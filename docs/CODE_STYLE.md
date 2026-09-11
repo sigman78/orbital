@@ -33,23 +33,68 @@ is about what the code does, not how it is indented.
   designated syntax and is the right way to pass a bundle of context by reference. It is not
   assignable, which is fine for a value that lives for one call.
 
-## Platform code
+## Platform layering
 
-- OS-specific code lives in `src/platform/<os>/` behind the OS-agnostic headers in `src/platform/`:
-  `window.hpp` (window, key presses, mouse look, polled keys, title), `process.hpp` (process setup,
-  executable directory) and `text.hpp` (text-overlay rasterizer). Application code (`app/`) and the
-  renderer never include an OS header; the renderer only carries the opaque native handle through
-  to the graphics backend.
-- Four files keep small compile-time guards instead of a platform backend, because the alternative
-  would be a module with one function: `core/file.cpp` (`_wfopen_s` for Unicode paths), `core/panic.cpp`
-  (debugger break), `assets/kernels.cpp` (instruction-set intrinsics) and the vendored-library include
-  block in `assets/image.cpp` (compiler pragmas). A `_WIN32` or `_MSC_VER` guard anywhere else is a
-  review finding.
+The tree is a strict stack. A module may include headers from the layers below it and never from
+the layers above or beside it.
+
+```
+app        options, camera, HUD layout, frame loop, main        (no OS headers)
+render     Vulkan renderer through NoGraphicsAPI                (no OS headers; opaque native handle)
+platform   window, events, process, text overlay interfaces    platform/<os>/ implements them
+scene      system generation, geometry                         assets  image I/O, kernels, materials
+core       log, panic, file, math, types, small_vec            depends on nothing
+```
+
+### Interfaces
+
+- `platform/window.hpp`, `platform/process.hpp` and `platform/text.hpp` are the whole OS surface the
+  demo uses. They are written in the project's own types (`Extent2D`, `Bytes`, `std::string_view`,
+  `std::filesystem::path`) and expose no OS type: no `HWND`, no `POINT`, no wide strings. The one
+  concession is `Window::native_handle()`, an opaque `void*` that the renderer forwards to the
+  graphics backend without interpreting it.
+- Events are pulled, not pushed. `pump_events()` drains the OS queue into plain data (`key_presses()`,
+  `mouse_look_began()`, `take_mouse_look_delta()`) that the frame loop reads afterwards. There are no
+  callbacks into application code from inside the OS message loop, so application state is only ever
+  touched from the frame loop.
+- Keys are the `Key` enumeration. Letters and digits carry their ASCII codes so tables and range
+  checks read naturally (`letter_key('W')`, `digit_of(key)`); everything else is a named value above
+  the ASCII range. The backend maps virtual-key codes both ways in one place.
+- Text crosses the boundary as UTF-8; the backend converts to whatever its API wants. Fonts, DPI,
+  cursors and window classes are backend details and never appear in the interface.
+- The text rasterizer takes a description (`OverlaySpec`: items, rules, size) and returns bytes.
+  What the HUD says and where it goes is application code (`app/hud.cpp`); how glyphs get onto
+  pixels is platform code.
+
+### Backends
+
+- One directory per operating system, `platform/win32/` today, each implementing every interface
+  header in full. A backend is a CMake target (`orbital_platform`) and is the only target that links
+  OS libraries; the demo executable links the target, not `user32` or `gdi32`.
+- Backend code follows the same rules as the rest of the tree (panics, settings, RAII wrappers such
+  as `Canvas` and `SelectedFont`) and may use OS types freely inside its own `.cpp` files.
+- Adding a platform means adding `platform/<os>/` with the three implementation files, a CMake branch
+  selecting it, and a swapchain path for it in the graphics backend. Nothing in `app/` or `render/`
+  changes.
+
+### Guarded exceptions
+
+Four files keep small compile-time guards instead of a backend, because the alternative would be a
+module with one function: `core/file.cpp` (`_wfopen_s` for Unicode paths), `core/panic.cpp` (debugger
+break), `assets/kernels.cpp` (instruction-set intrinsics, which are about the CPU rather than the OS)
+and the vendored-library include block in `assets/image.cpp` (compiler warning pragmas). Each guard
+has a portable fallback. A `_WIN32`, `_MSC_VER` or `<windows.h>` anywhere else is a review finding.
+
+### Compilers
+
 - Do not lean on MSVC leniency: no non-standard extensions, no reliance on its two-phase lookup
-  quirks or its permissive conversions. `/permissive-` is on, and CI builds the CPU libraries and
-  every test with GCC on Linux; MinGW GCC and clang are available locally for the same check.
-- The desktop demo itself is Windows-only until a second `platform/<os>/` backend and a swapchain
-  path exist for it; the layering makes that a contained job.
+  quirks or its permissive conversions. `/permissive-` is on.
+- Everything below `platform` is built and tested with GCC on Linux in CI and with MinGW GCC locally
+  through `tools/check-gcc.ps1`. That script links the C++ runtime statically on purpose: a
+  dynamically linked test picks up whichever `libstdc++-6.dll` is first on PATH, and a stale one
+  fails at load time with an entry-point dialog per executable.
+- The desktop demo itself is Windows-only until a second backend exists; the layering is what makes
+  that a contained job rather than a rewrite.
 
 ## Containers
 
@@ -231,18 +276,24 @@ was tuned rather than derived.
 
 ## Layout
 
-- `src/core`: logging, panic, files, math. Depends on nothing else.
+- `src/core`: logging, panic, files, math, byte aliases, `SmallVec`. Depends on nothing else.
 - `src/scene`: deterministic system generation and geometry. Depends on `core`.
 - `src/assets`: image I/O, pixel kernels, materials. Depends on `core`.
 - `src/platform`: OS-agnostic interfaces with one implementation directory per OS. Depends on `core`.
+  See "Platform layering" for the rules.
+- `src/render`: the Vulkan renderer. Depends on `core`, `scene` and `assets`; the HUD image and the
+  native window handle are passed in, so it needs neither `app` nor `platform`. Split by
+  responsibility: `renderer_impl.hpp` holds the private `Impl`, the slot and mode enumerations and
+  `RenderSettings`; `renderer_resources.cpp` creates the device, meshes, materials, pipelines and
+  targets; `renderer_frame.cpp` builds frame data, culls, records passes and captures.
 - `src/app`: options, camera, HUD layout, frame loop, `main`. Depends on everything, calls no OS API.
-- `src/render`: the Vulkan renderer. Depends on everything except `app` (the HUD image is passed
-  in). Split by responsibility: `renderer_impl.hpp` holds the private `Impl`, the slot and mode
-  enumerations and `RenderSettings`; `renderer_resources.cpp` creates the device, meshes, materials,
-  pipelines and targets; `renderer_frame.cpp` builds frame data, culls, records passes and captures.
+- Each directory is one CMake target with the same name prefix (`orbital_core`, `orbital_scene`,
+  `orbital_assets`, `orbital_platform`, `orbital`), and the target link graph mirrors the include
+  graph above. A new include direction is a new link edge, and the reverse is a review finding.
 - Vendored code under `third_party/` keeps its own style and is never edited to match ours. It is
-  compiled from exactly one translation unit with warnings pushed to level 0 around the include, and
-  pinned to a commit recorded in `third_party/README.md`.
+  compiled from exactly one translation unit with warnings suppressed around the include (MSVC
+  `warning(push, 0)`, GCC `diagnostic push`), and pinned to a commit recorded in
+  `third_party/README.md`.
 
 ## Concurrency
 
