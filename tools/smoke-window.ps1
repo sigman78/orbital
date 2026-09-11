@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][string]$Executable,
-    [string]$Capture = "captures/window.bmp",
+    [string]$Capture = "captures/window.png",
     [int]$TimeoutSeconds = 30
 )
 
@@ -53,6 +53,7 @@ foreach ($key in @(0x31,0x32,0x33,0x34,0x35,0x54,0x46,0x20,0x71)) {
 if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) { $proc.Kill(); throw "Application did not exit within timeout." }
 if ($proc.ExitCode -ne 0) { throw "Application exited with code $($proc.ExitCode)." }
 if (-not (Test-Path -LiteralPath $capturePath)) { throw "Expected capture was not written: $capturePath" }
-if ((Get-Item -LiteralPath $capturePath).Length -le 54) { throw "Capture is empty or not a BMP: $capturePath" }
+$signature = [IO.File]::ReadAllBytes($capturePath) | Select-Object -First 4
+if ($signature.Count -lt 4 -or $signature[1] -ne 0x50 -or $signature[2] -ne 0x4E -or $signature[3] -ne 0x47) { throw "Capture is empty or not a PNG: $capturePath" }
 Write-Output "Window smoke passed: exit=$($proc.ExitCode), capture=$capturePath"
 } finally { if ($proc -and -not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit() } }

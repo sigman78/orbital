@@ -3,8 +3,7 @@
 ## Prerequisites
 
 Windows x64, MSVC C++ tools, CMake 3.24+, Ninja and a Vulkan loader import library (normally from
-the Vulkan SDK). `tools/bootstrap.ps1` fetches pinned shader tools; `tools/download-assets.ps1`
-fetches the material textures. See the [README](README.md) for the full build walkthrough.
+the Vulkan SDK). `tools/bootstrap.ps1` fetches pinned shader tools. See the [README](README.md) for the full build walkthrough.
 
 ## Formatting
 
@@ -35,8 +34,8 @@ clang-tidy -p build/release src/scene/system.cpp
 ctest --preset release
 ```
 
-The scene, geometry, asset and camera tests are CPU-only and run in CI with `ORBITAL_BUILD_DEMO=OFF`.
-The material test and the window smoke test (`tools/smoke-window.ps1`) need a GPU and run locally.
+All CTest suites (system, geometry, camera, image and material loading) are CPU-only and run in CI with
+`ORBITAL_BUILD_DEMO=OFF`. The window smoke test (`tools/smoke-window.ps1`) needs a GPU and runs locally.
 `tools/check-stability.ps1` compares two fixed-time captures; see [docs/STABILITY.md](docs/STABILITY.md).
 
 ## Vendored NoGraphicsAPI

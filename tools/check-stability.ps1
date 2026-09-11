@@ -5,7 +5,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath($OutputDirectory); New-Item -ItemType Directory -Force $root | Out-Null
-$paths = @((Join-Path $root 'fixed-a.bmp'), (Join-Path $root 'fixed-b.bmp'))
+$paths = @((Join-Path $root 'fixed-a.png'), (Join-Path $root 'fixed-b.png'))
 $procs = @()
 try {
   for ($i=0; $i -lt 2; $i++) {

@@ -52,7 +52,7 @@ The isolated Debug tree was configured with `cmake --preset local-debug` and bui
 With `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation`, `VK_LAYER_VALIDATE_SYNC=1`, the local `VK_LAYER_PATH`, and implicit layers disabled, the following final smoke completed successfully on the GTX 1080 Ti:
 
 ```text
-build/debug/orbital.exe --frames 30 --width 960 --height 540 --time 0 --bookmark 4 --high --capture captures/final-validation-bookmark4.bmp
+build/debug/orbital.exe --frames 30 --width 960 --height 540 --time 0 --bookmark 4 --high --capture captures/final-validation-bookmark4.png
 ```
 
 The process exited 0 after 30 frames. Loader output confirms insertion of the local Khronos validation layer; searches for `NoGraphicsAPI validation`, `Validation Error`, `SYNC-HAZARD`, and `VUID-` returned zero findings. The 2,073,654-byte capture and stdout/stderr logs are under `captures/final-validation-bookmark4.*`.

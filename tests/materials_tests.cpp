@@ -1,4 +1,4 @@
-#include "../src/procedural/materials.hpp"
+#include "../src/assets/materials.hpp"
 
 #include <array>
 #include <cassert>
@@ -15,16 +15,16 @@ int main() {
         bool normal;
     };
     constexpr std::array cases{
-        MaterialCase{"earth_albedo.jpg", MaterialEncoding::SRGB, false, false},
-        MaterialCase{"earth_clouds.jpg", MaterialEncoding::Linear, true, false},
-        MaterialCase{"earth_night.jpg", MaterialEncoding::SRGB, false, false},
-        MaterialCase{"earth_normal.tif", MaterialEncoding::Linear, false, true},
-        MaterialCase{"earth_specular.tif", MaterialEncoding::Linear, false, false},
-        MaterialCase{"gas_albedo.jpg", MaterialEncoding::SRGB, false, false},
-        MaterialCase{"moon_albedo.jpg", MaterialEncoding::SRGB, false, false},
-        MaterialCase{"rock_albedo.jpg", MaterialEncoding::SRGB, false, false},
-        MaterialCase{"rock_normal.jpg", MaterialEncoding::Linear, false, true},
-        MaterialCase{"rock_roughness.jpg", MaterialEncoding::Linear, false, false},
+        MaterialCase{"earth_albedo.png", MaterialEncoding::SRGB, false, false},
+        MaterialCase{"earth_clouds.png", MaterialEncoding::Linear, true, false},
+        MaterialCase{"earth_night.png", MaterialEncoding::SRGB, false, false},
+        MaterialCase{"earth_normal.png", MaterialEncoding::Linear, false, true},
+        MaterialCase{"earth_specular.png", MaterialEncoding::Linear, false, false},
+        MaterialCase{"gas_albedo.png", MaterialEncoding::SRGB, false, false},
+        MaterialCase{"moon_albedo.png", MaterialEncoding::SRGB, false, false},
+        MaterialCase{"rock_albedo.png", MaterialEncoding::SRGB, false, false},
+        MaterialCase{"rock_normal.png", MaterialEncoding::Linear, false, true},
+        MaterialCase{"rock_roughness.png", MaterialEncoding::Linear, false, false},
     };
     const auto root = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "materials";
     for (const auto& item : cases) {

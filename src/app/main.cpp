@@ -1,6 +1,5 @@
 #include <windows.h>
 #include "camera.hpp"
-#include "procedural/assets.hpp"
 #include "render/renderer.hpp"
 #include <algorithm>
 #include <chrono>
@@ -82,7 +81,7 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM w, LPARAM l) {
         case 'X': app->auto_exposure = !app->auto_exposure; break;
         case VK_F1: app->overlay = !app->overlay; break;
         case VK_F2: app->high = !app->high; break;
-        case VK_F12: app->capture_request = "captures/orbital.bmp"; break;
+        case VK_F12: app->capture_request = "captures/orbital.png"; break;
         case VK_OEM_PLUS: app->exposure = std::min(8.f, app->exposure * 1.1f); break;
         case VK_OEM_MINUS: app->exposure = std::max(.05f, app->exposure / 1.1f); break;
         }
@@ -115,7 +114,7 @@ int main(int argc, char** argv) {
         unsigned frame_limit = 0, w = 1600, h = 900;
         double fixed_time = -1, duration = 0;
         int bookmark = -1;
-        bool tour = false, high = false, generate = false, no_hud = false;
+        bool tour = false, high = false, no_hud = false;
         float exposure = 1;
         std::filesystem::path capture;
         std::filesystem::path benchmark;
@@ -152,12 +151,10 @@ int main(int argc, char** argv) {
                 tour = true;
             else if (arg == "--high")
                 high = true;
-            else if (arg == "--generate-assets")
-                generate = true;
             else if (arg == "--help") {
                 std::cout << "ORBITAL - NoGraphicsAPI space demo\n--seed N --frames N --duration seconds --width W "
-                             "--height H --time seconds --bookmark 0..4 --capture file.bmp --benchmark file.csv --tour "
-                             "--high --no-hud --exposure scale --generate-assets\nControls: RMB mouse look; WASD move; "
+                             "--height H --time seconds --bookmark 0..4 --capture file.png --benchmark file.csv --tour "
+                             "--high --no-hud --exposure scale\nControls: RMB mouse look; WASD move; "
                              "Q/E vertical; Shift fast; 1-5 bookmarks; O orbit; F free; T tour; Space pause; +/- "
                              "exposure; X auto exposure; F1 HUD; F2 quality; F12 capture; Esc exit.\n";
                 return 0;
@@ -173,14 +170,6 @@ int main(int argc, char** argv) {
         auto errors = space::validate_system(system);
         if (!errors.empty())
             throw std::runtime_error("Invalid generated system: " + errors.front());
-        if (generate) {
-            for (unsigned i = 0; i < 2; i++) {
-                auto maps = space::assets::load_or_generate(dir / (i ? "cache/gas.bin" : "cache/earth.bin"),
-                                                            system.bodies[i].material_seed, i != 0, 1024);
-                space::assets::save_ppm_preview(dir / (i ? "cache/gas.ppm" : "cache/earth.ppm"), maps.surface_mips[0]);
-            }
-            return 0;
-        }
         SetProcessDPIAware();
         Application app;
         app.high = high;

@@ -4,15 +4,6 @@
 #include <array>
 #include <cmath>
 #include <stdexcept>
-#include <string>
-
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <wincodec.h>
-#endif
 
 namespace space::assets {
 namespace {
@@ -78,100 +69,13 @@ Image downsample(const Image& source, bool normal_map) {
     return out;
 }
 
-#ifdef _WIN32
-template <class T> class ComPtr {
-public:
-    ComPtr() = default;
-    ~ComPtr() {
-        if (ptr_)
-            ptr_->Release();
-    }
-    ComPtr(const ComPtr&) = delete;
-    ComPtr& operator=(const ComPtr&) = delete;
-    T* get() const { return ptr_; }
-    T** put() { return &ptr_; }
-    T* operator->() const { return ptr_; }
-
-private:
-    T* ptr_ = nullptr;
-};
-
-class ComApartment {
-public:
-    ComApartment() : result_(CoInitializeEx(nullptr, COINIT_MULTITHREADED)) {
-        if (FAILED(result_) && result_ != RPC_E_CHANGED_MODE)
-            throw std::runtime_error("WIC material load: COM initialization failed (HRESULT " +
-                                     std::to_string(static_cast<unsigned long>(result_)) + ")");
-    }
-    ~ComApartment() {
-        if (result_ == S_OK || result_ == S_FALSE)
-            CoUninitialize();
-    }
-
-private:
-    HRESULT result_;
-};
-
-[[noreturn]] void wic_error(const std::filesystem::path& path, const char* operation, HRESULT result) {
-    throw std::runtime_error("WIC material load failed for '" + path.string() + "' while " + operation + " (HRESULT " +
-                             std::to_string(static_cast<unsigned long>(result)) + ")");
-}
-
-Image decode_wic(const std::filesystem::path& path) {
-    ComApartment apartment;
-    ComPtr<IWICImagingFactory> factory;
-    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(factory.put()));
-    if (FAILED(hr))
-        wic_error(path, "creating imaging factory", hr);
-    ComPtr<IWICBitmapDecoder> decoder;
-    // CacheOnDemand avoids eagerly parsing optional EXIF blocks. Some otherwise
-    // valid texture JPEGs contain metadata rejected by Microsoft's EXIF reader.
-    hr = factory->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand,
-                                            decoder.put());
-    if (FAILED(hr))
-        wic_error(path, "opening image", hr);
-    ComPtr<IWICBitmapFrameDecode> frame;
-    hr = decoder->GetFrame(0, frame.put());
-    if (FAILED(hr))
-        wic_error(path, "decoding first frame", hr);
-    ComPtr<IWICFormatConverter> converter;
-    hr = factory->CreateFormatConverter(converter.put());
-    if (FAILED(hr))
-        wic_error(path, "creating RGBA converter", hr);
-    hr = converter->Initialize(frame.get(), GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0.0,
-                               WICBitmapPaletteTypeCustom);
-    if (FAILED(hr))
-        wic_error(path, "converting to 32-bit RGBA", hr);
-    UINT width = 0, height = 0;
-    hr = converter->GetSize(&width, &height);
-    if (FAILED(hr) || !width || !height)
-        wic_error(path, "reading dimensions", FAILED(hr) ? hr : E_INVALIDARG);
-    constexpr std::uint64_t max_pixels = std::uint64_t{1} << 30;
-    if (std::uint64_t(width) * height > max_pixels || std::uint64_t(width) * 4 > UINT_MAX)
-        throw std::runtime_error("WIC material load: image dimensions are too large: " + path.string());
-    Image image{width, height, {}};
-    image.pixels.resize(static_cast<std::size_t>(width) * height * 4);
-    if (image.pixels.size() > UINT_MAX)
-        throw std::runtime_error("WIC material load: decoded image exceeds WIC copy limit: " + path.string());
-    hr = converter->CopyPixels(nullptr, width * 4, static_cast<UINT>(image.pixels.size()), image.pixels.data());
-    if (FAILED(hr))
-        wic_error(path, "copying pixels", hr);
-    return image;
-}
-#endif
-
 } // namespace
 
 std::vector<Image> load_material(const std::filesystem::path& path, MaterialEncoding encoding, bool luminance_to_alpha,
                                  bool normal_map) {
     if (normal_map && luminance_to_alpha)
         throw std::invalid_argument("material cannot be both a normal map and luminance-to-alpha mask");
-#ifdef _WIN32
-    Image base = decode_wic(path);
-#else
-    (void)path;
-    throw std::runtime_error("native material loading requires Windows Imaging Component");
-#endif
+    Image base = load_png(path);
     for (std::size_t q = 0; q < base.pixels.size(); q += 4) {
         if (luminance_to_alpha) {
             // Rec.709 luma from encoded source bytes is used as authored mask coverage.

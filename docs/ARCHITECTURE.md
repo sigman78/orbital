@@ -19,7 +19,7 @@ Foundation acceptance requires a real rendered frame, shader-accessed data, samp
 | `src/app/` | Window, input, configuration, main loop, diagnostics, camera tour |
 | `src/scene/` | Seeded body descriptions, transforms, cameras, asteroid instances |
 | `src/render/` | GPU ownership, uploads, frame resources, passes, quality settings |
-| `src/procedural/` | Generation parameters, scheduling and generated asset caching |
+| `src/assets/` | PNG image I/O and material mip-chain generation |
 | `shaders/` | Shared ABI, generation, opaque shading, atmosphere/clouds, post-processing |
 | `cmake/` | Dependency and shader compilation integration |
 | `tests/` | Focused non-GPU tests and GPU smoke entry points |

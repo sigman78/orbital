@@ -1,8 +1,8 @@
 #include "renderer.hpp"
 #include "app/hud.hpp"
+#include "assets/image.hpp"
+#include "assets/materials.hpp"
 #include "gpu_types.hpp"
-#include "procedural/assets.hpp"
-#include "procedural/materials.hpp"
 #include "scene/geometry.hpp"
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
 #include <algorithm>
@@ -312,28 +312,24 @@ struct Renderer::Impl {
             }
         std::cout << "Loading planetary maps and scanned rock PBR materials...\n";
         auto material = [&](const char* name, unsigned slot, bool srgb, bool alpha = false, bool normal = false) {
-            auto path = directory / "assets/materials" / name;
-            if (!std::filesystem::exists(path) && path.extension() == ".tif")
-                path.replace_extension(".jpg");
-            auto maps = assets::load_material(
-                path, srgb ? assets::MaterialEncoding::SRGB : assets::MaterialEncoding::Linear, alpha, normal);
-            while (maps.front().width > 4096)
-                maps.erase(maps.begin());
-            upload_image(maps, slot);
+            upload_image(assets::load_material(directory / "assets/materials" / name,
+                                               srgb ? assets::MaterialEncoding::SRGB : assets::MaterialEncoding::Linear,
+                                               alpha, normal),
+                         slot);
         };
-        material("earth_albedo.jpg", 3, true);
-        material("gas_albedo.jpg", 4, true);
-        material("earth_clouds.jpg", 5, false, true);
+        material("earth_albedo.png", 3, true);
+        material("gas_albedo.png", 4, true);
+        material("earth_clouds.png", 5, false, true);
         for (unsigned i = 0; i < 24; i++)
             if (i < 3 || i > 5)
                 descriptor(i, assets[0]);
-        material("earth_normal.tif", 7, false, false, true);
-        material("earth_specular.tif", 8, false);
-        material("earth_night.jpg", 9, true);
-        material("moon_albedo.jpg", 10, true);
-        material("rock_albedo.jpg", 11, true);
-        material("rock_normal.jpg", 12, false, false, true);
-        material("rock_roughness.jpg", 13, false);
+        material("earth_normal.png", 7, false, false, true);
+        material("earth_specular.png", 8, false);
+        material("earth_night.png", 9, true);
+        material("moon_albedo.png", 10, true);
+        material("rock_albedo.png", 11, true);
+        material("rock_normal.png", 12, false, false, true);
+        material("rock_roughness.png", 13, false);
         upload_image({assets::make_hud()}, 14);
         opaque = pipeline("surface", "surface", gpu::Format::rgba16_float, true, false);
         cloud = pipeline("surface", "surface", gpu::Format::rgba16_float, true, true);
@@ -720,27 +716,12 @@ void Renderer::capture(const std::filesystem::path& path) {
     gpu::barrier(c, gpu::Stage::transfer, gpu::Access::transfer_write, gpu::Stage::host, gpu::Access::host_read);
     gpu::submit({c}, {s.timeline, ++s.serial});
     gpu::wait_timeline({s.timeline, s.serial});
-    if (!path.parent_path().empty())
-        std::filesystem::create_directories(path.parent_path());
-    std::ofstream f(path, std::ios::binary);
-    std::uint32_t size = 54 + s.width * s.height * 4;
-    unsigned char header[54] = {0x42, 0x4d};
-    std::memcpy(header + 2, &size, 4);
-    header[10] = 54;
-    header[14] = 40;
-    std::memcpy(header + 18, &s.width, 4);
-    auto negativeHeight = -int(s.height);
-    std::memcpy(header + 22, &negativeHeight, 4);
-    header[26] = 1;
-    header[28] = 32;
-    f.write(reinterpret_cast<char*>(header), 54);
-    auto p = reinterpret_cast<unsigned char*>(readback.range.cpu);
-    for (std::size_t i = 0; i < std::size_t(s.width) * s.height; i++) {
-        unsigned char bgra[4] = {p[i * 4 + 2], p[i * 4 + 1], p[i * 4], 255};
-        f.write(reinterpret_cast<char*>(bgra), 4);
-    }
+    const auto* p = reinterpret_cast<const unsigned char*>(readback.range.cpu);
+    std::vector<std::uint8_t> rgb(std::size_t(s.width) * s.height * 3);
+    for (std::size_t i = 0; i < std::size_t(s.width) * s.height; i++)
+        for (unsigned channel = 0; channel < 3; channel++)
+            rgb[i * 3 + channel] = p[i * 4 + channel];
     gpu::destroy_gpu_heap(readback);
-    if (!f)
-        throw std::runtime_error("Cannot save screenshot");
+    assets::save_png(path, s.width, s.height, 3, rgb.data());
 }
 } // namespace space::render

@@ -10,12 +10,6 @@
 # Runtime captures, benchmarks and stability runs
 /captures/
 
-# Downloaded material textures (tools/download-assets.ps1, see docs/ASSETS.md).
-# The manifest with hashes and attribution stays tracked.
-/assets/materials/*.jpg
-/assets/materials/*.tif
-/assets/materials/*.png
-
 # Machine-specific CMake overrides
 /CMakeUserPresets.json
 

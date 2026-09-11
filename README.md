@@ -15,13 +15,12 @@ Requires Windows x64, MSVC C++ tools, CMake 3.24+, Ninja and Vulkan headers/load
 
 ```powershell
 ./tools/bootstrap.ps1
-./tools/download-assets.ps1
 ./tools/build.ps1 -Preset release
 ctest --preset release
 ./build/release/orbital.exe
 ```
 
-Bootstrap downloads pinned shader tools; it does not install a GPU driver or full Vulkan SDK. Material textures are fetched and hash-verified by `download-assets.ps1` and are not tracked in git. Machine-specific overrides (for example an existing Vulkan loader library) go in an ignored `CMakeUserPresets.json`; in an MSVC developer shell, `cmake --preset <your-preset>` then `cmake --build --preset release`.
+Bootstrap downloads pinned shader tools; it does not install a GPU driver or full Vulkan SDK. Material textures are tracked in git as PNG; `tools/import-assets.ps1` records and reproduces their derivation from the upstream sources. Machine-specific overrides (for example an existing Vulkan loader library) go in an ignored `CMakeUserPresets.json`; in an MSVC developer shell, `cmake --preset <your-preset>` then `cmake --build --preset release`.
 
 Slang is the default shader language, with offline compilation and a shared C++/shader layout header. See [foundation details](docs/FOUNDATION.md) for upstream compatibility changes.
 
@@ -31,11 +30,11 @@ RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. K
 
 ```powershell
 ./build/release/orbital.exe --width 1920 --height 1080 --tour
-./build/release/orbital.exe --bookmark 4 --time 0 --frames 124 --no-hud --capture captures/belt.bmp
+./build/release/orbital.exe --bookmark 4 --time 0 --frames 124 --no-hud --capture captures/belt.png
 ./build/release/orbital.exe --duration 60 --tour --benchmark captures/tour.csv
 ```
 
-`--help` lists options. `--time` freezes simulation and exposure adaptation for reproducible captures. `--generate-assets` generates optional procedural previews/cache, not the default sourced materials.
+`--help` lists options. `--time` freezes simulation and exposure adaptation for reproducible captures.
 
 ## Repository layout
 
@@ -43,14 +42,14 @@ RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. K
 | --- | --- |
 | `src/app` | Window, input, camera, HUD and the `main` loop |
 | `src/scene` | Deterministic system generation and mesh geometry |
-| `src/procedural` | Procedural asset generation and sourced material loading |
+| `src/assets` | PNG image I/O (stb) and material mip-chain generation |
 | `src/render` | Vulkan renderer on top of NoGraphicsAPI, GPU-side types |
 | `shaders/` | Slang shaders; `scene_shared.h` is the shared C++/shader layout |
 | `tests/` | Executable-assertion tests run through CTest |
-| `tools/` | PowerShell scripts: bootstrap, asset download, build, format, smoke and stability checks |
+| `tools/` | PowerShell scripts: bootstrap, asset import, build, format, smoke and stability checks |
 | `cmake/` | Slang shader compilation helper |
 | `docs/` | Product, architecture, decisions, validation and handoff documents ([index](docs/README.md)) |
-| `third_party/` | Vendored NoGraphicsAPI fork and its patch against upstream ([details](third_party/README.md)) |
+| `third_party/` | Vendored NoGraphicsAPI fork with its patch against upstream, and stb image headers ([details](third_party/README.md)) |
 
 ## Development
 
@@ -67,4 +66,4 @@ Working desktop implementation tested on GTX 1080 Ti; RTX 4080 remains untested.
 
 ## License
 
-The demo is released under the [MIT License](LICENSE). NoGraphicsAPI is MIT licensed (`third_party/NoGraphicsAPI/LICENSE`). Material textures are CC BY 4.0 (Solar System Scope) and CC0 (Poly Haven); provenance, hashes and attribution requirements are in [docs/ASSETS.md](docs/ASSETS.md) and `assets/materials/manifest.json`. Keep attribution with redistributed assets.
+The demo is released under the [MIT License](LICENSE). NoGraphicsAPI is MIT licensed (`third_party/NoGraphicsAPI/LICENSE`); stb_image and stb_image_write are public domain (`third_party/stb/LICENSE`). Material textures are CC BY 4.0 (Solar System Scope) and CC0 (Poly Haven); provenance, hashes and attribution requirements are in [docs/ASSETS.md](docs/ASSETS.md) and `assets/materials/manifest.json`. Keep attribution with redistributed assets.

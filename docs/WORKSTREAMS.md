@@ -11,7 +11,7 @@ The integration owner publishes the initial schema and coordinate/material/ABI c
 | W01 Toolchain/backend | `cmake/` discovery, NoGraphicsAPI fork, capability smoke | None | T01/T02 proof and explicit limitations |
 | W02 System schema/generator | `src/scene/system*`, configuration and generation tests | Initial schema agreement | Seeded star/planet/moon/belt description, stable IDs, independent seeds, validity checks, inspectable default system |
 | W03 Motion/scale | `src/scene/orbit*`, transform evaluation | W02 schema | Direct time evaluation, rotation/orbits, parent transforms, camera-relative conversion contract, separation/finite-value checks |
-| W04 Asset pipeline | `src/procedural/` orchestration, asset manifest/cache tooling | Initial asset contract | Versioned seed/parameter cache, regeneration CLI, atomic outputs, provenance/license records and resource accounting |
+| W04 Asset pipeline | `src/assets/` loading, asset manifest/import tooling | Initial asset contract | Versioned seed/parameter cache, regeneration CLI, atomic outputs, provenance/license records and resource accounting |
 | W05 Terrestrial materials | Earth generation module and its generation shaders | W02/W04 contracts | Continents, relief, biome/ice/ocean/roughness/normal maps with seam-safe mipmaps and visual evidence |
 | W06 Gas-giant materials | Gas generation module and its shaders | W02/W04 contracts | Bands, coherent warping, storms, palette and animation parameters with full-disc/detail evidence |
 | W07 Rocky assets/acquisition | Rock/crater generation, supporting asset manifest entries | W04 | Reusable rocky mesh/material inputs; vetted supporting assets only where useful; complete redistribution provenance |

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../procedural/assets.hpp"
+#include "../assets/image.hpp"
 
 namespace space::assets {
 

@@ -21,3 +21,10 @@ git diff --no-index --src-prefix=a/ --dst-prefix=b/ upstream NoGraphicsAPI > NoG
 
 Vendored code keeps its upstream formatting (`NoGraphicsAPI/.clang-format`) and is excluded from
 the project's clang-format and clang-tidy runs.
+
+## stb
+
+`stb/` holds `stb_image.h` (v2.30) and `stb_image_write.h` (v1.16) from
+[nothings/stb](https://github.com/nothings/stb) at commit `2c980bb59875b0d32144a71867fbdebb2f77cd20`,
+public domain / MIT (`stb/LICENSE`). They are compiled once in `src/assets/image.cpp` with PNG support only
+and provide the demo's texture loading and screenshot export.
