@@ -7,6 +7,7 @@
 static const float PI = 3.141592653589793;
 static const float NEAR_Z = .02;
 static const float FAR_Z = 2000.0;
+static const int MAX_BODIES = 8; // Frame.bodies capacity; scene.x holds the live count
 
 float3 rayDirection(float2 pixel)
 {
@@ -38,7 +39,8 @@ float solarVisibility(float3 point, int skip)
 {
     float3 light = normalize(root.frame->sun.xyz - point);
     float visibility = 1.0;
-    for (int i = 0; i < 3; ++i) if (i != skip)
+    int bodyCount = int(root.frame->scene.x);
+    for (int i = 0; i < MAX_BODIES; ++i) if (i < bodyCount && i != skip)
     {
         float3 q = root.frame->bodies[i].xyz - point;
         float t = dot(q, light);
@@ -83,7 +85,7 @@ float beltShadow(float3 point)
 {
     float4 ring = root.frame->belt_ring;
     if (ring.z <= 0.0) return 1.0;
-    float3 centre = root.frame->bodies[1].xyz;
+    float3 centre = root.frame->bodies[int(root.frame->scene.y)].xyz;
     float3 n = root.frame->belt_normal.xyz;
     float3 light = normalize(root.frame->sun.xyz - point);
     float denominator = dot(light, n);
@@ -134,17 +136,6 @@ float fbm2(float2 p, int octaves)
     float n = 0.0, a = .5;
     for (int i = 0; i < octaves; ++i) { n += a * noise2(p); p = p * 2.03 + float2(1.7, 9.2); a *= .5; }
     return n;
-}
-
-// Remaps uv so bilinear filtering of a map with the given texel count becomes
-// C1-smooth (smoothstep inside each texel); derivatives of the result no longer
-// break at texel edges, which matters when heights are turned into normals.
-float2 smoothTexel(float2 uv, float2 texels)
-{
-    float2 p = uv * texels + .5;
-    float2 i = floor(p), f = frac(p);
-    f = f * f * (3.0 - 2.0 * f);
-    return (i + f - .5) / texels;
 }
 
 // 1 while a texel of a texture with the given size covers more than a screen

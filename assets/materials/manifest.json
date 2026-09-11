@@ -3,7 +3,9 @@
   "note": "PNG textures derived from the listed sources by tools/import-assets.ps1 (downscaled to at most 4096 px wide). Keep attribution when redistributing.",
   "license_pages": {
     "Solar System Scope": "https://www.solarsystemscope.com/textures/",
-    "Poly Haven": "https://polyhaven.com/license"
+    "Poly Haven": "https://polyhaven.com/license",
+    "NASA CGI Moon Kit": "https://svs.gsfc.nasa.gov/4720",
+    "NASA MOLA MEGDR": "https://pds-geosciences.wustl.edu/missions/mgs/megdr.html"
   },
   "assets": [
     {
@@ -81,15 +83,59 @@
     },
     {
       "file": "moon_albedo.png",
-      "width": 2048,
-      "height": 1024,
+      "width": 4096,
+      "height": 2048,
+      "color_space": "sRGB",
+      "license": "Public-Domain-NASA",
+      "attribution": "NASA/GSFC Scientific Visualization Studio, CGI Moon Kit (LRO LROC and LOLA data)",
+      "source": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_4k.tif",
+      "source_sha256": "918649A7F8ED2F1329B2CD95BB0D25483BEFDCB60AE1A66DB681A637CC21344F",
+      "source_width": 4096,
+      "source_height": 2048
+    },
+    {
+      "file": "moon_normal.png",
+      "width": 4096,
+      "height": 2048,
+      "color_space": "linear-data",
+      "license": "Public-Domain-NASA",
+      "attribution": "NASA/GSFC Scientific Visualization Studio, CGI Moon Kit (LRO LROC and LOLA data)",
+      "source": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/ldem_16_uint.tif",
+      "source_sha256": "45A2B32D56E81ED30DB07FEAD8ABC842B249B6511219D9CA2C53F81BC2DC5D62",
+      "source_width": 5760,
+      "source_height": 2880,
+      "normal_convention": "DirectX (green = south), height in alpha",
+      "height_min_m": -8981.5,
+      "height_max_m": 10622.0,
+      "slope_strength": 1.5
+    },
+    {
+      "file": "mars_albedo.png",
+      "width": 4096,
+      "height": 2048,
       "color_space": "sRGB",
       "license": "CC-BY-4.0",
       "attribution": "Solar System Scope",
-      "source": "https://www.solarsystemscope.com/textures/download/2k_moon.jpg",
-      "source_sha256": "2764BA6535EA0481A062846EE033CC7A909DAE05B31A8FD13F3E98F3A7FD92BD",
-      "source_width": 2048,
-      "source_height": 1024
+      "source": "https://www.solarsystemscope.com/textures/download/8k_mars.jpg",
+      "source_sha256": "4CC52149924ABC6AE507D63032F994E1D42A55CB82C09E002D1A567FF66C23EE",
+      "source_width": 8192,
+      "source_height": 4096
+    },
+    {
+      "file": "mars_normal.png",
+      "width": 4096,
+      "height": 2048,
+      "color_space": "linear-data",
+      "license": "Public-Domain-NASA",
+      "attribution": "NASA/JPL/GSFC, Mars Global Surveyor MOLA MEGDR (PDS Geosciences Node)",
+      "source": "https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x/meg016/megt90n000eb.img",
+      "source_sha256": "D18D9B9AB8C5516D02E157DD2CDE0F1D0D160C21940E953BA22391269A545E7B",
+      "source_width": 5760,
+      "source_height": 2880,
+      "normal_convention": "DirectX (green = south), height in alpha",
+      "height_min_m": -8163.0,
+      "height_max_m": 21171.0,
+      "slope_strength": 1.5
     },
     {
       "file": "rock_albedo.png",

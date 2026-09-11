@@ -19,13 +19,14 @@ struct Vertex { SHADER_FLOAT4 position; SHADER_FLOAT4 normal; };
 struct Frame {
     SHADER_MATRIX4 view_projection;
     SHADER_FLOAT4 camera_time, right_tan, up_aspect, forward_exposure, sun;
-    SHADER_FLOAT4 bodies[3];
+    SHADER_FLOAT4 bodies[8];               // camera-relative centre and radius; unused entries have radius 0
     SHADER_FLOAT4 options, screen_sun;
     SHADER_MATRIX4 light_projection;
     SHADER_MATRIX4 previous_projection;
     SHADER_FLOAT4 previous_camera_delta, previous_forward, jitter;
     SHADER_FLOAT4 belt_ring;   // inner radius, outer radius, density, thickness (giant-relative units)
     SHADER_FLOAT4 belt_normal; // unit normal of the belt plane, w unused
+    SHADER_FLOAT4 scene;       // body count, giant body index, unused, unused
 };
 struct Root {
 #ifdef __cplusplus

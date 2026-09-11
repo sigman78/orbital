@@ -26,7 +26,7 @@ Slang is the default shader language, with offline compilation and a shared C++/
 
 ## Explore
 
-RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. Keys 1–5 select Earth, Jupiter, Moon, dawn and belt views. T starts/stops the tour, O orbits, F returns to free flight. Space pauses the system; +/- changes exposure, X toggles adaptation. F1 toggles help, F2 quality, F12 saves a capture, Esc exits.
+RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. Keys 1–6 select Earth, Jupiter, Moon, Mars, dawn and belt views. T starts/stops the tour, O orbits, F returns to free flight. Space pauses the system; +/- changes exposure, X toggles adaptation. F1 toggles help, F2 quality, F12 saves a capture, Esc exits.
 
 ```powershell
 ./build/release/orbital.exe --width 1920 --height 1080 --tour

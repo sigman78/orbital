@@ -17,13 +17,16 @@ constexpr Float4 jitter_sequence[8] = {{0, -.166667f, 0, 0},      {-.25f, .16666
                                        {.375f, .055556f, 0, 0},   {-.4375f, .388889f, 0, 0}};
 constexpr unsigned jitter_count = 8;
 
-// Exposure adaptation, read by apply_metering and record_post_passes.
+// Exposure adaptation, read by apply_metering and record_post_passes. The
+// meter is centre weighted; adaptation is slight (about one stop either way)
+// and asymmetric like the eye: quick to close down, slow to open up.
 namespace exposure_meter {
-inline constexpr unsigned interval = 16;    // frames between readbacks
-inline constexpr float min_weight = 0.004f; // texels below this weight do not vote
-inline constexpr float key = 0.18f;         // middle gray
-inline constexpr float rate = 0.08f;        // smoothing toward the target per readback
-inline constexpr Range<float> adapted{0.75f, 1.75f};
+inline constexpr unsigned interval = 16;                               // frames between readbacks
+inline constexpr float min_luminance = 0.004f;                         // darker texels (space) do not vote
+inline constexpr float key = 0.18f;                                    // middle gray
+inline constexpr float brighten_seconds = 2.5f, darken_seconds = 0.6f; // time constants of the exposure change
+inline constexpr float max_step_seconds = 1.f;                         // a stalled frame does not snap the adaptation
+inline constexpr Range<float> adapted{0.6f, 1.8f};
 } // namespace exposure_meter
 
 // Temporal history invalidation, read by build_frame.
@@ -34,8 +37,8 @@ inline constexpr double min_forward_dot = 0.7; // turn that invalidates the hist
 
 // Shadow map placement, read by build_frame.
 namespace shadow_placement {
-inline constexpr double giant_distance = 100.0; // inside this the map follows the giant, else Earth
-inline constexpr float giant_half_size = 70.f, earth_half_size = 12.f;
+inline constexpr double giant_distance = 100.0; // inside this the map follows the giant, else the nearer planet
+inline constexpr float giant_half_size = 70.f, earth_half_size = 12.f, mars_half_size = 10.f;
 } // namespace shadow_placement
 
 // Sun disc and lens flare, read by build_frame.
@@ -190,17 +193,25 @@ void Renderer::Impl::read_gpu_timings() {
 void Renderer::Impl::apply_metering() {
     if (!meter_pending)
         return;
+    // Each meter texel holds log luminance, luminance and its centre weight.
     const auto* values = reinterpret_cast<const float*>(luminance_readback.range.cpu);
-    float sum = 0;
-    unsigned count = 0;
+    float log_sum = 0, weight_sum = 0;
     for (unsigned i = 0; i < targets::meter_size * targets::meter_size; i++)
-        if (values[i * 4 + 1] > exposure_meter::min_weight) {
-            sum += values[i * 4];
-            count++;
+        if (values[i * 4 + 1] > exposure_meter::min_luminance) {
+            log_sum += values[i * 4] * values[i * 4 + 2];
+            weight_sum += values[i * 4 + 2];
         }
-    const float target = count ? exposure_meter::adapted.clamp(exposure_meter::key / std::exp(sum / float(count)))
-                               : 1.f;
-    adapted_exposure += (target - adapted_exposure) * exposure_meter::rate;
+    const float target = weight_sum > 0
+                             ? exposure_meter::adapted.clamp(exposure_meter::key / std::exp(log_sum / weight_sum))
+                             : 1.f;
+    const auto now = std::chrono::steady_clock::now();
+    const float dt = meter_time == std::chrono::steady_clock::time_point{}
+                         ? exposure_meter::max_step_seconds
+                         : std::min(std::chrono::duration<float>(now - meter_time).count(),
+                                    exposure_meter::max_step_seconds);
+    meter_time = now;
+    const float tau = target < adapted_exposure ? exposure_meter::darken_seconds : exposure_meter::brighten_seconds;
+    adapted_exposure += (target - adapted_exposure) * (1 - std::exp(-dt / tau));
     meter_pending = false;
 }
 
@@ -227,19 +238,23 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.camera_time = {0, 0, 0, float(input.time)};
     frame.forward_exposure.w = input.exposure * (input.auto_exposure ? adapted_exposure : 1);
     frame.sun = f4(system.star.position - camera.position, sun_flare::disc_radius);
-    const bool giant_close = length(input.bodies[giant_index].position - camera.position) <
-                             shadow_placement::giant_distance;
-    const unsigned shadow_body = giant_close ? giant_index : earth_index;
+    const auto distance_to = [&](unsigned body) { return length(input.bodies[body].position - camera.position); };
+    const bool giant_close = distance_to(giant_index) < shadow_placement::giant_distance;
+    const bool mars_closer = distance_to(mars_index) < distance_to(earth_index);
+    const unsigned shadow_body = giant_close ? giant_index : (mars_closer ? mars_index : earth_index);
+    const float shadow_half_size = giant_close   ? shadow_placement::giant_half_size
+                                   : mars_closer ? shadow_placement::mars_half_size
+                                                 : shadow_placement::earth_half_size;
     write_light_projection(frame, input.bodies[shadow_body].position - camera.position,
-                           system.star.position - camera.position,
-                           giant_close ? shadow_placement::giant_half_size : shadow_placement::earth_half_size);
+                           system.star.position - camera.position, shadow_half_size);
     const auto& ring = system.belts[0];
     frame.belt_ring = {float(ring.inner_radius), float(ring.outer_radius), float(ring.density), float(ring.thickness)};
     frame.belt_normal = f4(belt_plane_normal);
     frame.options = {float(extent.width), float(extent.height), input.high_quality ? 1.f : 0.f,
                      input.overlay ? 1.f : 0.f};
-    for (unsigned i = 0; i < major_body_count; i++)
+    for (unsigned i = 0; i < body_count; i++)
         frame.bodies[i] = f4(input.bodies[i].position - camera.position, float(input.bodies[i].radius));
+    frame.scene = {float(body_count), float(giant_index), 0, 0};
 
     // Sun position in screen space for the lens flare, hidden when a body covers it.
     const Vec3d sun_direction = normalized(system.star.position - camera.position);
@@ -299,10 +314,15 @@ BeltBatches Renderer::Impl::cull_belt(const FrameInput& input, const FrameData& 
     distant.clear();
     for (auto& group : lod_groups)
         group.clear();
-    for (unsigned i = 0; i < major_body_count; i++)
+    for (unsigned i = 0; i < body_count; i++) {
+        const BodyClass body_class = system.bodies[i].body_class;
+        // Moonlets are dark, reddish rock; the tint also seeds their texture offset.
+        const Float4 tint = body_class == BodyClass::Moonlet ? Float4{.34f, .30f, .27f, 1} : Float4{1, 1, 1, 1};
         instances.push_back({frame.bodies[i],
-                             {0, float(input.bodies[i].rotation_angle), float(system.bodies[i].axial_tilt), float(i)},
-                             {1, 1, 1, 1}});
+                             {0, float(input.bodies[i].rotation_angle), float(system.bodies[i].axial_tilt),
+                              float(surface_kind(body_class))},
+                             tint});
+    }
 
     const float belt_angle = float(input.time * belt_culling::spin_rate);
     const float tan_y = frame.right_tan.w, tan_x = tan_y * frame.up_aspect.w;
@@ -321,11 +341,11 @@ BeltBatches Renderer::Impl::cull_belt(const FrameInput& input, const FrameData& 
                                   .pixels_per_unit_depth = float(extent.height) / (2 * frame.right_tan.w),
                                   .rock_spin = float(input.time * belt_culling::rock_spin_rate),
                                   .limit = (input.high_quality ? high_quality : baseline_quality).belt_count};
-    Vec3f occluders[major_body_count];
-    float occluder_radii[major_body_count];
-    for (unsigned i = 0; i < major_body_count; i++) {
-        occluders[i] = to_float(input.bodies[i].position - camera.position);
-        occluder_radii[i] = float(input.bodies[i].radius);
+    SmallVec<Vec3f, max_body_count> occluders;
+    SmallVec<float, max_body_count> occluder_radii;
+    for (unsigned i = 0; i < body_count; i++) {
+        occluders.push_back(to_float(input.bodies[i].position - camera.position));
+        occluder_radii.push_back(float(input.bodies[i].radius));
     }
     for (const auto& cluster : belt_clusters) {
         const Vec3f position = to_float(context.giant_relative +
@@ -347,7 +367,7 @@ BeltBatches Renderer::Impl::cull_belt(const FrameInput& input, const FrameData& 
     batches.distant_base = unsigned(instances.size());
     batches.distant_count = unsigned(distant.size());
     instances.insert(instances.end(), distant.begin(), distant.end());
-    stats.visible_asteroids = unsigned(instances.size() - major_body_count);
+    stats.visible_asteroids = unsigned(instances.size() - body_count);
     return batches;
 }
 
@@ -378,8 +398,8 @@ void Renderer::Impl::record_shadow_pass(gpu::CommandBuffer* cmd, Root root) {
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
     gpu::bind_pso(cmd, pso.shadow);
     const unsigned triangles_before = stats.triangles;
-    for (unsigned i = 0; i < major_body_count; i++)
-        draw_mesh(cmd, root, spheres[2], i, 1);
+    for (unsigned i = 0; i < body_count; i++)
+        draw_mesh(cmd, root, body_mesh(i, 2), i, 1);
     stats.triangles = triangles_before; // shadow geometry is not counted in the frame statistic
     gpu::end_render_pass(cmd);
     gpu::barrier(cmd, gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_write, gpu::Stage::fragment,
@@ -396,10 +416,10 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
     gpu::draw(cmd, root, 3);
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
     gpu::bind_pso(cmd, pso.opaque);
-    for (unsigned i = 0; i < major_body_count; i++) {
+    for (unsigned i = 0; i < body_count; i++) {
         const float distance = float(length(input.bodies[i].position - input.camera.position));
         const float projected = float(input.bodies[i].radius) * float(extent.height) / (distance * frame.right_tan.w);
-        draw_mesh(cmd, root, spheres[geometry::select_lod(projected, 2)], i, 1);
+        draw_mesh(cmd, root, body_mesh(i, geometry::select_lod(projected, 2)), i, 1);
     }
     for (unsigned lod = 0; lod < geometry::lod_count; lod++)
         if (batches.counts[lod])
@@ -447,7 +467,7 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
 bool Renderer::draw(const FrameInput& input) {
     const auto start = std::chrono::steady_clock::now();
     auto& s = *impl_;
-    ORBITAL_ASSERT(input.bodies.size() >= major_body_count);
+    ORBITAL_ASSERT(input.bodies.size() == s.body_count);
     gpu::wait_timeline({s.timeline, s.serial});
     s.read_gpu_timings();
     s.apply_metering();
@@ -499,12 +519,13 @@ bool Renderer::draw(const FrameInput& input) {
     // The atmosphere passes and the temporal pass read the scene depth.
     gpu::barrier(cmd, gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_write, gpu::Stage::fragment,
                  gpu::Access::shader_read);
-    // Atmosphere is composited per body, giant first so Earth's stays on top.
+    // Atmosphere is composited per body; the depth clamp orders them against
+    // geometry, and Earth's goes last so it stays on top where shells overlap.
     root.mode = 0;
-    root.base = giant_index;
-    s.fullscreen_pass(cmd, s.hdr, s.pso.atmosphere, root, true);
-    root.base = earth_index;
-    s.fullscreen_pass(cmd, s.hdr, s.pso.atmosphere, root, true);
+    for (unsigned body : {s.giant_index, s.mars_index, s.earth_index}) {
+        root.base = body;
+        s.fullscreen_pass(cmd, s.hdr, s.pso.atmosphere, root, true);
+    }
     stamp(3);
     s.record_post_passes(cmd, root, swap.render_view);
     stamp(4);

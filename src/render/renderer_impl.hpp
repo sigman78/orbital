@@ -12,6 +12,7 @@
 
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -41,6 +42,9 @@ enum class Slot : unsigned {
     history_a = 16,
     history_b = 17,
     depth = 18,
+    mars_albedo = 19,
+    mars_normal = 20,
+    moon_normal = 21,
     count = 24,
 };
 
@@ -58,8 +62,19 @@ enum class SurfaceMode : std::uint32_t { opaque = 0, cloud = 1, shadow = 2, bill
 // Root.mode as interpreted by post.slang; atmosphere.slang uses Root.base as the body index.
 enum class PostMode : std::uint32_t { tonemap = 0, bloom_a = 1, bloom_b = 2, present = 3, meter = 4 };
 
-constexpr unsigned major_body_count = 3; // Earth, gas giant, moon: slots 0..2 of the instance list
-constexpr unsigned earth_index = 0, giant_index = 1;
+// Instance.rotation_kind.w as interpreted by surface.slang and atmosphere.slang.
+enum class SurfaceKind : unsigned { earth = 0, giant = 1, moon = 2, rock = 3, mars = 4 };
+
+constexpr SurfaceKind surface_kind(BodyClass body_class) {
+    switch (body_class) {
+    case BodyClass::Terrestrial: return SurfaceKind::earth;
+    case BodyClass::GasGiant: return SurfaceKind::giant;
+    case BodyClass::RockyMoon: return SurfaceKind::moon;
+    case BodyClass::Desert: return SurfaceKind::mars;
+    case BodyClass::Moonlet: return SurfaceKind::rock;
+    }
+    return SurfaceKind::rock;
+}
 
 // --- Constants both files depend on ------------------------------------------
 
@@ -68,7 +83,7 @@ constexpr unsigned earth_index = 0, giant_index = 1;
 struct HeapLayout {
     std::uint64_t static_heap = 48ull << 20;
     std::uint64_t dynamic_offset = 32ull << 20;
-    std::uint64_t instance_offset = 512;        // FrameData precedes the instances
+    std::uint64_t instance_offset = 1024;       // FrameData precedes the instances
     std::uint64_t staging_budget = 64ull << 20; // texture upload staging, see upload_images
 
     constexpr std::uint64_t instance_capacity() const {
@@ -177,11 +192,15 @@ struct Renderer::Impl {
                  *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr;
     } pso;
     std::array<GpuMesh, geometry::lod_count> spheres{}, rocks{};
+    std::array<GpuMesh, max_body_count> moonlet_meshes{}; // per body index; only moonlets are filled
     std::vector<geometry::AsteroidInstance> belt;
     std::vector<unsigned> belt_order; // belt indices grouped by cluster
     std::vector<BeltCluster> belt_clusters;
     SystemDescription system;
     std::filesystem::path directory;
+    // The bodies occupy instance slots 0..body_count-1 in system order. The
+    // three anchors carry atmospheres and shadow maps.
+    unsigned body_count = 0, earth_index = 0, giant_index = 0, mars_index = 0;
 
     // Frame state.
     Extent2D extent{};
@@ -189,6 +208,7 @@ struct Renderer::Impl {
     Stats stats{};
     float adapted_exposure = 1;
     bool meter_pending = false;
+    std::chrono::steady_clock::time_point meter_time{}; // last adaptation step
     FrameData previous_frame{};
     Vec3d previous_camera{};
     bool history_valid = false;
@@ -215,6 +235,7 @@ struct Renderer::Impl {
     GpuMesh upload_mesh(const geometry::Mesh& mesh);
     GpuImage create_image(const ImageDesc& desc);
     void bind(Slot slot, const GpuImage& image);
+    const GpuMesh& body_mesh(unsigned body, unsigned lod) const;
     void upload_images(std::span<Upload> uploads);
     gpu::PSO* create_pipeline(const PipelineDesc& desc);
 

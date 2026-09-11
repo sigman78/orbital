@@ -38,6 +38,7 @@ constexpr ViewDefinition bookmark_views[bookmark_count] = {
     {.body = 0, .radius_scale = {0.0, 0.45, 2.1}, .offset = {}},
     {.body = 1, .radius_scale = {-0.6, 0.25, 2.2}, .offset = {}},
     {.body = 2, .radius_scale = {1.0, 0.4, 2.0}, .offset = {}},
+    {.body = 3, .radius_scale = {0.9, 0.35, 2.4}, .offset = {}},
     {.body = 0, .radius_scale = {}, .offset = {4.8, -0.2, 0.8}},
     {.body = 1, .radius_scale = {}, .offset = {45.0, -8.0, 22.0}},
 };
@@ -48,6 +49,7 @@ constexpr ViewDefinition tour_views[] = {
     {.body = 0, .radius_scale = {}, .offset = {4.4, -1.0, -1.8}},
     {.body = 1, .radius_scale = {-0.6, 0.25, 2.2}, .offset = {}},
     {.body = 2, .radius_scale = {1.0, 0.4, 2.0}, .offset = {}},
+    {.body = 3, .radius_scale = {0.9, 0.35, 2.4}, .offset = {}},
     {.body = 1, .radius_scale = {}, .offset = {45.0, -8.0, 22.0}},
 };
 constexpr std::size_t tour_count = std::size(tour_views);
@@ -167,6 +169,10 @@ void Camera::step_free(double dt, double speed, const Input& input) {
     position += (forward_ * double(input.move_forward) + right_ * double(input.move_right) +
                  up_ * double(input.move_up)) *
                 (speed * dt);
+}
+
+std::size_t Camera::bookmark_body(std::size_t index) {
+    return index < bookmark_count ? bookmark_views[index].body : 0;
 }
 
 void Camera::set_bookmark(std::size_t index, std::span<const BodyState> bodies) {

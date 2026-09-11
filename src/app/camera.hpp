@@ -22,7 +22,7 @@ struct Input {
 };
 
 // Number of preset views reachable with the number keys.
-constexpr std::size_t bookmark_count = 5;
+constexpr std::size_t bookmark_count = 6;
 
 struct Camera {
     Vec3d position{0.0, 0.8, 4.8};
@@ -38,6 +38,8 @@ struct Camera {
     // paused simulation does not pause camera input or the tour clock.
     void step(double dt, double time, const Input& input, std::span<const BodyState> bodies);
     void set_bookmark(std::size_t index, std::span<const BodyState> bodies);
+    // Body a bookmark is anchored to; used to pick the orbit target.
+    static std::size_t bookmark_body(std::size_t index);
     void toggle_tour();
     void look_at(Vec3d eye, Vec3d target);
     void set_tour_time(double seconds);

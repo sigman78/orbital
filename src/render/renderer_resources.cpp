@@ -60,6 +60,9 @@ constexpr MaterialSource material_sources[] = {
     {"rock_albedo.png", Slot::rock_albedo, {.encoding = MaterialEncoding::SRGB}},
     {"rock_normal.png", Slot::rock_normal, {.normal_map = true}},
     {"rock_roughness.png", Slot::rock_roughness, {}},
+    {"mars_albedo.png", Slot::mars_albedo, {.encoding = MaterialEncoding::SRGB}},
+    {"mars_normal.png", Slot::mars_normal, {.normal_map = true}},
+    {"moon_normal.png", Slot::moon_normal, {.normal_map = true}},
 };
 constexpr std::size_t material_count = std::size(material_sources);
 static_assert(material_count <= inline_upload_count);
@@ -261,6 +264,15 @@ void Renderer::Impl::create_meshes() {
         spheres[lod] = upload_mesh(geometry::generate_sphere(32u << lod, 16u << lod));
         rocks[lod] = upload_mesh(geometry::generate_rock(71 + lod * 37, 2 + lod));
     }
+    // Moonlets are irregular bodies: each gets its own seeded rock at full detail.
+    for (unsigned i = 0; i < body_count; i++)
+        if (system.bodies[i].body_class == BodyClass::Moonlet)
+            moonlet_meshes[i] = upload_mesh(
+                geometry::generate_rock(std::uint32_t(system.bodies[i].material_seed), geometry::lod_count - 1));
+}
+
+const GpuMesh& Renderer::Impl::body_mesh(unsigned body, unsigned lod) const {
+    return system.bodies[body].body_class == BodyClass::Moonlet ? moonlet_meshes[body] : spheres[lod];
 }
 
 // The seeded belt order defines quality tiers, but is spatially random. Build
@@ -411,7 +423,18 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
                           const std::filesystem::path& base_directory) {
     system = description;
     directory = base_directory;
-    ORBITAL_ASSERT(system.bodies.size() >= major_body_count && !system.belts.empty());
+    panic_if(system.bodies.empty() || system.bodies.size() > max_body_count || system.belts.empty(),
+             "the renderer needs 1 to {} bodies and a belt", max_body_count);
+    body_count = unsigned(system.bodies.size());
+    const auto find_class = [&](BodyClass body_class, const char* name) {
+        for (unsigned i = 0; i < body_count; i++)
+            if (system.bodies[i].body_class == body_class)
+                return i;
+        panic(std::format("the system has no {} body", name));
+    };
+    earth_index = find_class(BodyClass::Terrestrial, "terrestrial");
+    giant_index = find_class(BodyClass::GasGiant, "gas giant");
+    mars_index = find_class(BodyClass::Desert, "desert");
     create_device(window);
     create_samplers();
     create_meshes();

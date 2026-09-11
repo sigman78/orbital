@@ -2,17 +2,18 @@
 
 // Root.mode values (SurfaceMode on the C++ side).
 static const uint MODE_OPAQUE = 0, MODE_CLOUD = 1, MODE_SHADOW = 2, MODE_BILLBOARD = 3;
-// Instance kinds (rotation_kind.w).
-static const int KIND_EARTH = 0, KIND_GIANT = 1, KIND_MOON = 2, KIND_ROCK = 3;
+// Instance kinds (rotation_kind.w); SurfaceKind on the C++ side.
+static const int KIND_EARTH = 0, KIND_GIANT = 1, KIND_MOON = 2, KIND_ROCK = 3, KIND_MARS = 4;
 
 static const float CLOUD_DRIFT = .00012;      // uv per second; Earth itself turns 1/1600 of a revolution per second
 static const float CLOUD_HEIGHT = .009;       // cloud shell above the surface, in radii (matches the 1.009 mesh scale)
 static const float EARTH_NORMAL_Y = 1.0;      // the sourced map is DirectX-style (green = south), matching B below
-static const float MOON_RELIEF = 1.8;         // relief texels of height per unit of albedo luminance
-static const float MOON_RELIEF_LOD = 1.0;     // mip the height field is read from; higher is smoother
 static const float2 EARTH_TEXELS = float2(4096.0, 2048.0);
 static const float2 GAS_TEXELS = float2(2048.0, 1024.0);
-static const float2 MOON_TEXELS = float2(2048.0, 1024.0);
+static const float2 RELIEF_TEXELS = float2(4096.0, 2048.0); // Moon and Mars albedo and normal+height maps
+// Height range of the baked DEM alpha channel in radii (manifest height_min_m..height_max_m over the body radius).
+static const float MOON_HEIGHT_RANGE = 19603.0 / 1737400.0;
+static const float MARS_HEIGHT_RANGE = 29334.0 / 3396200.0;
 
 struct SurfaceVaryings {
     float4 position : SV_Position;
@@ -85,20 +86,48 @@ float4 shadeClouds(SurfaceVaryings input, float3 N, float3 L, float visibility, 
     return float4(cloudLight, alpha);
 }
 
-// --- Moon relief ------------------------------------------------------------------
+// --- Airless relief (Moon, Mars) ------------------------------------------------
 
-// Height field for the moon: the sourced albedo reads as relief (bright rims,
-// dark floors and low maria). It is read from a softer mip so texel grain does
-// not turn into pebbles, with broad procedural undulation on top.
-float moonHeight(float2 uv)
+// Short shadow trace through the DEM height stored in the normal map's alpha:
+// marches up-sun in texture space and darkens where terrain rises above the
+// light ray. heightRange converts alpha to radii.
+float reliefShadow(Texture2D<float4> normalMap, float2 uv, float3 L, float3 N, float3 T, float3 B, float heightRange)
 {
-    float2 reliefTexels = MOON_TEXELS / exp2(MOON_RELIEF_LOD);
-    const float3 grey = float3(.2126, .7152, .0722);
-    float fine = dot(textures[10].SampleLevel(samplers[1], smoothTexel(uv, reliefTexels), MOON_RELIEF_LOD).rgb, grey);
-    float broad = dot(textures[10].SampleLevel(samplers[1], uv, MOON_RELIEF_LOD + 2.5).rgb, grey);
-    // Broad brightness is terrain (dark maria lie low); small bright features are
-    // fresh craters and their ejecta, so those are sunk rather than raised.
-    return broad * .6 - (fine - broad) * .8 + (fbm2(uv * float2(160, 80), 4) - .5) * .12;
+    float2 lightUV = float2(dot(L, T), dot(L, B));
+    float lightRise = max(dot(L, N), .02) / max(length(lightUV), 1e-4); // rise per unit of tangent distance
+    lightUV = normalize(lightUV + 1e-6);
+    float2 texel = 1.0 / RELIEF_TEXELS;
+    float arc = 2.0 * PI / RELIEF_TEXELS.x; // tangent distance of one texel, in radii
+    float h0 = normalMap.SampleLevel(samplers[1], uv, 1.0).a * heightRange;
+    float shadow = 0.0;
+    for (int s = 1; s <= 6; ++s)
+    {
+        float distance = float(s) * 1.5;
+        float h = normalMap.SampleLevel(samplers[1], uv + lightUV * texel * distance, 1.0).a * heightRange;
+        float rise = h - h0 - lightRise * distance * arc;
+        shadow = max(shadow, rise / (distance * arc) * 6.0);
+    }
+    return 1.0 - saturate(shadow) * .55;
+}
+
+Material reliefMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility,
+                        Texture2D<float4> albedoMap, Texture2D<float4> normalMap, float heightRange, float strength)
+{
+    float3 localN = normalize(input.localNormal);
+    float2 uv = sphereUV(localN);
+    float detail = magnification(uv, RELIEF_TEXELS);
+    float3 T, B;
+    tangentFrame(localN, rotate, N, T, B);
+    float3 mapN = sampleSphere(normalMap, uv).xyz * 2.0 - 1.0;
+    Material m;
+    m.N = normalize(T * mapN.x * strength + B * mapN.y * strength + N * max(mapN.z, .2));
+    m.visibility = visibility * reliefShadow(normalMap, uv, L, N, T, B, heightRange);
+    m.albedo = sampleSphere(albedoMap, uv).rgb;
+    // Regolith grain where the 4K maps are magnified.
+    m.albedo *= 1.0 + (fbm2(uv * float2(3072, 1536), 3) - .5) * .10 * detail;
+    m.rough = .95;
+    m.water = 0.0;
+    return m;
 }
 
 // --- Fragment ---------------------------------------------------------------------
@@ -170,36 +199,14 @@ Material giantMaterial(SurfaceVaryings input, float3 N, float visibility)
 
 Material moonMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility)
 {
-    float3 localN = normalize(input.localNormal);
-    float2 uv = sphereUV(localN);
-    float detail = magnification(uv, MOON_TEXELS);
-    float2 texel = exp2(MOON_RELIEF_LOD) / MOON_TEXELS; // a texel of the relief mip
-    float3 T, B;
-    tangentFrame(localN, rotate, N, T, B);
-    // Relief normal from the height field; slopes are in relief-texel units.
-    float h0 = moonHeight(uv);
-    float hx = moonHeight(uv + float2(texel.x, 0)) - moonHeight(uv - float2(texel.x, 0));
-    float hy = moonHeight(uv + float2(0, texel.y)) - moonHeight(uv - float2(0, texel.y));
-    float3 mapN = normalize(float3(-hx * MOON_RELIEF * .5, -hy * MOON_RELIEF * .5, 1.0));
-    Material m;
-    m.N = normalize(T * mapN.x + B * mapN.y + N * mapN.z);
-    // Self shadowing: march up-sun in texture space and compare terrain height
-    // with the light ray's height above the surface.
-    float2 lightUV = float2(dot(L, T), dot(L, B));
-    float lightRise = max(dot(L, N), .02) / max(length(lightUV), 1e-4);
-    lightUV = normalize(lightUV + 1e-6);
-    float shadow = 0.0;
-    for (int s = 1; s <= 4; ++s)
-    {
-        float distance = float(s) * 1.25;
-        float rise = (moonHeight(uv + lightUV * texel * distance) - h0) * MOON_RELIEF;
-        shadow = max(shadow, rise - lightRise * distance);
-    }
-    m.visibility = visibility * (1.0 - saturate(shadow) * .35);
-    m.albedo = sampleSphere(textures[10], uv).rgb * .8;
-    m.albedo *= 1.0 + (fbm2(uv * float2(1536, 768), 3) - .5) * .08 * detail;
-    m.rough = .95;
-    m.water = 0.0;
+    return reliefMaterial(input, rotate, N, L, visibility, textures[10], textures[21], MOON_HEIGHT_RANGE, 1.0);
+}
+
+Material marsMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility)
+{
+    // MOLA slopes are gentle at 5 km per texel; doubled so the relief reads.
+    Material m = reliefMaterial(input, rotate, N, L, visibility, textures[19], textures[20], MARS_HEIGHT_RANGE, 2.0);
+    m.rough = .9;
     return m;
 }
 
@@ -243,7 +250,8 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     float3 N = normalize(input.worldNormal);
     float3 V = normalize(root.frame->camera_time.xyz - input.worldPosition);
     float3 L = normalize(root.frame->sun.xyz - input.worldPosition);
-    float visibility = solarVisibility(input.worldPosition, kind < KIND_ROCK ? kind : -1) * localShadow(input.worldPosition, N);
+    int selfBody = input.instanceIndex < uint(root.frame->scene.x) ? int(input.instanceIndex) : -1;
+    float visibility = solarVisibility(input.worldPosition, selfBody) * localShadow(input.worldPosition, N);
     float nl = max(dot(N, L), 0.0);
     if (root.mode == MODE_CLOUD) return shadeClouds(input, N, L, visibility, nl);
 
@@ -252,6 +260,7 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     if (kind == KIND_EARTH) m = earthMaterial(input, rotate, N, L, visibility);
     else if (kind == KIND_GIANT) m = giantMaterial(input, N, visibility);
     else if (kind == KIND_MOON) m = moonMaterial(input, rotate, N, L, visibility);
+    else if (kind == KIND_MARS) m = marsMaterial(input, rotate, N, L, visibility);
     else m = rockMaterial(input, inst, N, visibility);
 
     // Normal variance broadens unresolved highlights instead of sparkling.

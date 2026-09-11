@@ -51,7 +51,7 @@ constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
     "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..4\n"
     "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale\n"
-    "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-5 bookmarks; O orbit; F free;\n"
+    "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F free;\n"
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F12 capture; Esc exit.";
 
 struct Options {
@@ -178,7 +178,7 @@ void handle_key(AppState& app, Key key) {
     else if (const auto digit = platform::digit_of(key); digit && *digit >= 1 && *digit <= bookmark_count) {
         const std::size_t index = *digit - 1;
         app.camera.set_bookmark(index, app.bodies);
-        app.selected_body = unsigned(std::min<std::size_t>(index, app.bodies.size() - 1));
+        app.selected_body = unsigned(std::min(Camera::bookmark_body(index), app.bodies.size() - 1));
         app.camera.set_mode(CameraMode::Free);
     }
 }
@@ -205,7 +205,7 @@ Input gather_input(platform::Window& window, AppState& app) {
 void update_title(platform::Window& window, const render::Stats& stats, bool high) {
     const int fps = int(1000 / std::max(stats.frame_ms, 0.1f));
     window.set_title(
-        std::format("ORBITAL  |  {} FPS  |  {}  |  {} asteroids  |  RMB + WASD / T tour / 1-3 planets / F1 help", fps,
+        std::format("ORBITAL  |  {} FPS  |  {}  |  {} asteroids  |  RMB + WASD / T tour / 1-4 planets / F1 help", fps,
                     high ? "HIGH" : "BASELINE", stats.visible_asteroids));
 }
 
@@ -332,8 +332,7 @@ int run(const Options& options) {
     AppState app = initial_state(options, system);
     const auto window = platform::Window::create({.client_size = options.size, .title = window_title});
     render::Renderer renderer(window->native_handle(), system, directory);
-    log::info(
-        "Ready. RMB + WASD: fly | 1/2/3: planets | T: tour | F2: quality | F12: capture | --help for all controls");
+    log::info("Ready. RMB + WASD: fly | 1-4: planets | T: tour | F2: quality | F12: capture | --help for all controls");
     FrameTimes times;
     times.cpu_ms.reserve(options.frame_limit ? options.frame_limit : benchmark::expected_frames);
     times.gpu_ms.reserve(times.cpu_ms.capacity());
