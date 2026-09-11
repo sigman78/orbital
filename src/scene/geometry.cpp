@@ -278,11 +278,10 @@ Mesh generate_rock(std::uint32_t seed, std::uint32_t level) {
 }
 
 std::uint32_t select_rock_level(float projected_radius_pixels) {
-    constexpr float thresholds[rock_level_count - 1] = {3.f, 8.f, 20.f, 50.f, 130.f}; // projected radius in pixels
     if (!std::isfinite(projected_radius_pixels))
         return 0;
     std::uint32_t level = 0;
-    while (level < rock_level_count - 1 && projected_radius_pixels >= thresholds[level])
+    while (level < rock_level_count - 1 && projected_radius_pixels >= rock_level_thresholds[level])
         ++level;
     return level;
 }

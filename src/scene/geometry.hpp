@@ -62,6 +62,9 @@ Mesh generate_sphere(std::uint32_t longitude, std::uint32_t latitude);
 // Vertices are shared and indexed (ready for meshlet building) with normals
 // taken from the shape function rather than from the faces.
 Mesh generate_rock(std::uint32_t seed, std::uint32_t level);
+// Projected radius in pixels above which each level from 1 upward is used.
+// The GPU culling pass applies the same thresholds.
+constexpr float rock_level_thresholds[rock_level_count - 1] = {3.f, 8.f, 20.f, 50.f, 130.f};
 // Rock level for a projected radius in pixels; no hysteresis, the levels
 // share one shape so switches are small.
 std::uint32_t select_rock_level(float projected_radius_pixels);

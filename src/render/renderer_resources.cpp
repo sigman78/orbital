@@ -20,12 +20,6 @@
 namespace space::render {
 namespace {
 
-// Polar grid the belt is binned into for culling, read by build_belt.
-namespace cluster_grid {
-inline constexpr unsigned angle_bins = 128, radial_bins = belt::radial_bands, height_bins = 4;
-inline constexpr unsigned count = angle_bins * radial_bins * height_bins;
-} // namespace cluster_grid
-
 constexpr unsigned decode_workers_max = 8; // upper bound for the material decode pool
 
 std::vector<std::uint32_t> read_spirv(const std::filesystem::path& path) {
@@ -284,70 +278,32 @@ const GpuMesh& Renderer::Impl::body_mesh(unsigned body, unsigned lod) const {
     return system.bodies[body].body_class == BodyClass::Moonlet ? moonlet_meshes[body] : spheres[lod];
 }
 
-// The seeded belt order defines quality tiers, but is spatially random. Build
-// a separate index into compact polar cells without reordering IDs.
+// Uploads the static per-rock records the GPU culling pass places each frame.
+// The seeded belt order defines quality tiers, so records keep their ids.
 void Renderer::Impl::build_belt(const BeltDescription& description) {
-    const float inner = float(description.inner_radius), outer = float(description.outer_radius),
-                thickness = float(description.thickness);
-    belt = geometry::generate_belt({.seed = description.seed,
-                                    .count = high_quality.belt_count,
-                                    .inner_radius = inner,
-                                    .outer_radius = outer,
-                                    .thickness = thickness});
-    // Counting sort of belt indices by bin: one flat array, no per-bin allocations.
-    std::vector<unsigned> bin_of(belt.size());
-    std::vector<unsigned> bin_start(cluster_grid::count + 1, 0);
-    for (unsigned i = 0; i < belt.size(); ++i) {
-        const auto& p = belt[i].position;
-        float angle = std::atan2(p.z, p.x);
-        if (angle < 0)
-            angle += 2 * pi<float>;
-        const float radial = std::sqrt(p.x * p.x + p.z * p.z);
-        const unsigned a = std::min(cluster_grid::angle_bins - 1,
-                                    unsigned(angle / (2 * pi<float>)*cluster_grid::angle_bins));
-        const unsigned r = std::min(
-            cluster_grid::radial_bins - 1,
+    const float inner = float(description.inner_radius), outer = float(description.outer_radius);
+    const auto belt = geometry::generate_belt({.seed = description.seed,
+                                               .count = high_quality.belt_count,
+                                               .inner_radius = inner,
+                                               .outer_radius = outer,
+                                               .thickness = float(description.thickness)});
+    std::vector<RockData> records;
+    records.reserve(belt.size());
+    for (unsigned id = 0; id < belt.size(); ++id) {
+        const auto& rock = belt[id];
+        const float radial = std::sqrt(rock.position.x * rock.position.x + rock.position.z * rock.position.z);
+        const unsigned band = std::min(
+            belt::radial_bands - 1,
             unsigned(std::clamp((radial - inner) / std::max(outer - inner, 1e-4f), 0.f, .999999f) *
-                     cluster_grid::radial_bins));
-        const unsigned h = std::min(
-            cluster_grid::height_bins - 1,
-            unsigned(std::clamp((p.y + thickness * .5f) / std::max(thickness, 1e-4f), 0.f, .999999f) *
-                     cluster_grid::height_bins));
-        bin_of[i] = (h * cluster_grid::radial_bins + r) * cluster_grid::angle_bins + a;
-        ++bin_start[bin_of[i] + 1];
+                     belt::radial_bands));
+        const float radius = rock.scale.x * belt::rock_radius_scale * belt::size_tail(id);
+        records.push_back(
+            {.position_radius = {rock.position.x, rock.position.y, rock.position.z, radius},
+             .rotation_seed = {rock.rotation.x, rock.rotation.y, rock.rotation.z, 0},
+             .spin_group = {rock.spin.x, rock.spin.y, rock.spin.z, float(rock.variant * belt::radial_bands + band)}});
     }
-    for (unsigned bin = 0; bin < cluster_grid::count; ++bin)
-        bin_start[bin + 1] += bin_start[bin];
-    belt_order.resize(belt.size());
-    {
-        std::vector<unsigned> cursor(bin_start.begin(), bin_start.end() - 1);
-        for (unsigned i = 0; i < belt.size(); ++i)
-            belt_order[cursor[bin_of[i]]++] = i;
-    }
-    belt_clusters.reserve(cluster_grid::count);
-    for (unsigned bin = 0; bin < cluster_grid::count; ++bin) {
-        const std::span<const unsigned> ids(belt_order.data() + bin_start[bin], bin_start[bin + 1] - bin_start[bin]);
-        if (ids.empty())
-            continue;
-        Vec3f lo = belt[ids[0]].position, hi = lo;
-        for (unsigned id : ids) {
-            const auto& p = belt[id].position;
-            lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-            hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
-        }
-        const Vec3f center = (lo + hi) * .5f;
-        float bound = 0;
-        for (unsigned id : ids) {
-            const auto d = belt[id].position - center;
-            const auto& s = belt[id].scale;
-            const float rock_radius = belt::rock_radius_scale * std::max(s.x, std::max(s.y, s.z)) * belt::size_tail(id);
-            bound = std::max(bound, std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z) + rock_radius);
-        }
-        belt_clusters.push_back({.center = center,
-                                 .radius = bound,
-                                 .band = (bin / cluster_grid::angle_bins) % cluster_grid::radial_bins,
-                                 .indices = ids});
-    }
+    rock_data = upload_static(bytes_of(records));
+    rock_count = unsigned(records.size());
 }
 
 // Decodes and mip-filters every material on a bounded worker pool, then
@@ -408,6 +364,9 @@ void Renderer::Impl::create_pipelines() {
     pso.present = make("fullscreen", "post", Format::bgra8_srgb);
     pso.meter = make("fullscreen", "post", Format::rgba32_float);
     pso.temporal = make("fullscreen", "temporal", Format::rgba16_float);
+    pso.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
+    panic_if(!pso.cull, "compute pipeline creation failed: cull");
+    pipelines.push_back(pso.cull);
     // Depth-only shadow pass reuses the surface vertex shader with a slope bias.
     const auto shadow_vertex = read_spirv(directory / "shaders/surface.vertex.spv");
     pso.shadow = gpu::create_graphics_pso(device,

@@ -108,8 +108,8 @@ has a portable fallback. A `_WIN32`, `_MSC_VER` or `<windows.h>` anywhere else i
   including a function that accepts a caller-sized span, uses `std::vector`.
 - `std::vector` only for large owning buffers (pixels, meshes, instance lists) and for containers
   that are cleared and reused. Never a `std::vector` of `std::vector`s for a grid; use one flat
-  array plus offsets (the belt clusters are a counting sort into `belt_order`, and each cluster views
-  its slice).
+  array plus offsets (the per-frame instance list is one flat array; the GPU culling pass writes each
+  rock group's slice at a base it computed itself).
 - No node-based or hashed containers (`std::map`, `std::unordered_map`, `std::set`, `std::list`) for
   small keyed sets. A linear search over a handful of bodies is faster than a hash lookup and does
   not allocate; `evaluate_system` went from two maps per frame to none.
@@ -127,9 +127,8 @@ has a portable fallback. A `_WIN32`, `_MSC_VER` or `<windows.h>` anywhere else i
 - When a callee only reads data, it takes an immutable view: `ByteView` for bytes,
   `std::span<const T>` for anything else, `std::string_view` for text. Ownership is transferred only
   when the callee keeps the data, and then by move.
-- A view is valid only while its owner is immutable. Where a view outlives the call that created it
-  (`BeltCluster::indices` into `Impl::belt_order`) the owner is documented as frozen after
-  construction, and nothing appends to it afterwards.
+- A view is valid only while its owner is immutable. Where a view outlives the call that created it,
+  the owner is documented as frozen after construction, and nothing appends to it afterwards.
 - Leaf kernels keep raw pointer plus dimension parameters on purpose; everything above them has
   already validated sizes through the view types.
 

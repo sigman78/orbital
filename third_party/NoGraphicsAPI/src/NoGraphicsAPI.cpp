@@ -3044,6 +3044,16 @@ PSO* create_mesh_pso(Device* device, const MeshPSODesc& desc) noexcept
                              desc.stencil_format, desc.rasterization, true);
 }
 
+// Heap owning a device address range; the conventional path needs the VkBuffer.
+static GpuHeapOwner* conventional_heap_for(Device* device, GpuRange range) noexcept
+{
+    GpuHeapOwner* heap = device->gpu_heaps;
+    const VkDeviceAddress address = reinterpret_cast<uintptr>(range.gpu);
+    while (heap && !(address >= heap->backing.address && address + range.size <= heap->backing.address + heap->backing.mapped_size)) heap = heap->next;
+    assert(heap);
+    return heap;
+}
+
 PSO* create_compute_pso(Device* device, Span<const uint32> compute_spirv) noexcept
 {
     assert(device && "create_compute_pso called with a null device");
@@ -3065,8 +3075,9 @@ PSO* create_compute_pso(Device* device, Span<const uint32> compute_spirv) noexce
     };
     const VkComputePipelineCreateInfo pso_info{
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-        .pNext = &flags_info,
+        .pNext = device->conventional_backend ? nullptr : static_cast<const void*>(&flags_info),
         .stage = stage,
+        .layout = device->conventional_backend ? device->conventional_pipeline_layout : VK_NULL_HANDLE,
         .basePipelineIndex = -1,
     };
     PSO* result = new PSO{
@@ -3675,6 +3686,13 @@ void draw_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments, u
 {
     assert(commands && commands->state);
     emit_root_data(commands, root);
+    if (commands->state->conventional_backend)
+    {
+        GpuHeapOwner* heap = conventional_heap_for(commands->state, arguments);
+        vkCmdDrawIndirect(commands->command_buffer, heap->backing.buffer, reinterpret_cast<uintptr>(arguments.gpu) - heap->backing.address, draw_count,
+                          stride == 0 ? sizeof(VkDrawIndirectCommand) : stride);
+        return;
+    }
     const VkDrawIndirect2InfoKHR info{
         .sType = VK_STRUCTURE_TYPE_DRAW_INDIRECT_2_INFO_KHR,
         .addressRange = {
@@ -3693,6 +3711,17 @@ void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indi
 {
     assert(commands && commands->state);
     emit_root_data(commands, root);
+    if (commands->state->conventional_backend)
+    {
+        GpuHeapOwner* index_heap = conventional_heap_for(commands->state, indices);
+        GpuHeapOwner* argument_heap = conventional_heap_for(commands->state, arguments);
+        vkCmdBindIndexBuffer(commands->command_buffer, index_heap->backing.buffer, reinterpret_cast<uintptr>(indices.gpu) - index_heap->backing.address,
+                             static_cast<VkIndexType>(type));
+        vkCmdDrawIndexedIndirect(commands->command_buffer, argument_heap->backing.buffer,
+                                 reinterpret_cast<uintptr>(arguments.gpu) - argument_heap->backing.address, draw_count,
+                                 stride == 0 ? sizeof(VkDrawIndexedIndirectCommand) : stride);
+        return;
+    }
     const VkBindIndexBuffer3InfoKHR bind_info{
         .sType = VK_STRUCTURE_TYPE_BIND_INDEX_BUFFER_3_INFO_KHR,
         .addressRange = {

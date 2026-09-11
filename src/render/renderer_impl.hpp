@@ -89,7 +89,8 @@ constexpr SurfaceKind surface_kind(BodyClass body_class) {
 struct HeapLayout {
     std::uint64_t static_heap = 48ull << 20;
     std::uint64_t dynamic_offset = 32ull << 20;
-    std::uint64_t instance_offset = 1024;       // FrameData precedes the instances
+    std::uint64_t cull_offset = 1024; // FrameData, then the culling scratch, then the instances
+    std::uint64_t instance_offset = 1024 + 8192;
     std::uint64_t staging_budget = 64ull << 20; // texture upload staging, see upload_images
 
     constexpr std::uint64_t instance_capacity() const {
@@ -97,7 +98,8 @@ struct HeapLayout {
     }
 };
 inline constexpr HeapLayout heap_layout{};
-static_assert(heap_layout.instance_offset >= sizeof(FrameData));
+static_assert(heap_layout.cull_offset >= sizeof(FrameData));
+static_assert(heap_layout.instance_offset >= heap_layout.cull_offset + sizeof(CullScratch));
 static_assert(heap_layout.dynamic_offset + heap_layout.instance_offset < heap_layout.static_heap);
 
 // Sizes of the fixed GPU targets, created by the resources side and addressed by the frame side.
@@ -164,28 +166,14 @@ struct Upload {
 constexpr std::size_t inline_upload_count = 24;
 using Uploads = SmallVec<Upload, inline_upload_count>;
 
-// Spatial bin of belt instances for coarse frustum and occlusion culling.
-// indices views Impl::belt_order, which is immutable after build_belt.
-struct BeltCluster {
-    Vec3f center{};
-    float radius = 0;
-    unsigned band = 0; // radial band, which sets the cluster's orbital rate
-    std::span<const unsigned> indices;
-};
-
-// One draw group per (shape, level) pair of the rock library.
+// One draw group per (shape, level) pair of the rock library; the GPU
+// culling pass appends the billboard list as one more group.
 constexpr unsigned rock_group_count = geometry::rock_shape_count * geometry::rock_level_count;
 constexpr unsigned rock_group(unsigned shape, unsigned level) {
     return shape * geometry::rock_level_count + level;
 }
-
-// Where each rock group and the billboards landed in the per-frame instance list.
-struct BeltBatches {
-    std::array<unsigned, rock_group_count> bases{}, counts{};
-    unsigned distant_base = 0, distant_count = 0;
-};
-
-struct RockCullContext;
+static_assert(rock_group_count == ORBITAL_ROCK_GROUPS && geometry::rock_level_count == ORBITAL_ROCK_LEVELS &&
+              belt::radial_bands == ORBITAL_BELT_BANDS);
 
 struct Renderer::Impl {
     // Device and heaps.
@@ -201,14 +189,14 @@ struct Renderer::Impl {
     GpuImage hdr{}, depth{}, bloom_a{}, bloom_b{}, final_image{}, shadow_map{}, luminance{}, history[2]{};
     struct {
         gpu::PSO *opaque = nullptr, *cloud = nullptr, *background = nullptr, *atmosphere = nullptr, *bloom = nullptr,
-                 *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr;
+                 *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr,
+                 *cull = nullptr;
     } pso;
     std::array<GpuMesh, geometry::lod_count> spheres{};
     std::array<GpuMesh, rock_group_count> rocks{};        // the rock library, indexed by rock_group
     std::array<GpuMesh, max_body_count> moonlet_meshes{}; // per body index; only moonlets are filled
-    std::vector<geometry::AsteroidInstance> belt;
-    std::vector<unsigned> belt_order; // belt indices grouped by cluster
-    std::vector<BeltCluster> belt_clusters;
+    std::uint64_t rock_data = 0;                          // static heap address of the RockData records
+    unsigned rock_count = 0;
     SystemDescription system;
     std::filesystem::path directory;
     // The bodies occupy instance slots 0..body_count-1 in system order. The
@@ -226,10 +214,9 @@ struct Renderer::Impl {
     Vec3d previous_camera{};
     bool history_valid = false;
 
-    // Per-frame scratch, cleared and reused.
+    // Per-frame scratch, cleared and reused: the body instances only, rocks
+    // are placed by the GPU.
     std::vector<Instance> instances;
-    std::array<std::vector<Instance>, rock_group_count> rock_groups;
-    std::vector<Instance> distant;
 
     ~Impl();
 
@@ -256,11 +243,14 @@ struct Renderer::Impl {
     void read_gpu_timings();
     void apply_metering();
     FrameData build_frame(const FrameInput& input);
-    BeltBatches cull_belt(const FrameInput& input, const FrameData& frame);
-    void classify_rock(unsigned id, const RockCullContext& context, unsigned band);
+    void write_body_instances(const FrameInput& input, const FrameData& frame);
+    void write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
+                            std::uint64_t instance_address);
+    void read_cull_counts(const CullScratch& scratch);
+    void record_cull_passes(gpu::CommandBuffer* cmd, const CullRoot& root);
     void record_shadow_pass(gpu::CommandBuffer* cmd, Root root);
     void record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input, const FrameData& frame,
-                           const BeltBatches& batches);
+                           std::uint64_t args_address);
     void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view);
     void fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, gpu::PSO* pipeline, Root root,
                          bool preserve = false);

@@ -9,7 +9,8 @@ namespace space::render {
 
 struct Stats {
     float frame_ms = 0, gpu_ms = 0, shadow_ms = 0, surface_ms = 0, atmosphere_ms = 0, post_ms = 0;
-    unsigned visible_asteroids = 0, triangles = 0;
+    unsigned visible_asteroids = 0, triangles = 0,
+             rock_triangles = 0; // rock figures are from the previous frame's culling
 };
 
 // Everything the renderer needs for one frame; owned by the caller.

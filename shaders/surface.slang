@@ -24,10 +24,12 @@ struct SurfaceVaryings {
 };
 
 [shader("vertex")]
-SurfaceVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_InstanceID)
+SurfaceVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_InstanceID, uint firstInstance : SV_StartInstanceLocation)
 {
+    // SV_InstanceID is zero based per draw; indirect rock draws place their
+    // group's instances through the first-instance argument.
     SurfaceVaryings output;
-    output.instanceIndex = root.base + instanceId;
+    output.instanceIndex = root.base + firstInstance + instanceId;
     Instance inst = root.instances[output.instanceIndex];
     if (root.mode == MODE_BILLBOARD)
     {
