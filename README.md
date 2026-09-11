@@ -42,7 +42,7 @@ RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. K
 | --- | --- |
 | `src/app` | Window, input, camera, HUD and the `main` loop |
 | `src/scene` | Deterministic system generation and mesh geometry |
-| `src/assets` | PNG image I/O (Wuffs decode, stb write) and material mip-chain generation |
+| `src/assets` | PNG image I/O (Wuffs decode, stb write), SIMD pixel kernels and material mip-chain generation |
 | `src/render` | Vulkan renderer on top of NoGraphicsAPI, GPU-side types |
 | `shaders/` | Slang shaders; `scene_shared.h` is the shared C++/shader layout |
 | `tests/` | Executable-assertion tests run through CTest |

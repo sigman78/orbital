@@ -17,13 +17,13 @@ target_include_directories(orbital_scene PUBLIC src)
 target_compile_features(orbital_scene PUBLIC cxx_std_20)
 target_compile_options(orbital_scene PRIVATE ${ORBITAL_WARNINGS})
 
-add_library(orbital_assets STATIC src/assets/image.cpp src/assets/materials.cpp)
+add_library(orbital_assets STATIC src/assets/image.cpp src/assets/kernels.cpp src/assets/materials.cpp)
 target_include_directories(orbital_assets PUBLIC src PRIVATE third_party/stb third_party/wuffs)
 target_compile_features(orbital_assets PUBLIC cxx_std_20)
 target_compile_options(orbital_assets PRIVATE ${ORBITAL_WARNINGS})
 
 if(BUILD_TESTING)
-  foreach(test IN ITEMS system geometry camera image materials)
+  foreach(test IN ITEMS system geometry camera image kernels materials)
     add_executable(${test}_tests tests/${test}_tests.cpp)
     target_link_libraries(${test}_tests PRIVATE orbital_scene orbital_assets)
     # These tests use assertions as executable invariants, including Release.

@@ -1,6 +1,7 @@
 #include "renderer.hpp"
 #include "app/hud.hpp"
 #include "assets/image.hpp"
+#include "assets/kernels.hpp"
 #include "assets/materials.hpp"
 #include "gpu_types.hpp"
 #include "scene/geometry.hpp"
@@ -325,7 +326,7 @@ struct Renderer::Impl {
         std::cout
             << "Loaded " << count << " materials in "
             << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count()
-            << " ms on " << workers << " workers\n";
+            << " ms on " << workers << " workers (" << assets::kernels::backend() << ")\n";
     }
     void init(void* hwnd, const SystemDescription& sys, const std::filesystem::path& dir) {
         system = sys;

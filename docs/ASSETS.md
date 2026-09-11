@@ -12,4 +12,4 @@ Solar System Scope's Earth day, cloud and night maps are 8192x4096 upstream and 
 
 Decode albedo, gas, moon and night-emission maps as sRGB. Decode normal, specular, cloud-mask and roughness maps as linear data. The Poly Haven normal is OpenGL-style +Y. The Solar System Scope normal orientation should be checked against the renderer's tangent basis before final sign-off.
 
-Loading is done by `src/assets/image.cpp` (vendored Wuffs PNG decoder; stb_image_write for screenshots) and `src/assets/materials.cpp` (sRGB-to-linear conversion, luminance-to-alpha masks, normal-map renormalisation and 2x2 box mip generation with horizontal wrap for equirectangular maps).
+Loading is done by `src/assets/image.cpp` (vendored Wuffs PNG decoder; stb_image_write for screenshots) and `src/assets/materials.cpp`, which drives the pixel kernels in `src/assets/kernels.cpp`: sRGB-to-linear conversion, luminance-to-alpha masks, normal-map renormalisation and 2x2 box mip generation. The box filter has SSE2 and AVX2 paths selected at runtime; every kernel is bit-exact with the scalar reference kept in the same file and checked by the kernels test.
