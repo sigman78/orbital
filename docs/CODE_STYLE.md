@@ -35,16 +35,21 @@ is about what the code does, not how it is indented.
 
 ## Platform code
 
-- Platform- and compiler-specific code is confined to designated files, and everything else must
-  compile on any conforming C++20 compiler. The designated files today are `app/main.cpp` and
-  `app/hud.cpp` (Win32), `core/file.cpp` and `core/panic.cpp` (guarded OS calls), `assets/kernels.cpp`
-  (instruction-set intrinsics) and the vendored-library include block in `assets/image.cpp` (compiler
-  pragmas). A `_WIN32` or `_MSC_VER` guard anywhere else is a review finding.
+- OS-specific code lives in `src/platform/<os>/` behind the OS-agnostic headers in `src/platform/`:
+  `window.hpp` (window, key presses, mouse look, polled keys, title), `process.hpp` (process setup,
+  executable directory) and `text.hpp` (text-overlay rasterizer). Application code (`app/`) and the
+  renderer never include an OS header; the renderer only carries the opaque native handle through
+  to the graphics backend.
+- Four files keep small compile-time guards instead of a platform backend, because the alternative
+  would be a module with one function: `core/file.cpp` (`_wfopen_s` for Unicode paths), `core/panic.cpp`
+  (debugger break), `assets/kernels.cpp` (instruction-set intrinsics) and the vendored-library include
+  block in `assets/image.cpp` (compiler pragmas). A `_WIN32` or `_MSC_VER` guard anywhere else is a
+  review finding.
 - Do not lean on MSVC leniency: no non-standard extensions, no reliance on its two-phase lookup
-  quirks or its permissive conversions. `/permissive-` is on and MinGW GCC and clang are available
-  locally to cross-check; a Linux CI build of the CPU libraries is the planned enforcement.
-- Separating the remaining platform code into its own module is a follow-up to this document, not
-  something the current tree already does completely.
+  quirks or its permissive conversions. `/permissive-` is on, and CI builds the CPU libraries and
+  every test with GCC on Linux; MinGW GCC and clang are available locally for the same check.
+- The desktop demo itself is Windows-only until a second `platform/<os>/` backend and a swapchain
+  path exist for it; the layering makes that a contained job.
 
 ## Containers
 
@@ -229,7 +234,8 @@ was tuned rather than derived.
 - `src/core`: logging, panic, files, math. Depends on nothing else.
 - `src/scene`: deterministic system generation and geometry. Depends on `core`.
 - `src/assets`: image I/O, pixel kernels, materials. Depends on `core`.
-- `src/app`: window, input, camera, HUD, `main`. Depends on everything. All Win32 calls live here.
+- `src/platform`: OS-agnostic interfaces with one implementation directory per OS. Depends on `core`.
+- `src/app`: options, camera, HUD layout, frame loop, `main`. Depends on everything, calls no OS API.
 - `src/render`: the Vulkan renderer. Depends on everything except `app` (the HUD image is passed
   in). Split by responsibility: `renderer_impl.hpp` holds the private `Impl`, the slot and mode
   enumerations and `RenderSettings`; `renderer_resources.cpp` creates the device, meshes, materials,

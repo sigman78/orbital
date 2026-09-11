@@ -1,10 +1,11 @@
-#include <windows.h>
 #include "app/camera.hpp"
 #include "core/file.hpp"
 #include "core/log.hpp"
 #include "core/math.hpp"
-#include "core/panic.hpp"
+#include "platform/process.hpp"
+#include "platform/window.hpp"
 #include "render/renderer.hpp"
+
 #include <algorithm>
 #include <charconv>
 #include <chrono>
@@ -15,14 +16,11 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <vector>
-#ifdef _MSC_VER
-#include <crtdbg.h>
-#endif
 
 namespace {
 
 using namespace space;
+using platform::Key;
 
 struct AppSettings {
     struct {
@@ -47,8 +45,7 @@ struct AppSettings {
 constexpr AppSettings settings{};
 
 constexpr std::string_view hotkey_capture_path = "captures/orbital.png";
-constexpr const wchar_t* window_class_name = L"OrbitalWindow";
-constexpr const wchar_t* window_title = L"ORBITAL  /  Procedural worlds";
+constexpr std::string_view window_title = "ORBITAL  /  Procedural worlds";
 
 constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
@@ -148,155 +145,69 @@ std::optional<Options> parse_options(int argc, char** argv) {
     return options;
 }
 
-// Mutable state shared between the window procedure and the frame loop.
+// Interactive state that key presses and the frame loop share.
 struct AppState {
     Camera camera;
     BodyStates bodies;
-    bool running = true, paused = false, high = false, overlay = true, mouse_look = false, auto_exposure = true;
+    bool running = true, paused = false, high = false, overlay = true, auto_exposure = true;
     float exposure = 1.0f;
-    float mouse_dx = 0, mouse_dy = 0;
-    POINT previous_cursor{};
     unsigned selected_body = 0;
     std::filesystem::path capture_request;
 };
 
-void handle_key(AppState& app, WPARAM key) {
+void handle_key(AppState& app, Key key) {
     const auto& exposure = settings.exposure;
     switch (key) {
-    case VK_ESCAPE: app.running = false; break;
-    case VK_SPACE: app.paused = !app.paused; break;
-    case 'T': app.camera.toggle_tour(); break;
-    case 'O':
+    case Key::escape: app.running = false; break;
+    case Key::space: app.paused = !app.paused; break;
+    case Key::f1: app.overlay = !app.overlay; break;
+    case Key::f2: app.high = !app.high; break;
+    case Key::f12: app.capture_request = hotkey_capture_path; break;
+    case Key::plus: app.exposure = exposure.range.clamp(app.exposure * exposure.step); break;
+    case Key::minus: app.exposure = exposure.range.clamp(app.exposure / exposure.step); break;
+    default: break;
+    }
+    if (key == platform::letter_key('T'))
+        app.camera.toggle_tour();
+    else if (key == platform::letter_key('O'))
         app.camera.set_orbit_target(app.selected_body,
                                     app.bodies[app.selected_body].radius * settings.control.orbit_zoom_radii);
-        break;
-    case 'F': app.camera.set_mode(CameraMode::Free); break;
-    case 'X': app.auto_exposure = !app.auto_exposure; break;
-    case VK_F1: app.overlay = !app.overlay; break;
-    case VK_F2: app.high = !app.high; break;
-    case VK_F12: app.capture_request = hotkey_capture_path; break;
-    case VK_OEM_PLUS: app.exposure = exposure.range.clamp(app.exposure * exposure.step); break;
-    case VK_OEM_MINUS: app.exposure = exposure.range.clamp(app.exposure / exposure.step); break;
-    default:
-        if (key >= '1' && key < '1' + bookmark_count) {
-            const auto index = static_cast<std::size_t>(key - '1');
-            app.camera.set_bookmark(index, app.bodies);
-            app.selected_body = unsigned(std::min<std::size_t>(index, app.bodies.size() - 1));
-            app.camera.set_mode(CameraMode::Free);
-        }
-        break;
+    else if (key == platform::letter_key('F'))
+        app.camera.set_mode(CameraMode::Free);
+    else if (key == platform::letter_key('X'))
+        app.auto_exposure = !app.auto_exposure;
+    else if (const auto digit = platform::digit_of(key); digit && *digit >= 1 && *digit <= bookmark_count) {
+        const std::size_t index = *digit - 1;
+        app.camera.set_bookmark(index, app.bodies);
+        app.selected_body = unsigned(std::min<std::size_t>(index, app.bodies.size() - 1));
+        app.camera.set_mode(CameraMode::Free);
     }
 }
 
-LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM w, LPARAM l) {
-    auto* app = reinterpret_cast<AppState*>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        app = static_cast<AppState*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(app));
-    }
-    if (!app)
-        return DefWindowProcW(window, message, w, l);
-    constexpr LPARAM key_repeat_bit = 1ll << 30;
-    switch (message) {
-    case WM_CLOSE: app->running = false; return 0;
-    case WM_DESTROY: PostQuitMessage(0); return 0;
-    case WM_KILLFOCUS:
-    case WM_RBUTTONUP:
-        app->mouse_look = false;
-        ReleaseCapture();
-        return 0;
-    case WM_RBUTTONDOWN:
-        app->mouse_look = true;
-        if (app->camera.mode() == CameraMode::Tour)
-            app->camera.set_mode(CameraMode::Free);
-        GetCursorPos(&app->previous_cursor);
-        SetCapture(window);
-        return 0;
-    case WM_MOUSEMOVE:
-        if (app->mouse_look) {
-            POINT cursor;
-            GetCursorPos(&cursor);
-            app->mouse_dx += float(cursor.x - app->previous_cursor.x);
-            app->mouse_dy += float(cursor.y - app->previous_cursor.y);
-            app->previous_cursor = cursor;
-        }
-        return 0;
-    case WM_KEYDOWN:
-        if (!(l & key_repeat_bit))
-            handle_key(*app, w);
-        return 0;
-    }
-    return DefWindowProcW(window, message, w, l);
-}
-
-std::filesystem::path executable_directory() {
-    wchar_t buffer[32768];
-    const auto length = GetModuleFileNameW(nullptr, buffer, static_cast<DWORD>(std::size(buffer)));
-    if (!length || length >= std::size(buffer))
-        panic("cannot locate the executable directory");
-    return std::filesystem::path(buffer).parent_path();
-}
-
-struct Window {
-    HWND handle = nullptr;
-    Window(Extent2D size, AppState& app) {
-        WNDCLASSW wc{};
-        wc.lpfnWndProc = window_proc;
-        wc.hInstance = GetModuleHandleW(nullptr);
-        wc.lpszClassName = window_class_name;
-        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-        if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
-            panic("cannot register the window class");
-        RECT area{0, 0, LONG(size.width), LONG(size.height)};
-        AdjustWindowRect(&area, WS_OVERLAPPEDWINDOW, FALSE);
-        handle = CreateWindowExW(0, window_class_name, window_title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                                 area.right - area.left, area.bottom - area.top, nullptr, nullptr, wc.hInstance, &app);
-        if (!handle)
-            panic("cannot create the desktop window");
-        ShowWindow(handle, SW_SHOW);
-    }
-    ~Window() {
-        if (handle)
-            DestroyWindow(handle);
-    }
-    Window(const Window&) = delete;
-    Window& operator=(const Window&) = delete;
-};
-
-// Pumps pending messages; false once the application should exit.
-bool pump_messages(AppState& app) {
-    MSG msg;
-    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-        if (msg.message == WM_QUIT)
-            app.running = false;
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
-    return app.running;
-}
-
-Input gather_input(HWND window, AppState& app) {
-    const auto down = [&](int key) { return GetForegroundWindow() == window && (GetAsyncKeyState(key) & 0x8000) != 0; };
+Input gather_input(platform::Window& window, AppState& app) {
+    const auto axis = [&](char positive, char negative) {
+        return float(window.key_down(platform::letter_key(positive))) -
+               float(window.key_down(platform::letter_key(negative)));
+    };
     Input input;
-    input.move_forward = float(down('W')) - float(down('S'));
-    input.move_right = float(down('D')) - float(down('A'));
-    input.move_up = float(down('E')) - float(down('Q'));
-    input.speed_scale = down(VK_SHIFT) ? settings.control.fast_speed_scale : 1.0f;
-    input.mouse_dx = app.mouse_dx;
-    input.mouse_dy = app.mouse_dy;
-    app.mouse_dx = app.mouse_dy = 0;
+    input.move_forward = axis('W', 'S');
+    input.move_right = axis('D', 'A');
+    input.move_up = axis('E', 'Q');
+    input.speed_scale = window.key_down(Key::shift) ? settings.control.fast_speed_scale : 1.0f;
+    const platform::MouseDelta mouse = window.take_mouse_look_delta();
+    input.mouse_dx = mouse.dx;
+    input.mouse_dy = mouse.dy;
     const bool moving = input.move_forward != 0 || input.move_right != 0 || input.move_up != 0;
-    if (moving && app.camera.mode() == CameraMode::Tour)
+    if ((moving || window.mouse_look_began()) && app.camera.mode() == CameraMode::Tour)
         app.camera.set_mode(CameraMode::Free);
     return input;
 }
 
-void update_title(HWND window, const render::Stats& stats, bool high) {
+void update_title(platform::Window& window, const render::Stats& stats, bool high) {
     const int fps = int(1000 / std::max(stats.frame_ms, 0.1f));
-    const auto title = std::format(
-        L"ORBITAL  |  {} FPS  |  {}  |  {} asteroids  |  RMB + WASD / T tour / 1-3 planets / F1 help", fps,
-        high ? L"HIGH" : L"BASELINE", stats.visible_asteroids);
-    SetWindowTextW(window, title.c_str());
+    window.set_title(
+        std::format("ORBITAL  |  {} FPS  |  {}  |  {} asteroids  |  RMB + WASD / T tour / 1-3 planets / F1 help", fps,
+                    high ? "HIGH" : "BASELINE", stats.visible_asteroids));
 }
 
 struct FrameTimes {
@@ -343,7 +254,7 @@ struct Session {
     const SystemDescription& system;
     std::filesystem::path directory;
     AppState& app;
-    HWND window;
+    platform::Window& window;
     render::Renderer& renderer;
 };
 
@@ -351,13 +262,18 @@ struct Session {
 unsigned frame_loop(const Session& session, FrameTimes& times) {
     const Options& options = session.options;
     AppState& app = session.app;
+    platform::Window& window = session.window;
     render::Renderer& renderer = session.renderer;
     auto previous = std::chrono::steady_clock::now();
     double simulation_time = 0, elapsed = 0, title_clock = 0;
     unsigned frames = 0;
-    while (pump_messages(app)) {
-        if (IsIconic(session.window)) {
-            WaitMessage();
+    while (app.running && window.pump_events()) {
+        for (const Key key : window.key_presses())
+            handle_key(app, key);
+        if (!app.running)
+            break;
+        if (window.minimized()) {
+            window.wait_for_events();
             previous = std::chrono::steady_clock::now();
             continue;
         }
@@ -371,7 +287,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
         if (options.fixed_time >= 0)
             simulation_time = options.fixed_time;
         app.bodies = evaluate_system(session.system, simulation_time);
-        app.camera.step(dt, elapsed, gather_input(session.window, app), app.bodies);
+        app.camera.step(dt, elapsed, gather_input(window, app), app.bodies);
 
         const render::FrameInput frame_input{.camera = app.camera,
                                              .bodies = app.bodies,
@@ -401,23 +317,23 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
         }
         if (elapsed - title_clock > settings.window.title_refresh_seconds) {
             title_clock = elapsed;
-            update_title(session.window, renderer.stats(), app.high);
+            update_title(window, renderer.stats(), app.high);
         }
     }
     return frames;
 }
 
 int run(const Options& options) {
-    const auto directory = executable_directory();
+    const auto directory = platform::executable_directory();
     const auto system = generate_system(options.seed);
     if (const auto errors = validate_system(system); !errors.empty()) {
         log::error("invalid generated system: {}", errors.front());
         return 1;
     }
-    SetProcessDPIAware();
+    platform::init_process();
     AppState app = initial_state(options, system);
-    Window window(options.size, app);
-    render::Renderer renderer(window.handle, system, directory);
+    const auto window = platform::Window::create({.client_size = options.size, .title = window_title});
+    render::Renderer renderer(window->native_handle(), system, directory);
     log::info(
         "Ready. RMB + WASD: fly | 1/2/3: planets | T: tour | F2: quality | F12: capture | --help for all controls");
     FrameTimes times;
@@ -427,7 +343,7 @@ int run(const Options& options) {
                                         .system = system,
                                         .directory = directory,
                                         .app = app,
-                                        .window = window.handle,
+                                        .window = *window,
                                         .renderer = renderer},
                                        times);
     if (!options.benchmark.empty())
@@ -439,10 +355,6 @@ int run(const Options& options) {
 } // namespace
 
 int main(int argc, char** argv) {
-#if defined(_MSC_VER) && !defined(NDEBUG)
-    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
-    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
-#endif
     const auto options = parse_options(argc, argv);
     if (!options)
         return 1;

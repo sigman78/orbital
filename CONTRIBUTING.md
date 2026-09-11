@@ -44,6 +44,12 @@ All CTest suites (system, geometry, camera, image and material loading) are CPU-
 `ORBITAL_BUILD_DEMO=OFF`. The window smoke test (`tools/smoke-window.ps1`) needs a GPU and runs locally.
 `tools/check-stability.ps1` compares two fixed-time captures; see [docs/STABILITY.md](docs/STABILITY.md).
 
+## Portability check
+
+`tools/check-gcc.ps1` builds the CPU libraries and every test with MinGW GCC (the same set the Linux CI job builds)
+and runs them. Use it before pushing anything that touches `src/core`, `src/scene` or `src/assets`; the Win32
+platform backend and the demo executable are the only parts that need MSVC.
+
 ## Vendored NoGraphicsAPI
 
 Changes to `third_party/NoGraphicsAPI` must keep the upstream style and be reflected in

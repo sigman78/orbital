@@ -27,11 +27,18 @@
 #define STBI_WRITE_NO_STDIO
 #if defined(_MSC_VER)
 #pragma warning(push, 0)
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
 #endif
 #include <stb_image_write.h>
 #include <wuffs-v0.4.c>
 #if defined(_MSC_VER)
 #pragma warning(pop)
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
 #endif
 
 namespace space::assets {

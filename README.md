@@ -41,7 +41,8 @@ RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. K
 | Path | Contents |
 | --- | --- |
 | `src/core` | Logging, panic, file I/O and vector/matrix math shared by everything else |
-| `src/app` | Window, input, camera, HUD and the `main` loop |
+| `src/platform` | OS-agnostic window, input, process and text-overlay interfaces; `win32/` implements them |
+| `src/app` | Options, camera, HUD layout and the frame loop; no OS calls |
 | `src/scene` | Deterministic system generation and mesh geometry |
 | `src/assets` | PNG image I/O (Wuffs decode, stb write), SIMD pixel kernels and material mip-chain generation |
 | `src/render` | Vulkan renderer on top of NoGraphicsAPI: resources and materials, per-frame passes, GPU-side types |

@@ -18,8 +18,20 @@ jobs:
           find src tests \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) -print0 \
             | xargs -0 clang-format --style=file --dry-run --Werror
 
+  cpu-tests-linux:
+    name: CPU libraries and tests (GCC, Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DORBITAL_BUILD_DEMO=OFF -DBUILD_TESTING=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
   cpu-tests:
-    name: Scene library and tests (MSVC, no GPU)
+    name: CPU libraries and tests (MSVC, no GPU)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

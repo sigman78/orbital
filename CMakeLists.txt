@@ -60,8 +60,14 @@ if(ORBITAL_BUILD_DEMO)
   endforeach()
   add_custom_target(orbital_shaders DEPENDS ${ORBITAL_SHADER_OUTPUTS})
 
+  # Platform layer: the only code that talks to the OS windowing, input and font APIs.
+  add_library(orbital_platform STATIC src/platform/win32/window.cpp src/platform/win32/process.cpp src/platform/win32/text.cpp)
+  target_link_libraries(orbital_platform PUBLIC orbital_core PRIVATE user32 gdi32)
+  target_compile_definitions(orbital_platform PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+  target_compile_options(orbital_platform PRIVATE ${ORBITAL_WARNINGS})
+
   add_executable(orbital src/app/main.cpp src/app/hud.cpp src/render/renderer_resources.cpp src/render/renderer_frame.cpp)
-  target_link_libraries(orbital PRIVATE orbital_scene orbital_assets NoGraphicsAPI::NoGraphicsAPI user32 gdi32)
+  target_link_libraries(orbital PRIVATE orbital_scene orbital_assets orbital_platform NoGraphicsAPI::NoGraphicsAPI)
   target_include_directories(orbital PRIVATE shaders) # scene_shared.h, the C++/shader layout
   target_compile_definitions(orbital PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
   target_compile_options(orbital PRIVATE ${ORBITAL_WARNINGS})
