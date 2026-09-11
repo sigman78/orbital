@@ -120,8 +120,7 @@ std::optional<Image> try_load_png(const std::filesystem::path& path) {
 
 Image load_png(const std::filesystem::path& path) {
     auto image = try_load_png(path);
-    if (!image)
-        panic(std::format("required image is missing or unreadable: {}", path.string()));
+    panic_if(!image, "required image is missing or unreadable: {}", path.string());
     return std::move(*image);
 }
 

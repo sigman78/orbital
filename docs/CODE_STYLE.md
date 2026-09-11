@@ -158,8 +158,9 @@ Three tiers, chosen by who could act on the failure:
 - Code that a test needs to exercise on the failure path gets a `try_` variant that returns
   `std::optional` (`try_load_png`); the plain variant panics. A function that reports failure
   through `bool` logs the reason itself so callers only decide what to do next.
-- `panic_if(condition, "message")` replaces an `if`/`panic` pair when the message is constant. When
-  the message needs `std::format`, keep the pair so nothing is formatted on the success path.
+- `panic_if(condition, "format {}", args...)` replaces an `if`/`panic` pair. The format string is
+  checked at compile time and the message is built only on the failure path; the arguments are
+  evaluated either way, so keep an explicit pair when building an argument is itself expensive.
 - `panic` calls `std::_Exit`, so it is safe from worker threads and never runs destructors of
   half-initialized GPU objects. `ORBITAL_ASSERT` is a macro because it needs the stringized
   condition; `panic` is a plain function because `std::source_location` gives it the location.

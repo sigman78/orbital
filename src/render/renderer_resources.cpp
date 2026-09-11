@@ -30,13 +30,11 @@ constexpr unsigned decode_workers_max = 8; // upper bound for the material decod
 
 std::vector<std::uint32_t> read_spirv(const std::filesystem::path& path) {
     const auto bytes = file::read(path);
-    if (!bytes || bytes->empty() || bytes->size() % 4)
-        panic(std::format("missing or invalid shader: {}", path.string()));
+    panic_if(!bytes || bytes->empty() || bytes->size() % 4, "missing or invalid shader: {}", path.string());
     std::vector<std::uint32_t> words(bytes->size() / 4);
     std::memcpy(words.data(), bytes->data(), bytes->size());
     constexpr std::uint32_t spirv_magic = 0x07230203;
-    if (words[0] != spirv_magic)
-        panic(std::format("not a SPIR-V module: {}", path.string()));
+    panic_if(words[0] != spirv_magic, "not a SPIR-V module: {}", path.string());
     return words;
 }
 
@@ -119,9 +117,8 @@ GpuImage Renderer::Impl::create_image(const ImageDesc& desc) {
     GpuImage result;
     result.heap = gpu::create_texture_heap(device, size.size);
     result.texture = gpu::create_texture(device, texture_desc, result.heap, 0);
-    if (!result.texture)
-        panic(std::format("texture allocation failed ({}x{}, {} mips)", desc.extent.width, desc.extent.height,
-                          desc.mips));
+    panic_if(!result.texture, "texture allocation failed ({}x{}, {} mips)", desc.extent.width, desc.extent.height,
+             desc.mips);
     const auto attachment_bits = static_cast<unsigned>(gpu::TextureUsage::color_attachment |
                                                        gpu::TextureUsage::depth_stencil_attachment);
     if (static_cast<unsigned>(desc.usage) & attachment_bits)
@@ -208,8 +205,7 @@ gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
                  .fragment_spirv = fragment,
                  .color_targets = {&target, 1},
                  .depth_format = desc.depth_test ? gpu::Format::d32_float : gpu::Format::undefined});
-    if (!pipeline)
-        panic(std::format("pipeline creation failed for {} + {}", desc.vertex_shader, desc.fragment_shader));
+    panic_if(!pipeline, "pipeline creation failed for {} + {}", desc.vertex_shader, desc.fragment_shader);
     pipelines.push_back(pipeline);
     return pipeline;
 }
