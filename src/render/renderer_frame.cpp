@@ -260,7 +260,8 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
                 geometry::rock_level_thresholds[2], geometry::rock_level_thresholds[3]};
     p.billboard = {geometry::rock_level_thresholds[4], belt_culling::billboard::pixel_radius,
                    belt_culling::billboard::min_pixels, 0};
-    p.rock_limit = std::min(rock_count, (input.high_quality ? high_quality : baseline_quality).belt_count);
+    const unsigned tier_count = (input.high_quality ? high_quality : baseline_quality).belt_count;
+    p.rock_limit = std::min(rock_count, belt_count_override ? belt_count_override : tier_count);
     p.body_count = body_count;
     for (unsigned group = 0; group < rock_group_count; group++)
         p.index_counts[group] = rocks[group].index_count;
@@ -412,6 +413,7 @@ bool Renderer::draw(const FrameInput& input) {
     const auto swap = gpu::acquire(s.device);
     if (!swap.render_view)
         return false;
+    const auto prepare_start = std::chrono::steady_clock::now();
 
     const unsigned history_write = s.frame_index % 2;
     s.bind(Slot::history_a, s.history[history_write]);
@@ -475,6 +477,8 @@ bool Renderer::draw(const FrameInput& input) {
     stamp(3);
     s.record_post_passes(cmd, root, swap.render_view);
     stamp(4);
+    s.stats.prepare_ms =
+        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - prepare_start).count();
     gpu::submit_and_present(s.device, {cmd}, {s.timeline, ++s.serial});
 
     s.frame_index++;

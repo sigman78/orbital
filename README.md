@@ -30,6 +30,7 @@ RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. K
 
 ```powershell
 ./build/release/orbital.exe --width 1920 --height 1080 --tour
+./build/release/orbital.exe --bookmark 5 --time 0 --frames 300 --high --rocks 650000 --benchmark belt.csv
 ./build/release/orbital.exe --bookmark 4 --time 0 --frames 124 --no-hud --capture captures/belt.png
 ./build/release/orbital.exe --duration 60 --tour --benchmark captures/tour.csv
 ```

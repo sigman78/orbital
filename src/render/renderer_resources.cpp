@@ -283,7 +283,7 @@ const GpuMesh& Renderer::Impl::body_mesh(unsigned body, unsigned lod) const {
 void Renderer::Impl::build_belt(const BeltDescription& description) {
     const float inner = float(description.inner_radius), outer = float(description.outer_radius);
     const auto belt = geometry::generate_belt({.seed = description.seed,
-                                               .count = high_quality.belt_count,
+                                               .count = std::max(high_quality.belt_count, belt_count_override),
                                                .inner_radius = inner,
                                                .outer_radius = outer,
                                                .thickness = float(description.thickness)});
@@ -388,9 +388,10 @@ void Renderer::Impl::create_fixed_targets() {
 }
 
 void Renderer::Impl::init(void* window, const SystemDescription& description,
-                          const std::filesystem::path& base_directory) {
+                          const std::filesystem::path& base_directory, const RendererConfig& config) {
     system = description;
     directory = base_directory;
+    belt_count_override = config.belt_count;
     panic_if(system.bodies.empty() || system.bodies.size() > max_body_count || system.belts.empty(),
              "the renderer needs 1 to {} bodies and a belt", max_body_count);
     body_count = unsigned(system.bodies.size());
@@ -448,9 +449,10 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     bind(Slot::depth, depth);
 }
 
-Renderer::Renderer(void* window, const SystemDescription& system, const std::filesystem::path& directory)
+Renderer::Renderer(void* window, const SystemDescription& system, const std::filesystem::path& directory,
+                   const RendererConfig& config)
     : impl_(std::make_unique<Impl>()) {
-    impl_->init(window, system, directory);
+    impl_->init(window, system, directory, config);
 }
 
 Renderer::~Renderer() = default;

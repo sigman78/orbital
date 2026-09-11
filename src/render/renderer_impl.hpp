@@ -87,9 +87,9 @@ constexpr SurfaceKind surface_kind(BodyClass body_class) {
 // One host-visible heap: meshes are appended from the front at startup, the
 // per-frame FrameData and instance list live in the back half.
 struct HeapLayout {
-    std::uint64_t static_heap = 48ull << 20;
-    std::uint64_t dynamic_offset = 32ull << 20;
-    std::uint64_t cull_offset = 1024; // FrameData, then the culling scratch, then the instances
+    std::uint64_t static_heap = 128ull << 20;   // with the 64 MiB upload staging this stays inside the BAR window
+    std::uint64_t dynamic_offset = 80ull << 20; // meshes and rock records before, per-frame data after
+    std::uint64_t cull_offset = 1024;           // FrameData, then the culling scratch, then the instances
     std::uint64_t instance_offset = 1024 + 8192;
     std::uint64_t staging_budget = 64ull << 20; // texture upload staging, see upload_images
 
@@ -197,6 +197,7 @@ struct Renderer::Impl {
     std::array<GpuMesh, max_body_count> moonlet_meshes{}; // per body index; only moonlets are filled
     std::uint64_t rock_data = 0;                          // static heap address of the RockData records
     unsigned rock_count = 0;
+    unsigned belt_count_override = 0; // RendererConfig::belt_count
     SystemDescription system;
     std::filesystem::path directory;
     // The bodies occupy instance slots 0..body_count-1 in system order. The
@@ -221,7 +222,8 @@ struct Renderer::Impl {
     ~Impl();
 
     // renderer_resources.cpp
-    void init(void* window, const SystemDescription& description, const std::filesystem::path& base_directory);
+    void init(void* window, const SystemDescription& description, const std::filesystem::path& base_directory,
+              const RendererConfig& config);
     void create_device(void* window);
     void create_samplers();
     void create_meshes();

@@ -50,7 +50,7 @@ constexpr std::string_view window_title = "ORBITAL  /  Procedural worlds";
 constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
     "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..4\n"
-    "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale\n"
+    "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --rocks N\n"
     "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F free;\n"
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F12 capture; Esc exit.";
 
@@ -62,6 +62,7 @@ struct Options {
     double duration = 0;    // > 0 exits after this many wall-clock seconds
     int bookmark = -1;
     float exposure = 1;
+    unsigned rocks = 0; // belt override for benchmarks; 0 keeps the quality tiers
     bool tour = false, high = false, no_hud = false, help = false;
     std::filesystem::path capture, benchmark;
 };
@@ -113,6 +114,8 @@ std::optional<Options> parse_options(int argc, char** argv) {
             ok = parse_number(value(), options.seed);
         else if (arg == "--frames")
             ok = parse_number(value(), options.frame_limit);
+        else if (arg == "--rocks")
+            ok = parse_number(value(), options.rocks);
         else if (arg == "--width")
             ok = parse_number(value(), options.size.width);
         else if (arg == "--height")
@@ -210,13 +213,14 @@ void update_title(platform::Window& window, const render::Stats& stats, bool hig
 }
 
 struct FrameTimes {
-    std::vector<float> cpu_ms, gpu_ms;
+    std::vector<float> cpu_ms, gpu_ms, prepare_ms;
 };
 
 void write_benchmark(const std::filesystem::path& path, const FrameTimes& times) {
-    std::string csv = "frame,cpu_submit_and_wait_ms,gpu_ms\n";
+    std::string csv = "frame,cpu_submit_and_wait_ms,gpu_ms,cpu_prepare_ms\n";
     for (std::size_t i = 0; i < times.cpu_ms.size(); i++)
-        std::format_to(std::back_inserter(csv), "{},{},{}\n", i, times.cpu_ms[i], times.gpu_ms[i]);
+        std::format_to(std::back_inserter(csv), "{},{},{},{}\n", i, times.cpu_ms[i], times.gpu_ms[i],
+                       times.prepare_ms[i]);
     if (!file::write_text(path, csv))
         log::error("cannot write benchmark {}", path.string());
     auto sorted = times.cpu_ms;
@@ -299,6 +303,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
             const auto stats = renderer.stats();
             times.cpu_ms.push_back(stats.frame_ms);
             times.gpu_ms.push_back(stats.gpu_ms);
+            times.prepare_ms.push_back(stats.prepare_ms);
             if (!app.capture_request.empty()) {
                 const auto path = session.directory / app.capture_request;
                 if (renderer.capture(path))
@@ -331,7 +336,7 @@ int run(const Options& options) {
     platform::init_process();
     AppState app = initial_state(options, system);
     const auto window = platform::Window::create({.client_size = options.size, .title = window_title});
-    render::Renderer renderer(window->native_handle(), system, directory);
+    render::Renderer renderer(window->native_handle(), system, directory, {.belt_count = options.rocks});
     log::info("Ready. RMB + WASD: fly | 1-4: planets | T: tour | F2: quality | F12: capture | --help for all controls");
     FrameTimes times;
     times.cpu_ms.reserve(options.frame_limit ? options.frame_limit : benchmark::expected_frames);
