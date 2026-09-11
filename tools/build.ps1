@@ -9,9 +9,6 @@ if (-not $vcvars) {
         if ($installation) { $vcvars = Join-Path $installation 'VC\Auxiliary\Build\vcvarsall.bat' }
     }
 }
-if (-not $vcvars -and (Test-Path -LiteralPath 'C:\dev\msvc.2021\VC\Auxiliary\Build\vcvarsall.bat')) {
-    $vcvars = 'C:\dev\msvc.2021\VC\Auxiliary\Build\vcvarsall.bat'
-}
 if (-not $vcvars -or -not (Test-Path -LiteralPath $vcvars)) {
     throw 'MSVC environment not found. Set ORBITAL_VCVARS to the absolute vcvarsall.bat path.'
 }

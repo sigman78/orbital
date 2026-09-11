@@ -4,9 +4,9 @@ Pinned NoGraphicsAPI revision: `8e414bd0a8010b9f721d06d470860e27aa69c071` (upstr
 
 ## Local toolchain
 
-- MSVC 19.44.35222, compiler at `C:\dev\msvc.2021\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\cl.exe`; initialize with `C:\dev\msvc.2021\VC\Auxiliary\Build\vcvarsall.bat x64`.
+- MSVC 19.44.35222 (v14.44 toolset), initialized with `vcvarsall.bat x64`. `tools/build.ps1` locates it through `vswhere`; set `ORBITAL_VCVARS` for a standalone or custom installation.
 - Vulkan headers 1.4.357 at `.tools/Vulkan-Headers/include`, pinned externally at commit `e3b1eec08173d6b825cd3ac88c885a63b621504a`.
-- Vulkan loader import library at `D:\blender-build\blender\lib\windows_x64\vulkan\lib\vulkan-1.lib`.
+- Vulkan loader import library (`vulkan-1.lib`) from an external installation, passed to CMake as `Vulkan_LIBRARY` (typically in an ignored `CMakeUserPresets.json`). It is not redistributed.
 - glslang 16.5.0 at `.tools/glslang/bin/glslang.exe`. `tools/bootstrap.ps1` fetches the tagged Windows archive and verifies SHA-256 `06B71298B750268C127F2EE7AE0EF7525E2068120C6C8A3A08B2F58CA6F325CE`.
 - Slang 2026.14.1 at `.tools/slang/bin/slangc.exe`; the official tagged Windows archive SHA-256 is `5ED0A59D650A0AF0ACA45D5DB4E083B3D8FB5CEA05748747DD95DFBE9C580658`.
 - The tested device is NVIDIA GeForce GTX 1080 Ti, Vulkan 1.4.312, driver 582.66. It lacks `VK_EXT_descriptor_heap`, `VK_KHR_device_address_commands`, `VK_KHR_shader_untyped_pointers`, and `VK_EXT_mesh_shader`.
@@ -28,13 +28,13 @@ The parallel Slang shader path preserves this ABI in `shaders/common.slang` and 
 
 ## Build evidence and remaining validation
 
-Run `tools/bootstrap.ps1` to install the pinned Vulkan headers and shader compiler, then `tools/build.ps1 release`. Set `ORBITAL_VCVARS` when MSVC is installed outside Visual Studio discovery. The Vulkan loader/import library is intentionally not redistributed: install the Vulkan SDK or provide `Vulkan_LIBRARY` to CMake. The local Blender path below is environment-specific build evidence.
+Run `tools/bootstrap.ps1` to install the pinned Vulkan headers and shader compiler, then `tools/build.ps1 release`. Set `ORBITAL_VCVARS` when MSVC is installed outside Visual Studio discovery. The Vulkan loader/import library is intentionally not redistributed: install the Vulkan SDK or provide `Vulkan_LIBRARY` to CMake.
 
 The fork builds successfully with MSVC using the commands below:
 
 ```bat
-call C:\dev\msvc.2021\VC\Auxiliary\Build\vcvarsall.bat x64
-cmake -S third_party\NoGraphicsAPI -B third_party\NoGraphicsAPI\build-compat -G Ninja -DVulkan_INCLUDE_DIR=.tools\Vulkan-Headers\include -DVulkan_LIBRARY=D:\blender-build\blender\lib\windows_x64\vulkan\lib\vulkan-1.lib -DNOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND=ON
+call "%ORBITAL_VCVARS%" x64
+cmake -S third_party\NoGraphicsAPI -B third_party\NoGraphicsAPI\build-compat -G Ninja -DVulkan_INCLUDE_DIR=.tools\Vulkan-Headers\include -DVulkan_LIBRARY=<path-to>\vulkan-1.lib -DNOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND=ON
 cmake --build third_party\NoGraphicsAPI\build-compat
 ```
 

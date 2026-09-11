@@ -19,7 +19,7 @@ HDR means floating-point scene rendering and tone-mapped SDR output for the firs
 
 ## Observed environment — 2026-09-11
 
-- Workspace: `D:\non-esp\space-demo`; no existing application files were found before documentation authoring.
+- Workspace: the repository root; no existing application files were found before documentation authoring.
 - PowerShell is the shell. CMake and Git are on PATH.
 - `cl` was not on PATH; `vswhere -all -products '*' -format json` returned `[]`. The user says MSVC is installed; locate standalone/custom tools before concluding it is unavailable.
 - `vulkaninfo` is available. Loader instance version: 1.4.309.

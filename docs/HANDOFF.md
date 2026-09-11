@@ -31,9 +31,9 @@ Rendering includes camera-relative coordinates, sphere/rock LODs, shadow map, ma
 
 ## Workspace and coordination
 
-Use tools/build.ps1; local machine overrides are in ignored CMakeUserPresets.json (local-release, local-debug). MSVC exists at C:/dev/msvc.2021/VC/Auxiliary/Build/vcvarsall.bat. Local Vulkan headers are under .tools; the loader import library currently comes from an existing external installation, so a fresh machine needs Vulkan SDK or explicit CMake paths. Do not advertise this as a fully self-contained toolchain yet.
+Use tools/build.ps1; it finds MSVC through vswhere or `ORBITAL_VCVARS`. Machine-specific CMake overrides (for example `Vulkan_LIBRARY`) belong in the ignored CMakeUserPresets.json. Local Vulkan headers are under .tools; the loader import library currently comes from an existing external installation, so a fresh machine needs Vulkan SDK or explicit CMake paths. Do not advertise this as a fully self-contained toolchain yet.
 
-No root git repository has been initialized. Preserve all work. Child agents share files: assign exclusive ownership. Parent owns renderer, root build, app integration and primary docs; foundation owns dependency backend/validation tooling; geometry owns camera tests/stability tooling. Inspect actual diffs/results rather than relying solely on agent completion messages.
+The repository is tracked in git on `main`. Preserve all work. Child agents share files: assign exclusive ownership. Parent owns renderer, root build, app integration and primary docs; foundation owns dependency backend/validation tooling; geometry owns camera tests/stability tooling. Inspect actual diffs/results rather than relying solely on agent completion messages.
 
 ## Suggested skills
 
