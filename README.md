@@ -42,14 +42,14 @@ RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. K
 | --- | --- |
 | `src/app` | Window, input, camera, HUD and the `main` loop |
 | `src/scene` | Deterministic system generation and mesh geometry |
-| `src/assets` | PNG image I/O (stb) and material mip-chain generation |
+| `src/assets` | PNG image I/O (Wuffs decode, stb write) and material mip-chain generation |
 | `src/render` | Vulkan renderer on top of NoGraphicsAPI, GPU-side types |
 | `shaders/` | Slang shaders; `scene_shared.h` is the shared C++/shader layout |
 | `tests/` | Executable-assertion tests run through CTest |
 | `tools/` | PowerShell scripts: bootstrap, asset import, build, format, smoke and stability checks |
 | `cmake/` | Slang shader compilation helper |
 | `docs/` | Product, architecture, decisions, validation and handoff documents ([index](docs/README.md)) |
-| `third_party/` | Vendored NoGraphicsAPI fork with its patch against upstream, and stb image headers ([details](third_party/README.md)) |
+| `third_party/` | Vendored NoGraphicsAPI fork with its patch against upstream, Wuffs and stb_image_write ([details](third_party/README.md)) |
 
 ## Development
 
@@ -66,4 +66,4 @@ Working desktop implementation tested on GTX 1080 Ti; RTX 4080 remains untested.
 
 ## License
 
-The demo is released under the [MIT License](LICENSE). NoGraphicsAPI is MIT licensed (`third_party/NoGraphicsAPI/LICENSE`); stb_image and stb_image_write are public domain (`third_party/stb/LICENSE`). Material textures are CC BY 4.0 (Solar System Scope) and CC0 (Poly Haven); provenance, hashes and attribution requirements are in [docs/ASSETS.md](docs/ASSETS.md) and `assets/materials/manifest.json`. Keep attribution with redistributed assets.
+The demo is released under the [MIT License](LICENSE). NoGraphicsAPI is MIT licensed (`third_party/NoGraphicsAPI/LICENSE`); Wuffs is Apache-2.0 OR MIT (`third_party/wuffs/LICENSE`) and stb_image_write is public domain (`third_party/stb/LICENSE`). Material textures are CC BY 4.0 (Solar System Scope) and CC0 (Poly Haven); provenance, hashes and attribution requirements are in [docs/ASSETS.md](docs/ASSETS.md) and `assets/materials/manifest.json`. Keep attribution with redistributed assets.

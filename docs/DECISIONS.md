@@ -45,7 +45,7 @@ Append dated decisions with evidence and implications when these questions are r
 
 - The conventional NoGraphicsAPI fallback is implemented and demonstrated on GTX 1080 Ti; details and upstream pin are in FOUNDATION.md. Demo shaders use this ABI even on newer hardware. This is not a replacement graphics library.
 - Default shaders use Slang, offline SPIR-V compilation and scene_shared.h shared data layouts. Compiler binaries are pinned by bootstrap.ps1.
-- The material pipeline loads realistic sourced maps with provenance; the earlier procedural texture generator was removed. Textures are stored as PNG and decoded with the vendored stb_image, so loading has no platform dependency. See ASSETS.md.
+- The material pipeline loads realistic sourced maps with provenance; the earlier procedural texture generator was removed. Textures are stored as PNG and decoded with the vendored Wuffs decoder, so loading has no platform dependency. See ASSETS.md.
 - Rendering is linear floating-point HDR internally, with ACES-fit tone mapping and sRGB presentation to an SDR swapchain. Native HDR-monitor output remains deferred.
 - Longitude-wrap derivatives are corrected for spherical texture sampling. Temporal reprojection and area-weighted tiny-asteroid billboards address aliasing; residual phase/motion artifacts require the evidence in STABILITY.md, not a blanket resolved claim.
 - Scene distances are compressed for an authored fictional-system tour. Giant/Earth radii are substantially differentiated; this is not a true-scale Solar System simulation.

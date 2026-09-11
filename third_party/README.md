@@ -22,9 +22,15 @@ git diff --no-index --src-prefix=a/ --dst-prefix=b/ upstream NoGraphicsAPI > NoG
 Vendored code keeps its upstream formatting (`NoGraphicsAPI/.clang-format`) and is excluded from
 the project's clang-format and clang-tidy runs.
 
+## Wuffs
+
+`wuffs/wuffs-v0.4.c` is the single-file release of [google/wuffs](https://github.com/google/wuffs)
+at commit `0f214ba59c20c0c9c7ba841ecc3683f863965312`, Apache-2.0 OR MIT (`wuffs/LICENSE`). Only the PNG decoder and its
+dependencies (adler32, crc32, deflate, zlib) are compiled, in `src/assets/image.cpp`. Wuffs is a
+memory-safe, SIMD-accelerated decoder and is what loads every texture.
+
 ## stb
 
-`stb/` holds `stb_image.h` (v2.30) and `stb_image_write.h` (v1.16) from
-[nothings/stb](https://github.com/nothings/stb) at commit `2c980bb59875b0d32144a71867fbdebb2f77cd20`,
-public domain / MIT (`stb/LICENSE`). They are compiled once in `src/assets/image.cpp` with PNG support only
-and provide the demo's texture loading and screenshot export.
+`stb/stb_image_write.h` (v1.16) from [nothings/stb](https://github.com/nothings/stb) at commit
+`2c980bb59875b0d32144a71867fbdebb2f77cd20`, public domain / MIT (`stb/LICENSE`), encodes PNG
+screenshots. Wuffs has no PNG encoder, so this is kept for export only.

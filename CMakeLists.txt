@@ -11,13 +11,14 @@ else()
 endif()
 
 # CPU-only libraries: deterministic system generation, geometry, camera, and PNG/material loading.
+# orbital_assets compiles the vendored Wuffs PNG decoder and stb PNG writer in src/assets/image.cpp.
 add_library(orbital_scene STATIC src/scene/system.cpp src/scene/geometry.cpp src/app/camera.cpp)
 target_include_directories(orbital_scene PUBLIC src)
 target_compile_features(orbital_scene PUBLIC cxx_std_20)
 target_compile_options(orbital_scene PRIVATE ${ORBITAL_WARNINGS})
 
 add_library(orbital_assets STATIC src/assets/image.cpp src/assets/materials.cpp)
-target_include_directories(orbital_assets PUBLIC src PRIVATE third_party/stb)
+target_include_directories(orbital_assets PUBLIC src PRIVATE third_party/stb third_party/wuffs)
 target_compile_features(orbital_assets PUBLIC cxx_std_20)
 target_compile_options(orbital_assets PRIVATE ${ORBITAL_WARNINGS})
 
@@ -71,4 +72,5 @@ if(ORBITAL_BUILD_DEMO)
   install(DIRECTORY docs DESTINATION .)
   install(FILES third_party/NoGraphicsAPI/LICENSE DESTINATION licenses RENAME NoGraphicsAPI-LICENSE.txt)
   install(FILES third_party/stb/LICENSE DESTINATION licenses RENAME stb-LICENSE.txt)
+  install(FILES third_party/wuffs/LICENSE DESTINATION licenses RENAME wuffs-LICENSE.txt)
 endif()
