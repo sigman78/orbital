@@ -61,16 +61,55 @@ constexpr unsigned earth_index = 0, giant_index = 1;
 
 // --- Budgets and tuning -------------------------------------------------------
 
-constexpr std::uint64_t static_heap_size = 48ull * 1024 * 1024; // meshes, then the per-frame region
-constexpr std::uint64_t dynamic_offset = 32ull * 1024 * 1024;   // per-frame data starts here
-constexpr std::uint64_t instance_offset = 512;                  // instances follow the 400-byte FrameData
-constexpr std::uint64_t staging_budget = 64ull * 1024 * 1024;   // texture upload staging, see upload_images
-constexpr unsigned shadow_map_size = 2048;
-constexpr unsigned luminance_size = 16; // exposure meter target, luminance_size^2 texels of rgba32f
-constexpr unsigned meter_interval = 16; // frames between exposure readbacks
-constexpr unsigned timestamp_count = 5; // frame start, after shadow, surface, atmosphere, post
-constexpr unsigned high_belt_count = 65000, baseline_belt_count = 35000;
-constexpr float near_z = 0.02f, far_z = 2000.0f;
+struct RenderSettings {
+    struct {
+        std::uint64_t static_heap = 48ull << 20;    // meshes, then the per-frame region
+        std::uint64_t dynamic_offset = 32ull << 20; // per-frame data starts here
+        std::uint64_t instance_offset = 512;        // instances follow the 400-byte FrameData
+        std::uint64_t staging_budget = 64ull << 20; // texture upload staging, see upload_images
+        unsigned decode_workers = 8;                // upper bound for the material decode pool
+    } memory;
+    struct {
+        Range<float> depth{0.02f, 2000.0f}; // near and far plane, camera-relative units
+        unsigned shadow_map_size = 2048;
+        unsigned timestamp_count = 5; // frame start, after shadow, surface, atmosphere, post
+    } frame;
+    struct {
+        unsigned target_size = 16; // luminance meter edge, texels of rgba32f
+        unsigned interval = 16;    // frames between readbacks
+        float min_weight = 0.004f; // texels below this weight do not vote
+        float key = 0.18f;         // middle gray
+        float rate = 0.08f;        // smoothing toward the target per readback
+        Range<float> adapted{0.75f, 1.75f};
+    } metering;
+    struct {
+        double max_jump = 10.0;       // camera translation that invalidates the history
+        double min_forward_dot = 0.7; // turn that invalidates the history
+    } history;
+    struct {
+        double giant_distance = 100.0; // inside this the shadow map follows the giant, else Earth
+        float giant_half_size = 70.f, earth_half_size = 12.f;
+    } shadow;
+    struct {
+        float disc_radius = 3.0f;       // Frame.sun.w
+        float screen_size = 0.008f;     // Frame.screen_sun.w
+        float max_screen_offset = 1.3f; // beyond this the flare is off-screen
+    } sun;
+    struct {
+        unsigned high_count = 65000, baseline_count = 35000;
+        unsigned angle_bins = 128, radial_bins = 8, height_bins = 4; // cluster grid
+        float cluster_bound_scale = 1.30f;                           // the tilt/compression matrix has norm below 1.293
+        float rock_radius_scale = 0.025f;                            // instance scale to world radius
+        double spin_rate = 0.008, rock_spin_rate = 0.08;             // radians per simulation second
+        float lod_switch_pixels = 5.f; // above this projected radius rocks use their own LOD
+        struct {
+            float min_pixels = 0.06f;  // smaller rocks are dropped
+            float pixel_radius = 1.2f; // rocks below this become fixed-size billboards
+        } billboard;
+    } belt;
+    float earth_rotation_offset = -0.95f; // aligns the day map with the lighting
+};
+inline constexpr RenderSettings settings{};
 
 // --- GPU-side records ---------------------------------------------------------
 
@@ -86,7 +125,7 @@ struct GpuMesh {
 };
 
 struct ImageDesc {
-    unsigned width = 1, height = 1;
+    Extent2D extent{1, 1};
     gpu::Format format = gpu::Format::rgba8_unorm;
     gpu::TextureUsage usage = gpu::TextureUsage::sampled;
     unsigned mips = 1;
@@ -118,6 +157,8 @@ struct BeltBatches {
     unsigned distant_base = 0, distant_count = 0;
 };
 
+struct RockCullContext;
+
 struct Renderer::Impl {
     // Device and heaps.
     gpu::Device* device = nullptr;
@@ -141,7 +182,8 @@ struct Renderer::Impl {
     std::filesystem::path directory;
 
     // Frame state.
-    unsigned width = 0, height = 0, frame_index = 0;
+    Extent2D extent{};
+    unsigned frame_index = 0;
     Stats stats{};
     float adapted_exposure = 1;
     bool meter_pending = false;
@@ -165,7 +207,7 @@ struct Renderer::Impl {
     void load_materials();
     void create_pipelines();
     void create_fixed_targets();
-    void resize(unsigned new_width, unsigned new_height);
+    void resize(Extent2D new_extent);
     void destroy(GpuImage& image);
     std::uint64_t upload_static(const void* bytes, std::size_t size);
     GpuMesh upload_mesh(const geometry::Mesh& mesh);
@@ -179,7 +221,7 @@ struct Renderer::Impl {
     void apply_metering();
     FrameData build_frame(const FrameInput& input);
     BeltBatches cull_belt(const FrameInput& input, const FrameData& frame);
-    void classify_rock(unsigned id, const struct RockCullContext& context);
+    void classify_rock(unsigned id, const RockCullContext& context);
     void record_shadow_pass(gpu::CommandBuffer* cmd, Root root, const BeltBatches& batches);
     void record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input, const FrameData& frame,
                            const BeltBatches& batches);

@@ -191,19 +191,23 @@ std::vector<AsteroidInstance> generate_belt(const BeltParams& params) {
 }
 
 std::uint32_t select_lod(float projected_radius_pixels, std::uint32_t previous) {
-    constexpr float thresholds[lod_count - 1] = {24.0f, 80.0f, 240.0f};
-    constexpr float grow_hysteresis = 1.15f, shrink_hysteresis = 0.85f;
+    struct LodSettings {
+        float thresholds[lod_count - 1] = {24.0f, 80.0f, 240.0f}; // projected radius in pixels
+        float grow_hysteresis = 1.15f, shrink_hysteresis = 0.85f;
+    };
+    constexpr LodSettings lod{};
     if (!std::isfinite(projected_radius_pixels))
         projected_radius_pixels = 0.0f;
     projected_radius_pixels = std::max(0.0f, projected_radius_pixels);
     previous = std::min(previous, lod_count - 1);
     std::uint32_t desired = 0;
-    while (desired < lod_count - 1 && projected_radius_pixels >= thresholds[desired])
+    while (desired < lod_count - 1 && projected_radius_pixels >= lod.thresholds[desired])
         ++desired;
     if (desired > previous && previous < lod_count - 1 &&
-        projected_radius_pixels < thresholds[previous] * grow_hysteresis)
+        projected_radius_pixels < lod.thresholds[previous] * lod.grow_hysteresis)
         return previous;
-    if (desired < previous && previous > 0 && projected_radius_pixels >= thresholds[previous - 1] * shrink_hysteresis)
+    if (desired < previous && previous > 0 &&
+        projected_radius_pixels >= lod.thresholds[previous - 1] * lod.shrink_hysteresis)
         return previous;
     return desired;
 }

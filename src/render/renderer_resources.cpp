@@ -20,10 +20,7 @@
 namespace space::render {
 namespace {
 
-constexpr unsigned angle_bins = 128, radial_bins = 8, height_bins = 4;
-constexpr unsigned cluster_bin_count = angle_bins * radial_bins * height_bins;
-constexpr unsigned max_decode_workers = 8;
-constexpr float rock_radius_scale = 0.025f; // instance scale to world radius
+constexpr unsigned cluster_bin_count = settings.belt.angle_bins * settings.belt.radial_bins * settings.belt.height_bins;
 
 // A sparse large-body tail exposes the fractured silhouettes between the much
 // more numerous small rocks. Stable IDs keep quality tiers nested.
@@ -95,7 +92,7 @@ void Renderer::Impl::destroy(GpuImage& image) {
 
 std::uint64_t Renderer::Impl::upload_static(const void* bytes, std::size_t size) {
     static_cursor = (static_cursor + 15) & ~15ull;
-    if (static_cursor + size > dynamic_offset)
+    if (static_cursor + size > settings.memory.dynamic_offset)
         panic("static GPU heap exhausted");
     const auto address = reinterpret_cast<std::uint64_t>(data.range.gpu) + static_cursor;
     std::memcpy(data.range.cpu + static_cursor, bytes, size);
@@ -114,14 +111,17 @@ GpuMesh Renderer::Impl::upload_mesh(const geometry::Mesh& mesh) {
 }
 
 GpuImage Renderer::Impl::create_image(const ImageDesc& desc) {
-    const gpu::TextureDesc texture_desc{
-        .extent = {desc.width, desc.height, 1}, .mip_levels = desc.mips, .format = desc.format, .usage = desc.usage};
+    const gpu::TextureDesc texture_desc{.extent = {desc.extent.width, desc.extent.height, 1},
+                                        .mip_levels = desc.mips,
+                                        .format = desc.format,
+                                        .usage = desc.usage};
     const auto size = gpu::get_texture_size_align(device, texture_desc);
     GpuImage result;
     result.heap = gpu::create_texture_heap(device, size.size);
     result.texture = gpu::create_texture(device, texture_desc, result.heap, 0);
     if (!result.texture)
-        panic(std::format("texture allocation failed ({}x{}, {} mips)", desc.width, desc.height, desc.mips));
+        panic(std::format("texture allocation failed ({}x{}, {} mips)", desc.extent.width, desc.extent.height,
+                          desc.mips));
     const auto attachment_bits = static_cast<unsigned>(gpu::TextureUsage::color_attachment |
                                                        gpu::TextureUsage::depth_stencil_attachment);
     if (static_cast<unsigned>(desc.usage) & attachment_bits)
@@ -147,8 +147,7 @@ void Renderer::Impl::upload_images(std::span<Upload> uploads) {
     for (const auto& upload : uploads) {
         ORBITAL_ASSERT(!upload.mips.empty());
         const auto& base = upload.mips.front();
-        images.push_back(create_image({.width = base.width,
-                                       .height = base.height,
+        images.push_back(create_image({.extent = {base.width, base.height},
                                        .format = gpu::Format::rgba8_unorm,
                                        .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::transfer_destination,
                                        .mips = unsigned(upload.mips.size())}));
@@ -159,7 +158,7 @@ void Renderer::Impl::upload_images(std::span<Upload> uploads) {
             bytes += padded_size(mip);
         largest = std::max(largest, bytes);
     }
-    auto staging = gpu::create_gpu_heap(device, std::max(largest, staging_budget));
+    auto staging = gpu::create_gpu_heap(device, std::max(largest, settings.memory.staging_budget));
     if (!staging.range.cpu)
         panic("texture staging allocation failed");
     gpu::CommandBuffer* cmd = nullptr;
@@ -226,15 +225,16 @@ void Renderer::Impl::create_device(void* window) {
     if (!caps.conventional_descriptor_backend)
         panic("the demo's shaders require the conventional descriptor backend build option");
     timeline = gpu::create_timeline_semaphore(device);
-    data = gpu::create_gpu_heap(device, static_heap_size);
+    data = gpu::create_gpu_heap(device, settings.memory.static_heap);
     texture_descriptors = gpu::create_gpu_heap(device, caps.texture_descriptor_size * unsigned(Slot::count),
                                                gpu::MemoryType::texture_descriptor_heap);
     sampler_descriptors = gpu::create_gpu_heap(device, caps.sampler_descriptor_size * unsigned(SamplerSlot::count),
                                                gpu::MemoryType::sampler_descriptor_heap);
     if (!data.range.cpu || !texture_descriptors.range.cpu || !sampler_descriptors.range.cpu)
         panic("GPU mapped heap allocation failed");
-    luminance_readback = gpu::create_gpu_heap(device, luminance_size * luminance_size * sizeof(Float4),
-                                              gpu::MemoryType::readback);
+    luminance_readback = gpu::create_gpu_heap(
+        device, settings.metering.target_size * settings.metering.target_size * sizeof(Float4),
+        gpu::MemoryType::readback);
     timestamps = gpu::create_gpu_heap(device, 64, gpu::MemoryType::readback);
 }
 
@@ -275,7 +275,7 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
     const float inner = float(description.inner_radius), outer = float(description.outer_radius),
                 thickness = float(description.thickness);
     belt = geometry::generate_belt({.seed = description.seed,
-                                    .count = high_belt_count,
+                                    .count = settings.belt.high_count,
                                     .inner_radius = inner,
                                     .outer_radius = outer,
                                     .thickness = thickness});
@@ -286,14 +286,17 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
         if (angle < 0)
             angle += 2 * pi<float>;
         const float radial = std::sqrt(p.x * p.x + p.z * p.z);
-        const unsigned a = std::min(angle_bins - 1, unsigned(angle / (2 * pi<float>)*angle_bins));
+        const unsigned a = std::min(settings.belt.angle_bins - 1,
+                                    unsigned(angle / (2 * pi<float>)*settings.belt.angle_bins));
         const unsigned r = std::min(
-            radial_bins - 1,
-            unsigned(std::clamp((radial - inner) / std::max(outer - inner, 1e-4f), 0.f, .999999f) * radial_bins));
+            settings.belt.radial_bins - 1,
+            unsigned(std::clamp((radial - inner) / std::max(outer - inner, 1e-4f), 0.f, .999999f) *
+                     settings.belt.radial_bins));
         const unsigned h = std::min(
-            height_bins - 1,
-            unsigned(std::clamp((p.y + thickness * .5f) / std::max(thickness, 1e-4f), 0.f, .999999f) * height_bins));
-        bins[(h * radial_bins + r) * angle_bins + a].push_back(i);
+            settings.belt.height_bins - 1,
+            unsigned(std::clamp((p.y + thickness * .5f) / std::max(thickness, 1e-4f), 0.f, .999999f) *
+                     settings.belt.height_bins));
+        bins[(h * settings.belt.radial_bins + r) * settings.belt.angle_bins + a].push_back(i);
     }
     belt_clusters.reserve(cluster_bin_count);
     for (auto& ids : bins) {
@@ -310,7 +313,8 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
         for (unsigned id : ids) {
             const auto d = belt[id].position - center;
             const auto& s = belt[id].scale;
-            const float rock_radius = rock_radius_scale * std::max(s.x, std::max(s.y, s.z)) * size_tail(id);
+            const float rock_radius = settings.belt.rock_radius_scale * std::max(s.x, std::max(s.y, s.z)) *
+                                      size_tail(id);
             bound = std::max(bound, std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z) + rock_radius);
         }
         belt_clusters.push_back({.center = center, .radius = bound, .indices = std::move(ids)});
@@ -325,8 +329,8 @@ void Renderer::Impl::load_materials() {
     // Leave one core for this thread and cap the pool: decoding and filtering
     // are memory-bound enough that more workers stop helping.
     const unsigned cores = std::thread::hardware_concurrency();
-    const std::size_t workers = std::min(material_count,
-                                         std::size_t(std::clamp(cores > 1 ? cores - 1 : 1u, 1u, max_decode_workers)));
+    const std::size_t workers = std::min(
+        material_count, std::size_t(std::clamp(cores > 1 ? cores - 1 : 1u, 1u, settings.memory.decode_workers)));
     std::vector<Upload> uploads(material_count);
     std::atomic<std::size_t> next{0};
     std::vector<std::future<void>> pool;
@@ -385,13 +389,11 @@ void Renderer::Impl::create_pipelines() {
 }
 
 void Renderer::Impl::create_fixed_targets() {
-    shadow_map = create_image({.width = shadow_map_size,
-                               .height = shadow_map_size,
+    shadow_map = create_image({.extent = {settings.frame.shadow_map_size, settings.frame.shadow_map_size},
                                .format = gpu::Format::d32_float,
                                .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::depth_stencil_attachment});
     bind(Slot::shadow_map, shadow_map);
-    luminance = create_image({.width = luminance_size,
-                              .height = luminance_size,
+    luminance = create_image({.extent = {settings.metering.target_size, settings.metering.target_size},
                               .format = gpu::Format::rgba32_float,
                               .usage = gpu::TextureUsage::color_attachment | gpu::TextureUsage::transfer_source});
 }
@@ -413,33 +415,29 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     create_fixed_targets();
 }
 
-void Renderer::Impl::resize(unsigned new_width, unsigned new_height) {
-    if (width == new_width && height == new_height)
+void Renderer::Impl::resize(Extent2D new_extent) {
+    if (extent == new_extent)
         return;
     gpu::wait_idle(device);
     for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &history[0], &history[1]})
         destroy(*image);
-    width = new_width;
-    height = new_height;
+    extent = new_extent;
     history_valid = false;
     const auto color_usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment;
-    const unsigned bloom_width = std::max(1u, width / 4), bloom_height = std::max(1u, height / 4);
-    hdr = create_image({.width = width, .height = height, .format = gpu::Format::rgba16_float, .usage = color_usage});
-    depth = create_image({.width = width,
-                          .height = height,
+    const unsigned bloom_width = std::max(1u, extent.width / 4), bloom_height = std::max(1u, extent.height / 4);
+    hdr = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
+    depth = create_image({.extent = extent,
                           .format = gpu::Format::d32_float,
                           .usage = gpu::TextureUsage::depth_stencil_attachment | gpu::TextureUsage::sampled});
     bloom_a = create_image(
-        {.width = bloom_width, .height = bloom_height, .format = gpu::Format::rgba16_float, .usage = color_usage});
+        {.extent = {bloom_width, bloom_height}, .format = gpu::Format::rgba16_float, .usage = color_usage});
     bloom_b = create_image(
-        {.width = bloom_width, .height = bloom_height, .format = gpu::Format::rgba16_float, .usage = color_usage});
-    final_image = create_image({.width = width,
-                                .height = height,
+        {.extent = {bloom_width, bloom_height}, .format = gpu::Format::rgba16_float, .usage = color_usage});
+    final_image = create_image({.extent = extent,
                                 .format = gpu::Format::rgba8_srgb,
                                 .usage = color_usage | gpu::TextureUsage::transfer_source});
     for (auto& image : history)
-        image = create_image(
-            {.width = width, .height = height, .format = gpu::Format::rgba16_float, .usage = color_usage});
+        image = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
     bind(Slot::hdr, hdr);
     bind(Slot::bloom_a, bloom_a);
     bind(Slot::bloom_b, bloom_b);

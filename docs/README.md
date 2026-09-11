@@ -13,6 +13,7 @@ The application is implemented and renders on GTX 1080 Ti. PRD/architecture/work
 | [SYSTEMS.md](SYSTEMS.md) | Generation, asset pipeline, geometry/LOD, shaders, camera and rendering contracts |
 | [WORKSTREAMS.md](WORKSTREAMS.md) | Detailed subsystem assignments and parallel development plan |
 | [HANDOFF.md](HANDOFF.md) | Session context and instructions for the coordinating agent |
+| [CODE_STYLE.md](CODE_STYLE.md) | C++ conventions: language level, error handling, logging, ownership, settings scopes, layout |
 
 Maintain task status and evidence in TASKS.md as work progresses. Record material changes to the design in DECISIONS.md; keep the PRD aligned with approved scope.
 

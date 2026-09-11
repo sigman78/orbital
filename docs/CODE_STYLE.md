@@ -83,6 +83,19 @@ that a test needs to exercise on the failure path gets a `try_` variant that ret
 - Shared read-only data that several owners need is referenced, not duplicated; copy-on-write is
   the fallback if sharing ever turns into mutation, and it has not been needed yet.
 
+## Small value types and settings scopes
+
+- Values that always travel as a pair or triple get a small named type instead of two loose fields:
+  `Range<T>` for limits and clamps (`Range<float> depth{0.02f, 2000.0f}`), `Extent2D` for widths and
+  heights, `Vec3` for anything spatial. The type carries the operations (`clamp`, `contains`,
+  `aspect`) so callers stop re-deriving them.
+- Related tuning constants live in one `constexpr` settings struct per module (`RenderSettings`,
+  `CameraSettings`, `AppSettings`), grouped into nested anonymous structs by topic:
+  `settings.belt.billboard.min_pixels` reads as a path through the design rather than a flat list of
+  prefixed names. Single-use structs are fine; the scope is the point, not reuse.
+- A settings value is still a `constexpr` compile-time constant. The struct only names the scope;
+  nothing is looked up at runtime.
+
 ## Magic numbers
 
 A literal is acceptable when the context makes it self-explanatory: `* 0.5f`, `/ 255.0f`, array sizes

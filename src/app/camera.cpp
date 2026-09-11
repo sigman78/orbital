@@ -7,15 +7,26 @@
 namespace space {
 namespace {
 
-constexpr double base_speed = 8.0;           // scene units per second at speed_scale 1
-constexpr double max_speed_scale = 100.0;    // guards against a runaway scale from input
-constexpr double max_step_seconds = 0.25;    // a long stall must not teleport the camera
-constexpr double mouse_sensitivity = 0.0025; // radians per pixel
-constexpr double orbit_pitch_limit = 1.45;   // radians, keeps the orbit camera off the poles
-constexpr double free_pitch_limit = 0.995;   // limit on forward.y, avoids a degenerate basis
-constexpr double collision_margin = 1.08;    // camera stays outside body radius * margin
-constexpr double tour_period_seconds = 90.0;
-constexpr double basis_epsilon = 1e-8;
+struct CameraSettings {
+    double base_speed = 8.0;               // scene units per second at speed_scale 1
+    Range<double> speed_scale{0.0, 100.0}; // guards against a runaway scale from input
+    double max_step_seconds = 0.25;        // a long stall must not teleport the camera
+    double mouse_sensitivity = 0.0025;     // radians per pixel
+    double collision_margin = 1.08;        // camera stays outside body radius * margin
+    double basis_epsilon = 1e-8;
+    struct {
+        Range<double> pitch{-1.45, 1.45}; // radians, keeps the orbit camera off the poles
+        double initial_pitch = 0.35;
+    } orbit;
+    struct {
+        Range<double> pitch_step{-1.5, 1.5};    // per-step pitch change
+        Range<double> forward_y{-0.995, 0.995}; // avoids a degenerate basis when looking straight up
+    } free;
+    struct {
+        double period_seconds = 90.0;
+    } tour;
+};
+constexpr CameraSettings settings{};
 
 // A view anchored to a body: body position + radius-scaled offset + fixed offset.
 struct ViewDefinition {
@@ -76,7 +87,7 @@ void Camera::rebuild_basis() {
     // Keep world Y as the stable up direction except when looking nearly up.
     const Vec3d world_up{0, 1, 0};
     right_ = normalized(cross(forward_, world_up));
-    if (length(right_) < basis_epsilon)
+    if (length(right_) < settings.basis_epsilon)
         right_ = {1, 0, 0};
     up_ = normalized(cross(right_, forward_));
 }
@@ -84,7 +95,7 @@ void Camera::rebuild_basis() {
 void Camera::collision_clamp(std::span<const BodyState> bodies) {
     for (const auto& body : bodies) {
         const Vec3d delta = position - body.position;
-        const double distance = length(delta), minimum = std::max(0.0, body.radius * collision_margin);
+        const double distance = length(delta), minimum = std::max(0.0, body.radius * settings.collision_margin);
         if (minimum > 0.0 && distance < minimum) {
             const Vec3d outward = distance > 1e-9 ? delta * (1.0 / distance) : Vec3d{0, 1, 0};
             position = body.position + outward * minimum;
@@ -95,9 +106,9 @@ void Camera::collision_clamp(std::span<const BodyState> bodies) {
 void Camera::step(double dt, double time, const Input& input, std::span<const BodyState> bodies) {
     if (!std::isfinite(dt) || dt <= 0.0)
         return;
-    dt = std::min(dt, max_step_seconds);
+    dt = std::min(dt, settings.max_step_seconds);
     const double scale = std::isfinite(input.speed_scale) ? input.speed_scale : 1.0;
-    const double speed = base_speed * std::clamp(scale, 0.0, max_speed_scale);
+    const double speed = settings.base_speed * settings.speed_scale.clamp(scale);
     if (mode_ == CameraMode::Tour && !bodies.empty()) {
         step_tour(time, bodies);
         return;
@@ -115,8 +126,9 @@ void Camera::step_tour(double time, std::span<const BodyState> bodies) {
         tour_start_ = time;
         tour_clock_valid_ = true;
     }
+    const double period = settings.tour.period_seconds;
     const double tour_time = tour_override_ ? tour_override_time_ : (time - tour_start_);
-    const double phase = std::fmod(std::max(0.0, tour_time), tour_period_seconds) / tour_period_seconds;
+    const double phase = std::fmod(std::max(0.0, tour_time), period) / period;
     Vec3d eyes[tour_count], targets[tour_count];
     for (std::size_t i = 0; i < tour_count; ++i) {
         const auto& body = view_body(tour_views[i], bodies);
@@ -135,10 +147,10 @@ void Camera::step_tour(double time, std::span<const BodyState> bodies) {
 }
 
 void Camera::step_orbit(double dt, double speed, const Input& input, const BodyState& body) {
-    const double minimum_zoom = body.radius * collision_margin;
+    const double minimum_zoom = body.radius * settings.collision_margin;
     orbit_zoom_ = std::max(minimum_zoom, orbit_zoom_ - input.move_forward * speed * dt);
-    orbit_yaw_ += input.mouse_dx * mouse_sensitivity;
-    orbit_pitch_ = std::clamp(orbit_pitch_ - input.mouse_dy * mouse_sensitivity, -orbit_pitch_limit, orbit_pitch_limit);
+    orbit_yaw_ += input.mouse_dx * settings.mouse_sensitivity;
+    orbit_pitch_ = settings.orbit.pitch.clamp(orbit_pitch_ - input.mouse_dy * settings.mouse_sensitivity);
     const double cp = std::cos(orbit_pitch_);
     const Vec3d from{orbit_zoom_ * cp * std::sin(orbit_yaw_), orbit_zoom_ * std::sin(orbit_pitch_),
                      orbit_zoom_ * cp * std::cos(orbit_yaw_)};
@@ -147,10 +159,10 @@ void Camera::step_orbit(double dt, double speed, const Input& input, const BodyS
 }
 
 void Camera::step_free(double dt, double speed, const Input& input) {
-    const double yaw = input.mouse_dx * mouse_sensitivity;
-    const double pitch = std::clamp(-input.mouse_dy * mouse_sensitivity, -1.5, 1.5);
+    const double yaw = input.mouse_dx * settings.mouse_sensitivity;
+    const double pitch = settings.free.pitch_step.clamp(-input.mouse_dy * settings.mouse_sensitivity);
     forward_ = normalized(rotate_y(forward_, yaw));
-    forward_.y = std::clamp(forward_.y + pitch, -free_pitch_limit, free_pitch_limit);
+    forward_.y = settings.free.forward_y.clamp(forward_.y + pitch);
     forward_ = normalized(forward_);
     rebuild_basis();
     position += (forward_ * double(input.move_forward) + right_ * double(input.move_right) +
@@ -203,7 +215,7 @@ void Camera::set_orbit_target(std::size_t index, double zoom) {
         orbit_zoom_ = zoom;
     mode_ = CameraMode::Orbit;
     orbit_yaw_ = 0.0;
-    orbit_pitch_ = 0.35;
+    orbit_pitch_ = settings.orbit.initial_pitch;
 }
 
 void Camera::set_mode(CameraMode mode) {

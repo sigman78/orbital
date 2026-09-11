@@ -10,6 +10,25 @@ namespace space {
 
 template <class T> inline constexpr T pi = static_cast<T>(3.14159265358979323846L);
 
+// Closed interval [min, max]; the natural type for limits, depth ranges and clamps.
+template <class T> struct Range {
+    T min{}, max{};
+
+    constexpr T span() const { return max - min; }
+    constexpr bool contains(T value) const { return value >= min && value <= max; }
+    constexpr T clamp(T value) const { return value < min ? min : (value > max ? max : value); }
+    constexpr bool operator==(const Range&) const = default;
+};
+
+// Width and height of an image, window or render target.
+struct Extent2D {
+    unsigned width = 0, height = 0;
+
+    constexpr float aspect() const { return static_cast<float>(width) / static_cast<float>(height); }
+    constexpr bool empty() const { return width == 0 || height == 0; }
+    constexpr bool operator==(const Extent2D&) const = default;
+};
+
 template <class T> struct Vec3 {
     T x{}, y{}, z{};
 

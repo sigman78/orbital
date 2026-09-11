@@ -2,6 +2,7 @@
 #include "app/camera.hpp"
 #include "core/file.hpp"
 #include "core/log.hpp"
+#include "core/math.hpp"
 #include "core/panic.hpp"
 #include "render/renderer.hpp"
 #include <algorithm>
@@ -23,15 +24,28 @@ namespace {
 
 using namespace space;
 
-constexpr unsigned default_width = 1600, default_height = 900;
-constexpr unsigned min_width = 320, min_height = 200, max_width = 7680, max_height = 4320;
-constexpr double max_frame_seconds = 0.1; // a stall must not advance the simulation by more than this
-constexpr double title_refresh_seconds = 0.5;
-constexpr float exposure_step = 1.1f, min_exposure = 0.05f, max_exposure = 8.0f;
-constexpr float fast_speed_scale = 4.0f;
-constexpr double orbit_zoom_radii = 2.3; // O key orbits at this many body radii
-constexpr std::size_t benchmark_warmup_frames = 60;
-constexpr std::size_t expected_frames = 36000; // reserve for an open-ended run (10 minutes at 60 Hz)
+struct AppSettings {
+    struct {
+        Extent2D default_size{1600, 900};
+        Range<unsigned> width{320, 7680}, height{200, 4320};
+        double title_refresh_seconds = 0.5;
+    } window;
+    struct {
+        Range<float> range{0.05f, 8.0f};
+        float step = 1.1f; // per +/- key press
+    } exposure;
+    struct {
+        double max_frame_seconds = 0.1; // a stall must not advance the simulation by more than this
+        float fast_speed_scale = 4.0f;  // Shift
+        double orbit_zoom_radii = 2.3;  // O key orbits at this many body radii
+    } control;
+    struct {
+        std::size_t warmup_frames = 60;      // dropped before computing percentiles
+        std::size_t expected_frames = 36000; // reserve for an open-ended run (10 minutes at 60 Hz)
+    } benchmark;
+};
+constexpr AppSettings settings{};
+
 constexpr auto hotkey_capture_path = "captures/orbital.png";
 constexpr auto window_class_name = L"OrbitalWindow";
 constexpr auto window_title = L"ORBITAL  /  Procedural worlds";
@@ -46,7 +60,7 @@ constexpr std::string_view usage =
 struct Options {
     std::uint64_t seed = showcase_seed;
     unsigned frame_limit = 0;
-    unsigned width = default_width, height = default_height;
+    Extent2D size = settings.window.default_size;
     double fixed_time = -1; // >= 0 freezes simulation and exposure adaptation at this time
     double duration = 0;    // > 0 exits after this many wall-clock seconds
     int bookmark = -1;
@@ -68,6 +82,16 @@ bool parse_path(std::optional<std::string_view> text, std::filesystem::path& out
         return false;
     out = *text;
     return true;
+}
+
+bool options_valid(const Options& options) {
+    const bool size_ok = settings.window.width.contains(options.size.width) &&
+                         settings.window.height.contains(options.size.height);
+    const bool time_ok = std::isfinite(options.fixed_time) && options.fixed_time >= -1 &&
+                         std::isfinite(options.duration) && options.duration >= 0;
+    const bool exposure_ok = std::isfinite(options.exposure) && options.exposure > 0;
+    const bool bookmark_ok = options.bookmark >= -1 && options.bookmark < int(bookmark_count);
+    return size_ok && time_ok && exposure_ok && bookmark_ok;
 }
 
 std::optional<Options> parse_options(int argc, char** argv) {
@@ -93,9 +117,9 @@ std::optional<Options> parse_options(int argc, char** argv) {
         else if (arg == "--frames")
             ok = parse_number(value(), options.frame_limit);
         else if (arg == "--width")
-            ok = parse_number(value(), options.width);
+            ok = parse_number(value(), options.size.width);
         else if (arg == "--height")
-            ok = parse_number(value(), options.height);
+            ok = parse_number(value(), options.size.height);
         else if (arg == "--time")
             ok = parse_number(value(), options.fixed_time);
         else if (arg == "--duration")
@@ -117,13 +141,7 @@ std::optional<Options> parse_options(int argc, char** argv) {
             return std::nullopt;
         }
     }
-    const bool size_ok = options.width >= min_width && options.width <= max_width && options.height >= min_height &&
-                         options.height <= max_height;
-    const bool time_ok = std::isfinite(options.fixed_time) && options.fixed_time >= -1 &&
-                         std::isfinite(options.duration) && options.duration >= 0;
-    const bool exposure_ok = std::isfinite(options.exposure) && options.exposure > 0;
-    const bool bookmark_ok = options.bookmark >= -1 && options.bookmark < int(bookmark_count);
-    if (!size_ok || !time_ok || !exposure_ok || !bookmark_ok) {
+    if (!options_valid(options)) {
         log::error("invalid dimensions, time, duration, exposure, or bookmark (expected 0..{})", bookmark_count - 1);
         return std::nullopt;
     }
@@ -143,20 +161,22 @@ struct AppState {
 };
 
 void handle_key(AppState& app, WPARAM key) {
+    const auto& exposure = settings.exposure;
     switch (key) {
     case VK_ESCAPE: app.running = false; break;
     case VK_SPACE: app.paused = !app.paused; break;
     case 'T': app.camera.toggle_tour(); break;
     case 'O':
-        app.camera.set_orbit_target(app.selected_body, app.bodies[app.selected_body].radius * orbit_zoom_radii);
+        app.camera.set_orbit_target(app.selected_body,
+                                    app.bodies[app.selected_body].radius * settings.control.orbit_zoom_radii);
         break;
     case 'F': app.camera.set_mode(CameraMode::Free); break;
     case 'X': app.auto_exposure = !app.auto_exposure; break;
     case VK_F1: app.overlay = !app.overlay; break;
     case VK_F2: app.high = !app.high; break;
     case VK_F12: app.capture_request = hotkey_capture_path; break;
-    case VK_OEM_PLUS: app.exposure = std::min(max_exposure, app.exposure * exposure_step); break;
-    case VK_OEM_MINUS: app.exposure = std::max(min_exposure, app.exposure / exposure_step); break;
+    case VK_OEM_PLUS: app.exposure = exposure.range.clamp(app.exposure * exposure.step); break;
+    case VK_OEM_MINUS: app.exposure = exposure.range.clamp(app.exposure / exposure.step); break;
     default:
         if (key >= '1' && key < '1' + bookmark_count) {
             const auto index = static_cast<std::size_t>(key - '1');
@@ -219,7 +239,7 @@ std::filesystem::path executable_directory() {
 
 struct Window {
     HWND handle = nullptr;
-    Window(unsigned width, unsigned height, AppState& app) {
+    Window(Extent2D size, AppState& app) {
         WNDCLASSW wc{};
         wc.lpfnWndProc = window_proc;
         wc.hInstance = GetModuleHandleW(nullptr);
@@ -227,7 +247,7 @@ struct Window {
         wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
         if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
             panic("cannot register the window class");
-        RECT area{0, 0, LONG(width), LONG(height)};
+        RECT area{0, 0, LONG(size.width), LONG(size.height)};
         AdjustWindowRect(&area, WS_OVERLAPPEDWINDOW, FALSE);
         handle = CreateWindowExW(0, window_class_name, window_title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                                  area.right - area.left, area.bottom - area.top, nullptr, nullptr, wc.hInstance, &app);
@@ -261,7 +281,7 @@ Input gather_input(HWND window, AppState& app) {
     input.move_forward = float(down('W')) - float(down('S'));
     input.move_right = float(down('D')) - float(down('A'));
     input.move_up = float(down('E')) - float(down('Q'));
-    input.speed_scale = down(VK_SHIFT) ? fast_speed_scale : 1.0f;
+    input.speed_scale = down(VK_SHIFT) ? settings.control.fast_speed_scale : 1.0f;
     input.mouse_dx = app.mouse_dx;
     input.mouse_dy = app.mouse_dy;
     app.mouse_dx = app.mouse_dy = 0;
@@ -290,8 +310,8 @@ void write_benchmark(const std::filesystem::path& path, const FrameTimes& times)
     if (!file::write_text(path, csv))
         log::error("cannot write benchmark {}", path.string());
     auto sorted = times.cpu_ms;
-    if (sorted.size() > benchmark_warmup_frames)
-        sorted.erase(sorted.begin(), sorted.begin() + benchmark_warmup_frames);
+    if (sorted.size() > settings.benchmark.warmup_frames)
+        sorted.erase(sorted.begin(), sorted.begin() + settings.benchmark.warmup_frames);
     std::sort(sorted.begin(), sorted.end());
     if (!sorted.empty()) {
         const auto p95 = sorted[std::min(sorted.size() - 1, std::size_t(double(sorted.size()) * .95))];
@@ -318,42 +338,40 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     return app;
 }
 
-int run(const Options& options) {
-    const auto directory = executable_directory();
-    const auto system = generate_system(options.seed);
-    if (const auto errors = validate_system(system); !errors.empty()) {
-        log::error("invalid generated system: {}", errors.front());
-        return 1;
-    }
-    SetProcessDPIAware();
-    AppState app = initial_state(options, system);
-    Window window(options.width, options.height, app);
-    render::Renderer renderer(window.handle, system, directory);
-    log::info(
-        "Ready. RMB + WASD: fly | 1/2/3: planets | T: tour | F2: quality | F12: capture | --help for all controls");
+struct Session {
+    const Options& options;
+    const SystemDescription& system;
+    std::filesystem::path directory;
+    AppState& app;
+    HWND window;
+    render::Renderer& renderer;
+};
 
-    FrameTimes times;
-    times.cpu_ms.reserve(options.frame_limit ? options.frame_limit : expected_frames);
-    times.gpu_ms.reserve(times.cpu_ms.capacity());
+// Runs until the window closes or the frame/duration limit is reached; returns the frame count.
+unsigned frame_loop(const Session& session, FrameTimes& times) {
+    const Options& options = session.options;
+    AppState& app = session.app;
+    render::Renderer& renderer = session.renderer;
     auto previous = std::chrono::steady_clock::now();
     double simulation_time = 0, elapsed = 0, title_clock = 0;
     unsigned frames = 0;
     while (pump_messages(app)) {
-        if (IsIconic(window.handle)) {
+        if (IsIconic(session.window)) {
             WaitMessage();
             previous = std::chrono::steady_clock::now();
             continue;
         }
         const auto now = std::chrono::steady_clock::now();
-        const double dt = std::min(std::chrono::duration<double>(now - previous).count(), max_frame_seconds);
+        const double dt = std::min(std::chrono::duration<double>(now - previous).count(),
+                                   settings.control.max_frame_seconds);
         previous = now;
         elapsed += dt;
         if (!app.paused)
             simulation_time += dt;
         if (options.fixed_time >= 0)
             simulation_time = options.fixed_time;
-        app.bodies = evaluate_system(system, simulation_time);
-        app.camera.step(dt, elapsed, gather_input(window.handle, app), app.bodies);
+        app.bodies = evaluate_system(session.system, simulation_time);
+        app.camera.step(dt, elapsed, gather_input(session.window, app), app.bodies);
 
         const render::FrameInput frame_input{.camera = app.camera,
                                              .bodies = app.bodies,
@@ -368,7 +386,7 @@ int run(const Options& options) {
             times.cpu_ms.push_back(stats.frame_ms);
             times.gpu_ms.push_back(stats.gpu_ms);
             if (!app.capture_request.empty()) {
-                const auto path = directory / app.capture_request;
+                const auto path = session.directory / app.capture_request;
                 if (renderer.capture(path))
                     log::info("Saved {}", path.string());
                 app.capture_request.clear();
@@ -381,11 +399,37 @@ int run(const Options& options) {
                 break;
             }
         }
-        if (elapsed - title_clock > title_refresh_seconds) {
+        if (elapsed - title_clock > settings.window.title_refresh_seconds) {
             title_clock = elapsed;
-            update_title(window.handle, renderer.stats(), app.high);
+            update_title(session.window, renderer.stats(), app.high);
         }
     }
+    return frames;
+}
+
+int run(const Options& options) {
+    const auto directory = executable_directory();
+    const auto system = generate_system(options.seed);
+    if (const auto errors = validate_system(system); !errors.empty()) {
+        log::error("invalid generated system: {}", errors.front());
+        return 1;
+    }
+    SetProcessDPIAware();
+    AppState app = initial_state(options, system);
+    Window window(options.size, app);
+    render::Renderer renderer(window.handle, system, directory);
+    log::info(
+        "Ready. RMB + WASD: fly | 1/2/3: planets | T: tour | F2: quality | F12: capture | --help for all controls");
+    FrameTimes times;
+    times.cpu_ms.reserve(options.frame_limit ? options.frame_limit : settings.benchmark.expected_frames);
+    times.gpu_ms.reserve(times.cpu_ms.capacity());
+    const unsigned frames = frame_loop({.options = options,
+                                        .system = system,
+                                        .directory = directory,
+                                        .app = app,
+                                        .window = window.handle,
+                                        .renderer = renderer},
+                                       times);
     if (!options.benchmark.empty())
         write_benchmark(options.benchmark, times);
     log::info("Completed {} frames.", frames);

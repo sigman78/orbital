@@ -5,6 +5,12 @@
 Windows x64, MSVC C++ tools, CMake 3.24+, Ninja and a Vulkan loader import library (normally from
 the Vulkan SDK). `tools/bootstrap.ps1` fetches pinned shader tools. See the [README](README.md) for the full build walkthrough.
 
+## Code style
+
+Read [docs/CODE_STYLE.md](docs/CODE_STYLE.md) before changing C++: it covers the C++20 baseline, the
+panic/assert/optional error tiers, `std::format` logging, C stdio file wrappers, ownership rules, settings
+scopes and the module layering (`core` -> `scene`/`assets` -> `render` -> `app`).
+
 ## Formatting
 
 C++ under `src/` and `tests/` is formatted with clang-format (LLVM 17 or newer) using the

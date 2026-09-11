@@ -32,6 +32,16 @@ void test_vectors() {
     assert(std::abs(rotated.x) < 1e-12 && std::abs(rotated.z + 1) < 1e-12);
 }
 
+void test_small_types() {
+    constexpr Range<float> range{-1.5f, 2.0f};
+    static_assert(range.span() == 3.5f);
+    static_assert(range.contains(0.0f) && !range.contains(3.0f));
+    static_assert(range.clamp(9.0f) == 2.0f && range.clamp(-9.0f) == -1.5f && range.clamp(1.0f) == 1.0f);
+    constexpr Extent2D extent{1920, 1080};
+    static_assert(!extent.empty() && Extent2D{}.empty());
+    assert(near(extent.aspect(), 1920.0f / 1080.0f));
+}
+
 void test_matrices() {
     constexpr Mat4 identity;
     constexpr Mat4 view = view_matrix({1, 0, 0}, {0, 1, 0}, {0, 0, -1});
@@ -65,6 +75,7 @@ void test_files() {
 
 int main() {
     test_vectors();
+    test_small_types();
     test_matrices();
     test_files();
     std::printf("core tests passed\n");

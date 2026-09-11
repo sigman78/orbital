@@ -40,10 +40,11 @@ RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. K
 
 | Path | Contents |
 | --- | --- |
+| `src/core` | Logging, panic, file I/O and vector/matrix math shared by everything else |
 | `src/app` | Window, input, camera, HUD and the `main` loop |
 | `src/scene` | Deterministic system generation and mesh geometry |
 | `src/assets` | PNG image I/O (Wuffs decode, stb write), SIMD pixel kernels and material mip-chain generation |
-| `src/render` | Vulkan renderer on top of NoGraphicsAPI, GPU-side types |
+| `src/render` | Vulkan renderer on top of NoGraphicsAPI: resources and materials, per-frame passes, GPU-side types |
 | `shaders/` | Slang shaders; `scene_shared.h` is the shared C++/shader layout |
 | `tests/` | Executable-assertion tests run through CTest |
 | `tools/` | PowerShell scripts: bootstrap, asset import, build, format, smoke and stability checks |
@@ -53,7 +54,7 @@ RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. K
 
 ## Development
 
-Sources are formatted with clang-format and checked in CI; `.clang-tidy` provides advisory static analysis. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Sources are formatted with clang-format and checked in CI; `.clang-tidy` provides advisory static analysis. Conventions (C++20, error handling, logging, ownership, settings scopes) are in [docs/CODE_STYLE.md](docs/CODE_STYLE.md); see [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow.
 
 ```powershell
 ./tools/format.ps1          # format src/ and tests/
