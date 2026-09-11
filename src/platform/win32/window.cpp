@@ -118,8 +118,7 @@ std::unique_ptr<Window> Window::create(const WindowDesc& desc) {
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = window_class_name;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
-        panic("cannot register the window class");
+    panic_if(!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS, "cannot register the window class");
     RECT area{0, 0, LONG(desc.client_size.width), LONG(desc.client_size.height)};
     AdjustWindowRect(&area, WS_OVERLAPPEDWINDOW, FALSE);
     auto impl = std::make_unique<Impl>();
@@ -127,8 +126,7 @@ std::unique_ptr<Window> Window::create(const WindowDesc& desc) {
     HWND handle = CreateWindowExW(0, window_class_name, title.c_str(), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
                                   CW_USEDEFAULT, area.right - area.left, area.bottom - area.top, nullptr, nullptr,
                                   wc.hInstance, impl.get());
-    if (!handle)
-        panic("cannot create the desktop window");
+    panic_if(!handle, "cannot create the desktop window");
     impl->handle = handle;
     ShowWindow(handle, SW_SHOW);
     return std::unique_ptr<Window>(new Window(std::move(impl)));

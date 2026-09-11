@@ -10,6 +10,15 @@ namespace space {
 // shaders or assets, GPU initialization, exhausted fixed budgets.
 [[noreturn]] void panic(std::string_view message, std::source_location location = std::source_location::current());
 
+// panic() when the condition holds. Reads better than an if/panic pair for
+// checks with a constant message; keep the pair when the message needs
+// std::format, so nothing is formatted on the success path.
+inline void panic_if(bool condition, std::string_view message,
+                     std::source_location location = std::source_location::current()) {
+    if (condition)
+        panic(message, location);
+}
+
 } // namespace space
 
 // Invariant check that stays active in every build configuration.

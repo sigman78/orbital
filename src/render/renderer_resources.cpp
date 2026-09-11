@@ -93,8 +93,7 @@ void Renderer::Impl::destroy(GpuImage& image) {
 
 std::uint64_t Renderer::Impl::upload_static(ByteView bytes) {
     static_cursor = (static_cursor + 15) & ~15ull;
-    if (static_cursor + bytes.size() > heap_layout.dynamic_offset)
-        panic("static GPU heap exhausted");
+    panic_if(static_cursor + bytes.size() > heap_layout.dynamic_offset, "static GPU heap exhausted");
     const auto address = reinterpret_cast<std::uint64_t>(data.range.gpu) + static_cursor;
     std::memcpy(data.range.cpu + static_cursor, bytes.data(), bytes.size());
     static_cursor += bytes.size();
@@ -161,8 +160,7 @@ void Renderer::Impl::upload_images(std::span<Upload> uploads) {
         largest = std::max(largest, bytes);
     }
     auto staging = gpu::create_gpu_heap(device, std::max(largest, heap_layout.staging_budget));
-    if (!staging.range.cpu)
-        panic("texture staging allocation failed");
+    panic_if(!staging.range.cpu, "texture staging allocation failed");
     gpu::CommandBuffer* cmd = nullptr;
     std::uint64_t offset = 0;
     const auto flush = [&] {
@@ -220,20 +218,19 @@ void Renderer::Impl::create_device(void* window) {
     const auto init = gpu::create_device(
         {.window = window, .swapchain_format = gpu::Format::bgra8_srgb, .timestamp_query_count = 16});
     device = init.device;
-    if (!device)
-        panic("Vulkan device creation failed; check the console for missing features or driver errors");
+    panic_if(!device, "Vulkan device creation failed; check the console for missing features or driver errors");
     const auto& caps = gpu::get_device_caps(device);
     log::info("GPU: {} | conventional NoGraphicsAPI backend", caps.device_name);
-    if (!caps.conventional_descriptor_backend)
-        panic("the demo's shaders require the conventional descriptor backend build option");
+    panic_if(!caps.conventional_descriptor_backend,
+             "the demo's shaders require the conventional descriptor backend build option");
     timeline = gpu::create_timeline_semaphore(device);
     data = gpu::create_gpu_heap(device, heap_layout.static_heap);
     texture_descriptors = gpu::create_gpu_heap(device, caps.texture_descriptor_size * unsigned(Slot::count),
                                                gpu::MemoryType::texture_descriptor_heap);
     sampler_descriptors = gpu::create_gpu_heap(device, caps.sampler_descriptor_size * unsigned(SamplerSlot::count),
                                                gpu::MemoryType::sampler_descriptor_heap);
-    if (!data.range.cpu || !texture_descriptors.range.cpu || !sampler_descriptors.range.cpu)
-        panic("GPU mapped heap allocation failed");
+    panic_if(!data.range.cpu || !texture_descriptors.range.cpu || !sampler_descriptors.range.cpu,
+             "GPU mapped heap allocation failed");
     luminance_readback = gpu::create_gpu_heap(device, targets::meter_size * targets::meter_size * sizeof(Float4),
                                               gpu::MemoryType::readback);
     timestamps = gpu::create_gpu_heap(device, 64, gpu::MemoryType::readback);
@@ -397,8 +394,7 @@ void Renderer::Impl::create_pipelines() {
                                           {.vertex_spirv = shadow_vertex,
                                            .depth_format = Format::d32_float,
                                            .rasterization = {.depth_bias_constant = 1, .depth_bias_slope = 1.5f}});
-    if (!pso.shadow)
-        panic("shadow pipeline creation failed");
+    panic_if(!pso.shadow, "shadow pipeline creation failed");
     pipelines.push_back(pso.shadow);
 }
 

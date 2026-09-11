@@ -22,8 +22,7 @@ void init_process() {
 std::filesystem::path executable_directory() {
     wchar_t buffer[32768];
     const auto length = GetModuleFileNameW(nullptr, buffer, static_cast<DWORD>(std::size(buffer)));
-    if (!length || length >= std::size(buffer))
-        panic("cannot locate the executable directory");
+    panic_if(!length || length >= std::size(buffer), "cannot locate the executable directory");
     return std::filesystem::path(buffer).parent_path();
 }
 
