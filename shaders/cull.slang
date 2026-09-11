@@ -109,12 +109,13 @@ void computeMain(uint3 thread : SV_DispatchThreadID)
     if (root.pass == 1)
     {
         if (id != 0) return;
-        uint running = scratch->params.body_count;
+        uint running = scratch->params.body_count, drawCount = 0;
         for (uint g = 0; g <= ORBITAL_ROCK_GROUPS; ++g)
         {
             uint count = scratch->counts[g].load();
             scratch->cursors[g].store(running);
             DrawArgs args;
+            args.pad0 = 0; args.pad1 = 0; args.pad2 = 0;
             if (g == BILLBOARD_GROUP)
             {
                 // VkDrawIndirectCommand: vertex count, instance count, first vertex, first instance.
@@ -123,19 +124,21 @@ void computeMain(uint3 thread : SV_DispatchThreadID)
                 args.first_index = 0;
                 args.vertex_offset = running;
                 args.first_instance = 0;
+                scratch->args[BILLBOARD_GROUP] = args;
             }
-            else
+            else if (count > 0)
             {
+                // Empty groups are dropped, so the multi-draw only visits groups with rocks.
                 args.index_count = scratch->params.index_counts[g];
                 args.instance_count = count;
-                args.first_index = 0;
-                args.vertex_offset = 0;
+                args.first_index = scratch->params.first_indices[g];
+                args.vertex_offset = scratch->params.vertex_offsets[g];
                 args.first_instance = running;
+                scratch->args[drawCount++] = args;
             }
-            args.pad0 = 0; args.pad1 = 0; args.pad2 = 0;
-            scratch->args[g] = args;
             running += count;
         }
+        scratch->draw_count = drawCount;
         return;
     }
     if (id >= scratch->params.rock_limit) return;

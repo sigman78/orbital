@@ -101,14 +101,41 @@ std::uint64_t Renderer::Impl::upload_static(ByteView bytes) {
     return address;
 }
 
+namespace {
+void append_vertices(std::vector<Vertex>& out, const geometry::Mesh& mesh) {
+    for (const auto& v : mesh.vertices)
+        out.push_back({{v.position.x, v.position.y, v.position.z, 1}, {v.normal.x, v.normal.y, v.normal.z, 0}});
+}
+} // namespace
+
 GpuMesh Renderer::Impl::upload_mesh(const geometry::Mesh& mesh) {
     std::vector<Vertex> vertices;
     vertices.reserve(mesh.vertices.size());
-    for (const auto& v : mesh.vertices)
-        vertices.push_back({{v.position.x, v.position.y, v.position.z, 1}, {v.normal.x, v.normal.y, v.normal.z, 0}});
+    append_vertices(vertices, mesh);
     return {.vertices = upload_static(bytes_of(vertices)),
             .indices = upload_static(bytes_of(mesh.indices)),
             .index_count = unsigned(mesh.indices.size())};
+}
+
+// One vertex and one index range for the whole rock library, so every rock
+// group is a first-index/vertex-offset slice and one multi-draw covers them all.
+void Renderer::Impl::upload_rock_pool(std::span<const geometry::Mesh> meshes) {
+    std::vector<Vertex> vertices;
+    std::vector<std::uint32_t> indices;
+    for (std::size_t group = 0; group < meshes.size(); group++) {
+        rocks[group] = {.index_count = unsigned(meshes[group].indices.size()),
+                        .first_index = unsigned(indices.size()),
+                        .vertex_offset = unsigned(vertices.size())};
+        append_vertices(vertices, meshes[group]);
+        indices.insert(indices.end(), meshes[group].indices.begin(), meshes[group].indices.end());
+    }
+    rock_pool = {.vertices = upload_static(bytes_of(vertices)),
+                 .indices = upload_static(bytes_of(indices)),
+                 .index_count = unsigned(indices.size())};
+    for (auto& rock : rocks) {
+        rock.vertices = rock_pool.vertices;
+        rock.indices = rock_pool.indices;
+    }
 }
 
 GpuImage Renderer::Impl::create_image(const ImageDesc& desc) {
@@ -263,10 +290,12 @@ void Renderer::Impl::create_meshes() {
     for (unsigned lod = 0; lod < geometry::lod_count; lod++)
         spheres[lod] = upload_mesh(geometry::generate_sphere(32u << lod, 16u << lod));
     constexpr std::uint32_t rock_seed_base = 71, rock_seed_stride = 37;
+    std::vector<geometry::Mesh> library(rock_group_count);
     for (unsigned shape = 0; shape < geometry::rock_shape_count; shape++)
         for (unsigned level = 0; level < geometry::rock_level_count; level++)
-            rocks[rock_group(shape, level)] = upload_mesh(
-                geometry::generate_rock(rock_seed_base + shape * rock_seed_stride, level));
+            library[rock_group(shape, level)] = geometry::generate_rock(rock_seed_base + shape * rock_seed_stride,
+                                                                        level);
+    upload_rock_pool(library);
     // Moonlets are irregular bodies: each gets its own seeded rock at full detail.
     for (unsigned i = 0; i < body_count; i++)
         if (system.bodies[i].body_class == BodyClass::Moonlet)

@@ -114,8 +114,8 @@ inline constexpr unsigned timestamp_count = 5; // frame start, after shadow, sur
 struct QualityTier {
     unsigned belt_count;
 };
-inline constexpr QualityTier baseline_quality{.belt_count = 35000};
-inline constexpr QualityTier high_quality{.belt_count = 65000};
+inline constexpr QualityTier baseline_quality{.belt_count = 280000};
+inline constexpr QualityTier high_quality{.belt_count = 520000};
 
 // Belt rock sizing, needed when clusters are bounded and again when rocks are culled.
 namespace belt {
@@ -140,6 +140,7 @@ struct GpuImage {
 struct GpuMesh {
     std::uint64_t vertices = 0, indices = 0; // GPU addresses in the static heap
     unsigned index_count = 0;
+    unsigned first_index = 0, vertex_offset = 0; // position inside a pooled buffer, zero for standalone meshes
 };
 
 struct ImageDesc {
@@ -193,7 +194,8 @@ struct Renderer::Impl {
                  *cull = nullptr;
     } pso;
     std::array<GpuMesh, geometry::lod_count> spheres{};
-    std::array<GpuMesh, rock_group_count> rocks{};        // the rock library, indexed by rock_group
+    std::array<GpuMesh, rock_group_count> rocks{}; // the rock library, indexed by rock_group; slices of rock_pool
+    GpuMesh rock_pool{};                           // every rock mesh in one vertex and one index range
     std::array<GpuMesh, max_body_count> moonlet_meshes{}; // per body index; only moonlets are filled
     std::uint64_t rock_data = 0;                          // static heap address of the RockData records
     unsigned rock_count = 0;
@@ -235,6 +237,7 @@ struct Renderer::Impl {
     void destroy(GpuImage& image);
     std::uint64_t upload_static(ByteView bytes);
     GpuMesh upload_mesh(const geometry::Mesh& mesh);
+    void upload_rock_pool(std::span<const geometry::Mesh> meshes);
     GpuImage create_image(const ImageDesc& desc);
     void bind(Slot slot, const GpuImage& image);
     const GpuMesh& body_mesh(unsigned body, unsigned lod) const;

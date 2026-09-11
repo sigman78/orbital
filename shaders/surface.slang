@@ -24,10 +24,13 @@ struct SurfaceVaryings {
 };
 
 [shader("vertex")]
-SurfaceVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_InstanceID, uint firstInstance : SV_StartInstanceLocation)
+SurfaceVaryings vertexMain(uint vertexIndex : SV_VertexID, uint firstVertex : SV_StartVertexLocation,
+                           uint instanceId : SV_InstanceID, uint firstInstance : SV_StartInstanceLocation)
 {
-    // SV_InstanceID is zero based per draw; indirect rock draws place their
-    // group's instances through the first-instance argument.
+    // SV_VertexID and SV_InstanceID are zero based per draw; the pooled rock
+    // draws place their group's slice through the vertex-offset and
+    // first-instance arguments.
+    vertexIndex += firstVertex;
     SurfaceVaryings output;
     output.instanceIndex = root.base + firstInstance + instanceId;
     Instance inst = root.instances[output.instanceIndex];

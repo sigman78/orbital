@@ -68,7 +68,10 @@ struct CullParams {
     SHADER_FLOAT4 levels;               // projected-radius thresholds of levels 1 to 4, in pixels
     SHADER_FLOAT4 billboard;            // level 5 threshold, billboard radius, minimum radius, unused
     SHADER_UINT rock_limit, body_count, unused0, unused1;
+    // Each rock group's slice of the pooled rock mesh.
     SHADER_UINT index_counts[ORBITAL_ROCK_GROUPS];
+    SHADER_UINT first_indices[ORBITAL_ROCK_GROUPS];
+    SHADER_UINT vertex_offsets[ORBITAL_ROCK_GROUPS];
 };
 
 // Per-frame scratch the culling passes read and write; the CPU fills params,
@@ -83,7 +86,8 @@ struct CullScratch {
     Atomic<uint> counts[ORBITAL_ROCK_GROUPS + 1];
     Atomic<uint> cursors[ORBITAL_ROCK_GROUPS + 1];
 #endif
-    DrawArgs args[ORBITAL_ROCK_GROUPS + 1];
+    SHADER_UINT draw_count, pad0, pad1, pad2; // non-empty rock groups compacted to the front of args
+    DrawArgs args[ORBITAL_ROCK_GROUPS + 1];   // the billboard entry stays at index ORBITAL_ROCK_GROUPS
 };
 
 struct CullRoot {

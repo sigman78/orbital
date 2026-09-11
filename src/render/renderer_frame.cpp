@@ -263,8 +263,11 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
     const unsigned tier_count = (input.high_quality ? high_quality : baseline_quality).belt_count;
     p.rock_limit = std::min(rock_count, belt_count_override ? belt_count_override : tier_count);
     p.body_count = body_count;
-    for (unsigned group = 0; group < rock_group_count; group++)
+    for (unsigned group = 0; group < rock_group_count; group++) {
         p.index_counts[group] = rocks[group].index_count;
+        p.first_indices[group] = rocks[group].first_index;
+        p.vertex_offsets[group] = rocks[group].vertex_offset;
+    }
     scratch.instances = instance_address;
     std::memset(scratch.counts, 0, sizeof scratch.counts);
     std::memset(scratch.cursors, 0, sizeof scratch.cursors);
@@ -273,11 +276,13 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
 // Statistics from the previous frame's culling, read back once its GPU work
 // has completed. The triangle count is what those draws submitted.
 void Renderer::Impl::read_cull_counts(const CullScratch& scratch) {
-    unsigned rocks_visible = 0, triangles = 0;
+    unsigned rocks_visible = 0, triangles = 0, groups_drawn = 0;
     for (unsigned group = 0; group < rock_group_count; group++) {
         rocks_visible += scratch.counts[group];
         triangles += scratch.counts[group] * (scratch.params.index_counts[group] / 3);
+        groups_drawn += scratch.counts[group] ? 1 : 0;
     }
+    stats.rock_groups_drawn = groups_drawn; // equals scratch.draw_count once the prefix pass has run
     rocks_visible += scratch.counts[rock_group_count];
     triangles += scratch.counts[rock_group_count] * 2;
     stats.visible_asteroids = rocks_visible;
@@ -304,6 +309,7 @@ void Renderer::Impl::draw_mesh(gpu::CommandBuffer* cmd, Root& root, const GpuMes
                                unsigned instance_count) {
     root.base = base;
     root.vertices = mesh.vertices;
+    stats.draw_calls++;
     gpu::draw_indexed(cmd, root, {reinterpret_cast<void*>(mesh.indices), std::uint64_t(mesh.index_count) * 4},
                       gpu::IndexType::uint32, mesh.index_count, instance_count);
     stats.triangles += mesh.index_count / 3 * instance_count;
@@ -316,6 +322,7 @@ void Renderer::Impl::fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, 
     gpu::begin_render_pass(cmd, {.colors = {&attachment, 1}});
     gpu::bind_pso(cmd, pipeline);
     gpu::draw(cmd, root, 3);
+    stats.draw_calls++;
     gpu::end_render_pass(cmd);
     gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
                  gpu::Access::shader_read);
@@ -343,6 +350,7 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
                            {.colors = {&color, 1}, .depth = {.render_view = depth.view, .load = gpu::LoadOp::clear}});
     gpu::bind_pso(cmd, pso.background);
     gpu::draw(cmd, root, 3);
+    stats.draw_calls++;
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
     gpu::bind_pso(cmd, pso.opaque);
     for (unsigned i = 0; i < body_count; i++) {
@@ -350,22 +358,24 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
         const float projected = float(input.bodies[i].radius) * float(extent.height) / (distance * frame.right_tan.w);
         draw_mesh(cmd, root, body_mesh(i, geometry::select_lod(projected, 2)), i, 1);
     }
-    // Rocks: one indirect draw per group; the culling pass wrote the counts and bases.
-    const auto args_of = [&](unsigned group) {
-        return gpu::GpuRange{reinterpret_cast<void*>(args_address + group * sizeof(DrawArgs)), sizeof(DrawArgs)};
-    };
+    // Rocks: one multi-draw over the pooled mesh; the culling pass wrote every
+    // group's count, base and slice into the argument array.
     root.base = 0;
-    for (unsigned group = 0; group < rock_group_count; group++) {
-        const GpuMesh& mesh = rocks[group];
-        root.vertices = mesh.vertices;
-        gpu::draw_indexed_indirect(cmd, root,
-                                   {reinterpret_cast<void*>(mesh.indices), std::uint64_t(mesh.index_count) * 4},
-                                   gpu::IndexType::uint32, args_of(group), 1, sizeof(DrawArgs));
-    }
+    root.vertices = rock_pool.vertices;
+    gpu::draw_indexed_indirect_count(
+        cmd, root, {reinterpret_cast<void*>(rock_pool.indices), std::uint64_t(rock_pool.index_count) * 4},
+        gpu::IndexType::uint32, {reinterpret_cast<void*>(args_address), sizeof(DrawArgs) * rock_group_count},
+        {reinterpret_cast<void*>(args_address - offsetof(CullScratch, args) + offsetof(CullScratch, draw_count)),
+         sizeof(std::uint32_t)},
+        rock_group_count, sizeof(DrawArgs));
+    stats.draw_calls++;
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
     gpu::bind_pso(cmd, pso.cloud);
     root.mode = std::uint32_t(SurfaceMode::billboard);
-    gpu::draw_indirect(cmd, root, args_of(rock_group_count), 1, sizeof(DrawArgs));
+    gpu::draw_indirect(cmd, root,
+                       {reinterpret_cast<void*>(args_address + rock_group_count * sizeof(DrawArgs)), sizeof(DrawArgs)},
+                       1, sizeof(DrawArgs));
+    stats.draw_calls++;
     stats.triangles += stats.rock_triangles;
     root.mode = std::uint32_t(SurfaceMode::cloud);
     draw_mesh(cmd, root, spheres[geometry::lod_count - 1], earth_index, 1);
@@ -421,6 +431,7 @@ bool Renderer::draw(const FrameInput& input) {
     const FrameData frame = s.build_frame(input);
     s.write_body_instances(input, frame);
     s.stats.triangles = 0;
+    s.stats.draw_calls = 0;
 
     // Per-frame constants, culling scratch and instances live in the dynamic
     // half of the static heap; the previous frame's culling counts are read

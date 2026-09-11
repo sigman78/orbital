@@ -3745,6 +3745,23 @@ void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indi
     commands->state->fn.cmd_draw_indexed_indirect(commands->command_buffer, &info);
 }
 
+void draw_indexed_indirect_count(CommandBuffer* commands, ByteSpan root, GpuRange indices, IndexType type, GpuRange arguments, GpuRange count,
+                                 uint32 max_draw_count, uint32 stride) noexcept
+{
+    assert(commands && commands->state);
+    assert(commands->state->conventional_backend && "draw_indexed_indirect_count is implemented on the conventional backend only");
+    emit_root_data(commands, root);
+    GpuHeapOwner* index_heap = conventional_heap_for(commands->state, indices);
+    GpuHeapOwner* argument_heap = conventional_heap_for(commands->state, arguments);
+    GpuHeapOwner* count_heap = conventional_heap_for(commands->state, count);
+    vkCmdBindIndexBuffer(commands->command_buffer, index_heap->backing.buffer, reinterpret_cast<uintptr>(indices.gpu) - index_heap->backing.address,
+                         static_cast<VkIndexType>(type));
+    vkCmdDrawIndexedIndirectCount(commands->command_buffer, argument_heap->backing.buffer,
+                                  reinterpret_cast<uintptr>(arguments.gpu) - argument_heap->backing.address, count_heap->backing.buffer,
+                                  reinterpret_cast<uintptr>(count.gpu) - count_heap->backing.address, max_draw_count,
+                                  stride == 0 ? sizeof(VkDrawIndexedIndirectCommand) : stride);
+}
+
 void dispatch(CommandBuffer* commands, ByteSpan root, uint32x3 group_count) noexcept
 {
     assert(commands);

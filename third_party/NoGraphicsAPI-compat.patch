@@ -37,6 +37,17 @@ diff --git i/include/NoGraphicsAPI/NoGraphicsAPI.hpp w/include/NoGraphicsAPI/NoG
  };
  
  // A windowed device and every call using it must remain on the native
+@@ -728,6 +732,10 @@ void draw_indexed(CommandBuffer* commands, ByteSpan root, GpuRange indices, Inde
+ void draw_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments, uint32 draw_count = 1, uint32 stride = 0) noexcept;
+ void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indices, IndexType type, GpuRange arguments, uint32 draw_count = 1,
+                            uint32 stride = 0) noexcept;
++// Multi-draw whose draw count is read from GPU memory (a uint32 at count.gpu), capped at max_draw_count.
++// Implemented on the conventional backend only.
++void draw_indexed_indirect_count(CommandBuffer* commands, ByteSpan root, GpuRange indices, IndexType type, GpuRange arguments, GpuRange count,
++                                 uint32 max_draw_count, uint32 stride = 0) noexcept;
+ void dispatch(CommandBuffer* commands, ByteSpan root, uint32x3 group_count) noexcept;
+ void dispatch_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments) noexcept;
+ void draw_meshlets(CommandBuffer* commands, ByteSpan root, uint32x3 group_count) noexcept;
 diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
 --- i/src/NoGraphicsAPI.cpp
 +++ w/src/NoGraphicsAPI.cpp
@@ -607,7 +618,31 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkBindIndexBuffer3InfoKHR bind_info{
          .sType = VK_STRUCTURE_TYPE_BIND_INDEX_BUFFER_3_INFO_KHR,
          .addressRange = {
-@@ -3606,6 +3794,20 @@ void draw_meshlets_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arg
+@@ -3557,6 +3745,23 @@ void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indi
+     commands->state->fn.cmd_draw_indexed_indirect(commands->command_buffer, &info);
+ }
+ 
++void draw_indexed_indirect_count(CommandBuffer* commands, ByteSpan root, GpuRange indices, IndexType type, GpuRange arguments, GpuRange count,
++                                 uint32 max_draw_count, uint32 stride) noexcept
++{
++    assert(commands && commands->state);
++    assert(commands->state->conventional_backend && "draw_indexed_indirect_count is implemented on the conventional backend only");
++    emit_root_data(commands, root);
++    GpuHeapOwner* index_heap = conventional_heap_for(commands->state, indices);
++    GpuHeapOwner* argument_heap = conventional_heap_for(commands->state, arguments);
++    GpuHeapOwner* count_heap = conventional_heap_for(commands->state, count);
++    vkCmdBindIndexBuffer(commands->command_buffer, index_heap->backing.buffer, reinterpret_cast<uintptr>(indices.gpu) - index_heap->backing.address,
++                         static_cast<VkIndexType>(type));
++    vkCmdDrawIndexedIndirectCount(commands->command_buffer, argument_heap->backing.buffer,
++                                  reinterpret_cast<uintptr>(arguments.gpu) - argument_heap->backing.address, count_heap->backing.buffer,
++                                  reinterpret_cast<uintptr>(count.gpu) - count_heap->backing.address, max_draw_count,
++                                  stride == 0 ? sizeof(VkDrawIndexedIndirectCommand) : stride);
++}
++
+ void dispatch(CommandBuffer* commands, ByteSpan root, uint32x3 group_count) noexcept
+ {
+     assert(commands);
+@@ -3606,6 +3811,20 @@ void draw_meshlets_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arg
  void copy_memory(CommandBuffer* commands, GpuRange source, GpuRange destination) noexcept
  {
      assert(commands && commands->state);
@@ -628,7 +663,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkDeviceMemoryCopyKHR region{
          .sType = VK_STRUCTURE_TYPE_DEVICE_MEMORY_COPY_KHR,
          .srcRange = {
-@@ -3630,6 +3832,23 @@ void copy_memory(CommandBuffer* commands, GpuRange source, GpuRange destination)
+@@ -3630,6 +3849,23 @@ void copy_memory(CommandBuffer* commands, GpuRange source, GpuRange destination)
  void copy_memory_to_texture(CommandBuffer* commands, GpuRange source, Texture* destination, const TextureCopyDesc& copy) noexcept
  {
      assert(commands && commands->state && destination);
@@ -652,7 +687,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkDeviceMemoryImageCopyKHR region = make_texture_copy_region(*destination, copy, source);
      const VkCopyDeviceMemoryImageInfoKHR info{
          .sType = VK_STRUCTURE_TYPE_COPY_DEVICE_MEMORY_IMAGE_INFO_KHR,
-@@ -3643,6 +3862,23 @@ void copy_memory_to_texture(CommandBuffer* commands, GpuRange source, Texture* d
+@@ -3643,6 +3879,23 @@ void copy_memory_to_texture(CommandBuffer* commands, GpuRange source, Texture* d
  void copy_texture_to_memory(CommandBuffer* commands, Texture* source, GpuRange destination, const TextureCopyDesc& copy) noexcept
  {
      assert(commands && commands->state && source);
