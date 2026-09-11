@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -229,6 +230,47 @@ struct Renderer::Impl {
         pipelines.push_back(p);
         return p;
     }
+    // Decodes and mip-filters every material concurrently, then uploads them in
+    // slot order on this thread. Unused descriptor slots point at the first map.
+    void load_materials() {
+        struct Source {
+            const char* file;
+            unsigned slot;
+            bool srgb, luminance_to_alpha = false, normal_map = false;
+        };
+        static constexpr Source sources[] = {
+            {"earth_albedo.png", 3, true},
+            {"gas_albedo.png", 4, true},
+            {"earth_clouds.png", 5, false, true},
+            {"earth_normal.png", 7, false, false, true},
+            {"earth_specular.png", 8, false},
+            {"earth_night.png", 9, true},
+            {"moon_albedo.png", 10, true},
+            {"rock_albedo.png", 11, true},
+            {"rock_normal.png", 12, false, false, true},
+            {"rock_roughness.png", 13, false},
+        };
+        const auto start = std::chrono::steady_clock::now();
+        std::vector<std::future<std::vector<assets::Image>>> pending;
+        for (const auto& source : sources)
+            pending.push_back(std::async(std::launch::async, [this, source] {
+                return assets::load_material(directory / "assets/materials" / source.file,
+                                             source.srgb ? assets::MaterialEncoding::SRGB
+                                                         : assets::MaterialEncoding::Linear,
+                                             source.luminance_to_alpha, source.normal_map);
+            }));
+        for (std::size_t i = 0; i < pending.size(); i++) {
+            upload_image(pending[i].get(), sources[i].slot);
+            if (i == 0)
+                for (unsigned slot = 0; slot < 24; slot++)
+                    if (slot != sources[0].slot)
+                        descriptor(slot, assets[0]);
+        }
+        std::cout
+            << "Loaded " << pending.size() << " materials in "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count()
+            << " ms\n";
+    }
     void init(void* hwnd, const SystemDescription& sys, const std::filesystem::path& dir) {
         system = sys;
         directory = dir;
@@ -311,25 +353,7 @@ struct Renderer::Impl {
                 belt_clusters.push_back({centre, bound, std::move(ids)});
             }
         std::cout << "Loading planetary maps and scanned rock PBR materials...\n";
-        auto material = [&](const char* name, unsigned slot, bool srgb, bool alpha = false, bool normal = false) {
-            upload_image(assets::load_material(directory / "assets/materials" / name,
-                                               srgb ? assets::MaterialEncoding::SRGB : assets::MaterialEncoding::Linear,
-                                               alpha, normal),
-                         slot);
-        };
-        material("earth_albedo.png", 3, true);
-        material("gas_albedo.png", 4, true);
-        material("earth_clouds.png", 5, false, true);
-        for (unsigned i = 0; i < 24; i++)
-            if (i < 3 || i > 5)
-                descriptor(i, assets[0]);
-        material("earth_normal.png", 7, false, false, true);
-        material("earth_specular.png", 8, false);
-        material("earth_night.png", 9, true);
-        material("moon_albedo.png", 10, true);
-        material("rock_albedo.png", 11, true);
-        material("rock_normal.png", 12, false, false, true);
-        material("rock_roughness.png", 13, false);
+        load_materials();
         upload_image({assets::make_hud()}, 14);
         opaque = pipeline("surface", "surface", gpu::Format::rgba16_float, true, false);
         cloud = pipeline("surface", "surface", gpu::Format::rgba16_float, true, true);
