@@ -3,8 +3,9 @@
 #include <cstdint>
 
 // Pixel kernels for material preparation. All functions operate on tightly
-// packed RGBA8 and are bit-exact with the scalar reference in
-// downsample_reference; the SIMD paths only change speed.
+// packed RGBA8 through raw pointers plus dimensions: they are leaf code called
+// from one place with sizes already validated, and the pointer form keeps the
+// SIMD loops free of view bookkeeping. Everything above them uses ByteView.
 namespace space::assets::kernels {
 
 // Half extent of a mip level, never below 1.

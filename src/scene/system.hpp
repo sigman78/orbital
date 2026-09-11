@@ -3,6 +3,7 @@
 #include "core/math.hpp"
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -65,13 +66,16 @@ struct BodyState {
     double radius = 0.0;
 };
 
+using BodyStates = std::vector<BodyState>;         // one entry per body, in description order
+using ValidationErrors = std::vector<std::string>; // empty means valid
+
 SystemDescription generate_system(std::uint64_t seed);
 
 // Empty when the description is consistent; otherwise one message per problem.
-std::vector<std::string> validate_system(const SystemDescription& system);
+ValidationErrors validate_system(const SystemDescription& system);
 
 // Body positions and rotations at the given simulation time. Empty for an
 // invalid description or non-finite time.
-std::vector<BodyState> evaluate_system(const SystemDescription& system, double seconds);
+BodyStates evaluate_system(const SystemDescription& system, double seconds);
 
 } // namespace space

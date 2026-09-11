@@ -5,6 +5,8 @@
 #include "render/renderer.hpp"
 
 #include "assets/image.hpp"
+#include "core/small_vec.hpp"
+#include "core/types.hpp"
 #include "render/gpu_types.hpp"
 #include "scene/geometry.hpp"
 
@@ -140,15 +142,20 @@ struct PipelineDesc {
 };
 
 struct Upload {
-    std::vector<assets::Image> mips;
+    assets::MipChain mips;
     Slot slot;
 };
 
+// Uploads and their GPU images are created a handful at a time.
+constexpr std::size_t inline_upload_count = 16;
+using Uploads = SmallVec<Upload, inline_upload_count>;
+
 // Spatial bin of belt instances for coarse frustum and occlusion culling.
+// indices views Impl::belt_order, which is immutable after build_belt.
 struct BeltCluster {
     Vec3f center{};
     float radius = 0;
-    std::vector<unsigned> indices;
+    std::span<const unsigned> indices;
 };
 
 // Where each LOD group and the billboards landed in the per-frame instance list.
@@ -177,6 +184,7 @@ struct Renderer::Impl {
     } pso;
     std::array<GpuMesh, geometry::lod_count> spheres{}, rocks{};
     std::vector<geometry::AsteroidInstance> belt;
+    std::vector<unsigned> belt_order; // belt indices grouped by cluster
     std::vector<BeltCluster> belt_clusters;
     SystemDescription system;
     std::filesystem::path directory;
@@ -209,7 +217,7 @@ struct Renderer::Impl {
     void create_fixed_targets();
     void resize(Extent2D new_extent);
     void destroy(GpuImage& image);
-    std::uint64_t upload_static(const void* bytes, std::size_t size);
+    std::uint64_t upload_static(ByteView bytes);
     GpuMesh upload_mesh(const geometry::Mesh& mesh);
     GpuImage create_image(const ImageDesc& desc);
     void bind(Slot slot, const GpuImage& image);

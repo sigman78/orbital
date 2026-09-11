@@ -33,6 +33,63 @@ is about what the code does, not how it is indented.
   designated syntax and is the right way to pass a bundle of context by reference. It is not
   assignable, which is fine for a value that lives for one call.
 
+## Platform code
+
+- Platform- and compiler-specific code is confined to designated files, and everything else must
+  compile on any conforming C++20 compiler. The designated files today are `app/main.cpp` and
+  `app/hud.cpp` (Win32), `core/file.cpp` and `core/panic.cpp` (guarded OS calls), `assets/kernels.cpp`
+  (instruction-set intrinsics) and the vendored-library include block in `assets/image.cpp` (compiler
+  pragmas). A `_WIN32` or `_MSC_VER` guard anywhere else is a review finding.
+- Do not lean on MSVC leniency: no non-standard extensions, no reliance on its two-phase lookup
+  quirks or its permissive conversions. `/permissive-` is on and MinGW GCC and clang are available
+  locally to cross-check; a Linux CI build of the CPU libraries is the planned enforcement.
+- Separating the remaining platform code into its own module is a follow-up to this document, not
+  something the current tree already does completely.
+
+## Containers
+
+- Standard containers are generic and allocate; use the one that fits the shape of the data, and
+  prefer no container at all when a fixed array will do.
+- `SmallVec<T, N>` (`core/small_vec.hpp`) for small, bounded collections in startup and per-frame
+  code: material uploads, decode workers, resolved body positions. It stores `N` elements inline
+  and spills to the heap only past that, and it is move-only.
+- `std::vector` only for large owning buffers (pixels, meshes, instance lists) and for containers
+  that are cleared and reused. Never a `std::vector` of `std::vector`s for a grid; use one flat
+  array plus offsets (the belt clusters are a counting sort into `belt_order`, and each cluster views
+  its slice).
+- No node-based or hashed containers (`std::map`, `std::unordered_map`, `std::set`, `std::list`) for
+  small keyed sets. A linear search over a handful of bodies is faster than a hash lookup and does
+  not allocate; `evaluate_system` went from two maps per frame to none.
+- Fixed-size C arrays or `std::array` for tables and lookups whose size is known at compile time.
+
+## Strings
+
+- String constants are `constexpr std::string_view` (or `const char*` inside `constexpr` tables and
+  wide literals at the Win32 boundary). `std::string` exists only while text is being built.
+- Error and log messages are built on the failure path only; the success path formats nothing.
+- Functions take `std::string_view` and `const std::filesystem::path&`, never `const std::string&`.
+
+## Views over ownership
+
+- When a callee only reads data, it takes an immutable view: `ByteView` for bytes,
+  `std::span<const T>` for anything else, `std::string_view` for text. Ownership is transferred only
+  when the callee keeps the data, and then by move.
+- A view is valid only while its owner is immutable. Where a view outlives the call that created it
+  (`BeltCluster::indices` into `Impl::belt_order`) the owner is documented as frozen after
+  construction, and nothing appends to it afterwards.
+- Leaf kernels keep raw pointer plus dimension parameters on purpose; everything above them has
+  already validated sizes through the view types.
+
+## Type aliases
+
+- A standard type spelling that appears in more than one signature gets a name that says what it
+  means: `Bytes` and `ByteView` (`core/types.hpp`), `MipChain`, `BodyStates`, `ValidationErrors`,
+  `Uploads`. Readers then see the role of the data, not its container.
+- Aliases live next to the type they describe (`MipChain` in `image.hpp`, `BodyStates` in
+  `system.hpp`); only the byte aliases are global because every module uses them.
+- `bytes_of` turns a span or vector of trivially copyable values into a `ByteView` for uploads and
+  file writes, so no call site spells `reinterpret_cast`.
+
 ## Error handling
 
 Three tiers, chosen by who could act on the failure:

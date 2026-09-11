@@ -46,7 +46,7 @@ std::optional<std::string> failure(const wuffs_base__status& status, const char*
     return std::format("{}: {}", step, wuffs_base__status__message(&status));
 }
 
-std::optional<Image> decode_png(std::vector<std::uint8_t>& bytes, std::string& error) {
+std::optional<Image> decode_png(MutableByteView bytes, std::string& error) {
     auto decoder = wuffs_png__decoder::alloc();
     if (!decoder) {
         error = "decoder allocation failed";
@@ -58,16 +58,16 @@ std::optional<Image> decode_png(std::vector<std::uint8_t>& bytes, std::string& e
         error = *why;
         return std::nullopt;
     }
-    const std::uint32_t width = wuffs_base__pixel_config__width(&config.pixcfg);
-    const std::uint32_t height = wuffs_base__pixel_config__height(&config.pixcfg);
-    if (!width || !height || std::uint64_t(width) * height > max_pixels) {
-        error = std::format("unsupported dimensions {}x{}", width, height);
+    const Extent2D extent{wuffs_base__pixel_config__width(&config.pixcfg),
+                          wuffs_base__pixel_config__height(&config.pixcfg)};
+    if (extent.empty() || std::uint64_t(extent.width) * extent.height > max_pixels) {
+        error = std::format("unsupported dimensions {}x{}", extent.width, extent.height);
         return std::nullopt;
     }
     // Decode straight into tightly packed, non-premultiplied RGBA8.
     wuffs_base__pixel_config__set(&config.pixcfg, WUFFS_BASE__PIXEL_FORMAT__RGBA_NONPREMUL,
-                                  WUFFS_BASE__PIXEL_SUBSAMPLING__NONE, width, height);
-    Image image{width, height, std::vector<std::uint8_t>(static_cast<std::size_t>(width) * height * 4)};
+                                  WUFFS_BASE__PIXEL_SUBSAMPLING__NONE, extent.width, extent.height);
+    Image image{extent, Bytes(static_cast<std::size_t>(extent.width) * extent.height * 4)};
     wuffs_base__pixel_buffer pixels{};
     if (auto why = failure(
             wuffs_base__pixel_buffer__set_from_slice(
@@ -76,7 +76,7 @@ std::optional<Image> decode_png(std::vector<std::uint8_t>& bytes, std::string& e
         error = *why;
         return std::nullopt;
     }
-    std::vector<std::uint8_t> work(wuffs_png__decoder__workbuf_len(decoder.get()).max_incl);
+    Bytes work(wuffs_png__decoder__workbuf_len(decoder.get()).max_incl);
     wuffs_base__frame_config frame{};
     if (auto why = failure(wuffs_png__decoder__decode_frame_config(decoder.get(), &frame, &source), "frame header")) {
         error = *why;
@@ -118,19 +118,19 @@ Image load_png(const std::filesystem::path& path) {
     return std::move(*image);
 }
 
-bool save_png(const std::filesystem::path& path, std::uint32_t width, std::uint32_t height, unsigned channels,
-              const std::uint8_t* pixels) {
-    ORBITAL_ASSERT(width && height && channels >= 1 && channels <= 4 && pixels);
-    std::vector<std::uint8_t> encoded;
-    encoded.reserve(static_cast<std::size_t>(width) * height * channels / 2);
+bool save_png(const std::filesystem::path& path, Extent2D extent, unsigned channels, ByteView pixels) {
+    ORBITAL_ASSERT(!extent.empty() && channels >= 1 && channels <= 4);
+    ORBITAL_ASSERT(pixels.size() == static_cast<std::size_t>(extent.width) * extent.height * channels);
+    Bytes encoded;
+    encoded.reserve(pixels.size() / 2);
     const auto append = [](void* context, void* data, int size) {
-        auto* out = static_cast<std::vector<std::uint8_t>*>(context);
+        auto* out = static_cast<Bytes*>(context);
         const auto* bytes = static_cast<const std::uint8_t*>(data);
         out->insert(out->end(), bytes, bytes + size);
     };
-    const int stride = static_cast<int>(width * channels);
-    if (!stbi_write_png_to_func(append, &encoded, static_cast<int>(width), static_cast<int>(height),
-                                static_cast<int>(channels), pixels, stride)) {
+    const int stride = static_cast<int>(extent.width * channels);
+    if (!stbi_write_png_to_func(append, &encoded, static_cast<int>(extent.width), static_cast<int>(extent.height),
+                                static_cast<int>(channels), pixels.data(), stride)) {
         log::error("PNG encode failed for {}", path.string());
         return false;
     }

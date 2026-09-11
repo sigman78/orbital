@@ -22,6 +22,6 @@ struct MaterialDesc {
 
 // Loads a PNG material and returns its complete RGBA8_UNORM mip chain down to
 // 1x1. Panics if the file is missing or unreadable.
-std::vector<Image> load_material(const std::filesystem::path& path, const MaterialDesc& desc);
+MipChain load_material(const std::filesystem::path& path, const MaterialDesc& desc);
 
 } // namespace space::assets

@@ -90,13 +90,13 @@ void Renderer::Impl::destroy(GpuImage& image) {
     image = {};
 }
 
-std::uint64_t Renderer::Impl::upload_static(const void* bytes, std::size_t size) {
+std::uint64_t Renderer::Impl::upload_static(ByteView bytes) {
     static_cursor = (static_cursor + 15) & ~15ull;
-    if (static_cursor + size > settings.memory.dynamic_offset)
+    if (static_cursor + bytes.size() > settings.memory.dynamic_offset)
         panic("static GPU heap exhausted");
     const auto address = reinterpret_cast<std::uint64_t>(data.range.gpu) + static_cursor;
-    std::memcpy(data.range.cpu + static_cursor, bytes, size);
-    static_cursor += size;
+    std::memcpy(data.range.cpu + static_cursor, bytes.data(), bytes.size());
+    static_cursor += bytes.size();
     return address;
 }
 
@@ -105,8 +105,8 @@ GpuMesh Renderer::Impl::upload_mesh(const geometry::Mesh& mesh) {
     vertices.reserve(mesh.vertices.size());
     for (const auto& v : mesh.vertices)
         vertices.push_back({{v.position.x, v.position.y, v.position.z, 1}, {v.normal.x, v.normal.y, v.normal.z, 0}});
-    return {.vertices = upload_static(vertices.data(), vertices.size() * sizeof(Vertex)),
-            .indices = upload_static(mesh.indices.data(), mesh.indices.size() * sizeof(std::uint32_t)),
+    return {.vertices = upload_static(bytes_of(vertices)),
+            .indices = upload_static(bytes_of(mesh.indices)),
             .index_count = unsigned(mesh.indices.size())};
 }
 
@@ -142,12 +142,12 @@ void Renderer::Impl::bind(Slot slot, const GpuImage& image) {
 // instead of sized to the whole set. Textures are created before
 // begin_commands so the backend records their layout initialization first.
 void Renderer::Impl::upload_images(std::span<Upload> uploads) {
-    std::vector<GpuImage> images;
+    SmallVec<GpuImage, inline_upload_count> images;
     std::uint64_t largest = 0;
     for (const auto& upload : uploads) {
         ORBITAL_ASSERT(!upload.mips.empty());
         const auto& base = upload.mips.front();
-        images.push_back(create_image({.extent = {base.width, base.height},
+        images.push_back(create_image({.extent = base.extent,
                                        .format = gpu::Format::rgba8_unorm,
                                        .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::transfer_destination,
                                        .mips = unsigned(upload.mips.size())}));
@@ -279,7 +279,9 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
                                     .inner_radius = inner,
                                     .outer_radius = outer,
                                     .thickness = thickness});
-    std::vector<std::vector<unsigned>> bins(cluster_bin_count);
+    // Counting sort of belt indices by bin: one flat array, no per-bin allocations.
+    std::vector<unsigned> bin_of(belt.size());
+    std::vector<unsigned> bin_start(cluster_bin_count + 1, 0);
     for (unsigned i = 0; i < belt.size(); ++i) {
         const auto& p = belt[i].position;
         float angle = std::atan2(p.z, p.x);
@@ -296,10 +298,20 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
             settings.belt.height_bins - 1,
             unsigned(std::clamp((p.y + thickness * .5f) / std::max(thickness, 1e-4f), 0.f, .999999f) *
                      settings.belt.height_bins));
-        bins[(h * settings.belt.radial_bins + r) * settings.belt.angle_bins + a].push_back(i);
+        bin_of[i] = (h * settings.belt.radial_bins + r) * settings.belt.angle_bins + a;
+        ++bin_start[bin_of[i] + 1];
+    }
+    for (unsigned bin = 0; bin < cluster_bin_count; ++bin)
+        bin_start[bin + 1] += bin_start[bin];
+    belt_order.resize(belt.size());
+    {
+        std::vector<unsigned> cursor(bin_start.begin(), bin_start.end() - 1);
+        for (unsigned i = 0; i < belt.size(); ++i)
+            belt_order[cursor[bin_of[i]]++] = i;
     }
     belt_clusters.reserve(cluster_bin_count);
-    for (auto& ids : bins) {
+    for (unsigned bin = 0; bin < cluster_bin_count; ++bin) {
+        const std::span<const unsigned> ids(belt_order.data() + bin_start[bin], bin_start[bin + 1] - bin_start[bin]);
         if (ids.empty())
             continue;
         Vec3f lo = belt[ids[0]].position, hi = lo;
@@ -317,7 +329,7 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
                                       size_tail(id);
             bound = std::max(bound, std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z) + rock_radius);
         }
-        belt_clusters.push_back({.center = center, .radius = bound, .indices = std::move(ids)});
+        belt_clusters.push_back({.center = center, .radius = bound, .indices = ids});
     }
 }
 
@@ -331,9 +343,11 @@ void Renderer::Impl::load_materials() {
     const unsigned cores = std::thread::hardware_concurrency();
     const std::size_t workers = std::min(
         material_count, std::size_t(std::clamp(cores > 1 ? cores - 1 : 1u, 1u, settings.memory.decode_workers)));
-    std::vector<Upload> uploads(material_count);
+    Uploads uploads;
+    for (std::size_t i = 0; i < material_count; i++)
+        uploads.emplace_back();
     std::atomic<std::size_t> next{0};
-    std::vector<std::future<void>> pool;
+    SmallVec<std::future<void>, settings.memory.decode_workers> pool;
     for (std::size_t worker = 0; worker < workers; worker++)
         pool.push_back(std::async(std::launch::async, [&] {
             for (std::size_t i = next++; i < material_count; i = next++) {
@@ -409,7 +423,10 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     build_belt(system.belts[0]);
     log::info("Loading planetary maps and scanned rock PBR materials...");
     load_materials();
-    Upload hud[] = {{.mips = {assets::make_hud()}, .slot = Slot::hud}};
+    Uploads hud;
+    hud.emplace_back();
+    hud.back().mips.push_back(assets::make_hud());
+    hud.back().slot = Slot::hud;
     upload_images(hud);
     create_pipelines();
     create_fixed_targets();

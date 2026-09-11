@@ -1,4 +1,5 @@
 #include "assets/kernels.hpp"
+#include "core/types.hpp"
 
 #include <cassert>
 #include <chrono>
@@ -13,9 +14,9 @@ namespace {
 
 using namespace space::assets;
 
-std::vector<std::uint8_t> random_pixels(std::uint32_t width, std::uint32_t height, std::uint32_t seed) {
+space::Bytes random_pixels(std::uint32_t width, std::uint32_t height, std::uint32_t seed) {
     std::mt19937 rng(seed);
-    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * height * 4);
+    space::Bytes pixels(static_cast<std::size_t>(width) * height * 4);
     for (auto& value : pixels)
         value = static_cast<std::uint8_t>(rng());
     return pixels;
@@ -24,7 +25,7 @@ std::vector<std::uint8_t> random_pixels(std::uint32_t width, std::uint32_t heigh
 void check_downsample_matches_reference(std::uint32_t width, std::uint32_t height, bool normal_map) {
     const auto source = random_pixels(width, height, width * 131 + height * 7 + normal_map);
     const std::size_t out_size = std::size_t(kernels::half_extent(width)) * kernels::half_extent(height) * 4;
-    std::vector<std::uint8_t> expected(out_size), actual(out_size, 0xCD);
+    space::Bytes expected(out_size), actual(out_size, 0xCD);
     kernels::downsample_reference(source.data(), width, height, expected.data(), normal_map);
     (normal_map ? kernels::downsample_normals : kernels::downsample_rgba8)(source.data(), width, height, actual.data());
     if (!normal_map) {
@@ -82,7 +83,7 @@ template <class F> double time_ms(F&& function) {
 void report_timings() {
     constexpr std::uint32_t width = 4096, height = 2048;
     auto source = random_pixels(width, height, 7);
-    std::vector<std::uint8_t> out(std::size_t(width / 2) * (height / 2) * 4);
+    space::Bytes out(std::size_t(width / 2) * (height / 2) * 4);
     const double reference = time_ms(
         [&] { kernels::downsample_reference(source.data(), width, height, out.data(), false); });
     const double box = time_ms([&] { kernels::downsample_rgba8(source.data(), width, height, out.data()); });

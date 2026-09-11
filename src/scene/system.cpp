@@ -1,9 +1,9 @@
 #include "scene/system.hpp"
 
+#include "core/small_vec.hpp"
+
 #include <cmath>
 #include <format>
-#include <unordered_map>
-#include <unordered_set>
 
 namespace space {
 namespace {
@@ -20,6 +20,10 @@ struct SeedTags {
 };
 constexpr SeedTags tags{};
 
+// Bodies per system are few (three today), so identifier lookups are linear
+// and per-frame evaluation never touches the heap.
+constexpr std::size_t inline_body_count = 8;
+
 std::uint64_t mix(std::uint64_t x) {
     x += 0x9e3779b97f4a7c15ull;
     x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
@@ -27,31 +31,42 @@ std::uint64_t mix(std::uint64_t x) {
     return x ^ (x >> 31);
 }
 
-using BodyIndex = std::unordered_map<std::uint64_t, const BodyDescription*>;
-
-// Local orbit position composed with every ancestor, memoized per body.
-Vec3d resolve_position(std::uint64_t id, const BodyIndex& by_id, std::unordered_map<std::uint64_t, Vec3d>& positions,
-                       double seconds) {
-    if (const auto cached = positions.find(id); cached != positions.end())
-        return cached->second;
-    const auto& body = *by_id.at(id);
-    Vec3d position = rotate_about(body.orbit_offset, body.orbit_axis, body.orbit_angular_rate * seconds);
-    if (body.parent_id)
-        position += resolve_position(body.parent_id, by_id, positions, seconds);
-    return positions[id] = position;
+// Index of the body with the given id, or the body count when absent.
+std::size_t find_body(std::span<const BodyDescription> bodies, std::uint64_t id) {
+    for (std::size_t i = 0; i < bodies.size(); ++i)
+        if (bodies[i].id == id)
+            return i;
+    return bodies.size();
 }
 
-bool has_parent_cycle(const BodyDescription& body, const BodyIndex& by_id) {
-    std::unordered_set<std::uint64_t> seen;
-    for (auto parent = body.parent_id; parent;) {
-        if (!seen.insert(parent).second)
-            return true;
-        const auto it = by_id.find(parent);
-        if (it == by_id.end())
+// A parent chain longer than the body count must contain a cycle.
+bool has_parent_cycle(std::span<const BodyDescription> bodies, const BodyDescription& body) {
+    std::uint64_t parent = body.parent_id;
+    for (std::size_t steps = 0; parent && steps <= bodies.size(); ++steps) {
+        const std::size_t index = find_body(bodies, parent);
+        if (index == bodies.size())
             return false;
-        parent = it->second->parent_id;
+        parent = bodies[index].parent_id;
     }
-    return false;
+    return parent != 0;
+}
+
+struct ResolvedPosition {
+    bool done = false;
+    Vec3d position{};
+};
+
+// Local orbit position composed with every ancestor, memoized per body index.
+Vec3d resolve_position(std::span<const BodyDescription> bodies, std::size_t index, std::span<ResolvedPosition> resolved,
+                       double seconds) {
+    if (resolved[index].done)
+        return resolved[index].position;
+    const auto& body = bodies[index];
+    Vec3d position = rotate_about(body.orbit_offset, body.orbit_axis, body.orbit_angular_rate * seconds);
+    if (body.parent_id)
+        position += resolve_position(bodies, find_body(bodies, body.parent_id), resolved, seconds);
+    resolved[index] = {.done = true, .position = position};
+    return position;
 }
 
 } // namespace
@@ -108,28 +123,27 @@ SystemDescription generate_system(std::uint64_t seed) {
     return s;
 }
 
-std::vector<std::string> validate_system(const SystemDescription& s) {
-    std::vector<std::string> errors;
+ValidationErrors validate_system(const SystemDescription& s) {
+    ValidationErrors errors;
+    const std::span<const BodyDescription> bodies = s.bodies;
     if (s.schema_version == 0)
         errors.emplace_back("schema_version must be non-zero");
     if (!std::isfinite(s.scale_policy) || s.scale_policy <= 0)
         errors.emplace_back("scale_policy must be finite and positive");
     if (!is_finite(s.star.position) || !std::isfinite(s.star.radius) || s.star.radius <= 0)
         errors.emplace_back("star has invalid position or radius");
-    BodyIndex by_id;
-    for (const auto& b : s.bodies) {
-        if (b.id == 0 || !by_id.emplace(b.id, &b).second)
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        const auto& b = bodies[i];
+        if (b.id == 0 || find_body(bodies, b.id) != i)
             errors.emplace_back("body IDs must be unique and non-zero");
         if (!std::isfinite(b.radius) || b.radius <= 0 || !is_finite(b.orbit_offset) || !is_finite(b.orbit_axis) ||
             !std::isfinite(b.orbit_angular_rate))
             errors.push_back(std::format("body {} has invalid finite/radius parameters", b.id));
         if (b.parent_id == b.id)
             errors.push_back(std::format("body {} is its own parent", b.id));
-    }
-    for (const auto& b : s.bodies) {
-        if (b.parent_id && !by_id.count(b.parent_id))
+        if (b.parent_id && find_body(bodies, b.parent_id) == bodies.size())
             errors.push_back(std::format("body {} references missing parent", b.id));
-        if (has_parent_cycle(b, by_id))
+        if (has_parent_cycle(bodies, b))
             errors.emplace_back("parent graph contains a cycle");
     }
     for (const auto& belt : s.belts) {
@@ -137,25 +151,26 @@ std::vector<std::string> validate_system(const SystemDescription& s) {
             belt.inner_radius <= 0 || belt.outer_radius <= belt.inner_radius || belt.thickness < 0 ||
             !std::isfinite(belt.density) || belt.density < 0)
             errors.emplace_back("belt has invalid bounds or density");
-        if (belt.parent_id && !by_id.count(belt.parent_id))
+        if (belt.parent_id && find_body(bodies, belt.parent_id) == bodies.size())
             errors.emplace_back("belt references missing parent");
     }
     return errors;
 }
 
-std::vector<BodyState> evaluate_system(const SystemDescription& s, double seconds) {
-    std::vector<BodyState> result;
+BodyStates evaluate_system(const SystemDescription& s, double seconds) {
+    BodyStates result;
     if (!std::isfinite(seconds) || !validate_system(s).empty())
         return result;
-    BodyIndex by_id;
-    for (const auto& b : s.bodies)
-        by_id[b.id] = &b;
-    std::unordered_map<std::uint64_t, Vec3d> positions;
-    result.reserve(s.bodies.size());
-    for (const auto& b : s.bodies) {
+    const std::span<const BodyDescription> bodies = s.bodies;
+    SmallVec<ResolvedPosition, inline_body_count> resolved;
+    for (std::size_t i = 0; i < bodies.size(); ++i)
+        resolved.emplace_back();
+    result.reserve(bodies.size());
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        const auto& b = bodies[i];
         const double spin = b.rotation_period > epsilon ? 2 * pi<double> * seconds / b.rotation_period : 0.0;
         result.push_back({.id = b.id,
-                          .position = resolve_position(b.id, by_id, positions, seconds),
+                          .position = resolve_position(bodies, i, resolved, seconds),
                           .rotation_angle = b.rotation_phase + spin,
                           .radius = b.radius});
     }

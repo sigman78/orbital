@@ -485,12 +485,12 @@ bool Renderer::capture(const std::filesystem::path& path) {
     gpu::submit({cmd}, {s.timeline, ++s.serial});
     gpu::wait_timeline({s.timeline, s.serial});
     const auto* rgba = reinterpret_cast<const std::uint8_t*>(readback.range.cpu);
-    std::vector<std::uint8_t> rgb(std::size_t(s.extent.width) * s.extent.height * 3);
+    Bytes rgb(std::size_t(s.extent.width) * s.extent.height * 3);
     for (std::size_t i = 0; i < std::size_t(s.extent.width) * s.extent.height; i++)
         for (unsigned channel = 0; channel < 3; channel++)
             rgb[i * 3 + channel] = rgba[i * 4 + channel];
     gpu::destroy_gpu_heap(readback);
-    return assets::save_png(path, s.extent.width, s.extent.height, 3, rgb.data());
+    return assets::save_png(path, s.extent, 3, rgb);
 }
 
 } // namespace space::render

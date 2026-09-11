@@ -37,7 +37,7 @@ void text(HDC dc, int x, int y, const wchar_t* s) {
 
 Image make_hud() {
     constexpr int width = 1024, height = 256;
-    Image image{width, height, std::vector<std::uint8_t>(width * height * 4, 0)};
+    Image image{{width, height}, Bytes(width * height * 4, 0)};
     HDC screen = GetDC(nullptr);
     HDC dc = CreateCompatibleDC(screen);
     BITMAPINFO info{};

@@ -31,14 +31,15 @@ int main() {
         const auto mips = load_material(
             root / item.name, {.encoding = item.encoding, .luminance_to_alpha = item.mask, .normal_map = item.normal});
         assert(!mips.empty());
-        assert(mips.front().width > 0 && mips.front().height > 0);
-        assert(mips.back().width == 1 && mips.back().height == 1);
+        assert(!mips.front().extent.empty());
+        const space::Extent2D one_by_one{1, 1};
+        assert(mips.back().extent == one_by_one);
         for (std::size_t level = 0; level < mips.size(); ++level) {
             const auto& image = mips[level];
-            assert(image.pixels.size() == std::size_t(image.width) * image.height * 4);
+            assert(image.pixels.size() == image.pixel_count() * 4);
             if (level) {
-                assert(image.width == std::max(1u, mips[level - 1].width / 2));
-                assert(image.height == std::max(1u, mips[level - 1].height / 2));
+                assert(image.extent.width == std::max(1u, mips[level - 1].extent.width / 2));
+                assert(image.extent.height == std::max(1u, mips[level - 1].extent.height / 2));
             }
         }
         if (item.mask) {
@@ -75,6 +76,6 @@ int main() {
             }
             assert(minimum < maximum); // Map retained a meaningful shader range.
         }
-        std::printf("%s %ux%u\n", item.name, mips.front().width, mips.front().height);
+        std::printf("%s %ux%u\n", item.name, mips.front().extent.width, mips.front().extent.height);
     }
 }

@@ -46,9 +46,9 @@ struct AppSettings {
 };
 constexpr AppSettings settings{};
 
-constexpr auto hotkey_capture_path = "captures/orbital.png";
-constexpr auto window_class_name = L"OrbitalWindow";
-constexpr auto window_title = L"ORBITAL  /  Procedural worlds";
+constexpr std::string_view hotkey_capture_path = "captures/orbital.png";
+constexpr const wchar_t* window_class_name = L"OrbitalWindow";
+constexpr const wchar_t* window_title = L"ORBITAL  /  Procedural worlds";
 
 constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
@@ -151,7 +151,7 @@ std::optional<Options> parse_options(int argc, char** argv) {
 // Mutable state shared between the window procedure and the frame loop.
 struct AppState {
     Camera camera;
-    std::vector<BodyState> bodies;
+    BodyStates bodies;
     bool running = true, paused = false, high = false, overlay = true, mouse_look = false, auto_exposure = true;
     float exposure = 1.0f;
     float mouse_dx = 0, mouse_dy = 0;
