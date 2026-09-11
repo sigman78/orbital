@@ -183,33 +183,71 @@ struct Renderer::Impl {
         gpu::write_texture_descriptor(device, textures.range.cpu + slot * caps.texture_descriptor_size, i.texture,
                                       gpu::TextureDescriptorType::sampled);
     }
-    void upload_image(const std::vector<assets::Image>& mips, unsigned slot) {
-        auto im = image(mips[0].width, mips[0].height, gpu::Format::rgba8_unorm,
-                        gpu::TextureUsage::sampled | gpu::TextureUsage::transfer_destination, unsigned(mips.size()));
-        assets.push_back(im);
-        descriptor(slot, im);
-        std::uint64_t bytes = 0;
-        for (const auto& mip : mips)
-            bytes += (mip.pixels.size() + 15) & ~15ull;
-        auto staging = gpu::create_gpu_heap(device, bytes);
+    struct Upload {
+        std::vector<assets::Image> mips;
+        unsigned slot;
+    };
+    // Creates one sampled RGBA8 texture per upload and streams every mip through
+    // a single reusable staging heap. Host-visible heaps live in device-local
+    // (BAR) memory on this backend, so the heap is capped and flushed in batches
+    // instead of sized to the whole set. Textures are created before
+    // begin_commands so the backend records their layout initialization first.
+    void upload_images(const std::vector<Upload>& uploads) {
+        constexpr std::uint64_t staging_budget = 64ull * 1024 * 1024;
+        const auto padded = [](const assets::Image& mip) { return (mip.pixels.size() + 15) & ~15ull; };
+        std::vector<Image> images;
+        std::uint64_t largest = 0;
+        for (const auto& upload : uploads) {
+            const auto& base = upload.mips.at(0);
+            images.push_back(image(base.width, base.height, gpu::Format::rgba8_unorm,
+                                   gpu::TextureUsage::sampled | gpu::TextureUsage::transfer_destination,
+                                   unsigned(upload.mips.size())));
+            assets.push_back(images.back());
+            descriptor(upload.slot, images.back());
+            std::uint64_t bytes = 0;
+            for (const auto& mip : upload.mips)
+                bytes += padded(mip);
+            largest = std::max(largest, bytes);
+        }
+        auto staging = gpu::create_gpu_heap(device, std::max(largest, staging_budget));
         if (!staging.range.cpu)
             throw std::runtime_error("Texture staging allocation failed");
-        std::vector<std::uint64_t> offsets;
+        gpu::CommandBuffer* cmd = nullptr;
         std::uint64_t offset = 0;
-        for (const auto& mip : mips) {
-            std::memcpy(staging.range.cpu + offset, mip.pixels.data(), mip.pixels.size());
-            offsets.push_back(reinterpret_cast<std::uint64_t>(staging.range.gpu) + offset);
-            offset += (mip.pixels.size() + 15) & ~15ull;
+        const auto flush = [&] {
+            if (!cmd)
+                return;
+            gpu::barrier(cmd, gpu::Stage::transfer, gpu::Access::transfer_write, gpu::Stage::fragment,
+                         gpu::Access::shader_read);
+            gpu::submit({cmd}, {timeline, ++serial});
+            gpu::wait_timeline({timeline, serial});
+            cmd = nullptr;
+            offset = 0;
+        };
+        for (std::size_t i = 0; i < uploads.size(); i++) {
+            std::uint64_t bytes = 0;
+            for (const auto& mip : uploads[i].mips)
+                bytes += padded(mip);
+            if (offset + bytes > staging.range.size)
+                flush();
+            if (!cmd)
+                cmd = gpu::begin_commands(device);
+            for (unsigned level = 0; level < uploads[i].mips.size(); level++) {
+                const auto& mip = uploads[i].mips[level];
+                std::memcpy(staging.range.cpu + offset, mip.pixels.data(), mip.pixels.size());
+                const auto source = reinterpret_cast<std::uint64_t>(staging.range.gpu) + offset;
+                gpu::copy_memory_to_texture(cmd, {reinterpret_cast<void*>(source), mip.pixels.size()},
+                                            images[i].texture, {.mip_level = level});
+                offset += padded(mip);
+            }
         }
-        auto cmd = gpu::begin_commands(device);
-        for (unsigned j = 0; j < mips.size(); j++)
-            gpu::copy_memory_to_texture(cmd, {reinterpret_cast<void*>(offsets[j]), mips[j].pixels.size()}, im.texture,
-                                        {.mip_level = j});
-        gpu::barrier(cmd, gpu::Stage::transfer, gpu::Access::transfer_write, gpu::Stage::fragment,
-                     gpu::Access::shader_read);
-        gpu::submit({cmd}, {timeline, ++serial});
-        gpu::wait_timeline({timeline, serial});
+        flush();
         gpu::destroy_gpu_heap(staging);
+    }
+    void upload_image(std::vector<assets::Image> mips, unsigned slot) {
+        std::vector<Upload> single;
+        single.push_back({std::move(mips), slot});
+        upload_images(single);
     }
     gpu::PSO* pipeline(const char* vs, const char* fs, gpu::Format format, bool depthTest, bool blend) {
         auto v = read_spv(directory / "shaders" / (std::string(vs) + ".vertex.spv")),
@@ -230,8 +268,8 @@ struct Renderer::Impl {
         pipelines.push_back(p);
         return p;
     }
-    // Decodes and mip-filters every material concurrently, then uploads them in
-    // slot order on this thread. Unused descriptor slots point at the first map.
+    // Decodes and mip-filters every material concurrently, then uploads them all
+    // in one batch on this thread. Unused descriptor slots point at the first map.
     void load_materials() {
         struct Source {
             const char* file;
@@ -259,13 +297,17 @@ struct Renderer::Impl {
                                                          : assets::MaterialEncoding::Linear,
                                              source.luminance_to_alpha, source.normal_map);
             }));
-        for (std::size_t i = 0; i < pending.size(); i++) {
-            upload_image(pending[i].get(), sources[i].slot);
-            if (i == 0)
-                for (unsigned slot = 0; slot < 24; slot++)
-                    if (slot != sources[0].slot)
-                        descriptor(slot, assets[0]);
-        }
+        std::vector<Upload> uploads;
+        for (std::size_t i = 0; i < pending.size(); i++)
+            uploads.push_back({pending[i].get(), sources[i].slot});
+        const auto first_asset = assets.size();
+        upload_images(uploads);
+        bool used[24]{};
+        for (const auto& source : sources)
+            used[source.slot] = true;
+        for (unsigned slot = 0; slot < 24; slot++)
+            if (!used[slot])
+                descriptor(slot, assets[first_asset]);
         std::cout
             << "Loaded " << pending.size() << " materials in "
             << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count()
