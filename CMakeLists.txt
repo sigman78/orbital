@@ -58,6 +58,8 @@ if(ORBITAL_BUILD_DEMO)
     orbital_compile_slang("shaders/${shader}.fragment.spv" "shaders/${shader}.slang" fragmentMain fragment)
     list(APPEND ORBITAL_SHADER_OUTPUTS "${CMAKE_BINARY_DIR}/shaders/${shader}.fragment.spv")
   endforeach()
+  orbital_compile_slang("shaders/cull.compute.spv" "shaders/cull.slang" computeMain compute)
+  list(APPEND ORBITAL_SHADER_OUTPUTS "${CMAKE_BINARY_DIR}/shaders/cull.compute.spv")
   add_custom_target(orbital_shaders DEPENDS ${ORBITAL_SHADER_OUTPUTS})
 
   # Platform layer: the only code that talks to the OS windowing, input and font APIs.

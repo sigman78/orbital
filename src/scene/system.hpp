@@ -18,7 +18,10 @@ constexpr std::uint64_t showcase_seed = 20260911;
 // Upper bound validate_system enforces, so per-frame evaluation can use fixed storage.
 constexpr std::size_t max_body_count = 8;
 
-enum class BodyClass { Terrestrial, GasGiant, RockyMoon };
+// Terrestrial: Earth-like with clouds and a thick atmosphere. Desert: Mars-like
+// with a thin dusty one. RockyMoon: a large airless sphere. Moonlet: a small
+// irregular captured body rendered as a rock.
+enum class BodyClass { Terrestrial, GasGiant, RockyMoon, Desert, Moonlet };
 
 struct BodyDescription {
     std::uint64_t id = 0;

@@ -16,10 +16,10 @@ namespace tags {
 inline constexpr std::uint64_t variation = 0x4f52424954414cull;  // "ORBITAL"
 inline constexpr std::uint64_t material = 0x535552464143454full; // "SURFACEO"
 inline constexpr std::uint64_t belt_id = 2001;
-inline constexpr std::uint64_t body_ids[3] = {1001, 1002, 1003};
+inline constexpr std::uint64_t body_ids[6] = {1001, 1002, 1003, 1004, 1005, 1006};
 } // namespace tags
 
-// Bodies per system are few (three today), so identifier lookups are linear
+// Bodies per system are few (six today), so identifier lookups are linear
 // and per-frame evaluation never touches the heap.
 
 std::uint64_t mix(std::uint64_t x) {
@@ -111,6 +111,39 @@ SystemDescription generate_system(std::uint64_t seed) {
                         .orbit_axis = {0, 1, 0},
                         .orbit_angular_rate = 0.000025,
                         .material_seed = material(tags::body_ids[2])},
+        // Mars at its real size relative to Earth; its moons are enlarged many
+        // times over so they read at demo scale, and orbit fast enough to watch.
+        BodyDescription{.id = tags::body_ids[3],
+                        .body_class = BodyClass::Desert,
+                        .radius = 1.33 * (1.0 + variation),
+                        .axial_tilt = 0.44,
+                        .rotation_period = 1650.0,
+                        .rotation_phase = 1.2,
+                        .orbit_offset = {-150, -12, 95},
+                        .orbit_axis = {0, 1, 0},
+                        .orbit_angular_rate = 0.000003,
+                        .material_seed = material(tags::body_ids[3]),
+                        .atmosphere_scale = 0.05},
+        BodyDescription{.id = tags::body_ids[4], // Phobos: tidally locked, inside the synchronous orbit
+                        .parent_id = tags::body_ids[3],
+                        .body_class = BodyClass::Moonlet,
+                        .radius = 0.09,
+                        .axial_tilt = 0.0,
+                        .rotation_period = 520.0,
+                        .orbit_offset = {3.8, 0.2, 0},
+                        .orbit_axis = {0.05, 1, 0},
+                        .orbit_angular_rate = 0.01208,
+                        .material_seed = material(tags::body_ids[4])},
+        BodyDescription{.id = tags::body_ids[5], // Deimos: smaller, farther, slower
+                        .parent_id = tags::body_ids[3],
+                        .body_class = BodyClass::Moonlet,
+                        .radius = 0.06,
+                        .axial_tilt = 0.0,
+                        .rotation_period = 1400.0,
+                        .orbit_offset = {-6.5, -0.4, 6.5},
+                        .orbit_axis = {0, 1, 0.03},
+                        .orbit_angular_rate = 0.004488,
+                        .material_seed = material(tags::body_ids[5])},
     };
     s.belts = {BeltDescription{.id = tags::belt_id,
                                .parent_id = tags::body_ids[1],

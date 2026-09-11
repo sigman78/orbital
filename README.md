@@ -7,7 +7,7 @@ Native Windows C++20 space demo built on a compatibility fork of [NoGraphicsAPI]
 | ![City lights at dawn](docs/images/dawn.jpg) | ![Asteroid belt around the gas giant](docs/images/belt.jpg) |
 | --- | --- |
 
-The Jovian belt contains 35,000 asteroids in baseline and 65,000 in high quality, with irregular flat-shaded rocks and mapped dielectric roughness. Spatial-cluster frustum/planet-occlusion culling feeds instanced draws; distant bodies use filtered billboards.
+The Jovian belt contains 280,000 asteroids in baseline and 520,000 in high quality, drawn from a library of 16 seeded shapes at 6 detail levels (20 to 20k triangles) with three scanned rock sets blended per rock, triplanar mapped with parallax on close rocks. A compute pass culls every rock on the GPU (frustum, planet occlusion, projected-size LOD) and writes indirect draws per shape and level; distant bodies use filtered billboards.
 
 ## Build
 
@@ -26,10 +26,11 @@ Slang is the default shader language, with offline compilation and a shared C++/
 
 ## Explore
 
-RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. Keys 1–5 select Earth, Jupiter, Moon, dawn and belt views. T starts/stops the tour, O orbits, F returns to free flight. Space pauses the system; +/- changes exposure, X toggles adaptation. F1 toggles help, F2 quality, F12 saves a capture, Esc exits.
+RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. Keys 1–6 select Earth, Jupiter, Moon, Mars, dawn and belt views. T starts/stops the tour, O orbits, F returns to free flight. Space pauses the system; +/- changes exposure, X toggles adaptation. F1 toggles help, F2 quality, F12 saves a capture, Esc exits.
 
 ```powershell
 ./build/release/orbital.exe --width 1920 --height 1080 --tour
+./build/release/orbital.exe --bookmark 5 --time 0 --frames 300 --high --rocks 650000 --benchmark belt.csv
 ./build/release/orbital.exe --bookmark 4 --time 0 --frames 124 --no-hud --capture captures/belt.png
 ./build/release/orbital.exe --duration 60 --tour --benchmark captures/tour.csv
 ```

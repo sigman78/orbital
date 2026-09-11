@@ -20,12 +20,6 @@
 namespace space::render {
 namespace {
 
-// Polar grid the belt is binned into for culling, read by build_belt.
-namespace cluster_grid {
-inline constexpr unsigned angle_bins = 128, radial_bins = 8, height_bins = 4;
-inline constexpr unsigned count = angle_bins * radial_bins * height_bins;
-} // namespace cluster_grid
-
 constexpr unsigned decode_workers_max = 8; // upper bound for the material decode pool
 
 std::vector<std::uint32_t> read_spirv(const std::filesystem::path& path) {
@@ -60,6 +54,15 @@ constexpr MaterialSource material_sources[] = {
     {"rock_albedo.png", Slot::rock_albedo, {.encoding = MaterialEncoding::SRGB}},
     {"rock_normal.png", Slot::rock_normal, {.normal_map = true}},
     {"rock_roughness.png", Slot::rock_roughness, {}},
+    {"mars_albedo.png", Slot::mars_albedo, {.encoding = MaterialEncoding::SRGB}},
+    {"mars_normal.png", Slot::mars_normal, {.normal_map = true}},
+    {"moon_normal.png", Slot::moon_normal, {.normal_map = true}},
+    {"rock_face_albedo.png", Slot::rock_face_albedo, {.encoding = MaterialEncoding::SRGB}},
+    {"rock_face_normal.png", Slot::rock_face_normal, {.normal_map = true}},
+    {"rock_face_roughness.png", Slot::rock_face_roughness, {}},
+    {"rock_boulder_albedo.png", Slot::rock_boulder_albedo, {.encoding = MaterialEncoding::SRGB}},
+    {"rock_boulder_normal.png", Slot::rock_boulder_normal, {.normal_map = true}},
+    {"rock_boulder_roughness.png", Slot::rock_boulder_roughness, {}},
 };
 constexpr std::size_t material_count = std::size(material_sources);
 static_assert(material_count <= inline_upload_count);
@@ -98,14 +101,41 @@ std::uint64_t Renderer::Impl::upload_static(ByteView bytes) {
     return address;
 }
 
+namespace {
+void append_vertices(std::vector<Vertex>& out, const geometry::Mesh& mesh) {
+    for (const auto& v : mesh.vertices)
+        out.push_back({{v.position.x, v.position.y, v.position.z, 1}, {v.normal.x, v.normal.y, v.normal.z, 0}});
+}
+} // namespace
+
 GpuMesh Renderer::Impl::upload_mesh(const geometry::Mesh& mesh) {
     std::vector<Vertex> vertices;
     vertices.reserve(mesh.vertices.size());
-    for (const auto& v : mesh.vertices)
-        vertices.push_back({{v.position.x, v.position.y, v.position.z, 1}, {v.normal.x, v.normal.y, v.normal.z, 0}});
+    append_vertices(vertices, mesh);
     return {.vertices = upload_static(bytes_of(vertices)),
             .indices = upload_static(bytes_of(mesh.indices)),
             .index_count = unsigned(mesh.indices.size())};
+}
+
+// One vertex and one index range for the whole rock library, so every rock
+// group is a first-index/vertex-offset slice and one multi-draw covers them all.
+void Renderer::Impl::upload_rock_pool(std::span<const geometry::Mesh> meshes) {
+    std::vector<Vertex> vertices;
+    std::vector<std::uint32_t> indices;
+    for (std::size_t group = 0; group < meshes.size(); group++) {
+        rocks[group] = {.index_count = unsigned(meshes[group].indices.size()),
+                        .first_index = unsigned(indices.size()),
+                        .vertex_offset = unsigned(vertices.size())};
+        append_vertices(vertices, meshes[group]);
+        indices.insert(indices.end(), meshes[group].indices.begin(), meshes[group].indices.end());
+    }
+    rock_pool = {.vertices = upload_static(bytes_of(vertices)),
+                 .indices = upload_static(bytes_of(indices)),
+                 .index_count = unsigned(indices.size())};
+    for (auto& rock : rocks) {
+        rock.vertices = rock_pool.vertices;
+        rock.indices = rock_pool.indices;
+    }
 }
 
 GpuImage Renderer::Impl::create_image(const ImageDesc& desc) {
@@ -257,73 +287,52 @@ void Renderer::Impl::create_samplers() {
 }
 
 void Renderer::Impl::create_meshes() {
-    for (unsigned lod = 0; lod < geometry::lod_count; lod++) {
+    for (unsigned lod = 0; lod < geometry::lod_count; lod++)
         spheres[lod] = upload_mesh(geometry::generate_sphere(32u << lod, 16u << lod));
-        rocks[lod] = upload_mesh(geometry::generate_rock(71 + lod * 37, 2 + lod));
-    }
+    constexpr std::uint32_t rock_seed_base = 71, rock_seed_stride = 37;
+    std::vector<geometry::Mesh> library(rock_group_count);
+    for (unsigned shape = 0; shape < geometry::rock_shape_count; shape++)
+        for (unsigned level = 0; level < geometry::rock_level_count; level++)
+            library[rock_group(shape, level)] = geometry::generate_rock(rock_seed_base + shape * rock_seed_stride,
+                                                                        level);
+    upload_rock_pool(library);
+    // Moonlets are irregular bodies: each gets its own seeded rock at full detail.
+    for (unsigned i = 0; i < body_count; i++)
+        if (system.bodies[i].body_class == BodyClass::Moonlet)
+            moonlet_meshes[i] = upload_mesh(
+                geometry::generate_rock(std::uint32_t(system.bodies[i].material_seed), geometry::rock_level_count - 1));
 }
 
-// The seeded belt order defines quality tiers, but is spatially random. Build
-// a separate index into compact polar cells without reordering IDs.
+const GpuMesh& Renderer::Impl::body_mesh(unsigned body, unsigned lod) const {
+    return system.bodies[body].body_class == BodyClass::Moonlet ? moonlet_meshes[body] : spheres[lod];
+}
+
+// Uploads the static per-rock records the GPU culling pass places each frame.
+// The seeded belt order defines quality tiers, so records keep their ids.
 void Renderer::Impl::build_belt(const BeltDescription& description) {
-    const float inner = float(description.inner_radius), outer = float(description.outer_radius),
-                thickness = float(description.thickness);
-    belt = geometry::generate_belt({.seed = description.seed,
-                                    .count = high_quality.belt_count,
-                                    .inner_radius = inner,
-                                    .outer_radius = outer,
-                                    .thickness = thickness});
-    // Counting sort of belt indices by bin: one flat array, no per-bin allocations.
-    std::vector<unsigned> bin_of(belt.size());
-    std::vector<unsigned> bin_start(cluster_grid::count + 1, 0);
-    for (unsigned i = 0; i < belt.size(); ++i) {
-        const auto& p = belt[i].position;
-        float angle = std::atan2(p.z, p.x);
-        if (angle < 0)
-            angle += 2 * pi<float>;
-        const float radial = std::sqrt(p.x * p.x + p.z * p.z);
-        const unsigned a = std::min(cluster_grid::angle_bins - 1,
-                                    unsigned(angle / (2 * pi<float>)*cluster_grid::angle_bins));
-        const unsigned r = std::min(
-            cluster_grid::radial_bins - 1,
+    const float inner = float(description.inner_radius), outer = float(description.outer_radius);
+    const auto belt = geometry::generate_belt({.seed = description.seed,
+                                               .count = std::max(high_quality.belt_count, belt_count_override),
+                                               .inner_radius = inner,
+                                               .outer_radius = outer,
+                                               .thickness = float(description.thickness)});
+    std::vector<RockData> records;
+    records.reserve(belt.size());
+    for (unsigned id = 0; id < belt.size(); ++id) {
+        const auto& rock = belt[id];
+        const float radial = std::sqrt(rock.position.x * rock.position.x + rock.position.z * rock.position.z);
+        const unsigned band = std::min(
+            belt::radial_bands - 1,
             unsigned(std::clamp((radial - inner) / std::max(outer - inner, 1e-4f), 0.f, .999999f) *
-                     cluster_grid::radial_bins));
-        const unsigned h = std::min(
-            cluster_grid::height_bins - 1,
-            unsigned(std::clamp((p.y + thickness * .5f) / std::max(thickness, 1e-4f), 0.f, .999999f) *
-                     cluster_grid::height_bins));
-        bin_of[i] = (h * cluster_grid::radial_bins + r) * cluster_grid::angle_bins + a;
-        ++bin_start[bin_of[i] + 1];
+                     belt::radial_bands));
+        const float radius = rock.scale.x * belt::rock_radius_scale * belt::size_tail(id);
+        records.push_back(
+            {.position_radius = {rock.position.x, rock.position.y, rock.position.z, radius},
+             .rotation_seed = {rock.rotation.x, rock.rotation.y, rock.rotation.z, 0},
+             .spin_group = {rock.spin.x, rock.spin.y, rock.spin.z, float(rock.variant * belt::radial_bands + band)}});
     }
-    for (unsigned bin = 0; bin < cluster_grid::count; ++bin)
-        bin_start[bin + 1] += bin_start[bin];
-    belt_order.resize(belt.size());
-    {
-        std::vector<unsigned> cursor(bin_start.begin(), bin_start.end() - 1);
-        for (unsigned i = 0; i < belt.size(); ++i)
-            belt_order[cursor[bin_of[i]]++] = i;
-    }
-    belt_clusters.reserve(cluster_grid::count);
-    for (unsigned bin = 0; bin < cluster_grid::count; ++bin) {
-        const std::span<const unsigned> ids(belt_order.data() + bin_start[bin], bin_start[bin + 1] - bin_start[bin]);
-        if (ids.empty())
-            continue;
-        Vec3f lo = belt[ids[0]].position, hi = lo;
-        for (unsigned id : ids) {
-            const auto& p = belt[id].position;
-            lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-            hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
-        }
-        const Vec3f center = (lo + hi) * .5f;
-        float bound = 0;
-        for (unsigned id : ids) {
-            const auto d = belt[id].position - center;
-            const auto& s = belt[id].scale;
-            const float rock_radius = belt::rock_radius_scale * std::max(s.x, std::max(s.y, s.z)) * belt::size_tail(id);
-            bound = std::max(bound, std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z) + rock_radius);
-        }
-        belt_clusters.push_back({.center = center, .radius = bound, .indices = ids});
-    }
+    rock_data = upload_static(bytes_of(records));
+    rock_count = unsigned(records.size());
 }
 
 // Decodes and mip-filters every material on a bounded worker pool, then
@@ -384,6 +393,9 @@ void Renderer::Impl::create_pipelines() {
     pso.present = make("fullscreen", "post", Format::bgra8_srgb);
     pso.meter = make("fullscreen", "post", Format::rgba32_float);
     pso.temporal = make("fullscreen", "temporal", Format::rgba16_float);
+    pso.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
+    panic_if(!pso.cull, "compute pipeline creation failed: cull");
+    pipelines.push_back(pso.cull);
     // Depth-only shadow pass reuses the surface vertex shader with a slope bias.
     const auto shadow_vertex = read_spirv(directory / "shaders/surface.vertex.spv");
     pso.shadow = gpu::create_graphics_pso(device,
@@ -405,10 +417,22 @@ void Renderer::Impl::create_fixed_targets() {
 }
 
 void Renderer::Impl::init(void* window, const SystemDescription& description,
-                          const std::filesystem::path& base_directory) {
+                          const std::filesystem::path& base_directory, const RendererConfig& config) {
     system = description;
     directory = base_directory;
-    ORBITAL_ASSERT(system.bodies.size() >= major_body_count && !system.belts.empty());
+    belt_count_override = config.belt_count;
+    panic_if(system.bodies.empty() || system.bodies.size() > max_body_count || system.belts.empty(),
+             "the renderer needs 1 to {} bodies and a belt", max_body_count);
+    body_count = unsigned(system.bodies.size());
+    const auto find_class = [&](BodyClass body_class, const char* name) {
+        for (unsigned i = 0; i < body_count; i++)
+            if (system.bodies[i].body_class == body_class)
+                return i;
+        panic(std::format("the system has no {} body", name));
+    };
+    earth_index = find_class(BodyClass::Terrestrial, "terrestrial");
+    giant_index = find_class(BodyClass::GasGiant, "gas giant");
+    mars_index = find_class(BodyClass::Desert, "desert");
     create_device(window);
     create_samplers();
     create_meshes();
@@ -454,9 +478,10 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     bind(Slot::depth, depth);
 }
 
-Renderer::Renderer(void* window, const SystemDescription& system, const std::filesystem::path& directory)
+Renderer::Renderer(void* window, const SystemDescription& system, const std::filesystem::path& directory,
+                   const RendererConfig& config)
     : impl_(std::make_unique<Impl>()) {
-    impl_->init(window, system, directory);
+    impl_->init(window, system, directory, config);
 }
 
 Renderer::~Renderer() = default;

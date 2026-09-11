@@ -8,8 +8,13 @@
 namespace space::render {
 
 struct Stats {
-    float frame_ms = 0, gpu_ms = 0, shadow_ms = 0, surface_ms = 0, atmosphere_ms = 0, post_ms = 0;
-    unsigned visible_asteroids = 0, triangles = 0;
+    float frame_ms = 0, gpu_ms = 0, shadow_ms = 0, surface_ms = 0, atmosphere_ms = 0,
+          post_ms = 0;    // shadow_ms includes the belt culling passes
+    float prepare_ms = 0; // CPU work between acquiring the swapchain image and submitting
+    unsigned visible_asteroids = 0, triangles = 0,
+             rock_triangles = 0;    // rock figures are from the previous frame's culling
+    unsigned draw_calls = 0;        // API draw calls submitted this frame (an indirect multi-draw counts once)
+    unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
 };
 
 // Everything the renderer needs for one frame; owned by the caller.
@@ -23,9 +28,15 @@ struct FrameInput {
     bool auto_exposure = true;
 };
 
+// Startup choices that are not part of the scene description.
+struct RendererConfig {
+    unsigned belt_count = 0; // rocks generated and drawn regardless of quality tier; 0 keeps the tiers
+};
+
 class Renderer {
 public:
-    Renderer(void* window, const SystemDescription& system, const std::filesystem::path& directory);
+    Renderer(void* window, const SystemDescription& system, const std::filesystem::path& directory,
+             const RendererConfig& config = {});
     ~Renderer();
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;

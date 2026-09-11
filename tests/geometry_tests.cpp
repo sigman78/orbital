@@ -11,7 +11,7 @@ static float length_squared(Vec3f value) {
     return dot(value, value);
 }
 
-static void validate_flat_rock(const Mesh& rock) {
+static void validate_rock(const Mesh& rock) {
     constexpr float radius_limit_squared = 1.0001f * 1.0001f;
     constexpr float normal_tolerance = 1e-5f;
     constexpr float area_epsilon_squared = 1e-12f;
@@ -32,9 +32,8 @@ static void validate_flat_rock(const Mesh& rock) {
         assert(is_finite(face_cross) && length_squared(face_cross) > area_epsilon_squared);
         const Vec3f centroid = (a.position + b.position + c.position) * (1.0f / 3.0f);
         assert(dot(face_cross, centroid) > 0.0f);
-        assert(length_squared(a.normal - b.normal) <= normal_tolerance * normal_tolerance);
-        assert(length_squared(a.normal - c.normal) <= normal_tolerance * normal_tolerance);
-        assert(dot(face_cross, a.normal) > 0.0f);
+        // Shape-function normals face outward from their own vertex.
+        assert(dot(a.normal, a.position) > 0.0f);
     }
 }
 
@@ -61,18 +60,28 @@ int main() {
         assert(dot(cross(b.position - a.position, c.position - a.position), a.position) > -1e-5f);
     }
     constexpr std::uint32_t rock_seeds[] = {1, 77, 0x12345678u, 0xffffffffu};
-    for (std::uint32_t detail = 1; detail <= 5; ++detail) {
+    for (std::uint32_t level = 0; level < rock_level_count; ++level) {
         for (std::uint32_t seed : rock_seeds) {
-            const auto rock_a = generate_rock(seed, detail);
-            const auto rock_b = generate_rock(seed, detail);
+            const auto rock_a = generate_rock(seed, level);
+            const auto rock_b = generate_rock(seed, level);
             assert(rock_a.vertices == rock_b.vertices); // exact deterministic generation
             assert(rock_a.indices == rock_b.indices);
-            validate_flat_rock(rock_a);
+            assert(rock_a.indices.size() == 60u << (2 * level)); // 20 * 4^level triangles
+            validate_rock(rock_a);
         }
-        const auto first_seed = generate_rock(rock_seeds[0], detail);
-        const auto second_seed = generate_rock(rock_seeds[1], detail);
+        const auto first_seed = generate_rock(rock_seeds[0], level);
+        const auto second_seed = generate_rock(rock_seeds[1], level);
         assert(distinct_silhouette(first_seed, second_seed));
     }
+    // Levels share one shape: the coarse level's vertices are the first ones of the finer level.
+    {
+        const auto coarse = generate_rock(77, 2), fine = generate_rock(77, 4);
+        assert(coarse.vertices.size() < fine.vertices.size());
+        for (std::size_t i = 0; i < coarse.vertices.size(); ++i)
+            assert(coarse.vertices[i] == fine.vertices[i]);
+    }
+    assert(select_rock_level(1.f) == 0 && select_rock_level(9.f) == 2 &&
+           select_rock_level(1000.f) == rock_level_count - 1);
     constexpr BeltParams belt_params{
         .seed = 1234, .count = 100, .inner_radius = 10, .outer_radius = 20, .thickness = 4};
     const auto belt_a = generate_belt(belt_params);
@@ -81,8 +90,14 @@ int main() {
     for (const auto& i : belt_a) {
         const float r = std::sqrt(i.position.x * i.position.x + i.position.z * i.position.z);
         assert(r >= 10.0f && r <= 20.0f && std::abs(i.position.y) <= 2.0f);
+        assert(std::abs(i.spin.y) >= 0.4f && std::abs(i.spin.y) <= 1.6f);
     }
-    assert(select_lod(220, 3) == 3); // hysteresis while shrinking
+    for (int step = 0; step <= 20; ++step) {
+        const float density = belt_ring_density(float(step) / 20.f);
+        assert(density > 0.0f && density <= 1.0f);
+    }
+    assert(belt_ring_density(.58f) < belt_ring_density(.15f)); // the gap is sparser than the rings
+    assert(select_lod(220, 3) == 3);                           // hysteresis while shrinking
     assert(select_lod(1, 3) == 0);
     Frustum f{{{{1, 0, 0}, 0}, {{-1, 0, 0}, 10}, {{0, 1, 0}, 0}, {{0, -1, 0}, 10}, {{0, 0, 1}, 0}, {{0, 0, -1}, 10}}};
     assert(sphere_in_frustum(f, {5, 5, 5}, 1));

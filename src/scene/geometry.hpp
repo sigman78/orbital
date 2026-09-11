@@ -26,6 +26,7 @@ struct AsteroidInstance {
     Vec3f position;
     Vec3f scale;
     Vec3f rotation; // Euler angles in radians (x, y, z).
+    Vec3f spin;     // tumble rate per axis, relative to the belt's rock spin rate
     std::uint32_t variant = 0;
 };
 
@@ -46,12 +47,34 @@ struct BeltParams {
     float thickness = 0.0f;
 };
 
-// Number of LOD levels for spheres and rocks; 0 is the cheapest, 3 the most detailed.
+// Number of LOD levels for spheres; 0 is the cheapest, 3 the most detailed.
 constexpr std::uint32_t lod_count = 4;
 
+// Rocks are icospheres displaced by a seeded shape function and come in
+// rock_level_count subdivision levels (20 to 20480 triangles). Every level
+// samples the same function, so silhouettes and normals agree across levels.
+// The belt draws from a library of rock_shape_count seeded shapes.
+constexpr std::uint32_t rock_level_count = 6;
+constexpr std::uint32_t rock_shape_count = 16;
+
 Mesh generate_sphere(std::uint32_t longitude, std::uint32_t latitude);
-Mesh generate_rock(std::uint32_t seed, std::uint32_t detail);
+// level is the number of icosphere subdivisions, below rock_level_count.
+// Vertices are shared and indexed (ready for meshlet building) with normals
+// taken from the shape function rather than from the faces.
+Mesh generate_rock(std::uint32_t seed, std::uint32_t level);
+// Projected radius in pixels above which each level from 1 upward is used.
+// The GPU culling pass applies the same thresholds.
+constexpr float rock_level_thresholds[rock_level_count - 1] = {3.f, 8.f, 20.f, 50.f, 130.f};
+// Rock level for a projected radius in pixels; no hysteresis, the levels
+// share one shape so switches are small.
+std::uint32_t select_rock_level(float projected_radius_pixels);
 std::vector<AsteroidInstance> generate_belt(const BeltParams& params);
+
+// Relative rock density across the belt, t = 0 at the inner edge and 1 at the
+// outer: three soft rings and one thin gap, so the belt reads as rings rather
+// than a uniform disc. Always within (0, 1]. The gas giant's belt shadow in
+// common.slang mirrors this profile.
+float belt_ring_density(float t);
 
 // Picks a LOD from the projected radius, keeping the previous level inside a
 // 15% hysteresis band around each transition.

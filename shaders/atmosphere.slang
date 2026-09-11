@@ -10,12 +10,13 @@ float miePhase(float mu, float g) {
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
-    int bodyIndex = clamp(int(root.base), 0, 1);
+    int bodyIndex = clamp(int(root.base), 0, MAX_BODIES - 1);
     Instance body = root.instances[bodyIndex];
     float3 centre = body.center_radius.xyz;
     float radius = max(body.center_radius.w, 1e-4);
-    bool gas = body.rotation_kind.w > .5;
-    float shellRadius = radius * (gas ? 1.010 : 1.018);
+    int kind = int(body.rotation_kind.w + .5);
+    bool gas = kind == 1, desert = kind == 4;
+    float shellRadius = radius * (gas ? 1.010 : desert ? 1.014 : 1.018);
     float3 ro = root.frame.camera_time.xyz;
     float3 rd = normalize(rayDirection(position.xy));
     float2 atmosphereHit = sphereHit(ro, rd, centre, shellRadius);
@@ -28,24 +29,29 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         float nearGround = groundHit.x > 0.0 ? groundHit.x : groundHit.y;
         end = min(end, nearGround);
     }
-    for (int i = 0; i < 3; ++i) if (i != bodyIndex) {
+    int bodyCount = int(root.frame.scene.x);
+    for (int i = 0; i < MAX_BODIES; ++i) if (i < bodyCount && i != bodyIndex) {
         float4 other = root.frame.bodies[i];
         float2 hit = sphereHit(ro, rd, other.xyz, other.w);
         if (hit.x > 0.0) end = min(end, hit.x);
     }
+    // Anything already drawn in front of the shell (asteroids, the moon) ends the march.
+    end = min(end, sceneDistance(position.xy, rd));
     if (end <= begin) return float4(0.0, 0.0, 0.0, 0.0);
 
     float3 sunDirection = normalize(root.frame.sun.xyz - centre);
     float solarRadiance = max(root.frame.sun.w, 0.0);
     float mu = dot(rd, sunDirection);
     float phaseR = 3.0 * (1.0 + mu * mu) / (16.0 * PI);
-    float phaseM = miePhase(mu, gas ? .62 : .72);
-    float3 betaR = gas ? float3(15.0, 23.0, 34.0) : float3(15.0, 35.0, 85.0);
-    float3 betaM = gas ? float3(15.0, 12.0, 10.0) : float3(9.0, 9.0, 9.0);
-    float3 scatterR = gas ? float3(.88, .70, .48) : float3(.68, .86, 1.0);
-    float3 scatterM = gas ? float3(1.0, .72, .43) : float3(1.0, .93, .82);
-    float scaleR = gas ? .0015 : .0025;
-    float scaleM = .001;
+    // Earth: blue Rayleigh sky. Gas giant: warm haze. Desert: a thin, dusty
+    // butterscotch atmosphere dominated by forward-scattering dust.
+    float phaseM = miePhase(mu, gas ? .62 : desert ? .55 : .72);
+    float3 betaR = gas ? float3(15.0, 23.0, 34.0) : desert ? float3(4.0, 5.0, 7.0) : float3(15.0, 35.0, 85.0);
+    float3 betaM = gas ? float3(15.0, 12.0, 10.0) : desert ? float3(9.0, 6.0, 3.5) : float3(9.0, 9.0, 9.0);
+    float3 scatterR = gas ? float3(.88, .70, .48) : desert ? float3(.85, .72, .58) : float3(.68, .86, 1.0);
+    float3 scatterM = gas ? float3(1.0, .72, .43) : desert ? float3(1.0, .66, .40) : float3(1.0, .93, .82);
+    float scaleR = gas ? .0015 : desert ? .004 : .0025;
+    float scaleM = desert ? .003 : .001;
     int viewSteps = root.frame.options.z > .5 ? 20 : 12;
     int lightSteps = root.frame.options.z > .5 ? 6 : 4;
     float segment = (end - begin) / float(viewSteps);

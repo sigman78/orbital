@@ -44,7 +44,7 @@ constexpr VkPresentModeKHR swapchain_present_mode = VK_PRESENT_MODE_FIFO_KHR;
 constexpr uint32 gpu_allocation_alignment = 16;
 constexpr uint32 max_surface_formats = 64;
 constexpr uint32 format_count = static_cast<uint32>(Format::undefined);
-constexpr uint32 conventional_texture_descriptor_count = 24;
+constexpr uint32 conventional_texture_descriptor_count = 32;
 
 [[nodiscard]] Error error_from_vk(VkResult result) noexcept
 {
@@ -3044,6 +3044,16 @@ PSO* create_mesh_pso(Device* device, const MeshPSODesc& desc) noexcept
                              desc.stencil_format, desc.rasterization, true);
 }
 
+// Heap owning a device address range; the conventional path needs the VkBuffer.
+static GpuHeapOwner* conventional_heap_for(Device* device, GpuRange range) noexcept
+{
+    GpuHeapOwner* heap = device->gpu_heaps;
+    const VkDeviceAddress address = reinterpret_cast<uintptr>(range.gpu);
+    while (heap && !(address >= heap->backing.address && address + range.size <= heap->backing.address + heap->backing.mapped_size)) heap = heap->next;
+    assert(heap);
+    return heap;
+}
+
 PSO* create_compute_pso(Device* device, Span<const uint32> compute_spirv) noexcept
 {
     assert(device && "create_compute_pso called with a null device");
@@ -3065,8 +3075,9 @@ PSO* create_compute_pso(Device* device, Span<const uint32> compute_spirv) noexce
     };
     const VkComputePipelineCreateInfo pso_info{
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-        .pNext = &flags_info,
+        .pNext = device->conventional_backend ? nullptr : static_cast<const void*>(&flags_info),
         .stage = stage,
+        .layout = device->conventional_backend ? device->conventional_pipeline_layout : VK_NULL_HANDLE,
         .basePipelineIndex = -1,
     };
     PSO* result = new PSO{
@@ -3675,6 +3686,13 @@ void draw_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments, u
 {
     assert(commands && commands->state);
     emit_root_data(commands, root);
+    if (commands->state->conventional_backend)
+    {
+        GpuHeapOwner* heap = conventional_heap_for(commands->state, arguments);
+        vkCmdDrawIndirect(commands->command_buffer, heap->backing.buffer, reinterpret_cast<uintptr>(arguments.gpu) - heap->backing.address, draw_count,
+                          stride == 0 ? sizeof(VkDrawIndirectCommand) : stride);
+        return;
+    }
     const VkDrawIndirect2InfoKHR info{
         .sType = VK_STRUCTURE_TYPE_DRAW_INDIRECT_2_INFO_KHR,
         .addressRange = {
@@ -3693,6 +3711,17 @@ void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indi
 {
     assert(commands && commands->state);
     emit_root_data(commands, root);
+    if (commands->state->conventional_backend)
+    {
+        GpuHeapOwner* index_heap = conventional_heap_for(commands->state, indices);
+        GpuHeapOwner* argument_heap = conventional_heap_for(commands->state, arguments);
+        vkCmdBindIndexBuffer(commands->command_buffer, index_heap->backing.buffer, reinterpret_cast<uintptr>(indices.gpu) - index_heap->backing.address,
+                             static_cast<VkIndexType>(type));
+        vkCmdDrawIndexedIndirect(commands->command_buffer, argument_heap->backing.buffer,
+                                 reinterpret_cast<uintptr>(arguments.gpu) - argument_heap->backing.address, draw_count,
+                                 stride == 0 ? sizeof(VkDrawIndexedIndirectCommand) : stride);
+        return;
+    }
     const VkBindIndexBuffer3InfoKHR bind_info{
         .sType = VK_STRUCTURE_TYPE_BIND_INDEX_BUFFER_3_INFO_KHR,
         .addressRange = {
@@ -3714,6 +3743,23 @@ void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indi
         .drawCount = draw_count,
     };
     commands->state->fn.cmd_draw_indexed_indirect(commands->command_buffer, &info);
+}
+
+void draw_indexed_indirect_count(CommandBuffer* commands, ByteSpan root, GpuRange indices, IndexType type, GpuRange arguments, GpuRange count,
+                                 uint32 max_draw_count, uint32 stride) noexcept
+{
+    assert(commands && commands->state);
+    assert(commands->state->conventional_backend && "draw_indexed_indirect_count is implemented on the conventional backend only");
+    emit_root_data(commands, root);
+    GpuHeapOwner* index_heap = conventional_heap_for(commands->state, indices);
+    GpuHeapOwner* argument_heap = conventional_heap_for(commands->state, arguments);
+    GpuHeapOwner* count_heap = conventional_heap_for(commands->state, count);
+    vkCmdBindIndexBuffer(commands->command_buffer, index_heap->backing.buffer, reinterpret_cast<uintptr>(indices.gpu) - index_heap->backing.address,
+                         static_cast<VkIndexType>(type));
+    vkCmdDrawIndexedIndirectCount(commands->command_buffer, argument_heap->backing.buffer,
+                                  reinterpret_cast<uintptr>(arguments.gpu) - argument_heap->backing.address, count_heap->backing.buffer,
+                                  reinterpret_cast<uintptr>(count.gpu) - count_heap->backing.address, max_draw_count,
+                                  stride == 0 ? sizeof(VkDrawIndexedIndirectCommand) : stride);
 }
 
 void dispatch(CommandBuffer* commands, ByteSpan root, uint32x3 group_count) noexcept

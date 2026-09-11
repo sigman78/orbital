@@ -17,13 +17,16 @@ constexpr Float4 jitter_sequence[8] = {{0, -.166667f, 0, 0},      {-.25f, .16666
                                        {.375f, .055556f, 0, 0},   {-.4375f, .388889f, 0, 0}};
 constexpr unsigned jitter_count = 8;
 
-// Exposure adaptation, read by apply_metering and record_post_passes.
+// Exposure adaptation, read by apply_metering and record_post_passes. The
+// meter is centre weighted; adaptation is slight (about one stop either way)
+// and asymmetric like the eye: quick to close down, slow to open up.
 namespace exposure_meter {
-inline constexpr unsigned interval = 16;    // frames between readbacks
-inline constexpr float min_weight = 0.004f; // texels below this weight do not vote
-inline constexpr float key = 0.18f;         // middle gray
-inline constexpr float rate = 0.08f;        // smoothing toward the target per readback
-inline constexpr Range<float> adapted{0.75f, 1.75f};
+inline constexpr unsigned interval = 16;                               // frames between readbacks
+inline constexpr float min_luminance = 0.004f;                         // darker texels (space) do not vote
+inline constexpr float key = 0.18f;                                    // middle gray
+inline constexpr float brighten_seconds = 2.5f, darken_seconds = 0.6f; // time constants of the exposure change
+inline constexpr float max_step_seconds = 1.f;                         // a stalled frame does not snap the adaptation
+inline constexpr Range<float> adapted{0.6f, 1.8f};
 } // namespace exposure_meter
 
 // Temporal history invalidation, read by build_frame.
@@ -34,8 +37,8 @@ inline constexpr double min_forward_dot = 0.7; // turn that invalidates the hist
 
 // Shadow map placement, read by build_frame.
 namespace shadow_placement {
-inline constexpr double giant_distance = 100.0; // inside this the map follows the giant, else Earth
-inline constexpr float giant_half_size = 70.f, earth_half_size = 12.f;
+inline constexpr double giant_distance = 100.0; // inside this the map follows the giant, else the nearer planet
+inline constexpr float giant_half_size = 70.f, earth_half_size = 12.f, mars_half_size = 10.f;
 } // namespace shadow_placement
 
 // Sun disc and lens flare, read by build_frame.
@@ -45,11 +48,11 @@ inline constexpr float screen_size = 0.008f;     // Frame.screen_sun.w
 inline constexpr float max_screen_offset = 1.3f; // beyond this the flare is off-screen
 } // namespace sun_flare
 
-// Per-rock and per-cluster culling, read by cull_belt and classify_rock.
+// Belt motion and per-rock culling limits, read by write_cull_scratch.
 namespace belt_culling {
-inline constexpr float cluster_bound_scale = 1.30f;               // the tilt/compression matrix has norm below 1.293
-inline constexpr double spin_rate = 0.008, rock_spin_rate = 0.08; // radians per simulation second
-inline constexpr float lod_switch_pixels = 5.f;                   // above this projected radius rocks use their own LOD
+inline constexpr double spin_rate = 0.0012, rock_spin_rate = 0.02; // radians per simulation second, barely visible
+inline constexpr float shear_exponent =
+    0.35f; // orbital rate falls with radius as r^-0.35: a hint of Kepler shear, not the real 1.5
 namespace billboard {
 inline constexpr float min_pixels = 0.06f;  // smaller rocks are dropped
 inline constexpr float pixel_radius = 1.2f; // rocks below this become fixed-size billboards
@@ -64,55 +67,30 @@ Float4 f4(Vec3d v, float w = 0) {
     return f4(to_float(v), w);
 }
 
-// Rock tint: slight per-instance albedo variation from the stable ID.
-Float4 rock_tint(unsigned id, float alpha) {
-    return {.8f + float(id % 7) * .05f, .84f, .78f, alpha};
-}
-
-// The belt is tilted and compressed relative to the giant, and spins with time.
+// The belt is tilted and compressed relative to the giant, and spins with time,
+// each radial band at its own rate so the rings slowly shear past each other.
+// The tilt is a rotation about X (cos .933, sin .36), so the belt plane normal
+// is fixed; the surface shader uses it to cast the belt's shadow on the giant.
+constexpr Vec3f belt_plane_normal{0.f, .933f, .36f};
+struct BeltTilt {
+    float y_scale = .7f, y_from_z = .36f, z_scale = .933f; // (x, y, z) -> (x, y * y_scale - z * y_from_z, z * z_scale)
+};
+constexpr BeltTilt belt_tilt{};
 struct BeltTransform {
-    float cos_spin, sin_spin;
-    Vec3f apply(Vec3f v) const {
-        const float bx = v.x * cos_spin - v.z * sin_spin, bz = v.x * sin_spin + v.z * cos_spin;
-        return {bx, v.y * .7f - bz * .36f, bz * .933f};
-    }
+    float cos_spin[belt::radial_bands], sin_spin[belt::radial_bands];
 };
 
-// Camera-relative frustum tests against non-unit plane normals.
-struct ViewVolume {
-    Vec3f right, up, forward;
-    float tan_x, tan_y, plane_x_scale, plane_y_scale;
-    float pixel_padding; // world units of padding per unit of depth (two pixels)
-
-    bool behind(Vec3f p, float radius) const { return dot(p, forward) < -radius; }
-    bool outside(Vec3f p, float radius) const {
-        const float z = std::max(dot(p, forward), 0.f);
-        const float padding = radius + z * pixel_padding;
-        return std::abs(dot(p, right)) > z * tan_x + padding * plane_x_scale ||
-               std::abs(dot(p, up)) > z * tan_y + padding * plane_y_scale;
+BeltTransform belt_transform(const BeltDescription& description, float angle) {
+    const float inner = float(description.inner_radius), outer = float(description.outer_radius);
+    const float middle = (inner + outer) * .5f;
+    BeltTransform transform{};
+    for (unsigned band = 0; band < belt::radial_bands; band++) {
+        const float radius = inner + (float(band) + .5f) / float(belt::radial_bands) * (outer - inner);
+        const float band_angle = angle * std::pow(middle / radius, belt_culling::shear_exponent);
+        transform.cos_spin[band] = std::cos(band_angle);
+        transform.sin_spin[band] = std::sin(band_angle);
     }
-};
-
-// True when the target sphere is entirely hidden behind one of the major bodies.
-bool fully_occluded(Vec3f target, float target_radius, std::span<const Vec3f> occluders,
-                    std::span<const float> occluder_radii) {
-    const float target_distance = length(target);
-    if (target_distance <= target_radius)
-        return false;
-    const Vec3f target_direction = target * (1.f / target_distance);
-    const float target_angle = std::asin(std::clamp(target_radius / target_distance, 0.f, 1.f));
-    for (std::size_t i = 0; i < occluders.size(); ++i) {
-        const float occluder_distance = length(occluders[i]), occluder_radius = occluder_radii[i];
-        if (occluder_distance <= occluder_radius ||
-            target_distance - target_radius <= occluder_distance + occluder_radius)
-            continue;
-        const float separation = std::acos(
-            std::clamp(dot(target_direction, occluders[i] * (1.f / occluder_distance)), -1.f, 1.f));
-        const float occluder_angle = std::asin(std::clamp(occluder_radius / occluder_distance, 0.f, 1.f));
-        if (separation + target_angle < occluder_angle)
-            return true;
-    }
-    return false;
+    return transform;
 }
 
 void write_projection(FrameData& frame, const Camera& camera, float aspect) {
@@ -146,16 +124,6 @@ void write_light_projection(FrameData& frame, Vec3d center, Vec3d sun, float hal
 
 } // namespace
 
-// Everything the per-rock classification needs, computed once per frame.
-struct RockCullContext {
-    ViewVolume view;
-    BeltTransform transform;
-    Vec3d giant_relative;
-    float pixels_per_unit_depth;
-    float rock_spin;
-    unsigned limit;
-};
-
 void Renderer::Impl::read_gpu_timings() {
     if (!frame_index)
         return;
@@ -171,17 +139,25 @@ void Renderer::Impl::read_gpu_timings() {
 void Renderer::Impl::apply_metering() {
     if (!meter_pending)
         return;
+    // Each meter texel holds log luminance, luminance and its centre weight.
     const auto* values = reinterpret_cast<const float*>(luminance_readback.range.cpu);
-    float sum = 0;
-    unsigned count = 0;
+    float log_sum = 0, weight_sum = 0;
     for (unsigned i = 0; i < targets::meter_size * targets::meter_size; i++)
-        if (values[i * 4 + 1] > exposure_meter::min_weight) {
-            sum += values[i * 4];
-            count++;
+        if (values[i * 4 + 1] > exposure_meter::min_luminance) {
+            log_sum += values[i * 4] * values[i * 4 + 2];
+            weight_sum += values[i * 4 + 2];
         }
-    const float target = count ? exposure_meter::adapted.clamp(exposure_meter::key / std::exp(sum / float(count)))
-                               : 1.f;
-    adapted_exposure += (target - adapted_exposure) * exposure_meter::rate;
+    const float target = weight_sum > 0
+                             ? exposure_meter::adapted.clamp(exposure_meter::key / std::exp(log_sum / weight_sum))
+                             : 1.f;
+    const auto now = std::chrono::steady_clock::now();
+    const float dt = meter_time == std::chrono::steady_clock::time_point{}
+                         ? exposure_meter::max_step_seconds
+                         : std::min(std::chrono::duration<float>(now - meter_time).count(),
+                                    exposure_meter::max_step_seconds);
+    meter_time = now;
+    const float tau = target < adapted_exposure ? exposure_meter::darken_seconds : exposure_meter::brighten_seconds;
+    adapted_exposure += (target - adapted_exposure) * (1 - std::exp(-dt / tau));
     meter_pending = false;
 }
 
@@ -208,16 +184,23 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.camera_time = {0, 0, 0, float(input.time)};
     frame.forward_exposure.w = input.exposure * (input.auto_exposure ? adapted_exposure : 1);
     frame.sun = f4(system.star.position - camera.position, sun_flare::disc_radius);
-    const bool giant_close = length(input.bodies[giant_index].position - camera.position) <
-                             shadow_placement::giant_distance;
-    const unsigned shadow_body = giant_close ? giant_index : earth_index;
+    const auto distance_to = [&](unsigned body) { return length(input.bodies[body].position - camera.position); };
+    const bool giant_close = distance_to(giant_index) < shadow_placement::giant_distance;
+    const bool mars_closer = distance_to(mars_index) < distance_to(earth_index);
+    const unsigned shadow_body = giant_close ? giant_index : (mars_closer ? mars_index : earth_index);
+    const float shadow_half_size = giant_close   ? shadow_placement::giant_half_size
+                                   : mars_closer ? shadow_placement::mars_half_size
+                                                 : shadow_placement::earth_half_size;
     write_light_projection(frame, input.bodies[shadow_body].position - camera.position,
-                           system.star.position - camera.position,
-                           giant_close ? shadow_placement::giant_half_size : shadow_placement::earth_half_size);
+                           system.star.position - camera.position, shadow_half_size);
+    const auto& ring = system.belts[0];
+    frame.belt_ring = {float(ring.inner_radius), float(ring.outer_radius), float(ring.density), float(ring.thickness)};
+    frame.belt_normal = f4(belt_plane_normal);
     frame.options = {float(extent.width), float(extent.height), input.high_quality ? 1.f : 0.f,
                      input.overlay ? 1.f : 0.f};
-    for (unsigned i = 0; i < major_body_count; i++)
+    for (unsigned i = 0; i < body_count; i++)
         frame.bodies[i] = f4(input.bodies[i].position - camera.position, float(input.bodies[i].radius));
+    frame.scene = {float(body_count), float(giant_index), 0, 0};
 
     // Sun position in screen space for the lens flare, hidden when a body covers it.
     const Vec3d sun_direction = normalized(system.star.position - camera.position);
@@ -239,100 +222,94 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     return frame;
 }
 
-// Adds one belt rock to the LOD groups or the billboard list, or drops it.
-void Renderer::Impl::classify_rock(unsigned id, const RockCullContext& context) {
-    const auto& rock = belt[id];
-    const Vec3f p = to_float(context.giant_relative + to_double(context.transform.apply(rock.position)));
-    const float radius = rock.scale.x * belt::rock_radius_scale * belt::size_tail(id);
-    const float z = dot(p, context.view.forward);
-    if (z < -radius)
-        return;
-    const float pixel_radius = radius * context.pixels_per_unit_depth / std::max(z, .1f);
-    if (pixel_radius < belt_culling::billboard::min_pixels || context.view.outside(p, radius))
-        return;
-    if (pixel_radius < belt_culling::billboard::pixel_radius) {
-        // Sub-pixel rocks become fixed-size billboards whose coverage fades in
-        // with their true size.
-        float coverage = pixel_radius * pixel_radius /
-                         (belt_culling::billboard::pixel_radius * belt_culling::billboard::pixel_radius);
-        coverage *= std::clamp(
-            (pixel_radius - belt_culling::billboard::min_pixels) / belt_culling::billboard::min_pixels, 0.f, 1.f);
-        distant.push_back({f4(p, radius * belt_culling::billboard::pixel_radius / pixel_radius),
-                           {0, 0, 0, float(SurfaceMode::billboard)},
-                           rock_tint(id, coverage)});
-        return;
+// The body instances occupy the first slots of the per-frame instance list.
+void Renderer::Impl::write_body_instances(const FrameInput& input, const FrameData& frame) {
+    instances.clear();
+    for (unsigned i = 0; i < body_count; i++) {
+        const BodyClass body_class = system.bodies[i].body_class;
+        // Moonlets are dark, reddish rock; the tint also seeds their texture offset.
+        const Float4 tint = body_class == BodyClass::Moonlet ? Float4{.34f, .30f, .27f, 1} : Float4{1, 1, 1, 1};
+        instances.push_back({frame.bodies[i],
+                             {0, float(input.bodies[i].rotation_angle), float(system.bodies[i].axial_tilt),
+                              float(surface_kind(body_class))},
+                             tint});
     }
-    const bool detailed = radius * context.pixels_per_unit_depth * 2 / std::max(z, .1f) >
-                          belt_culling::lod_switch_pixels;
-    lod_groups[detailed ? rock.variant : 0].push_back(
-        {f4(p, radius),
-         {rock.rotation.x, rock.rotation.y + context.rock_spin, rock.rotation.z, float(SurfaceMode::billboard)},
-         rock_tint(id, 1)});
 }
 
-// Fills the per-frame instance list: the major bodies first, then the belt
-// rocks grouped by LOD, then the sub-pixel billboards.
-BeltBatches Renderer::Impl::cull_belt(const FrameInput& input, const FrameData& frame) {
+// Everything the GPU culling pass needs this frame, mirroring the CPU
+// frustum test it replaced: plane normals are not unit length, so sphere
+// support is scaled, and two pixels of padding cover temporal jitter and
+// expanded tiny billboards.
+void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
+                                        std::uint64_t instance_address) {
     const Camera& camera = input.camera;
-    instances.clear();
-    distant.clear();
-    for (auto& group : lod_groups)
-        group.clear();
-    for (unsigned i = 0; i < major_body_count; i++)
-        instances.push_back({frame.bodies[i],
-                             {0, float(input.bodies[i].rotation_angle), float(system.bodies[i].axial_tilt), float(i)},
-                             {1, 1, 1, 1}});
-
-    const float belt_angle = float(input.time * belt_culling::spin_rate);
     const float tan_y = frame.right_tan.w, tan_x = tan_y * frame.up_aspect.w;
-    // Plane normals are not unit length; scale sphere support accordingly. Two
-    // pixels of padding also cover temporal jitter and expanded tiny billboards.
-    const RockCullContext context{.view = {.right = to_float(camera.right()),
-                                           .up = to_float(camera.up()),
-                                           .forward = to_float(camera.forward()),
-                                           .tan_x = tan_x,
-                                           .tan_y = tan_y,
-                                           .plane_x_scale = std::sqrt(1 + tan_x * tan_x),
-                                           .plane_y_scale = std::sqrt(1 + tan_y * tan_y),
-                                           .pixel_padding = tan_y * 4 / float(extent.height)},
-                                  .transform = {std::cos(belt_angle), std::sin(belt_angle)},
-                                  .giant_relative = input.bodies[giant_index].position - camera.position,
-                                  .pixels_per_unit_depth = float(extent.height) / (2 * frame.right_tan.w),
-                                  .rock_spin = float(input.time * belt_culling::rock_spin_rate),
-                                  .limit = (input.high_quality ? high_quality : baseline_quality).belt_count};
-    Vec3f occluders[major_body_count];
-    float occluder_radii[major_body_count];
-    for (unsigned i = 0; i < major_body_count; i++) {
-        occluders[i] = to_float(input.bodies[i].position - camera.position);
-        occluder_radii[i] = float(input.bodies[i].radius);
+    const BeltTransform transform = belt_transform(system.belts[0], float(input.time * belt_culling::spin_rate));
+    CullParams& p = scratch.params;
+    p = {};
+    p.right = f4(to_float(camera.right()), tan_x);
+    p.up = f4(to_float(camera.up()), tan_y);
+    p.forward = f4(to_float(camera.forward()), tan_y * 4 / float(extent.height));
+    p.view = {float(extent.height) / (2 * frame.right_tan.w), std::sqrt(1 + tan_x * tan_x),
+              std::sqrt(1 + tan_y * tan_y), float(input.time * belt_culling::rock_spin_rate)};
+    p.giant = f4(input.bodies[giant_index].position - camera.position);
+    p.belt_tilt = {belt_tilt.y_scale, belt_tilt.y_from_z, belt_tilt.z_scale, 0};
+    for (unsigned band = 0; band < belt::radial_bands; band++)
+        p.band_spin[band] = {transform.cos_spin[band], transform.sin_spin[band], 0, 0};
+    p.levels = {geometry::rock_level_thresholds[0], geometry::rock_level_thresholds[1],
+                geometry::rock_level_thresholds[2], geometry::rock_level_thresholds[3]};
+    p.billboard = {geometry::rock_level_thresholds[4], belt_culling::billboard::pixel_radius,
+                   belt_culling::billboard::min_pixels, 0};
+    const unsigned tier_count = (input.high_quality ? high_quality : baseline_quality).belt_count;
+    p.rock_limit = std::min(rock_count, belt_count_override ? belt_count_override : tier_count);
+    p.body_count = body_count;
+    for (unsigned group = 0; group < rock_group_count; group++) {
+        p.index_counts[group] = rocks[group].index_count;
+        p.first_indices[group] = rocks[group].first_index;
+        p.vertex_offsets[group] = rocks[group].vertex_offset;
     }
-    for (const auto& cluster : belt_clusters) {
-        const Vec3f position = to_float(context.giant_relative + to_double(context.transform.apply(cluster.center)));
-        const float radius = cluster.radius * belt_culling::cluster_bound_scale;
-        if (context.view.behind(position, radius) || context.view.outside(position, radius) ||
-            fully_occluded(position, radius, occluders, occluder_radii))
-            continue;
-        for (unsigned id : cluster.indices)
-            if (id < context.limit)
-                classify_rock(id, context);
+    scratch.instances = instance_address;
+    std::memset(scratch.counts, 0, sizeof scratch.counts);
+    std::memset(scratch.cursors, 0, sizeof scratch.cursors);
+}
+
+// Statistics from the previous frame's culling, read back once its GPU work
+// has completed. The triangle count is what those draws submitted.
+void Renderer::Impl::read_cull_counts(const CullScratch& scratch) {
+    unsigned rocks_visible = 0, triangles = 0, groups_drawn = 0;
+    for (unsigned group = 0; group < rock_group_count; group++) {
+        rocks_visible += scratch.counts[group];
+        triangles += scratch.counts[group] * (scratch.params.index_counts[group] / 3);
+        groups_drawn += scratch.counts[group] ? 1 : 0;
     }
-    BeltBatches batches;
-    for (unsigned lod = 0; lod < geometry::lod_count; lod++) {
-        batches.bases[lod] = unsigned(instances.size());
-        batches.counts[lod] = unsigned(lod_groups[lod].size());
-        instances.insert(instances.end(), lod_groups[lod].begin(), lod_groups[lod].end());
+    stats.rock_groups_drawn = groups_drawn; // equals scratch.draw_count once the prefix pass has run
+    rocks_visible += scratch.counts[rock_group_count];
+    triangles += scratch.counts[rock_group_count] * 2;
+    stats.visible_asteroids = rocks_visible;
+    stats.rock_triangles = triangles;
+}
+
+void Renderer::Impl::record_cull_passes(gpu::CommandBuffer* cmd, const CullRoot& root) {
+    constexpr unsigned pass_count = 3, prefix_pass = 1;
+    gpu::bind_pso(cmd, pso.cull);
+    const unsigned groups = (rock_count + ORBITAL_CULL_THREADS - 1) / ORBITAL_CULL_THREADS;
+    for (unsigned pass = 0; pass < pass_count; pass++) {
+        CullRoot pass_root = root;
+        pass_root.pass = pass;
+        gpu::dispatch(cmd, pass_root, {pass == prefix_pass ? 1u : groups, 1, 1});
+        const bool last = pass + 1 == pass_count;
+        gpu::barrier(cmd, gpu::Stage::compute, gpu::Access::shader_write,
+                     last ? gpu::Stage::indirect | gpu::Stage::vertex | gpu::Stage::fragment : gpu::Stage::compute,
+                     last ? gpu::Access::indirect_read | gpu::Access::shader_read
+                          : gpu::Access::shader_read | gpu::Access::shader_write);
     }
-    batches.distant_base = unsigned(instances.size());
-    batches.distant_count = unsigned(distant.size());
-    instances.insert(instances.end(), distant.begin(), distant.end());
-    stats.visible_asteroids = unsigned(instances.size() - major_body_count);
-    return batches;
 }
 
 void Renderer::Impl::draw_mesh(gpu::CommandBuffer* cmd, Root& root, const GpuMesh& mesh, unsigned base,
                                unsigned instance_count) {
     root.base = base;
     root.vertices = mesh.vertices;
+    stats.draw_calls++;
     gpu::draw_indexed(cmd, root, {reinterpret_cast<void*>(mesh.indices), std::uint64_t(mesh.index_count) * 4},
                       gpu::IndexType::uint32, mesh.index_count, instance_count);
     stats.triangles += mesh.index_count / 3 * instance_count;
@@ -345,22 +322,20 @@ void Renderer::Impl::fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, 
     gpu::begin_render_pass(cmd, {.colors = {&attachment, 1}});
     gpu::bind_pso(cmd, pipeline);
     gpu::draw(cmd, root, 3);
+    stats.draw_calls++;
     gpu::end_render_pass(cmd);
     gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
                  gpu::Access::shader_read);
 }
 
-void Renderer::Impl::record_shadow_pass(gpu::CommandBuffer* cmd, Root root, const BeltBatches& batches) {
+void Renderer::Impl::record_shadow_pass(gpu::CommandBuffer* cmd, Root root) {
     root.mode = std::uint32_t(SurfaceMode::shadow);
     gpu::begin_render_pass(cmd, {.depth = {.render_view = shadow_map.view, .load = gpu::LoadOp::clear}});
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
     gpu::bind_pso(cmd, pso.shadow);
     const unsigned triangles_before = stats.triangles;
-    for (unsigned i = 0; i < major_body_count; i++)
-        draw_mesh(cmd, root, spheres[2], i, 1);
-    for (unsigned lod = 0; lod < geometry::lod_count; lod++)
-        if (batches.counts[lod])
-            draw_mesh(cmd, root, rocks[lod], batches.bases[lod], batches.counts[lod]);
+    for (unsigned i = 0; i < body_count; i++)
+        draw_mesh(cmd, root, body_mesh(i, 2), i, 1);
     stats.triangles = triangles_before; // shadow geometry is not counted in the frame statistic
     gpu::end_render_pass(cmd);
     gpu::barrier(cmd, gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_write, gpu::Stage::fragment,
@@ -368,31 +343,40 @@ void Renderer::Impl::record_shadow_pass(gpu::CommandBuffer* cmd, Root root, cons
 }
 
 void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input,
-                                       const FrameData& frame, const BeltBatches& batches) {
+                                       const FrameData& frame, std::uint64_t args_address) {
     root.mode = std::uint32_t(SurfaceMode::opaque);
     gpu::ColorAttachment color{.render_view = hdr.view, .load = gpu::LoadOp::clear};
     gpu::begin_render_pass(cmd,
                            {.colors = {&color, 1}, .depth = {.render_view = depth.view, .load = gpu::LoadOp::clear}});
     gpu::bind_pso(cmd, pso.background);
     gpu::draw(cmd, root, 3);
+    stats.draw_calls++;
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
     gpu::bind_pso(cmd, pso.opaque);
-    for (unsigned i = 0; i < major_body_count; i++) {
+    for (unsigned i = 0; i < body_count; i++) {
         const float distance = float(length(input.bodies[i].position - input.camera.position));
         const float projected = float(input.bodies[i].radius) * float(extent.height) / (distance * frame.right_tan.w);
-        draw_mesh(cmd, root, spheres[geometry::select_lod(projected, 2)], i, 1);
+        draw_mesh(cmd, root, body_mesh(i, geometry::select_lod(projected, 2)), i, 1);
     }
-    for (unsigned lod = 0; lod < geometry::lod_count; lod++)
-        if (batches.counts[lod])
-            draw_mesh(cmd, root, rocks[lod], batches.bases[lod], batches.counts[lod]);
+    // Rocks: one multi-draw over the pooled mesh; the culling pass wrote every
+    // group's count, base and slice into the argument array.
+    root.base = 0;
+    root.vertices = rock_pool.vertices;
+    gpu::draw_indexed_indirect_count(
+        cmd, root, {reinterpret_cast<void*>(rock_pool.indices), std::uint64_t(rock_pool.index_count) * 4},
+        gpu::IndexType::uint32, {reinterpret_cast<void*>(args_address), sizeof(DrawArgs) * rock_group_count},
+        {reinterpret_cast<void*>(args_address - offsetof(CullScratch, args) + offsetof(CullScratch, draw_count)),
+         sizeof(std::uint32_t)},
+        rock_group_count, sizeof(DrawArgs));
+    stats.draw_calls++;
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
     gpu::bind_pso(cmd, pso.cloud);
-    if (batches.distant_count) {
-        root.base = batches.distant_base;
-        root.mode = std::uint32_t(SurfaceMode::billboard);
-        gpu::draw(cmd, root, 6, batches.distant_count);
-        stats.triangles += batches.distant_count * 2;
-    }
+    root.mode = std::uint32_t(SurfaceMode::billboard);
+    gpu::draw_indirect(cmd, root,
+                       {reinterpret_cast<void*>(args_address + rock_group_count * sizeof(DrawArgs)), sizeof(DrawArgs)},
+                       1, sizeof(DrawArgs));
+    stats.draw_calls++;
+    stats.triangles += stats.rock_triangles;
     root.mode = std::uint32_t(SurfaceMode::cloud);
     draw_mesh(cmd, root, spheres[geometry::lod_count - 1], earth_index, 1);
     gpu::end_render_pass(cmd);
@@ -428,7 +412,7 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
 bool Renderer::draw(const FrameInput& input) {
     const auto start = std::chrono::steady_clock::now();
     auto& s = *impl_;
-    ORBITAL_ASSERT(input.bodies.size() >= major_body_count);
+    ORBITAL_ASSERT(input.bodies.size() == s.body_count);
     gpu::wait_timeline({s.timeline, s.serial});
     s.read_gpu_timings();
     s.apply_metering();
@@ -439,24 +423,37 @@ bool Renderer::draw(const FrameInput& input) {
     const auto swap = gpu::acquire(s.device);
     if (!swap.render_view)
         return false;
+    const auto prepare_start = std::chrono::steady_clock::now();
 
     const unsigned history_write = s.frame_index % 2;
     s.bind(Slot::history_a, s.history[history_write]);
     s.bind(Slot::history_b, s.history[1 - history_write]);
     const FrameData frame = s.build_frame(input);
-    const BeltBatches batches = s.cull_belt(input, frame);
+    s.write_body_instances(input, frame);
     s.stats.triangles = 0;
+    s.stats.draw_calls = 0;
 
-    // Per-frame constants and instances live in the dynamic half of the static heap.
+    // Per-frame constants, culling scratch and instances live in the dynamic
+    // half of the static heap; the previous frame's culling counts are read
+    // before the scratch is reset.
     const auto frame_address = reinterpret_cast<std::uint64_t>(s.data.range.gpu) + heap_layout.dynamic_offset;
-    std::memcpy(s.data.range.cpu + heap_layout.dynamic_offset, &frame, sizeof frame);
-    std::memcpy(s.data.range.cpu + heap_layout.dynamic_offset + heap_layout.instance_offset, s.instances.data(),
-                s.instances.size() * sizeof(Instance));
+    auto* dynamic = s.data.range.cpu + heap_layout.dynamic_offset;
+    auto* scratch = reinterpret_cast<CullScratch*>(dynamic + heap_layout.cull_offset);
+    s.read_cull_counts(*scratch);
+    std::memcpy(dynamic, &frame, sizeof frame);
+    s.write_cull_scratch(input, frame, *scratch, frame_address + heap_layout.instance_offset);
+    std::memcpy(dynamic + heap_layout.instance_offset, s.instances.data(), s.instances.size() * sizeof(Instance));
     Root root{.frame = frame_address,
               .vertices = 0,
               .instances = frame_address + heap_layout.instance_offset,
               .base = 0,
               .mode = 0};
+    const CullRoot cull_root{.frame = frame_address,
+                             .rocks = s.rock_data,
+                             .scratch = frame_address + heap_layout.cull_offset,
+                             .pass = 0,
+                             .unused = 0};
+    const std::uint64_t args_address = frame_address + heap_layout.cull_offset + offsetof(CullScratch, args);
 
     auto* cmd = gpu::begin_commands(s.device);
     const auto stamp = [&](unsigned index) {
@@ -471,23 +468,28 @@ bool Renderer::draw(const FrameInput& input) {
                  gpu::Access::shader_read | gpu::Access::color_write | gpu::Access::depth_stencil_write,
                  gpu::Stage::all_commands,
                  gpu::Access::color_write | gpu::Access::depth_stencil_write | gpu::Access::shader_read);
-    s.record_shadow_pass(cmd, root, batches);
+    s.record_cull_passes(cmd, cull_root);
+    s.record_shadow_pass(cmd, root);
     stamp(1);
-    s.record_scene_pass(cmd, root, input, frame, batches);
+    s.record_scene_pass(cmd, root, input, frame, args_address);
     stamp(2);
     gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::color_output,
                  gpu::Access::color_read | gpu::Access::color_write);
-    // Atmosphere is composited per body, giant first so Earth's stays on top.
-    root.mode = 0;
-    root.base = giant_index;
-    s.fullscreen_pass(cmd, s.hdr, s.pso.atmosphere, root, true);
-    root.base = earth_index;
-    s.fullscreen_pass(cmd, s.hdr, s.pso.atmosphere, root, true);
-    stamp(3);
+    // The atmosphere passes and the temporal pass read the scene depth.
     gpu::barrier(cmd, gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_write, gpu::Stage::fragment,
                  gpu::Access::shader_read);
+    // Atmosphere is composited per body; the depth clamp orders them against
+    // geometry, and Earth's goes last so it stays on top where shells overlap.
+    root.mode = 0;
+    for (unsigned body : {s.giant_index, s.mars_index, s.earth_index}) {
+        root.base = body;
+        s.fullscreen_pass(cmd, s.hdr, s.pso.atmosphere, root, true);
+    }
+    stamp(3);
     s.record_post_passes(cmd, root, swap.render_view);
     stamp(4);
+    s.stats.prepare_ms =
+        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - prepare_start).count();
     gpu::submit_and_present(s.device, {cmd}, {s.timeline, ++s.serial});
 
     s.frame_index++;

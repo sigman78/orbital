@@ -732,6 +732,10 @@ void draw_indexed(CommandBuffer* commands, ByteSpan root, GpuRange indices, Inde
 void draw_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments, uint32 draw_count = 1, uint32 stride = 0) noexcept;
 void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indices, IndexType type, GpuRange arguments, uint32 draw_count = 1,
                            uint32 stride = 0) noexcept;
+// Multi-draw whose draw count is read from GPU memory (a uint32 at count.gpu), capped at max_draw_count.
+// Implemented on the conventional backend only.
+void draw_indexed_indirect_count(CommandBuffer* commands, ByteSpan root, GpuRange indices, IndexType type, GpuRange arguments, GpuRange count,
+                                 uint32 max_draw_count, uint32 stride = 0) noexcept;
 void dispatch(CommandBuffer* commands, ByteSpan root, uint32x3 group_count) noexcept;
 void dispatch_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments) noexcept;
 void draw_meshlets(CommandBuffer* commands, ByteSpan root, uint32x3 group_count) noexcept;
