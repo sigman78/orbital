@@ -272,7 +272,7 @@ Input gather_input(HWND window, AppState& app) {
 }
 
 void update_title(HWND window, const render::Stats& stats, bool high) {
-    const int fps = int(1000 / std::max(stats.frame_ms, 0.1));
+    const int fps = int(1000 / std::max(stats.frame_ms, 0.1f));
     const auto title = std::format(
         L"ORBITAL  |  {} FPS  |  {}  |  {} asteroids  |  RMB + WASD / T tour / 1-3 planets / F1 help", fps,
         high ? L"HIGH" : L"BASELINE", stats.visible_asteroids);
@@ -280,7 +280,7 @@ void update_title(HWND window, const render::Stats& stats, bool high) {
 }
 
 struct FrameTimes {
-    std::vector<double> cpu_ms, gpu_ms;
+    std::vector<float> cpu_ms, gpu_ms;
 };
 
 void write_benchmark(const std::filesystem::path& path, const FrameTimes& times) {
@@ -355,16 +355,22 @@ int run(const Options& options) {
         app.bodies = evaluate_system(system, simulation_time);
         app.camera.step(dt, elapsed, gather_input(window.handle, app), app.bodies);
 
-        if (renderer.draw(app.camera, app.bodies, simulation_time, app.exposure, app.high, app.overlay,
-                          app.auto_exposure)) {
+        const render::FrameInput frame_input{.camera = app.camera,
+                                             .bodies = app.bodies,
+                                             .time = simulation_time,
+                                             .exposure = app.exposure,
+                                             .high_quality = app.high,
+                                             .overlay = app.overlay,
+                                             .auto_exposure = app.auto_exposure};
+        if (renderer.draw(frame_input)) {
             frames++;
             const auto stats = renderer.stats();
             times.cpu_ms.push_back(stats.frame_ms);
             times.gpu_ms.push_back(stats.gpu_ms);
             if (!app.capture_request.empty()) {
                 const auto path = directory / app.capture_request;
-                renderer.capture(path);
-                log::info("Saved {}", path.string());
+                if (renderer.capture(path))
+                    log::info("Saved {}", path.string());
                 app.capture_request.clear();
             }
             const bool frames_done = options.frame_limit && frames >= options.frame_limit;

@@ -3,26 +3,42 @@
 #include "scene/system.hpp"
 #include <filesystem>
 #include <memory>
+#include <span>
 
 namespace space::render {
+
 struct Stats {
-    double frame_ms{}, gpu_ms{}, shadow_ms{}, surface_ms{}, atmosphere_ms{}, post_ms{};
-    unsigned visible_asteroids{}, triangles{};
+    float frame_ms = 0, gpu_ms = 0, shadow_ms = 0, surface_ms = 0, atmosphere_ms = 0, post_ms = 0;
+    unsigned visible_asteroids = 0, triangles = 0;
 };
+
+// Everything the renderer needs for one frame; owned by the caller.
+struct FrameInput {
+    const Camera& camera;
+    std::span<const BodyState> bodies; // at least the three major bodies, in system order
+    double time = 0;                   // simulation seconds; drives belt spin and rock rotation
+    float exposure = 1;                // manual exposure multiplier
+    bool high_quality = false;
+    bool overlay = true;
+    bool auto_exposure = true;
+};
+
 class Renderer {
 public:
-    Renderer(void* hwnd, const SystemDescription&, const std::filesystem::path& executable_directory);
+    Renderer(void* window, const SystemDescription& system, const std::filesystem::path& directory);
     ~Renderer();
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
-    bool draw(const Camera&, const std::vector<BodyState>&, double simulation_time, float exposure, bool high_quality,
-              bool overlay, bool auto_exposure = true);
-    void capture(const std::filesystem::path& path);
-    const char* device_name() const;
+
+    // False when there is no drawable surface (minimized) or no swapchain image.
+    bool draw(const FrameInput& input);
+    // Saves the last rendered frame as PNG; false (after logging) if it could not be written.
+    bool capture(const std::filesystem::path& path);
     Stats stats() const;
 
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
 } // namespace space::render

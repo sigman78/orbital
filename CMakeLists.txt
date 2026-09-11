@@ -60,7 +60,7 @@ if(ORBITAL_BUILD_DEMO)
   endforeach()
   add_custom_target(orbital_shaders DEPENDS ${ORBITAL_SHADER_OUTPUTS})
 
-  add_executable(orbital src/app/main.cpp src/app/hud.cpp src/render/renderer.cpp)
+  add_executable(orbital src/app/main.cpp src/app/hud.cpp src/render/renderer_resources.cpp src/render/renderer_frame.cpp)
   target_link_libraries(orbital PRIVATE orbital_scene orbital_assets NoGraphicsAPI::NoGraphicsAPI user32 gdi32)
   target_include_directories(orbital PRIVATE shaders) # scene_shared.h, the C++/shader layout
   target_compile_definitions(orbital PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
