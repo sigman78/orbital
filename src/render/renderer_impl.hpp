@@ -21,7 +21,7 @@ namespace space::render {
 
 // --- Fixed layout shared with the shaders -------------------------------------
 
-// Sampled texture descriptor slots (shaders/common.slang binds 24).
+// Sampled texture descriptor slots (shaders/common.slang binds 32).
 enum class Slot : unsigned {
     hdr = 0,
     bloom_a = 1,
@@ -45,7 +45,13 @@ enum class Slot : unsigned {
     mars_albedo = 19,
     mars_normal = 20,
     moon_normal = 21,
-    count = 24,
+    rock_face_albedo = 22, // second and third rock sets follow the first's albedo, normal+height, roughness order
+    rock_face_normal = 23,
+    rock_face_roughness = 24,
+    rock_boulder_albedo = 25,
+    rock_boulder_normal = 26,
+    rock_boulder_roughness = 27,
+    count = 32,
 };
 
 // Sampler descriptor slots (shaders/common.slang binds 4).
@@ -155,7 +161,7 @@ struct Upload {
 };
 
 // Uploads and their GPU images are created a handful at a time.
-constexpr std::size_t inline_upload_count = 16;
+constexpr std::size_t inline_upload_count = 24;
 using Uploads = SmallVec<Upload, inline_upload_count>;
 
 // Spatial bin of belt instances for coarse frustum and occlusion culling.
@@ -167,9 +173,15 @@ struct BeltCluster {
     std::span<const unsigned> indices;
 };
 
-// Where each LOD group and the billboards landed in the per-frame instance list.
+// One draw group per (shape, level) pair of the rock library.
+constexpr unsigned rock_group_count = geometry::rock_shape_count * geometry::rock_level_count;
+constexpr unsigned rock_group(unsigned shape, unsigned level) {
+    return shape * geometry::rock_level_count + level;
+}
+
+// Where each rock group and the billboards landed in the per-frame instance list.
 struct BeltBatches {
-    std::array<unsigned, geometry::lod_count> bases{}, counts{};
+    std::array<unsigned, rock_group_count> bases{}, counts{};
     unsigned distant_base = 0, distant_count = 0;
 };
 
@@ -191,7 +203,8 @@ struct Renderer::Impl {
         gpu::PSO *opaque = nullptr, *cloud = nullptr, *background = nullptr, *atmosphere = nullptr, *bloom = nullptr,
                  *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr;
     } pso;
-    std::array<GpuMesh, geometry::lod_count> spheres{}, rocks{};
+    std::array<GpuMesh, geometry::lod_count> spheres{};
+    std::array<GpuMesh, rock_group_count> rocks{};        // the rock library, indexed by rock_group
     std::array<GpuMesh, max_body_count> moonlet_meshes{}; // per body index; only moonlets are filled
     std::vector<geometry::AsteroidInstance> belt;
     std::vector<unsigned> belt_order; // belt indices grouped by cluster
@@ -215,7 +228,7 @@ struct Renderer::Impl {
 
     // Per-frame scratch, cleared and reused.
     std::vector<Instance> instances;
-    std::array<std::vector<Instance>, geometry::lod_count> lod_groups;
+    std::array<std::vector<Instance>, rock_group_count> rock_groups;
     std::vector<Instance> distant;
 
     ~Impl();

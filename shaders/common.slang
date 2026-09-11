@@ -1,6 +1,6 @@
 #include "scene_shared.h"
 
-[[vk::binding(0, 0)]] Texture2D<float4> textures[24];
+[[vk::binding(0, 0)]] Texture2D<float4> textures[32];
 [[vk::binding(1, 0)]] SamplerState samplers[4];
 [[vk::push_constant]] ConstantBuffer<Root> root;
 

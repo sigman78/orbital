@@ -54,7 +54,6 @@ inline constexpr float cluster_bound_scale = 1.30f;                // the tilt/c
 inline constexpr double spin_rate = 0.0012, rock_spin_rate = 0.02; // radians per simulation second, barely visible
 inline constexpr float shear_exponent =
     0.35f; // orbital rate falls with radius as r^-0.35: a hint of Kepler shear, not the real 1.5
-inline constexpr float lod_switch_pixels = 5.f; // above this projected radius rocks use their own LOD
 namespace billboard {
 inline constexpr float min_pixels = 0.06f;  // smaller rocks are dropped
 inline constexpr float pixel_radius = 1.2f; // rocks below this become fixed-size billboards
@@ -69,9 +68,14 @@ Float4 f4(Vec3d v, float w = 0) {
     return f4(to_float(v), w);
 }
 
-// Rock tint: slight per-instance albedo variation from the stable ID.
-Float4 rock_tint(unsigned id, float alpha) {
-    return {.8f + float(id % 7) * .05f, .84f, .78f, alpha};
+// Rock tint: slight per-instance albedo variation from the stable ID. w is
+// the billboard coverage, or for mesh rocks a per-rock material seed in [0, 1).
+Float4 rock_tint(unsigned id, float w) {
+    return {.8f + float(id % 7) * .05f, .84f, .78f, w};
+}
+
+float rock_material_seed(unsigned id) {
+    return float((id * 2654435761u) >> 16 & 0xffffu) / 65536.f;
 }
 
 // The belt is tilted and compressed relative to the giant, and spins with time,
@@ -299,11 +303,12 @@ void Renderer::Impl::classify_rock(unsigned id, const RockCullContext& context, 
                            rock_tint(id, coverage)});
         return;
     }
-    const bool detailed = radius * context.pixels_per_unit_depth * 2 / std::max(z, .1f) >
-                          belt_culling::lod_switch_pixels;
     const Vec3f rotation = rock.rotation + rock.spin * context.rock_spin;
-    lod_groups[detailed ? rock.variant : 0].push_back(
-        {f4(p, radius), {rotation.x, rotation.y, rotation.z, float(SurfaceMode::billboard)}, rock_tint(id, 1)});
+    const unsigned level = geometry::select_rock_level(pixel_radius);
+    rock_groups[rock_group(rock.variant, level)].push_back(
+        {f4(p, radius),
+         {rotation.x, rotation.y, rotation.z, float(SurfaceKind::rock)},
+         rock_tint(id, rock_material_seed(id))});
 }
 
 // Fills the per-frame instance list: the major bodies first, then the belt
@@ -312,7 +317,7 @@ BeltBatches Renderer::Impl::cull_belt(const FrameInput& input, const FrameData& 
     const Camera& camera = input.camera;
     instances.clear();
     distant.clear();
-    for (auto& group : lod_groups)
+    for (auto& group : rock_groups)
         group.clear();
     for (unsigned i = 0; i < body_count; i++) {
         const BodyClass body_class = system.bodies[i].body_class;
@@ -359,10 +364,10 @@ BeltBatches Renderer::Impl::cull_belt(const FrameInput& input, const FrameData& 
                 classify_rock(id, context, cluster.band);
     }
     BeltBatches batches;
-    for (unsigned lod = 0; lod < geometry::lod_count; lod++) {
-        batches.bases[lod] = unsigned(instances.size());
-        batches.counts[lod] = unsigned(lod_groups[lod].size());
-        instances.insert(instances.end(), lod_groups[lod].begin(), lod_groups[lod].end());
+    for (unsigned group = 0; group < rock_group_count; group++) {
+        batches.bases[group] = unsigned(instances.size());
+        batches.counts[group] = unsigned(rock_groups[group].size());
+        instances.insert(instances.end(), rock_groups[group].begin(), rock_groups[group].end());
     }
     batches.distant_base = unsigned(instances.size());
     batches.distant_count = unsigned(distant.size());
@@ -421,9 +426,9 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
         const float projected = float(input.bodies[i].radius) * float(extent.height) / (distance * frame.right_tan.w);
         draw_mesh(cmd, root, body_mesh(i, geometry::select_lod(projected, 2)), i, 1);
     }
-    for (unsigned lod = 0; lod < geometry::lod_count; lod++)
-        if (batches.counts[lod])
-            draw_mesh(cmd, root, rocks[lod], batches.bases[lod], batches.counts[lod]);
+    for (unsigned group = 0; group < rock_group_count; group++)
+        if (batches.counts[group])
+            draw_mesh(cmd, root, rocks[group], batches.bases[group], batches.counts[group]);
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
     gpu::bind_pso(cmd, pso.cloud);
     if (batches.distant_count) {

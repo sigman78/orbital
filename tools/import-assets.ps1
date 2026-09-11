@@ -22,7 +22,11 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
 $solar = 'https://www.solarsystemscope.com/textures/download/'
-$haven = 'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/worn_rock_natural_01/'
+$havenJpg = 'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/'
+$havenPng = 'https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/'
+$havenWorn = 'Poly Haven: Worn Rock Natural 01, Dimitrios Savva and Rob Tuytel'
+$havenFace = 'Poly Haven: Rock Face 03, Rob Tuytel'
+$havenBoulder = 'Poly Haven: Rock Boulder Dry, Rob Tuytel'
 $moonKit = 'https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/'
 $mola = 'https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x/meg016/'
 $nasaMoon = 'NASA/GSFC Scientific Visualization Studio, CGI Moon Kit (LRO LROC and LOLA data)'
@@ -41,9 +45,16 @@ $assets = @(
     @{ Name = 'moon_normal';    Source = 'ldem_16_uint.tif';      Url = $moonKit; Hash = '45A2B32D56E81ED30DB07FEAD8ABC842B249B6511219D9CA2C53F81BC2DC5D62'; License = 'Public-Domain-NASA'; Attribution = $nasaMoon; ColorSpace = 'linear-data'; NormalConvention = 'DirectX (green = south), height in alpha'; Bake = @{ Format = 'ldem-uint16'; RadiusKm = 1737.4; Strength = 1.5 } }
     @{ Name = 'mars_albedo';    Source = '8k_mars.jpg';           Url = $solar; Hash = '4CC52149924ABC6AE507D63032F994E1D42A55CB82C09E002D1A567FF66C23EE'; License = 'CC-BY-4.0'; Attribution = 'Solar System Scope'; ColorSpace = 'sRGB' }
     @{ Name = 'mars_normal';    Source = 'megt90n000eb.img';      Url = $mola; Hash = 'D18D9B9AB8C5516D02E157DD2CDE0F1D0D160C21940E953BA22391269A545E7B'; License = 'Public-Domain-NASA'; Attribution = $nasaMars; ColorSpace = 'linear-data'; NormalConvention = 'DirectX (green = south), height in alpha'; Bake = @{ Format = 'pds-int16'; RadiusKm = 3396.2; Strength = 1.5 } }
-    @{ Name = 'rock_albedo';    Source = 'worn_rock_natural_01_diff_1k.jpg';   Url = $haven; Hash = 'EF6C74732C61974C5DF7F0F7185E7D6A97308198BF10AEC7A0E95E953A617D9E'; License = 'CC0-1.0'; Attribution = 'Poly Haven: Worn Rock Natural 01, Dimitrios Savva and Rob Tuytel'; ColorSpace = 'sRGB' }
-    @{ Name = 'rock_normal';    Source = 'worn_rock_natural_01_nor_gl_1k.jpg'; Url = $haven; Hash = '77A5D3F833AA9613581A5C6EF11422923C04B529F893A16D25704529BE7386DC'; License = 'CC0-1.0'; Attribution = 'Poly Haven: Worn Rock Natural 01, Dimitrios Savva and Rob Tuytel'; ColorSpace = 'linear-data'; NormalConvention = 'OpenGL +Y' }
-    @{ Name = 'rock_roughness'; Source = 'worn_rock_natural_01_rough_1k.jpg';  Url = $haven; Hash = '6A96E1A9A86942D3A19FC332E1C0050390A34E7814CE20865A44C3916BD9B428'; License = 'CC0-1.0'; Attribution = 'Poly Haven: Worn Rock Natural 01, Dimitrios Savva and Rob Tuytel'; ColorSpace = 'linear-data' }
+    # Three CC0 rock sets at 2K for the belt: albedo, normal+height (packed by tools/pack-normal-height.py) and roughness.
+    @{ Name = 'rock_albedo';    Source = 'worn_rock_natural_01_diff_2k.jpg';   Url = $havenJpg + 'worn_rock_natural_01/'; Hash = '084E528A8B63684CF6CD9C9C1D44CEF32A8F4C9E8404394A4A1A40C70CBF000D'; License = 'CC0-1.0'; Attribution = $havenWorn; ColorSpace = 'sRGB' }
+    @{ Name = 'rock_normal';    Source = 'worn_rock_natural_01_nor_gl_2k.jpg'; Url = $havenJpg + 'worn_rock_natural_01/'; Hash = '51FB7B64EDA0D68BABD621C43A06D89300D789F27FBE63D917CD7B6AB93365CB'; License = 'CC0-1.0'; Attribution = $havenWorn; ColorSpace = 'linear-data'; NormalConvention = 'DirectX (green = +v), height in alpha'; Pack = @{ Source = 'worn_rock_natural_01_disp_2k.png'; Url = $havenPng + 'worn_rock_natural_01/'; Hash = '18F7556D90EA400C180547D74CADDFAF8DC6D3FD7ECE9061B5544058E2A5F200' } }
+    @{ Name = 'rock_roughness'; Source = 'worn_rock_natural_01_rough_2k.jpg';  Url = $havenJpg + 'worn_rock_natural_01/'; Hash = '1AAC2CF72392F1207B5DBF880CBE0EF58D4C7EECD9DADC12640F031670969395'; License = 'CC0-1.0'; Attribution = $havenWorn; ColorSpace = 'linear-data' }
+    @{ Name = 'rock_face_albedo';    Source = 'rock_face_03_diff_2k.jpg';   Url = $havenJpg + 'rock_face_03/'; Hash = '644EE79DF7FFBF5F6AFC330B64DD3F33794BAB8820915FE61FFE0C88ECFD7ECE'; License = 'CC0-1.0'; Attribution = $havenFace; ColorSpace = 'sRGB' }
+    @{ Name = 'rock_face_normal';    Source = 'rock_face_03_nor_gl_2k.jpg'; Url = $havenJpg + 'rock_face_03/'; Hash = 'A498CEF4BA6191F6959B6D03FB835263C77271948264A289AF24497AB7111DEC'; License = 'CC0-1.0'; Attribution = $havenFace; ColorSpace = 'linear-data'; NormalConvention = 'DirectX (green = +v), height in alpha'; Pack = @{ Source = 'rock_face_03_disp_2k.png'; Url = $havenPng + 'rock_face_03/'; Hash = '3CB398FC7E958C4A1C05428DBDB124DA70AC5C62DAB0820C1FADA48065370D2B' } }
+    @{ Name = 'rock_face_roughness'; Source = 'rock_face_03_rough_2k.jpg';  Url = $havenJpg + 'rock_face_03/'; Hash = '9CA3E9E196685F702328F24D66F039B72F5330FC35CF2A2C265CFA50A7916301'; License = 'CC0-1.0'; Attribution = $havenFace; ColorSpace = 'linear-data' }
+    @{ Name = 'rock_boulder_albedo';    Source = 'rock_boulder_dry_diff_2k.jpg';   Url = $havenJpg + 'rock_boulder_dry/'; Hash = 'C66DE7F7B48EF1BA542C17AF780787CA6D43DA2160A46FF3544DD9FCDF65CA30'; License = 'CC0-1.0'; Attribution = $havenBoulder; ColorSpace = 'sRGB' }
+    @{ Name = 'rock_boulder_normal';    Source = 'rock_boulder_dry_nor_gl_2k.jpg'; Url = $havenJpg + 'rock_boulder_dry/'; Hash = '72A3C96D563FC17AC36C568802E106222E6480512D98E07318E1F431CEA33DD6'; License = 'CC0-1.0'; Attribution = $havenBoulder; ColorSpace = 'linear-data'; NormalConvention = 'DirectX (green = +v), height in alpha'; Pack = @{ Source = 'rock_boulder_dry_disp_2k.png'; Url = $havenPng + 'rock_boulder_dry/'; Hash = 'E07B06123BDA2156F2A0FEF79B0EDB77280295135CB5063E7794998FF3E69A90' } }
+    @{ Name = 'rock_boulder_roughness'; Source = 'rock_boulder_dry_rough_2k.jpg';  Url = $havenJpg + 'rock_boulder_dry/'; Hash = '63BB4105E6F60B5968DA785AFC292B94026A5AFA6F18388E98B00232E9E2C433'; License = 'CC0-1.0'; Attribution = $havenBoulder; ColorSpace = 'linear-data' }
 )
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory, $SourceCache | Out-Null
@@ -73,13 +84,10 @@ function Convert-Texture($sourcePath, $outputPath, $widthLimit) {
     try {
         $sourceWidth = $source.Width
         $sourceHeight = $source.Height
-        if ($sourceWidth -le $widthLimit) {
-            # Lossless re-encode; keeps the source pixel format (e.g. 8-bit grayscale).
-            $source.Save($outputPath, [System.Drawing.Imaging.ImageFormat]::Png)
-            return @($sourceWidth, $sourceHeight, $sourceWidth, $sourceHeight)
-        }
-        $width = $widthLimit
-        $height = [int][Math]::Round($sourceHeight * $widthLimit / $sourceWidth)
+        # Always re-encode through a 24-bit surface: a grayscale source would otherwise be
+        # saved as a palette PNG, which the runtime decoder does not accept.
+        $width = [Math]::Min($sourceWidth, $widthLimit)
+        $height = [int][Math]::Round($sourceHeight * $width / $sourceWidth)
         $target = New-Object System.Drawing.Bitmap $width, $height, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
         $graphics = [System.Drawing.Graphics]::FromImage($target)
         $attributes = New-Object System.Drawing.Imaging.ImageAttributes
@@ -124,6 +132,13 @@ foreach ($asset in $assets) {
         if ($LASTEXITCODE -ne 0) { throw "bake-normal-map.py failed for $($asset.Name)" }
         $baked = $json | ConvertFrom-Json
         $dimensions = @($baked.source_width, $baked.source_height, $baked.width, $baked.height)
+    } elseif ($asset.Pack) {
+        $heightPath = Get-Source @{ Source = $asset.Pack.Source; Url = $asset.Pack.Url; Hash = $asset.Pack.Hash }
+        $packScript = Join-Path $PSScriptRoot 'pack-normal-height.py'
+        $json = & python $packScript --normal $sourcePath --height $heightPath --output $outputPath --max-width $widthLimit
+        if ($LASTEXITCODE -ne 0) { throw "pack-normal-height.py failed for $($asset.Name)" }
+        $packed = $json | ConvertFrom-Json
+        $dimensions = @($packed.source_width, $packed.source_height, $packed.width, $packed.height)
     } else {
         $dimensions = Convert-Texture $sourcePath $outputPath $widthLimit
     }
@@ -142,6 +157,10 @@ foreach ($asset in $assets) {
         source_height = $dimensions[1]
     }
     if ($asset.NormalConvention) { $entry.normal_convention = $asset.NormalConvention }
+    if ($asset.Pack) {
+        $entry.height_source = $asset.Pack.Url + $asset.Pack.Source
+        $entry.height_source_sha256 = $asset.Pack.Hash
+    }
     if ($baked) {
         $entry.height_min_m = $baked.height_min_m
         $entry.height_max_m = $baked.height_max_m

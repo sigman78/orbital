@@ -7,7 +7,7 @@ Native Windows C++20 space demo built on a compatibility fork of [NoGraphicsAPI]
 | ![City lights at dawn](docs/images/dawn.jpg) | ![Asteroid belt around the gas giant](docs/images/belt.jpg) |
 | --- | --- |
 
-The Jovian belt contains 35,000 asteroids in baseline and 65,000 in high quality, with irregular flat-shaded rocks and mapped dielectric roughness. Spatial-cluster frustum/planet-occlusion culling feeds instanced draws; distant bodies use filtered billboards.
+The Jovian belt contains 35,000 asteroids in baseline and 65,000 in high quality, drawn from a library of 16 seeded shapes at 6 detail levels (20 to 20k triangles) with three scanned rock sets blended per rock, triplanar mapped with parallax on close rocks. Spatial-cluster frustum/planet-occlusion culling feeds instanced draws; distant bodies use filtered billboards.
 
 ## Build
 

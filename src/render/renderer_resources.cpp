@@ -63,6 +63,12 @@ constexpr MaterialSource material_sources[] = {
     {"mars_albedo.png", Slot::mars_albedo, {.encoding = MaterialEncoding::SRGB}},
     {"mars_normal.png", Slot::mars_normal, {.normal_map = true}},
     {"moon_normal.png", Slot::moon_normal, {.normal_map = true}},
+    {"rock_face_albedo.png", Slot::rock_face_albedo, {.encoding = MaterialEncoding::SRGB}},
+    {"rock_face_normal.png", Slot::rock_face_normal, {.normal_map = true}},
+    {"rock_face_roughness.png", Slot::rock_face_roughness, {}},
+    {"rock_boulder_albedo.png", Slot::rock_boulder_albedo, {.encoding = MaterialEncoding::SRGB}},
+    {"rock_boulder_normal.png", Slot::rock_boulder_normal, {.normal_map = true}},
+    {"rock_boulder_roughness.png", Slot::rock_boulder_roughness, {}},
 };
 constexpr std::size_t material_count = std::size(material_sources);
 static_assert(material_count <= inline_upload_count);
@@ -260,15 +266,18 @@ void Renderer::Impl::create_samplers() {
 }
 
 void Renderer::Impl::create_meshes() {
-    for (unsigned lod = 0; lod < geometry::lod_count; lod++) {
+    for (unsigned lod = 0; lod < geometry::lod_count; lod++)
         spheres[lod] = upload_mesh(geometry::generate_sphere(32u << lod, 16u << lod));
-        rocks[lod] = upload_mesh(geometry::generate_rock(71 + lod * 37, 2 + lod));
-    }
+    constexpr std::uint32_t rock_seed_base = 71, rock_seed_stride = 37;
+    for (unsigned shape = 0; shape < geometry::rock_shape_count; shape++)
+        for (unsigned level = 0; level < geometry::rock_level_count; level++)
+            rocks[rock_group(shape, level)] = upload_mesh(
+                geometry::generate_rock(rock_seed_base + shape * rock_seed_stride, level));
     // Moonlets are irregular bodies: each gets its own seeded rock at full detail.
     for (unsigned i = 0; i < body_count; i++)
         if (system.bodies[i].body_class == BodyClass::Moonlet)
             moonlet_meshes[i] = upload_mesh(
-                geometry::generate_rock(std::uint32_t(system.bodies[i].material_seed), geometry::lod_count - 1));
+                geometry::generate_rock(std::uint32_t(system.bodies[i].material_seed), geometry::rock_level_count - 1));
 }
 
 const GpuMesh& Renderer::Impl::body_mesh(unsigned body, unsigned lod) const {
