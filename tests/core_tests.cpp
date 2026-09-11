@@ -50,6 +50,14 @@ void test_small_vec() {
     SmallVec<std::string, 3> names;
     static_assert(SmallVec<int, 4>::capacity() == 4);
     static_assert(sizeof(SmallVec<int, 4>::size_type) == 1); // size counter no wider than needed
+    // The counter is the narrowest type that holds N; the object is the storage plus that
+    // counter rounded up to alignof(T), so the counter is free whenever T has any alignment.
+    static_assert(sizeof(SmallVec<char, 3>) == 4);
+    static_assert(sizeof(SmallVec<char, 255>) == 256);
+    static_assert(sizeof(SmallVec<std::uint16_t, 16>) == 34);
+    static_assert(sizeof(SmallVec<int, 3>) == 16);
+    static_assert(sizeof(SmallVec<double, 8>) == 72);
+    static_assert(sizeof(SmallVec<char, 300>::size_type) == 2);
     assert(names.empty() && !names.full());
     names.push_back("alpha");
     names.emplace_back("beta");
