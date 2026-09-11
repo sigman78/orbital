@@ -7,13 +7,16 @@
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <fstream>
 #include <future>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 namespace space::render {
@@ -268,8 +271,9 @@ struct Renderer::Impl {
         pipelines.push_back(p);
         return p;
     }
-    // Decodes and mip-filters every material concurrently, then uploads them all
-    // in one batch on this thread. Unused descriptor slots point at the first map.
+    // Decodes and mip-filters every material on a bounded worker pool, then
+    // uploads them all in one batch on this thread. Unused descriptor slots
+    // point at the first map.
     void load_materials() {
         struct Source {
             const char* file;
@@ -288,18 +292,28 @@ struct Renderer::Impl {
             {"rock_normal.png", 12, false, false, true},
             {"rock_roughness.png", 13, false},
         };
+        constexpr std::size_t count = std::size(sources);
         const auto start = std::chrono::steady_clock::now();
-        std::vector<std::future<std::vector<assets::Image>>> pending;
-        for (const auto& source : sources)
-            pending.push_back(std::async(std::launch::async, [this, source] {
-                return assets::load_material(directory / "assets/materials" / source.file,
-                                             source.srgb ? assets::MaterialEncoding::SRGB
-                                                         : assets::MaterialEncoding::Linear,
-                                             source.luminance_to_alpha, source.normal_map);
+        // Leave one core for this thread and cap the pool: decoding and filtering
+        // are memory-bound enough that more workers stop helping.
+        const unsigned cores = std::thread::hardware_concurrency();
+        const std::size_t workers = std::min(count, std::size_t(std::clamp(cores > 1 ? cores - 1 : 1u, 1u, 8u)));
+        std::vector<std::vector<assets::Image>> chains(count);
+        std::atomic<std::size_t> next{0};
+        std::vector<std::future<void>> pool;
+        for (std::size_t worker = 0; worker < workers; worker++)
+            pool.push_back(std::async(std::launch::async, [&] {
+                for (std::size_t i = next++; i < count; i = next++)
+                    chains[i] = assets::load_material(directory / "assets/materials" / sources[i].file,
+                                                      sources[i].srgb ? assets::MaterialEncoding::SRGB
+                                                                      : assets::MaterialEncoding::Linear,
+                                                      sources[i].luminance_to_alpha, sources[i].normal_map);
             }));
+        for (auto& worker : pool)
+            worker.get();
         std::vector<Upload> uploads;
-        for (std::size_t i = 0; i < pending.size(); i++)
-            uploads.push_back({pending[i].get(), sources[i].slot});
+        for (std::size_t i = 0; i < count; i++)
+            uploads.push_back({std::move(chains[i]), sources[i].slot});
         const auto first_asset = assets.size();
         upload_images(uploads);
         bool used[24]{};
@@ -309,9 +323,9 @@ struct Renderer::Impl {
             if (!used[slot])
                 descriptor(slot, assets[first_asset]);
         std::cout
-            << "Loaded " << pending.size() << " materials in "
+            << "Loaded " << count << " materials in "
             << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count()
-            << " ms\n";
+            << " ms on " << workers << " workers\n";
     }
     void init(void* hwnd, const SystemDescription& sys, const std::filesystem::path& dir) {
         system = sys;
