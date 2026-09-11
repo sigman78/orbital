@@ -1,0 +1,637 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 6aebbe7..667785a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -14,6 +14,8 @@ include(CMakePackageConfigHelpers)
+ 
+ option(NOGRAPHICSAPI_BUILD_EXAMPLES "Build NoGraphicsAPI examples" OFF)
+ option(NOGRAPHICSAPI_BUILD_TESTS "Build NoGraphicsAPI tests" OFF)
++option(NOGRAPHICSAPI_ENABLE_CONVENTIONAL_BACKEND "Allow Vulkan 1.3 devices without the experimental descriptor/address-command extensions" ON)
++option(NOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND "Use the conventional shader ABI even when experimental extensions exist" OFF)
+ 
+ # CMake adds /EHsc to MSVC's default flags. Remove it before adding the explicit
+ # no-exceptions mode below so cl.exe does not report an option-override warning.
+@@ -53,6 +55,12 @@ target_link_libraries(NoGraphicsAPI
+     PRIVATE Vulkan::Vulkan
+ )
+ NoGraphicsAPI_disable_exceptions(NoGraphicsAPI)
++if(NOGRAPHICSAPI_ENABLE_CONVENTIONAL_BACKEND)
++    target_compile_definitions(NoGraphicsAPI PRIVATE NOGRAPHICSAPI_ENABLE_CONVENTIONAL_BACKEND=1)
++endif()
++if(NOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND)
++    target_compile_definitions(NoGraphicsAPI PRIVATE NOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND=1)
++endif()
+ 
+ if(MSVC)
+     target_compile_options(NoGraphicsAPI PRIVATE /W4 /permissive-)
+diff --git a/include/NoGraphicsAPI/NoGraphicsAPI.hpp b/include/NoGraphicsAPI/NoGraphicsAPI.hpp
+index 5d9e398..0a512df 100644
+--- a/include/NoGraphicsAPI/NoGraphicsAPI.hpp
++++ b/include/NoGraphicsAPI/NoGraphicsAPI.hpp
+@@ -437,6 +437,10 @@ struct DeviceCaps
+     bool texture_compression_bc = false;
+     bool texture_compression_astc = false;
+     bool storage_input_output16 = false;
++    // Compatibility devices use ordinary Vulkan push constants and descriptor arrays.
++    // Shaders declare sampled images at set 0/binding 0 and samplers at set 0/binding 1.
++    bool conventional_descriptor_backend = false;
++    bool mesh_shaders = false;
+ };
+ 
+ // A windowed device and every call using it must remain on the native
+diff --git a/src/NoGraphicsAPI.cpp b/src/NoGraphicsAPI.cpp
+index fab3a6b..e1df77f 100644
+--- a/src/NoGraphicsAPI.cpp
++++ b/src/NoGraphicsAPI.cpp
+@@ -44,6 +44,7 @@ constexpr VkPresentModeKHR swapchain_present_mode = VK_PRESENT_MODE_FIFO_KHR;
+ constexpr uint32 gpu_allocation_alignment = 16;
+ constexpr uint32 max_surface_formats = 64;
+ constexpr uint32 format_count = static_cast<uint32>(Format::undefined);
++constexpr uint32 conventional_texture_descriptor_count = 24;
+ 
+ [[nodiscard]] Error error_from_vk(VkResult result) noexcept
+ {
+@@ -471,6 +472,7 @@ struct BackingBuffer
+     VkDeviceMemory memory = VK_NULL_HANDLE;
+     void* mapped = nullptr;
+     VkDeviceAddress address = 0;
++    VkDeviceSize mapped_size = 0;
+ };
+ 
+ struct PresentContext;
+@@ -595,6 +597,8 @@ struct GpuHeapOwner
+ {
+     Device* state = nullptr;
+     detail::BackingBuffer backing;
++    MemoryType memory_type = MemoryType::cpu_visible;
++    GpuHeapOwner* next = nullptr;
+ };
+ 
+ struct TextureHeapOwner
+@@ -674,6 +678,15 @@ struct Device
+     uint32 active_command_buffers = 0;
+     uint32 present_context_count = 0;
+     uint32 next_present_context = 0;
++    bool conventional_backend = false;
++    VkPipelineLayout conventional_pipeline_layout = VK_NULL_HANDLE;
++    VkDescriptorSetLayout conventional_set_layout = VK_NULL_HANDLE;
++    VkDescriptorPool conventional_descriptor_pool = VK_NULL_HANDLE;
++    VkDescriptorSet conventional_descriptor_set = VK_NULL_HANDLE;
++    VkSampler conventional_samplers[4]{};
++    VkImageView conventional_views[conventional_texture_descriptor_count]{};
++    const Texture* conventional_view_textures[conventional_texture_descriptor_count]{};
++    GpuHeapOwner* gpu_heaps = nullptr;
+ 
+     ~Device();
+ 
+@@ -769,6 +782,7 @@ struct Device
+             .buffer = result.buffer,
+         };
+         result.address = vkGetBufferDeviceAddress(device, &address_info);
++        result.mapped_size = size;
+         output = result;
+     }
+ 
+@@ -827,7 +841,7 @@ bool supports_gpu_heap_memory(Device& device) noexcept
+     {
+         return false;
+     }
+-    const VkMemoryRequirements descriptor = buffer_memory_requirements(device, universal_buffer_usage | VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT);
++    const VkMemoryRequirements descriptor = buffer_memory_requirements(device, universal_buffer_usage | (device.conventional_backend ? 0 : VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT));
+     return device.find_memory_type(descriptor.memoryTypeBits, cpu_visible_memory_properties, 0, descriptor.size, memory_type);
+ }
+ 
+@@ -1011,7 +1025,15 @@ Device::~Device()
+     {
+         destroy_present_context(present_contexts[index]);
+     }
+-    if (device) vkDestroyDevice(device, nullptr);
++    if (device)
++    {
++        for (VkSampler sampler : conventional_samplers) if (sampler) vkDestroySampler(device, sampler, nullptr);
++        for (VkImageView view : conventional_views) if (view) vkDestroyImageView(device, view, nullptr);
++        if (conventional_descriptor_pool) vkDestroyDescriptorPool(device, conventional_descriptor_pool, nullptr);
++        if (conventional_pipeline_layout) vkDestroyPipelineLayout(device, conventional_pipeline_layout, nullptr);
++        if (conventional_set_layout) vkDestroyDescriptorSetLayout(device, conventional_set_layout, nullptr);
++        vkDestroyDevice(device, nullptr);
++    }
+     if (instance && surface) vkDestroySurfaceKHR(instance, surface, nullptr);
+     if (instance && debug_messenger && destroy_debug_messenger) destroy_debug_messenger(instance, debug_messenger, nullptr);
+     if (instance) vkDestroyInstance(instance, nullptr);
+@@ -1377,7 +1399,8 @@ GpuHeap Device::allocate_gpu_heap(VkDeviceSize size, MemoryType memory) noexcept
+         return {};
+     }
+ 
+-    GpuHeapOwner* heap = new GpuHeapOwner{.state = this};
++    GpuHeapOwner* heap = new GpuHeapOwner{.state = this, .memory_type = memory, .next = gpu_heaps};
++    gpu_heaps = heap;
+     create_backing_buffer(heap->backing, size, universal_buffer_usage, required, preferred, avoided);
+     return {
+         .range = {
+@@ -1392,6 +1415,14 @@ GpuHeap Device::allocate_gpu_heap(VkDeviceSize size, MemoryType memory) noexcept
+ GpuHeap Device::allocate_descriptor_heap(VkDeviceSize size, MemoryType memory) noexcept
+ {
+     assert(memory == MemoryType::texture_descriptor_heap || memory == MemoryType::sampler_descriptor_heap);
++    if (conventional_backend)
++    {
++        GpuHeapOwner* heap = new GpuHeapOwner{.state = this, .memory_type = memory, .next = gpu_heaps};
++        gpu_heaps = heap;
++        create_backing_buffer(heap->backing, size, universal_buffer_usage, cpu_visible_memory_properties, 0);
++        return {.range = {.cpu = static_cast<byte*>(heap->backing.mapped),
++                          .gpu = reinterpret_cast<byte*>(static_cast<uintptr>(heap->backing.address)), .size = size}, .owner = heap};
++    }
+     const bool texture_heap = memory == MemoryType::texture_descriptor_heap;
+     const VkDeviceSize resource_alignment = heap_properties.imageDescriptorAlignment > heap_properties.bufferDescriptorAlignment
+                                                 ? heap_properties.imageDescriptorAlignment
+@@ -1406,7 +1437,8 @@ GpuHeap Device::allocate_descriptor_heap(VkDeviceSize size, MemoryType memory) n
+     const VkDeviceSize alignment_padding = allocation_alignment - 1;
+     const VkDeviceSize backing_size = bind_size + alignment_padding;
+ 
+-    GpuHeapOwner* heap = new GpuHeapOwner{.state = this};
++    GpuHeapOwner* heap = new GpuHeapOwner{.state = this, .memory_type = memory, .next = gpu_heaps};
++    gpu_heaps = heap;
+     create_backing_buffer(heap->backing, backing_size, universal_buffer_usage | VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT, cpu_visible_memory_properties, 0);
+ 
+     const VkDeviceAddress gpu_address = align_up(heap->backing.address, allocation_alignment);
+@@ -1550,13 +1582,13 @@ struct QueriedFeatures
+     VkPhysicalDeviceMeshShaderFeaturesEXT mesh_shader{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
+     VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swapchain_maintenance1{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR};
+ 
+-    explicit QueriedFeatures(bool presentation, bool include_unified_image_layouts)
++    explicit QueriedFeatures(bool presentation, bool include_unified_image_layouts, bool conventional = false)
+     {
+         core.pNext = &vulkan11;
+         vulkan11.pNext = &vulkan12;
+         vulkan12.pNext = &vulkan13;
+         vulkan13.pNext = &vulkan14;
+-        vulkan14.pNext = &descriptor_heap;
++        vulkan14.pNext = conventional ? (presentation ? static_cast<void*>(&swapchain_maintenance1) : nullptr) : static_cast<void*>(&descriptor_heap);
+         descriptor_heap.pNext = &address_commands;
+         address_commands.pNext = &untyped_pointers;
+         untyped_pointers.pNext = include_unified_image_layouts ? static_cast<void*>(&unified_image_layouts) : static_cast<void*>(&mesh_shader);
+@@ -1578,6 +1610,7 @@ struct Candidate
+     bool texture_compression_etc2 = false;
+     bool storage_input_output16 = false;
+     bool khr_swapchain_maintenance1 = false;
++    bool conventional = false;
+     VkPhysicalDeviceDescriptorHeapPropertiesEXT heap_properties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT};
+     VkPhysicalDeviceVulkan12Properties vulkan12_properties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
+ };
+@@ -1599,11 +1632,18 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+         VK_KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME,
+         VK_EXT_MESH_SHADER_EXTENSION_NAME,
+     };
++    bool experimental_extensions = true;
+     for (const char* name : required_extensions)
+     {
+         if (!has_name({extensions, extension_count}, name))
+-            return Error::unsupported;
++            experimental_extensions = false;
+     }
++#if defined(NOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND)
++    experimental_extensions = false;
++#endif
++#if !defined(NOGRAPHICSAPI_ENABLE_CONVENTIONAL_BACKEND)
++    if (!experimental_extensions) return Error::unsupported;
++#endif
+     const bool khr_swapchain_maintenance1 = khr_surface_maintenance1 &&
+                                             has_name({extensions, extension_count}, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
+     const bool ext_swapchain_maintenance1 = ext_surface_maintenance1 &&
+@@ -1617,6 +1657,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+ 
+     Candidate result{
+         .physical_device = physical_device,
++        .conventional = !experimental_extensions,
+     };
+     result.heap_properties.pNext = &result.vulkan12_properties;
+     VkPhysicalDeviceProperties2 properties2{
+@@ -1643,7 +1684,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+     }
+     if (!cpu_visible_memory) return Error::unsupported;
+ 
+-    QueriedFeatures features(surface != VK_NULL_HANDLE, unified_image_layouts_extension);
++    QueriedFeatures features(surface != VK_NULL_HANDLE, unified_image_layouts_extension, result.conventional);
+     vkGetPhysicalDeviceFeatures2(physical_device, &features.core);
+     const bool required_features =
+         features.core.features.shaderInt16 == VK_TRUE &&
+@@ -1659,7 +1700,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+         features.vulkan11.storageBuffer16BitAccess == VK_TRUE &&
+         features.vulkan11.storagePushConstant16 == VK_TRUE &&
+         features.vulkan11.shaderDrawParameters == VK_TRUE &&
+-        features.vulkan12.shaderFloat16 == VK_TRUE &&
++        (result.conventional || features.vulkan12.shaderFloat16 == VK_TRUE) &&
+         features.vulkan12.scalarBlockLayout == VK_TRUE &&
+         features.vulkan12.bufferDeviceAddress == VK_TRUE &&
+         features.vulkan12.timelineSemaphore == VK_TRUE &&
+@@ -1667,10 +1708,10 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+         features.vulkan13.dynamicRendering == VK_TRUE &&
+         features.vulkan13.maintenance4 == VK_TRUE &&
+         features.vulkan14.maintenance5 == VK_TRUE &&
+-        features.descriptor_heap.descriptorHeap == VK_TRUE &&
++        (result.conventional || (features.descriptor_heap.descriptorHeap == VK_TRUE &&
+         features.address_commands.deviceAddressCommands == VK_TRUE &&
+         features.untyped_pointers.shaderUntypedPointers == VK_TRUE &&
+-        features.mesh_shader.meshShader == VK_TRUE &&
++        features.mesh_shader.meshShader == VK_TRUE)) &&
+         (features.core.features.textureCompressionBC == VK_TRUE ||
+          features.core.features.textureCompressionASTC_LDR == VK_TRUE) &&
+         (!surface || features.swapchain_maintenance1.swapchainMaintenance1 == VK_TRUE);
+@@ -1897,9 +1938,14 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+             break;
+     }
+     if (!has_selected)
++    {
++        fputs("NoGraphicsAPI: no suitable Vulkan device. Conventional backend requires Vulkan 1.4, buffer device address, timeline semaphores, "
++              "synchronization2, dynamic rendering, required raster features, a graphics+compute queue, and host-visible coherent memory.\n", stderr);
+         return fail_device_creation(state, Error::unsupported);
++    }
+ 
+     state->physical_device = selected.physical_device;
++    state->conventional_backend = selected.conventional;
+     state->queue_family = selected.queue_family;
+     state->physical_properties = selected.properties;
+     state->heap_properties = selected.heap_properties;
+@@ -1912,7 +1958,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+             state->physical_device, static_cast<Format>(value));
+     }
+ 
+-    QueriedFeatures enabled_features(presentation, selected.unified_image_layouts);
++    QueriedFeatures enabled_features(presentation, selected.unified_image_layouts, selected.conventional);
+     state->texture_compression_etc2 = selected.texture_compression_etc2;
+     enabled_features.core.features.imageCubeArray = selected.image_cube_array;
+     enabled_features.core.features.samplerAnisotropy = VK_TRUE;
+@@ -1932,7 +1978,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+     enabled_features.vulkan11.storagePushConstant16 = VK_TRUE;
+     enabled_features.vulkan11.storageInputOutput16 = selected.storage_input_output16;
+     enabled_features.vulkan11.shaderDrawParameters = VK_TRUE;
+-    enabled_features.vulkan12.shaderFloat16 = VK_TRUE;
++    enabled_features.vulkan12.shaderFloat16 = selected.conventional ? VK_FALSE : VK_TRUE;
+     enabled_features.vulkan12.scalarBlockLayout = VK_TRUE;
+     enabled_features.vulkan12.timelineSemaphore = VK_TRUE;
+     enabled_features.vulkan12.bufferDeviceAddress = VK_TRUE;
+@@ -1940,11 +1986,11 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+     enabled_features.vulkan13.dynamicRendering = VK_TRUE;
+     enabled_features.vulkan13.maintenance4 = VK_TRUE;
+     enabled_features.vulkan14.maintenance5 = VK_TRUE;
+-    enabled_features.descriptor_heap.descriptorHeap = VK_TRUE;
+-    enabled_features.address_commands.deviceAddressCommands = VK_TRUE;
+-    enabled_features.untyped_pointers.shaderUntypedPointers = VK_TRUE;
++    enabled_features.descriptor_heap.descriptorHeap = selected.conventional ? VK_FALSE : VK_TRUE;
++    enabled_features.address_commands.deviceAddressCommands = selected.conventional ? VK_FALSE : VK_TRUE;
++    enabled_features.untyped_pointers.shaderUntypedPointers = selected.conventional ? VK_FALSE : VK_TRUE;
+     enabled_features.unified_image_layouts.unifiedImageLayouts = selected.unified_image_layouts ? VK_TRUE : VK_FALSE;
+-    enabled_features.mesh_shader.meshShader = VK_TRUE;
++    enabled_features.mesh_shader.meshShader = selected.conventional ? VK_FALSE : VK_TRUE;
+     enabled_features.swapchain_maintenance1.swapchainMaintenance1 = VK_TRUE;
+ 
+     constexpr float queue_priority = 1.0f;
+@@ -1956,14 +2002,17 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+     };
+     const char* enabled_device_extensions[7]{};
+     uint32 enabled_device_extension_count = 0;
+-    enabled_device_extensions[enabled_device_extension_count++] = VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME;
+-    enabled_device_extensions[enabled_device_extension_count++] = VK_KHR_DEVICE_ADDRESS_COMMANDS_EXTENSION_NAME;
+-    enabled_device_extensions[enabled_device_extension_count++] = VK_KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME;
++    if (!selected.conventional)
++    {
++        enabled_device_extensions[enabled_device_extension_count++] = VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME;
++        enabled_device_extensions[enabled_device_extension_count++] = VK_KHR_DEVICE_ADDRESS_COMMANDS_EXTENSION_NAME;
++        enabled_device_extensions[enabled_device_extension_count++] = VK_KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME;
++    }
+     if (selected.unified_image_layouts)
+     {
+         enabled_device_extensions[enabled_device_extension_count++] = VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME;
+     }
+-    enabled_device_extensions[enabled_device_extension_count++] = VK_EXT_MESH_SHADER_EXTENSION_NAME;
++    if (!selected.conventional) enabled_device_extensions[enabled_device_extension_count++] = VK_EXT_MESH_SHADER_EXTENSION_NAME;
+ #if defined(_WIN32)
+     if (presentation)
+     {
+@@ -1985,6 +2034,25 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+     if (error != Error::none)
+         return fail_device_creation(state, error);
+     vkGetDeviceQueue(state->device, state->queue_family, 0, &state->queue);
++    if (selected.conventional)
++    {
++        const VkDescriptorSetLayoutBinding bindings[2]{
++            {.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = conventional_texture_descriptor_count, .stageFlags = VK_SHADER_STAGE_ALL},
++            {.binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 4, .stageFlags = VK_SHADER_STAGE_ALL},
++        };
++        const VkDescriptorSetLayoutCreateInfo set_info{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 2, .pBindings = bindings};
++        require_vk(vkCreateDescriptorSetLayout(state->device, &set_info, nullptr, &state->conventional_set_layout));
++        const VkPushConstantRange push_range{.stageFlags = VK_SHADER_STAGE_ALL, .size = selected.properties.limits.maxPushConstantsSize};
++        const VkPipelineLayoutCreateInfo layout_info{.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
++                                                     .pSetLayouts = &state->conventional_set_layout, .pushConstantRangeCount = 1, .pPushConstantRanges = &push_range};
++        require_vk(vkCreatePipelineLayout(state->device, &layout_info, nullptr, &state->conventional_pipeline_layout));
++        const VkDescriptorPoolSize sizes[2]{{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, conventional_texture_descriptor_count}, {VK_DESCRIPTOR_TYPE_SAMPLER, 4}};
++        const VkDescriptorPoolCreateInfo pool_info{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1, .poolSizeCount = 2, .pPoolSizes = sizes};
++        require_vk(vkCreateDescriptorPool(state->device, &pool_info, nullptr, &state->conventional_descriptor_pool));
++        const VkDescriptorSetAllocateInfo allocation{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = state->conventional_descriptor_pool,
++                                                     .descriptorSetCount = 1, .pSetLayouts = &state->conventional_set_layout};
++        require_vk(vkAllocateDescriptorSets(state->device, &allocation, &state->conventional_descriptor_set));
++    }
+     if (!supports_gpu_heap_memory(*state) || !select_texture_memory_type(*state))
+         return fail_device_creation(state, Error::unsupported);
+ 
+@@ -2004,13 +2072,13 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+     state->fn.cmd_copy_image_to_memory = load_device_proc<PFN_vkCmdCopyImageToMemoryKHR>(state->device, "vkCmdCopyImageToMemoryKHR");
+     state->fn.cmd_copy_query_pool_results_to_memory =
+         load_device_proc<PFN_vkCmdCopyQueryPoolResultsToMemoryKHR>(state->device, "vkCmdCopyQueryPoolResultsToMemoryKHR");
+-    if (!state->fn.write_sampler_descriptors || !state->fn.write_resource_descriptors ||
++    if (!selected.conventional && (!state->fn.write_sampler_descriptors || !state->fn.write_resource_descriptors ||
+         !state->fn.cmd_bind_sampler_heap || !state->fn.cmd_bind_texture_heap ||
+         !state->fn.cmd_push_data || !state->fn.cmd_bind_index_buffer ||
+         !state->fn.cmd_draw_indirect || !state->fn.cmd_draw_indexed_indirect ||
+         !state->fn.cmd_dispatch_indirect || !state->fn.cmd_draw_mesh_tasks ||
+         !state->fn.cmd_draw_mesh_tasks_indirect || !state->fn.cmd_copy_memory ||
+-        !state->fn.cmd_copy_memory_to_image || !state->fn.cmd_copy_image_to_memory || !state->fn.cmd_copy_query_pool_results_to_memory)
++        !state->fn.cmd_copy_memory_to_image || !state->fn.cmd_copy_image_to_memory || !state->fn.cmd_copy_query_pool_results_to_memory))
+     {
+         return fail_device_creation(state, Error::driver_error);
+     }
+@@ -2027,15 +2095,17 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+ 
+     state->caps = {
+         .device_name = state->physical_properties.deviceName,
+-        .max_push_data_size = state->heap_properties.maxPushDataSize,
++        .max_push_data_size = selected.conventional ? selected.properties.limits.maxPushConstantsSize : state->heap_properties.maxPushDataSize,
+         .texture_heap_alignment = state->texture_heap_alignment,
+-        .texture_descriptor_size = state->heap_properties.imageDescriptorSize,
+-        .sampler_descriptor_size = state->heap_properties.samplerDescriptorSize,
++        .texture_descriptor_size = selected.conventional ? uint64(sizeof(void*) * 4) : state->heap_properties.imageDescriptorSize,
++        .sampler_descriptor_size = selected.conventional ? uint64(64) : state->heap_properties.samplerDescriptorSize,
+         .timestamp_period_ns = selected.properties.limits.timestampPeriod,
+         .sub_texel_precision_bits = selected.properties.limits.subTexelPrecisionBits,
+         .texture_compression_bc = selected.texture_compression_bc,
+         .texture_compression_astc = selected.texture_compression_astc,
+         .storage_input_output16 = selected.storage_input_output16,
++        .conventional_descriptor_backend = selected.conventional,
++        .mesh_shaders = !selected.conventional,
+     };
+     if (presentation)
+     {
+@@ -2127,6 +2197,9 @@ void destroy_gpu_heap(const GpuHeap& heap) noexcept
+     if (!heap.owner) return;
+     assert(heap.owner->state);
+     const VkDevice device = heap.owner->state->device;
++    GpuHeapOwner** link = &heap.owner->state->gpu_heaps;
++    while (*link && *link != heap.owner) link = &(*link)->next;
++    if (*link) *link = heap.owner->next;
+     const detail::BackingBuffer& backing = heap.owner->backing;
+     if (backing.mapped) vkUnmapMemory(device, backing.memory);
+     vkDestroyBuffer(device, backing.buffer, nullptr);
+@@ -2644,6 +2717,18 @@ Texture* create_texture(Device* device, const TextureDesc& desc, const TextureHe
+ 
+ void destroy_texture(Texture* texture) noexcept
+ {
++    if (texture && texture->state->conventional_backend)
++    {
++        for (uint32 index = 0; index < conventional_texture_descriptor_count; ++index)
++        {
++            if (texture->state->conventional_view_textures[index] == texture)
++            {
++                vkDestroyImageView(texture->state->device, texture->state->conventional_views[index], nullptr);
++                texture->state->conventional_views[index] = VK_NULL_HANDLE;
++                texture->state->conventional_view_textures[index] = nullptr;
++            }
++        }
++    }
+     delete texture;
+ }
+ 
+@@ -2689,6 +2774,28 @@ void write_texture_descriptor(Device* device, void* cpu_destination, const Textu
+                               const TextureDescriptorDesc& desc) noexcept
+ {
+     assert(device && texture);
++    if (device->conventional_backend)
++    {
++        assert(type == TextureDescriptorType::sampled && "compatibility backend currently supports sampled texture descriptors");
++        GpuHeapOwner* owner = device->gpu_heaps;
++        while (owner && !(owner->memory_type == MemoryType::texture_descriptor_heap && cpu_destination >= owner->backing.mapped &&
++                          static_cast<byte*>(cpu_destination) < static_cast<byte*>(owner->backing.mapped) + owner->backing.mapped_size)) owner = owner->next;
++        assert(owner);
++        const uint32 index = static_cast<uint32>((static_cast<byte*>(cpu_destination) - static_cast<byte*>(owner->backing.mapped)) / device->caps.texture_descriptor_size);
++        assert(index < conventional_texture_descriptor_count);
++        if (device->conventional_views[index]) vkDestroyImageView(device->device, device->conventional_views[index], nullptr);
++        const VkImageViewCreateInfo compat_view{.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = texture->image, .viewType = to_vk_view(texture->type),
++            .format = to_vk(desc.format == Format::undefined ? texture->format : desc.format), .subresourceRange = {.aspectMask = image_aspects(texture->format),
++            .baseMipLevel = desc.base_mip, .levelCount = desc.mip_count ? desc.mip_count : VK_REMAINING_MIP_LEVELS, .baseArrayLayer = desc.base_layer,
++            .layerCount = desc.layer_count ? desc.layer_count : VK_REMAINING_ARRAY_LAYERS}};
++        require_vk(vkCreateImageView(device->device, &compat_view, nullptr, &device->conventional_views[index]));
++        device->conventional_view_textures[index] = texture;
++        const VkDescriptorImageInfo image{.imageView = device->conventional_views[index], .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
++        const VkWriteDescriptorSet write{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = device->conventional_descriptor_set, .dstBinding = 0,
++                                         .dstArrayElement = index, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .pImageInfo = &image};
++        vkUpdateDescriptorSets(device->device, 1, &write, 0, nullptr);
++        return;
++    }
+ 
+     const VkImageUsageFlags descriptor_usage = static_cast<VkImageUsageFlags>(
+         type == TextureDescriptorType::sampled ? VK_IMAGE_USAGE_SAMPLED_BIT : VK_IMAGE_USAGE_STORAGE_BIT);
+@@ -2758,6 +2865,22 @@ void write_sampler_descriptor(Device* device, void* cpu_destination, const Sampl
+         .compareOp = static_cast<VkCompareOp>(desc.compare),
+         .maxLod = VK_LOD_CLAMP_NONE,
+     };
++    if (device->conventional_backend)
++    {
++        GpuHeapOwner* owner = device->gpu_heaps;
++        while (owner && !(owner->memory_type == MemoryType::sampler_descriptor_heap && cpu_destination >= owner->backing.mapped &&
++                          static_cast<byte*>(cpu_destination) < static_cast<byte*>(owner->backing.mapped) + owner->backing.mapped_size)) owner = owner->next;
++        assert(owner);
++        const uint32 index = static_cast<uint32>((static_cast<byte*>(cpu_destination) - static_cast<byte*>(owner->backing.mapped)) / device->caps.sampler_descriptor_size);
++        assert(index < 4);
++        if (device->conventional_samplers[index]) vkDestroySampler(device->device, device->conventional_samplers[index], nullptr);
++        require_vk(vkCreateSampler(device->device, &sampler_info, nullptr, &device->conventional_samplers[index]));
++        const VkDescriptorImageInfo image{.sampler = device->conventional_samplers[index]};
++        const VkWriteDescriptorSet write{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = device->conventional_descriptor_set, .dstBinding = 1,
++                                         .dstArrayElement = index, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER, .pImageInfo = &image};
++        vkUpdateDescriptorSets(device->device, 1, &write, 0, nullptr);
++        return;
++    }
+     const VkHostAddressRangeEXT destination{
+         .address = cpu_destination,
+         .size = static_cast<size_t>(device->heap_properties.samplerDescriptorSize),
+@@ -2790,13 +2913,13 @@ PSO* create_raster_pso(Device* device, Span<const uint32> first_stage_spirv, Spa
+             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+             .pNext = &first_stage_module_info,
+             .stage = mesh ? VK_SHADER_STAGE_MESH_BIT_EXT : VK_SHADER_STAGE_VERTEX_BIT,
+-            .pName = mesh ? "meshMain" : "vertexMain",
++            .pName = device->conventional_backend ? "main" : (mesh ? "meshMain" : "vertexMain"),
+         },
+         VkPipelineShaderStageCreateInfo{
+             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+             .pNext = &fragment_module_info,
+             .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+-            .pName = "fragmentMain",
++            .pName = device->conventional_backend ? "main" : "fragmentMain",
+         },
+     };
+     const VkPipelineVertexInputStateCreateInfo vertex_input{
+@@ -2881,11 +3004,11 @@ PSO* create_raster_pso(Device* device, Span<const uint32> first_stage_spirv, Spa
+     const VkPipelineCreateFlags2CreateInfo flags_info{
+         .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO,
+         .pNext = &rendering_info,
+-        .flags = VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT,
++        .flags = device->conventional_backend ? 0u : VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT,
+     };
+     const VkGraphicsPipelineCreateInfo pso_info{
+         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+-        .pNext = &flags_info,
++        .pNext = device->conventional_backend ? static_cast<const void*>(&rendering_info) : static_cast<const void*>(&flags_info),
+         .stageCount = fragment_spirv.size ? 2u : 1u,
+         .pStages = stages,
+         .pVertexInputState = mesh ? nullptr : &vertex_input,
+@@ -2896,6 +3019,7 @@ PSO* create_raster_pso(Device* device, Span<const uint32> first_stage_spirv, Spa
+         .pDepthStencilState = &depth_stencil,
+         .pColorBlendState = &color_blend,
+         .pDynamicState = &dynamic_state,
++        .layout = device->conventional_pipeline_layout,
+         .basePipelineIndex = -1,
+     };
+     PSO* result = new PSO{
+@@ -3053,6 +3177,20 @@ void submit_commands(Span<CommandBuffer* const> commands, Device* device, Timeli
+         assert((current && current->state == device) && "command buffer batch contains an invalid handle");
+         for (uint32 timestamp = 0; timestamp < current->timestamp_count; ++timestamp)
+         {
++            if (device->conventional_backend)
++            {
++                const VkDeviceAddress address = current->timestamp_destinations[timestamp];
++                GpuHeapOwner* destination_heap = device->gpu_heaps;
++                while (destination_heap && !(address >= destination_heap->backing.address &&
++                       address + sizeof(uint64) <= destination_heap->backing.address + destination_heap->backing.mapped_size))
++                    destination_heap = destination_heap->next;
++                assert(destination_heap && destination_heap->memory_type == MemoryType::readback &&
++                       "timestamp destination must be an address in a live readback heap");
++                vkCmdCopyQueryPoolResults(current->command_buffer, current->timestamp_pool, timestamp, 1, destination_heap->backing.buffer,
++                                          address - destination_heap->backing.address, sizeof(uint64),
++                                          VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
++                continue;
++            }
+             const VkStridedDeviceAddressRangeKHR destination{
+                 .address = current->timestamp_destinations[timestamp],
+                 .size = sizeof(uint64),
+@@ -3278,6 +3416,9 @@ void bind_pso(CommandBuffer* commands, const PSO* pso) noexcept
+ {
+     assert(commands && pso);
+     vkCmdBindPipeline(commands->command_buffer, pso->bind_point, pso->pso);
++    if (commands->state->conventional_backend)
++        vkCmdBindDescriptorSets(commands->command_buffer, pso->bind_point, commands->state->conventional_pipeline_layout, 0, 1,
++                                &commands->state->conventional_descriptor_set, 0, nullptr);
+ }
+ 
+ VkDeviceMemoryImageCopyKHR make_texture_copy_region(const Texture& texture, const TextureCopyDesc& copy, GpuRange memory) noexcept
+@@ -3329,6 +3470,12 @@ void emit_root_data(CommandBuffer* commands, ByteSpan root) noexcept
+     if (root.size == 0)
+         return;
+     assert(commands->state);
++    if (commands->state->conventional_backend)
++    {
++        vkCmdPushConstants(commands->command_buffer, commands->state->conventional_pipeline_layout, VK_SHADER_STAGE_ALL, 0,
++                           static_cast<uint32>(root.size), root.data);
++        return;
++    }
+     const VkPushDataInfoEXT info{
+         .sType = VK_STRUCTURE_TYPE_PUSH_DATA_INFO_EXT,
+         .data = {
+@@ -3342,6 +3489,7 @@ void emit_root_data(CommandBuffer* commands, ByteSpan root) noexcept
+ void set_texture_descriptor_heap(CommandBuffer* commands, GpuRange heap) noexcept
+ {
+     assert(commands && commands->state);
++    if (commands->state->conventional_backend) return;
+     const VkPhysicalDeviceDescriptorHeapPropertiesEXT& properties = commands->state->heap_properties;
+     VkBindHeapInfoEXT bind_info{};
+     make_heap_bind_info(
+@@ -3357,6 +3505,7 @@ void set_texture_descriptor_heap(CommandBuffer* commands, GpuRange heap) noexcep
+ void set_sampler_descriptor_heap(CommandBuffer* commands, GpuRange heap) noexcept
+ {
+     assert(commands && commands->state);
++    if (commands->state->conventional_backend) return;
+     const VkPhysicalDeviceDescriptorHeapPropertiesEXT& properties = commands->state->heap_properties;
+     VkBindHeapInfoEXT bind_info{};
+     make_heap_bind_info(heap, properties.samplerDescriptorAlignment, properties.minSamplerHeapReservedRange, bind_info);
+@@ -3499,6 +3648,16 @@ void draw_indexed(CommandBuffer* commands, ByteSpan root, GpuRange indices, Inde
+ {
+     assert(commands && commands->state);
+     emit_root_data(commands, root);
++    if (commands->state->conventional_backend)
++    {
++        GpuHeapOwner* heap = commands->state->gpu_heaps;
++        const VkDeviceAddress address = reinterpret_cast<uintptr>(indices.gpu);
++        while (heap && !(address >= heap->backing.address && address + indices.size <= heap->backing.address + heap->backing.mapped_size)) heap = heap->next;
++        assert(heap);
++        vkCmdBindIndexBuffer(commands->command_buffer, heap->backing.buffer, address - heap->backing.address, static_cast<VkIndexType>(type));
++        vkCmdDrawIndexed(commands->command_buffer, index_count, instance_count, first_index, vertex_offset, first_instance);
++        return;
++    }
+     const VkBindIndexBuffer3InfoKHR bind_info{
+         .sType = VK_STRUCTURE_TYPE_BIND_INDEX_BUFFER_3_INFO_KHR,
+         .addressRange = {
+@@ -3606,6 +3765,20 @@ void draw_meshlets_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arg
+ void copy_memory(CommandBuffer* commands, GpuRange source, GpuRange destination) noexcept
+ {
+     assert(commands && commands->state);
++    if (commands->state->conventional_backend)
++    {
++        GpuHeapOwner* src = commands->state->gpu_heaps;
++        GpuHeapOwner* dst = commands->state->gpu_heaps;
++        const VkDeviceAddress src_address = reinterpret_cast<uintptr>(source.gpu);
++        const VkDeviceAddress dst_address = reinterpret_cast<uintptr>(destination.gpu);
++        while (src && !(src_address >= src->backing.address && src_address + source.size <= src->backing.address + src->backing.mapped_size)) src = src->next;
++        while (dst && !(dst_address >= dst->backing.address && dst_address + destination.size <= dst->backing.address + dst->backing.mapped_size)) dst = dst->next;
++        assert(src && dst);
++        const VkBufferCopy region{.srcOffset = src_address - src->backing.address, .dstOffset = dst_address - dst->backing.address,
++                                  .size = source.size < destination.size ? source.size : destination.size};
++        vkCmdCopyBuffer(commands->command_buffer, src->backing.buffer, dst->backing.buffer, 1, &region);
++        return;
++    }
+     const VkDeviceMemoryCopyKHR region{
+         .sType = VK_STRUCTURE_TYPE_DEVICE_MEMORY_COPY_KHR,
+         .srcRange = {
+@@ -3630,6 +3803,23 @@ void copy_memory(CommandBuffer* commands, GpuRange source, GpuRange destination)
+ void copy_memory_to_texture(CommandBuffer* commands, GpuRange source, Texture* destination, const TextureCopyDesc& copy) noexcept
+ {
+     assert(commands && commands->state && destination);
++    if (commands->state->conventional_backend)
++    {
++        GpuHeapOwner* src = commands->state->gpu_heaps;
++        const VkDeviceAddress address = reinterpret_cast<uintptr>(source.gpu);
++        while (src && !(address >= src->backing.address && address + source.size <= src->backing.address + src->backing.mapped_size)) src = src->next;
++        assert(src);
++        const uint32 mip_width = destination->width >> copy.mip_level ? destination->width >> copy.mip_level : 1;
++        const uint32 mip_height = destination->height >> copy.mip_level ? destination->height >> copy.mip_level : 1;
++        const VkBufferImageCopy region{.bufferOffset = address - src->backing.address,
++            .imageSubresource = {.aspectMask = image_aspects(destination->format), .mipLevel = copy.mip_level, .baseArrayLayer = copy.base_slice,
++                                 .layerCount = copy.slice_count ? copy.slice_count : destination->layer_count - copy.base_slice},
++            .imageOffset = {static_cast<int32>(copy.offset.x), static_cast<int32>(copy.offset.y), static_cast<int32>(copy.offset.z)},
++            .imageExtent = {copy.extent.x ? copy.extent.x : mip_width - copy.offset.x, copy.extent.y ? copy.extent.y : mip_height - copy.offset.y,
++                            copy.extent.z ? copy.extent.z : 1u}};
++        vkCmdCopyBufferToImage(commands->command_buffer, src->backing.buffer, destination->image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
++        return;
++    }
+     const VkDeviceMemoryImageCopyKHR region = make_texture_copy_region(*destination, copy, source);
+     const VkCopyDeviceMemoryImageInfoKHR info{
+         .sType = VK_STRUCTURE_TYPE_COPY_DEVICE_MEMORY_IMAGE_INFO_KHR,
+@@ -3643,6 +3833,23 @@ void copy_memory_to_texture(CommandBuffer* commands, GpuRange source, Texture* d
+ void copy_texture_to_memory(CommandBuffer* commands, Texture* source, GpuRange destination, const TextureCopyDesc& copy) noexcept
+ {
+     assert(commands && commands->state && source);
++    if (commands->state->conventional_backend)
++    {
++        GpuHeapOwner* dst = commands->state->gpu_heaps;
++        const VkDeviceAddress address = reinterpret_cast<uintptr>(destination.gpu);
++        while (dst && !(address >= dst->backing.address && address + destination.size <= dst->backing.address + dst->backing.mapped_size)) dst = dst->next;
++        assert(dst);
++        const uint32 mip_width = source->width >> copy.mip_level ? source->width >> copy.mip_level : 1;
++        const uint32 mip_height = source->height >> copy.mip_level ? source->height >> copy.mip_level : 1;
++        const VkBufferImageCopy region{.bufferOffset = address - dst->backing.address,
++            .imageSubresource = {.aspectMask = image_aspects(source->format), .mipLevel = copy.mip_level, .baseArrayLayer = copy.base_slice,
++                                 .layerCount = copy.slice_count ? copy.slice_count : source->layer_count - copy.base_slice},
++            .imageOffset = {static_cast<int32>(copy.offset.x), static_cast<int32>(copy.offset.y), static_cast<int32>(copy.offset.z)},
++            .imageExtent = {copy.extent.x ? copy.extent.x : mip_width - copy.offset.x, copy.extent.y ? copy.extent.y : mip_height - copy.offset.y,
++                            copy.extent.z ? copy.extent.z : 1u}};
++        vkCmdCopyImageToBuffer(commands->command_buffer, source->image, VK_IMAGE_LAYOUT_GENERAL, dst->backing.buffer, 1, &region);
++        return;
++    }
+     const VkDeviceMemoryImageCopyKHR region = make_texture_copy_region(*source, copy, destination);
+     const VkCopyDeviceMemoryImageInfoKHR info{
+         .sType = VK_STRUCTURE_TYPE_COPY_DEVICE_MEMORY_IMAGE_INFO_KHR,

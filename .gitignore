@@ -1,0 +1,38 @@
+# Build outputs
+/build/
+/out/
+/third_party/NoGraphicsAPI/build*/
+
+# Local tool installs (tools/bootstrap.ps1) and caches
+/.tools/
+/cache/
+
+# Runtime captures, benchmarks and stability runs
+/captures/
+
+# Downloaded material textures (tools/download-assets.ps1, see docs/ASSETS.md).
+# The manifest with hashes and attribution stays tracked.
+/assets/materials/*.jpg
+/assets/materials/*.tif
+/assets/materials/*.png
+
+# Machine-specific CMake overrides
+/CMakeUserPresets.json
+
+# IDE and editor state
+/.vs/
+/.vscode/
+/.idea/
+/.cache/
+*.user
+*.swp
+compile_commands.json
+
+# Binaries and intermediates
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.spv
+*.dll
+*.lib

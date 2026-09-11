@@ -1,0 +1,61 @@
+---
+# Orbital C++ style. Vendored code under third_party/ carries its own configuration.
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++20
+
+ColumnLimit: 120
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -4
+NamespaceIndentation: None
+FixNamespaceComments: true
+IndentPPDirectives: None
+MaxEmptyLinesToKeep: 1
+InsertNewlineAtEOF: true
+
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortLambdasOnASingleLine: All
+AllowShortEnumsOnASingleLine: true
+
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+QualifierAlignment: Leave
+SpaceAfterCStyleCast: false
+Cpp11BracedListStyle: true
+
+BinPackArguments: true
+BinPackParameters: true
+AlignAfterOpenBracket: Align
+AlignOperands: Align
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 0
+PenaltyReturnTypeOnItsOwnLine: 1000
+PenaltyBreakAssignment: 40
+
+# Includes: <windows.h> first, then other Win32 SDK headers, then project
+# headers, then third-party headers, then the standard library.
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve
+IncludeIsMainRegex: '([-_](test|tests|unittest))?$'
+IncludeCategories:
+  - Regex: '^<windows\.h>'
+    Priority: 1
+  - Regex: '^<(wincodec|crtdbg|shellapi|windowsx|commctrl|dwmapi|shlobj|shellscalingapi)\.h>'
+    Priority: 2
+  - Regex: '^"'
+    Priority: 3
+  - Regex: '^<[^/]+/.*>'
+    Priority: 4
+  - Regex: '.*'
+    Priority: 5

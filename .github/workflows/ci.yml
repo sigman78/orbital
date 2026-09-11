@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  format:
+    name: clang-format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: pip install clang-format==21.1.6
+      - name: Check formatting
+        run: |
+          find src tests \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) -print0 \
+            | xargs -0 clang-format --style=file --dry-run --Werror
+
+  cpu-tests:
+    name: Scene library and tests (MSVC, no GPU)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Configure
+        run: cmake --preset release -DORBITAL_BUILD_DEMO=OFF
+      - name: Build
+        run: cmake --build --preset release
+      - name: Test
+        run: ctest --preset release

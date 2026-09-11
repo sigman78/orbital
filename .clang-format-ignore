@@ -1,0 +1,4 @@
+# Shaders (GLSL and Slang) are not C++ and are formatted by hand.
+shaders/**
+# Vendored code keeps its upstream style (third_party/NoGraphicsAPI/.clang-format).
+third_party/**

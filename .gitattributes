@@ -1,0 +1,24 @@
+# Normalize text files to LF in the repository; check out with the platform default.
+* text=auto
+
+# Patches must round-trip byte-for-byte.
+*.patch -text
+
+# Binary assets
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.tif binary
+*.tiff binary
+*.bmp binary
+*.spv binary
+*.rgba8 binary
+*.zip binary
+*.exe binary
+*.dll binary
+*.lib binary
+*.pdb binary
+
+# GitHub language statistics
+third_party/** linguist-vendored
+docs/** linguist-documentation
