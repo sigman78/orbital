@@ -97,6 +97,7 @@ inline constexpr QualityTier high_quality{.belt_count = 65000};
 // Belt rock sizing, needed when clusters are bounded and again when rocks are culled.
 namespace belt {
 inline constexpr float rock_radius_scale = 0.025f; // instance scale to world radius
+inline constexpr unsigned radial_bands = 8;        // cluster bins across the belt width; each orbits at its own rate
 
 // A sparse large-body tail exposes the fractured silhouettes between the much
 // more numerous small rocks. Stable IDs keep quality tiers nested.
@@ -147,6 +148,7 @@ using Uploads = SmallVec<Upload, inline_upload_count>;
 struct BeltCluster {
     Vec3f center{};
     float radius = 0;
+    unsigned band = 0; // radial band, which sets the cluster's orbital rate
     std::span<const unsigned> indices;
 };
 
@@ -221,8 +223,8 @@ struct Renderer::Impl {
     void apply_metering();
     FrameData build_frame(const FrameInput& input);
     BeltBatches cull_belt(const FrameInput& input, const FrameData& frame);
-    void classify_rock(unsigned id, const RockCullContext& context);
-    void record_shadow_pass(gpu::CommandBuffer* cmd, Root root, const BeltBatches& batches);
+    void classify_rock(unsigned id, const RockCullContext& context, unsigned band);
+    void record_shadow_pass(gpu::CommandBuffer* cmd, Root root);
     void record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input, const FrameData& frame,
                            const BeltBatches& batches);
     void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view);

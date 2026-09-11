@@ -165,16 +165,34 @@ Mesh generate_rock(std::uint32_t seed, std::uint32_t detail) {
     return mesh;
 }
 
+float belt_ring_density(float t) {
+    struct Rings {
+        float count = 3.f, phase = .15f;            // ring pattern across the belt width
+        float gap_center = .58f, gap_width = .035f; // one thin sparse lane
+        float floor = .5f, gap_depth = .7f;         // density never drops below floor * (1 - gap_depth)
+    };
+    constexpr Rings rings{};
+    const float bands = .5f + .5f * std::cos(2 * pi<float> * (t * rings.count + rings.phase));
+    const float gap = (t - rings.gap_center) / rings.gap_width;
+    return (rings.floor + (1 - rings.floor) * bands) * (1 - rings.gap_depth * std::exp(-gap * gap));
+}
+
 std::vector<AsteroidInstance> generate_belt(const BeltParams& params) {
     const float inner = std::max(0.0f, params.inner_radius);
     const float outer = std::max(inner, params.outer_radius);
     const float thickness = std::max(0.0f, params.thickness);
+    constexpr unsigned ring_attempts = 16; // rejection sampling against belt_ring_density
     std::vector<AsteroidInstance> result;
     result.reserve(params.count);
     std::uint64_t state = params.seed;
     for (std::uint32_t i = 0; i < params.count; ++i) {
-        // Uniform in area over the annulus, then a random height in the slab.
-        const float r = std::sqrt(inner * inner + unit(state) * (outer * outer - inner * inner));
+        // Uniform in area over the annulus, thinned into rings, then a random height in the slab.
+        float r = inner;
+        for (unsigned attempt = 0; attempt < ring_attempts; ++attempt) {
+            r = std::sqrt(inner * inner + unit(state) * (outer * outer - inner * inner));
+            if (unit(state) <= belt_ring_density((r - inner) / std::max(outer - inner, 1e-6f)))
+                break;
+        }
         const float angle = 2.0f * pi<float> * unit(state);
         const float y = signed_unit(state) * thickness * 0.5f;
         const float s = 0.35f + 0.9f * unit(state);
@@ -184,6 +202,10 @@ std::vector<AsteroidInstance> generate_belt(const BeltParams& params) {
                           s * (0.75f + 0.5f * unit(state))};
         instance.rotation = {2.0f * pi<float> * unit(state), 2.0f * pi<float> * unit(state),
                              2.0f * pi<float> * unit(state)};
+        // Mostly a spin about the local Y axis at an individual rate and sense,
+        // with a slower tumble about the others.
+        const float sense = unit(state) < .5f ? -1.f : 1.f;
+        instance.spin = {.35f * signed_unit(state), sense * (.4f + 1.2f * unit(state)), .35f * signed_unit(state)};
         instance.variant = static_cast<std::uint32_t>(splitmix64(state) & 3u);
         result.push_back(instance);
     }

@@ -24,6 +24,8 @@ struct Frame {
     SHADER_MATRIX4 light_projection;
     SHADER_MATRIX4 previous_projection;
     SHADER_FLOAT4 previous_camera_delta, previous_forward, jitter;
+    SHADER_FLOAT4 belt_ring;   // inner radius, outer radius, density, thickness (giant-relative units)
+    SHADER_FLOAT4 belt_normal; // unit normal of the belt plane, w unused
 };
 struct Root {
 #ifdef __cplusplus

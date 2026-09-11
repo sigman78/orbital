@@ -81,8 +81,14 @@ int main() {
     for (const auto& i : belt_a) {
         const float r = std::sqrt(i.position.x * i.position.x + i.position.z * i.position.z);
         assert(r >= 10.0f && r <= 20.0f && std::abs(i.position.y) <= 2.0f);
+        assert(std::abs(i.spin.y) >= 0.4f && std::abs(i.spin.y) <= 1.6f);
     }
-    assert(select_lod(220, 3) == 3); // hysteresis while shrinking
+    for (int step = 0; step <= 20; ++step) {
+        const float density = belt_ring_density(float(step) / 20.f);
+        assert(density > 0.0f && density <= 1.0f);
+    }
+    assert(belt_ring_density(.58f) < belt_ring_density(.15f)); // the gap is sparser than the rings
+    assert(select_lod(220, 3) == 3);                           // hysteresis while shrinking
     assert(select_lod(1, 3) == 0);
     Frustum f{{{{1, 0, 0}, 0}, {{-1, 0, 0}, 10}, {{0, 1, 0}, 0}, {{0, -1, 0}, 10}, {{0, 0, 1}, 0}, {{0, 0, -1}, 10}}};
     assert(sphere_in_frustum(f, {5, 5, 5}, 1));

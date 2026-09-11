@@ -26,6 +26,7 @@ struct AsteroidInstance {
     Vec3f position;
     Vec3f scale;
     Vec3f rotation; // Euler angles in radians (x, y, z).
+    Vec3f spin;     // tumble rate per axis, relative to the belt's rock spin rate
     std::uint32_t variant = 0;
 };
 
@@ -52,6 +53,12 @@ constexpr std::uint32_t lod_count = 4;
 Mesh generate_sphere(std::uint32_t longitude, std::uint32_t latitude);
 Mesh generate_rock(std::uint32_t seed, std::uint32_t detail);
 std::vector<AsteroidInstance> generate_belt(const BeltParams& params);
+
+// Relative rock density across the belt, t = 0 at the inner edge and 1 at the
+// outer: three soft rings and one thin gap, so the belt reads as rings rather
+// than a uniform disc. Always within (0, 1]. The gas giant's belt shadow in
+// common.slang mirrors this profile.
+float belt_ring_density(float t);
 
 // Picks a LOD from the projected radius, keeping the previous level inside a
 // 15% hysteresis band around each transition.

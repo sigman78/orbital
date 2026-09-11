@@ -69,8 +69,8 @@
     },
     {
       "file": "gas_albedo.png",
-      "width": 4096,
-      "height": 2048,
+      "width": 2048,
+      "height": 1024,
       "color_space": "sRGB",
       "license": "CC-BY-4.0",
       "attribution": "Solar System Scope",

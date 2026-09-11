@@ -33,6 +33,8 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         float2 hit = sphereHit(ro, rd, other.xyz, other.w);
         if (hit.x > 0.0) end = min(end, hit.x);
     }
+    // Anything already drawn in front of the shell (asteroids, the moon) ends the march.
+    end = min(end, sceneDistance(position.xy, rd));
     if (end <= begin) return float4(0.0, 0.0, 0.0, 0.0);
 
     float3 sunDirection = normalize(root.frame.sun.xyz - centre);

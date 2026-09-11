@@ -5,6 +5,8 @@
 [[vk::push_constant]] ConstantBuffer<Root> root;
 
 static const float PI = 3.141592653589793;
+static const float NEAR_Z = .02;
+static const float FAR_Z = 2000.0;
 
 float3 rayDirection(float2 pixel)
 {
@@ -20,6 +22,16 @@ float2 sphereHit(float3 ro, float3 rd, float3 center, float radius)
     if (d < 0.0) return float2(1e20, -1e20);
     d = sqrt(d);
     return float2(-b - d, -b + d);
+}
+
+float linearViewDepth(float d) { return (NEAR_Z * FAR_Z) / max(FAR_Z - d * (FAR_Z - NEAR_Z), 1e-5); }
+
+// Distance along a view ray to the opaque scene at this pixel; very large for sky.
+float sceneDistance(float2 pixel, float3 rd)
+{
+    float d = textures[18].Load(int3(int2(pixel), 0)).r;
+    if (d >= .999999) return 1e9;
+    return linearViewDepth(d) / max(dot(rd, root.frame->forward_exposure.xyz), 1e-4);
 }
 
 float solarVisibility(float3 point, int skip)
@@ -55,6 +67,38 @@ float localShadow(float3 point, float3 normal)
     return result / 9.0;
 }
 
+// Relative rock density across the belt (0 inner edge, 1 outer edge); mirrors
+// geometry::belt_ring_density so the shadow shows the same rings and gap.
+float beltRingDensity(float t)
+{
+    float bands = .5 + .5 * cos(2.0 * PI * (t * 3.0 + .15));
+    float gap = (t - .58) / .035;
+    return (.5 + .5 * bands) * (1.0 - .7 * exp(-gap * gap));
+}
+
+// Shadow the asteroid belt casts on the gas giant: the sun ray from a surface
+// point is intersected with the belt plane and darkened inside the annulus.
+// The belt is a sparse cloud, so the shadow is soft and never fully dark.
+float beltShadow(float3 point)
+{
+    float4 ring = root.frame->belt_ring;
+    if (ring.z <= 0.0) return 1.0;
+    float3 centre = root.frame->bodies[1].xyz;
+    float3 n = root.frame->belt_normal.xyz;
+    float3 light = normalize(root.frame->sun.xyz - point);
+    float denominator = dot(light, n);
+    if (abs(denominator) < 1e-4) return 1.0;
+    float t = dot(centre - point, n) / denominator;
+    if (t <= 0.0) return 1.0;
+    float3 q = point + light * t - centre;
+    float r = length(q);
+    float feather = (ring.y - ring.x) * .12;
+    float inside = smoothstep(ring.x - feather, ring.x + feather, r) * (1.0 - smoothstep(ring.y - feather, ring.y + feather, r));
+    float density = beltRingDensity(saturate((r - ring.x) / (ring.y - ring.x)));
+    float grain = .8 + .2 * noise(q * .5);
+    return 1.0 - ring.z * .45 * inside * density * grain;
+}
+
 float3x3 rotation(float3 a)
 {
     float3 c = cos(a), s = sin(a);
@@ -76,3 +120,39 @@ float noise(float3 p)
                 lerp(lerp(hash(i+float3(0,0,1)),hash(i+float3(1,0,1)),f.x),lerp(hash(i+float3(0,1,1)),hash(i+float3(1,1,1)),f.x),f.y),f.z);
 }
 float fbm(float3 p) { float n=0,a=.5; for(int i=0;i<4;i++){n+=a*noise(p);p=p*2.03+float3(2.1,1.7,4.3);a*=.5;} return n; }
+
+// 2D value noise for surface detail; cheaper than the 3D variant above.
+float hash2(float2 p) { float3 q = frac(float3(p.xyx) * .1031); q += dot(q, q.yzx + 33.33); return frac((q.x + q.y) * q.z); }
+float noise2(float2 p)
+{
+    float2 i = floor(p), f = frac(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return lerp(lerp(hash2(i), hash2(i + float2(1, 0)), f.x), lerp(hash2(i + float2(0, 1)), hash2(i + float2(1, 1)), f.x), f.y);
+}
+float fbm2(float2 p, int octaves)
+{
+    float n = 0.0, a = .5;
+    for (int i = 0; i < octaves; ++i) { n += a * noise2(p); p = p * 2.03 + float2(1.7, 9.2); a *= .5; }
+    return n;
+}
+
+// Remaps uv so bilinear filtering of a map with the given texel count becomes
+// C1-smooth (smoothstep inside each texel); derivatives of the result no longer
+// break at texel edges, which matters when heights are turned into normals.
+float2 smoothTexel(float2 uv, float2 texels)
+{
+    float2 p = uv * texels + .5;
+    float2 i = floor(p), f = frac(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return (i + f - .5) / texels;
+}
+
+// 1 while a texel of a texture with the given size covers more than a screen
+// pixel (magnified), fading to 0 once texels shrink below a pixel. Procedural
+// detail is scaled by this so it only appears where the source runs out.
+float magnification(float2 uv, float2 texels)
+{
+    float2 d = max(abs(ddx(uv)), abs(ddy(uv))) * texels;
+    float lod = log2(max(max(d.x, d.y), 1e-6));
+    return saturate(-lod);
+}

@@ -22,7 +22,7 @@ namespace {
 
 // Polar grid the belt is binned into for culling, read by build_belt.
 namespace cluster_grid {
-inline constexpr unsigned angle_bins = 128, radial_bins = 8, height_bins = 4;
+inline constexpr unsigned angle_bins = 128, radial_bins = belt::radial_bands, height_bins = 4;
 inline constexpr unsigned count = angle_bins * radial_bins * height_bins;
 } // namespace cluster_grid
 
@@ -322,7 +322,10 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
             const float rock_radius = belt::rock_radius_scale * std::max(s.x, std::max(s.y, s.z)) * belt::size_tail(id);
             bound = std::max(bound, std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z) + rock_radius);
         }
-        belt_clusters.push_back({.center = center, .radius = bound, .indices = ids});
+        belt_clusters.push_back({.center = center,
+                                 .radius = bound,
+                                 .band = (bin / cluster_grid::angle_bins) % cluster_grid::radial_bins,
+                                 .indices = ids});
     }
 }
 
