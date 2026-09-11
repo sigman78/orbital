@@ -1,4 +1,6 @@
 #pragma once
+#include "core/types.hpp"
+
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -11,10 +13,10 @@
 // value; callers decide whether that is fatal.
 namespace space::file {
 
-std::optional<std::vector<std::uint8_t>> read(const std::filesystem::path& path);
+std::optional<Bytes> read(const std::filesystem::path& path);
 
 // Creates missing parent directories. Returns false if anything failed.
-bool write(const std::filesystem::path& path, std::span<const std::uint8_t> bytes);
+bool write(const std::filesystem::path& path, ByteView bytes);
 bool write_text(const std::filesystem::path& path, std::string_view text);
 
 } // namespace space::file

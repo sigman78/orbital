@@ -28,7 +28,7 @@ struct File {
 
 } // namespace
 
-std::optional<std::vector<std::uint8_t>> read(const std::filesystem::path& path) {
+std::optional<Bytes> read(const std::filesystem::path& path) {
     File file(path, "rb");
     if (!file)
         return std::nullopt;
@@ -37,13 +37,13 @@ std::optional<std::vector<std::uint8_t>> read(const std::filesystem::path& path)
     const long size = std::ftell(file.handle);
     if (size < 0 || std::fseek(file.handle, 0, SEEK_SET) != 0)
         return std::nullopt;
-    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+    Bytes bytes(static_cast<std::size_t>(size));
     if (!bytes.empty() && std::fread(bytes.data(), 1, bytes.size(), file.handle) != bytes.size())
         return std::nullopt;
     return bytes;
 }
 
-bool write(const std::filesystem::path& path, std::span<const std::uint8_t> bytes) {
+bool write(const std::filesystem::path& path, ByteView bytes) {
     std::error_code error;
     if (path.has_parent_path())
         std::filesystem::create_directories(path.parent_path(), error);
