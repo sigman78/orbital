@@ -1,9 +1,9 @@
-#include "../src/assets/materials.hpp"
+#include "assets/materials.hpp"
 
 #include <array>
 #include <cassert>
+#include <cstdio>
 #include <filesystem>
-#include <iostream>
 #include <string_view>
 
 int main() {
@@ -28,7 +28,8 @@ int main() {
     };
     const auto root = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "materials";
     for (const auto& item : cases) {
-        const auto mips = load_material(root / item.name, item.encoding, item.mask, item.normal);
+        const auto mips = load_material(
+            root / item.name, {.encoding = item.encoding, .luminance_to_alpha = item.mask, .normal_map = item.normal});
         assert(!mips.empty());
         assert(mips.front().width > 0 && mips.front().height > 0);
         assert(mips.back().width == 1 && mips.back().height == 1);
@@ -74,6 +75,6 @@ int main() {
             }
             assert(minimum < maximum); // Map retained a meaningful shader range.
         }
-        std::cout << item.name << ' ' << mips.front().width << 'x' << mips.front().height << '\n';
+        std::printf("%s %ux%u\n", item.name, mips.front().width, mips.front().height);
     }
 }

@@ -1,5 +1,5 @@
 #pragma once
-#include "../../shaders/scene_shared.h"
+#include "scene_shared.h"
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>

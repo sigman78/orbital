@@ -1,19 +1,19 @@
-#include "materials.hpp"
-#include "kernels.hpp"
+#include "assets/materials.hpp"
 
-#include <stdexcept>
+#include "assets/kernels.hpp"
+#include "core/panic.hpp"
+
+#include <algorithm>
 
 namespace space::assets {
 
-std::vector<Image> load_material(const std::filesystem::path& path, MaterialEncoding encoding, bool luminance_to_alpha,
-                                 bool normal_map) {
-    if (normal_map && luminance_to_alpha)
-        throw std::invalid_argument("material cannot be both a normal map and luminance-to-alpha mask");
+std::vector<Image> load_material(const std::filesystem::path& path, const MaterialDesc& desc) {
+    ORBITAL_ASSERT(!(desc.normal_map && desc.luminance_to_alpha));
     Image base = load_png(path);
     const std::size_t pixel_count = static_cast<std::size_t>(base.width) * base.height;
-    if (luminance_to_alpha)
+    if (desc.luminance_to_alpha)
         kernels::luminance_to_alpha(base.pixels.data(), pixel_count);
-    else if (encoding == MaterialEncoding::SRGB)
+    else if (desc.encoding == MaterialEncoding::SRGB)
         kernels::srgb_to_linear(base.pixels.data(), pixel_count);
 
     std::vector<Image> mips;
@@ -26,8 +26,8 @@ std::vector<Image> load_material(const std::filesystem::path& path, MaterialEnco
         const Image& previous = mips.back();
         Image next{kernels::half_extent(previous.width), kernels::half_extent(previous.height), {}};
         next.pixels.resize(static_cast<std::size_t>(next.width) * next.height * 4);
-        (normal_map ? kernels::downsample_normals : kernels::downsample_rgba8)(previous.pixels.data(), previous.width,
-                                                                               previous.height, next.pixels.data());
+        (desc.normal_map ? kernels::downsample_normals : kernels::downsample_rgba8)(
+            previous.pixels.data(), previous.width, previous.height, next.pixels.data());
         mips.push_back(std::move(next));
     }
     return mips;

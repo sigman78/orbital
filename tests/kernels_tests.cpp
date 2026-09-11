@@ -1,4 +1,4 @@
-#include "../src/assets/kernels.hpp"
+#include "assets/kernels.hpp"
 
 #include <cassert>
 #include <chrono>

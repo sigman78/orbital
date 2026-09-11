@@ -1,4 +1,4 @@
-#include "../src/scene/system.hpp"
+#include "scene/system.hpp"
 #include <cassert>
 #include <cmath>
 

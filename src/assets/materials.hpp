@@ -1,6 +1,6 @@
 #pragma once
 
-#include "image.hpp"
+#include "assets/image.hpp"
 #include <filesystem>
 #include <vector>
 
@@ -8,14 +8,20 @@ namespace space::assets {
 
 enum class MaterialEncoding { SRGB, Linear };
 
-// Loads a PNG material and returns a complete RGBA8_UNORM mip chain. SRGB
-// inputs (normally albedo/color maps) are converted to linear-light bytes
-// before storage; normal, specular, roughness, height, and mask maps should use
-// Linear. With luminance_to_alpha, RGB is set to white and source luminance
-// becomes alpha (the expected cloud-mask layout). normal_map renormalizes RGB
-// vectors at every mip level. Roughness convention: 0 is smooth and 255 is
-// rough.
-std::vector<Image> load_material(const std::filesystem::path& path, MaterialEncoding encoding,
-                                 bool luminance_to_alpha = false, bool normal_map = false);
+// How a source map is turned into upload data. SRGB inputs (normally
+// albedo/color maps) are converted to linear-light bytes before filtering;
+// normal, specular, roughness, height, and mask maps use Linear. With
+// luminance_to_alpha, RGB is set to white and source luminance becomes alpha
+// (the expected cloud-mask layout). normal_map renormalizes RGB vectors at
+// every mip level. Roughness convention: 0 is smooth and 255 is rough.
+struct MaterialDesc {
+    MaterialEncoding encoding = MaterialEncoding::Linear;
+    bool luminance_to_alpha = false;
+    bool normal_map = false;
+};
+
+// Loads a PNG material and returns its complete RGBA8_UNORM mip chain down to
+// 1x1. Panics if the file is missing or unreadable.
+std::vector<Image> load_material(const std::filesystem::path& path, const MaterialDesc& desc);
 
 } // namespace space::assets

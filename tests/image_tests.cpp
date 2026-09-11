@@ -1,8 +1,9 @@
-#include "../src/assets/image.hpp"
+#include "assets/image.hpp"
+#include "core/file.hpp"
 #include <cassert>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
-#include <stdexcept>
 #include <vector>
 
 int main() {
@@ -18,7 +19,7 @@ int main() {
     const auto path = std::filesystem::temp_directory_path() / "orbital_image_test.png";
 
     // RGBA round trip is lossless.
-    save_png(path, width, height, 4, rgba.data());
+    assert(save_png(path, width, height, 4, rgba.data()));
     const auto loaded = load_png(path);
     assert(loaded.width == width && loaded.height == height);
     assert(loaded.pixels == rgba);
@@ -28,7 +29,7 @@ int main() {
     for (std::uint32_t i = 0; i < width * height; ++i)
         for (unsigned c = 0; c < 3; ++c)
             rgb[i * 3 + c] = rgba[i * 4 + c];
-    save_png(path, width, height, 3, rgb.data());
+    assert(save_png(path, width, height, 3, rgb.data()));
     const auto expanded = load_png(path);
     assert(expanded.width == width && expanded.height == height);
     for (std::uint32_t i = 0; i < width * height; ++i) {
@@ -37,22 +38,12 @@ int main() {
         assert(expanded.pixels[i * 4 + 3] == 255);
     }
 
-    // Missing files and invalid descriptions are reported as exceptions.
+    // A missing file and a non-PNG file are reported, not fatal, on the try_ path.
     std::filesystem::remove(path);
-    bool threw = false;
-    try {
-        load_png(path);
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    assert(threw);
-    threw = false;
-    try {
-        save_png(path, 0, 0, 4, rgba.data());
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    assert(threw);
-    assert(!std::filesystem::exists(path));
+    assert(!try_load_png(path));
+    assert(space::file::write_text(path, "not a png"));
+    assert(!try_load_png(path));
+    std::filesystem::remove(path);
+    std::printf("image tests passed\n");
     return 0;
 }

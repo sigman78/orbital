@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <vector>
 
 namespace space::assets {
@@ -11,12 +12,15 @@ struct Image {
 };
 
 // Decodes a PNG file into RGBA8. Grayscale and RGB sources are expanded and a
-// missing alpha channel becomes 255. Throws std::runtime_error on failure.
+// missing alpha channel becomes 255. try_load_png reports failures by logging
+// and returning nullopt; load_png panics, for assets the demo cannot run without.
+std::optional<Image> try_load_png(const std::filesystem::path& path);
 Image load_png(const std::filesystem::path& path);
 
 // Encodes tightly packed 8-bit pixels with 1 to 4 channels as PNG, creating
-// parent directories as needed. Throws std::runtime_error on failure.
-void save_png(const std::filesystem::path& path, std::uint32_t width, std::uint32_t height, unsigned channels,
+// parent directories as needed. Returns false (after logging) if the file
+// could not be written.
+bool save_png(const std::filesystem::path& path, std::uint32_t width, std::uint32_t height, unsigned channels,
               const std::uint8_t* pixels);
 
 } // namespace space::assets

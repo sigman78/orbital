@@ -1,8 +1,11 @@
-#include "image.hpp"
+#include "assets/image.hpp"
+
+#include "core/file.hpp"
+#include "core/log.hpp"
+#include "core/panic.hpp"
 
 #include <climits>
-#include <fstream>
-#include <stdexcept>
+#include <format>
 #include <string>
 
 // Wuffs: PNG decoder plus the modules it depends on. On MSVC the SIMD paths
@@ -34,76 +37,108 @@
 namespace space::assets {
 namespace {
 
-std::vector<std::uint8_t> read_file(const std::filesystem::path& path) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file)
-        throw std::runtime_error("Cannot open image file: " + path.string());
-    const auto size = file.tellg();
-    if (size <= 0 || size > INT_MAX)
-        throw std::runtime_error("Image file is empty or too large: " + path.string());
-    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(bytes.data()), size);
-    if (!file)
-        throw std::runtime_error("Cannot read image file: " + path.string());
-    return bytes;
+constexpr std::uint64_t max_pixels = std::uint64_t{1} << 28;
+
+// Returns the Wuffs error text for a failed step, or nothing when it succeeded.
+std::optional<std::string> failure(const wuffs_base__status& status, const char* step) {
+    if (wuffs_base__status__is_ok(&status))
+        return std::nullopt;
+    return std::format("{}: {}", step, wuffs_base__status__message(&status));
 }
 
-void check(const wuffs_base__status& status, const std::filesystem::path& path, const char* step) {
-    if (!wuffs_base__status__is_ok(&status))
-        throw std::runtime_error("PNG decode failed for '" + path.string() + "' while " + step + ": " +
-                                 wuffs_base__status__message(&status));
-}
-
-} // namespace
-
-Image load_png(const std::filesystem::path& path) {
-    auto bytes = read_file(path);
+std::optional<Image> decode_png(std::vector<std::uint8_t>& bytes, std::string& error) {
     auto decoder = wuffs_png__decoder::alloc();
-    if (!decoder)
-        throw std::runtime_error("PNG decoder allocation failed");
+    if (!decoder) {
+        error = "decoder allocation failed";
+        return std::nullopt;
+    }
     wuffs_base__io_buffer source = wuffs_base__ptr_u8__reader(bytes.data(), bytes.size(), true);
     wuffs_base__image_config config{};
-    check(wuffs_png__decoder__decode_image_config(decoder.get(), &config, &source), path, "reading the header");
+    if (auto why = failure(wuffs_png__decoder__decode_image_config(decoder.get(), &config, &source), "header")) {
+        error = *why;
+        return std::nullopt;
+    }
     const std::uint32_t width = wuffs_base__pixel_config__width(&config.pixcfg);
     const std::uint32_t height = wuffs_base__pixel_config__height(&config.pixcfg);
-    constexpr std::uint64_t max_pixels = std::uint64_t{1} << 28;
-    if (!width || !height || std::uint64_t(width) * height > max_pixels)
-        throw std::runtime_error("PNG has unsupported dimensions: " + path.string());
+    if (!width || !height || std::uint64_t(width) * height > max_pixels) {
+        error = std::format("unsupported dimensions {}x{}", width, height);
+        return std::nullopt;
+    }
     // Decode straight into tightly packed, non-premultiplied RGBA8.
     wuffs_base__pixel_config__set(&config.pixcfg, WUFFS_BASE__PIXEL_FORMAT__RGBA_NONPREMUL,
                                   WUFFS_BASE__PIXEL_SUBSAMPLING__NONE, width, height);
     Image image{width, height, std::vector<std::uint8_t>(static_cast<std::size_t>(width) * height * 4)};
     wuffs_base__pixel_buffer pixels{};
-    check(wuffs_base__pixel_buffer__set_from_slice(&pixels, &config.pixcfg,
-                                                   wuffs_base__make_slice_u8(image.pixels.data(), image.pixels.size())),
-          path, "binding the output buffer");
+    if (auto why = failure(
+            wuffs_base__pixel_buffer__set_from_slice(
+                &pixels, &config.pixcfg, wuffs_base__make_slice_u8(image.pixels.data(), image.pixels.size())),
+            "output buffer")) {
+        error = *why;
+        return std::nullopt;
+    }
     std::vector<std::uint8_t> work(wuffs_png__decoder__workbuf_len(decoder.get()).max_incl);
     wuffs_base__frame_config frame{};
-    check(wuffs_png__decoder__decode_frame_config(decoder.get(), &frame, &source), path, "reading the frame header");
-    check(wuffs_png__decoder__decode_frame(decoder.get(), &pixels, &source, WUFFS_BASE__PIXEL_BLEND__SRC,
-                                           wuffs_base__make_slice_u8(work.data(), work.size()), nullptr),
-          path, "decoding pixels");
+    if (auto why = failure(wuffs_png__decoder__decode_frame_config(decoder.get(), &frame, &source), "frame header")) {
+        error = *why;
+        return std::nullopt;
+    }
+    if (auto why = failure(
+            wuffs_png__decoder__decode_frame(decoder.get(), &pixels, &source, WUFFS_BASE__PIXEL_BLEND__SRC,
+                                             wuffs_base__make_slice_u8(work.data(), work.size()), nullptr),
+            "pixels")) {
+        error = *why;
+        return std::nullopt;
+    }
     return image;
 }
 
-void save_png(const std::filesystem::path& path, std::uint32_t width, std::uint32_t height, unsigned channels,
+} // namespace
+
+std::optional<Image> try_load_png(const std::filesystem::path& path) {
+    auto bytes = file::read(path);
+    if (!bytes || bytes->empty()) {
+        log::error("cannot read image file {}", path.string());
+        return std::nullopt;
+    }
+    if (bytes->size() > INT_MAX) {
+        log::error("image file too large: {}", path.string());
+        return std::nullopt;
+    }
+    std::string error;
+    auto image = decode_png(*bytes, error);
+    if (!image)
+        log::error("PNG decode failed for {} ({})", path.string(), error);
+    return image;
+}
+
+Image load_png(const std::filesystem::path& path) {
+    auto image = try_load_png(path);
+    if (!image)
+        panic(std::format("required image is missing or unreadable: {}", path.string()));
+    return std::move(*image);
+}
+
+bool save_png(const std::filesystem::path& path, std::uint32_t width, std::uint32_t height, unsigned channels,
               const std::uint8_t* pixels) {
-    if (!width || !height || channels < 1 || channels > 4 || !pixels)
-        throw std::invalid_argument("save_png: invalid image description");
-    if (!path.parent_path().empty())
-        std::filesystem::create_directories(path.parent_path());
-    std::ofstream file(path, std::ios::binary);
-    if (!file)
-        throw std::runtime_error("Cannot create image file: " + path.string());
-    const auto write = [](void* context, void* data, int size) {
-        static_cast<std::ofstream*>(context)->write(static_cast<const char*>(data), size);
+    ORBITAL_ASSERT(width && height && channels >= 1 && channels <= 4 && pixels);
+    std::vector<std::uint8_t> encoded;
+    encoded.reserve(static_cast<std::size_t>(width) * height * channels / 2);
+    const auto append = [](void* context, void* data, int size) {
+        auto* out = static_cast<std::vector<std::uint8_t>*>(context);
+        const auto* bytes = static_cast<const std::uint8_t*>(data);
+        out->insert(out->end(), bytes, bytes + size);
     };
     const int stride = static_cast<int>(width * channels);
-    if (!stbi_write_png_to_func(write, &file, static_cast<int>(width), static_cast<int>(height),
-                                static_cast<int>(channels), pixels, stride) ||
-        !file)
-        throw std::runtime_error("PNG encode failed: " + path.string());
+    if (!stbi_write_png_to_func(append, &encoded, static_cast<int>(width), static_cast<int>(height),
+                                static_cast<int>(channels), pixels, stride)) {
+        log::error("PNG encode failed for {}", path.string());
+        return false;
+    }
+    if (!file::write(path, encoded)) {
+        log::error("cannot write {}", path.string());
+        return false;
+    }
+    return true;
 }
 
 } // namespace space::assets

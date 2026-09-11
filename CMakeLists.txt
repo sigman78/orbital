@@ -10,20 +10,26 @@ else()
   set(ORBITAL_WARNINGS -Wall -Wextra -Wpedantic)
 endif()
 
-# CPU-only libraries: deterministic system generation, geometry, camera, and PNG/material loading.
-# orbital_assets compiles the vendored Wuffs PNG decoder and stb PNG writer in src/assets/image.cpp.
+# CPU-only libraries (see docs/CODE_STYLE.md for the layering):
+#   orbital_core   logging, panic, file I/O, math
+#   orbital_scene  deterministic system generation, geometry, camera
+#   orbital_assets PNG I/O (vendored Wuffs decoder, stb writer), pixel kernels, materials
+add_library(orbital_core STATIC src/core/log.cpp src/core/panic.cpp src/core/file.cpp)
+target_include_directories(orbital_core PUBLIC src)
+target_compile_features(orbital_core PUBLIC cxx_std_20)
+target_compile_options(orbital_core PRIVATE ${ORBITAL_WARNINGS})
+
 add_library(orbital_scene STATIC src/scene/system.cpp src/scene/geometry.cpp src/app/camera.cpp)
-target_include_directories(orbital_scene PUBLIC src)
-target_compile_features(orbital_scene PUBLIC cxx_std_20)
+target_link_libraries(orbital_scene PUBLIC orbital_core)
 target_compile_options(orbital_scene PRIVATE ${ORBITAL_WARNINGS})
 
 add_library(orbital_assets STATIC src/assets/image.cpp src/assets/kernels.cpp src/assets/materials.cpp)
-target_include_directories(orbital_assets PUBLIC src PRIVATE third_party/stb third_party/wuffs)
-target_compile_features(orbital_assets PUBLIC cxx_std_20)
+target_include_directories(orbital_assets PRIVATE third_party/stb third_party/wuffs)
+target_link_libraries(orbital_assets PUBLIC orbital_core)
 target_compile_options(orbital_assets PRIVATE ${ORBITAL_WARNINGS})
 
 if(BUILD_TESTING)
-  foreach(test IN ITEMS system geometry camera image kernels materials)
+  foreach(test IN ITEMS core system geometry camera image kernels materials)
     add_executable(${test}_tests tests/${test}_tests.cpp)
     target_link_libraries(${test}_tests PRIVATE orbital_scene orbital_assets)
     # These tests use assertions as executable invariants, including Release.
@@ -56,6 +62,7 @@ if(ORBITAL_BUILD_DEMO)
 
   add_executable(orbital src/app/main.cpp src/app/hud.cpp src/render/renderer.cpp)
   target_link_libraries(orbital PRIVATE orbital_scene orbital_assets NoGraphicsAPI::NoGraphicsAPI user32 gdi32)
+  target_include_directories(orbital PRIVATE shaders) # scene_shared.h, the C++/shader layout
   target_compile_definitions(orbital PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
   target_compile_options(orbital PRIVATE ${ORBITAL_WARNINGS})
   add_dependencies(orbital orbital_shaders)

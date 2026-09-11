@@ -306,9 +306,10 @@ struct Renderer::Impl {
             pool.push_back(std::async(std::launch::async, [&] {
                 for (std::size_t i = next++; i < count; i = next++)
                     chains[i] = assets::load_material(directory / "assets/materials" / sources[i].file,
-                                                      sources[i].srgb ? assets::MaterialEncoding::SRGB
-                                                                      : assets::MaterialEncoding::Linear,
-                                                      sources[i].luminance_to_alpha, sources[i].normal_map);
+                                                      {.encoding = sources[i].srgb ? assets::MaterialEncoding::SRGB
+                                                                                   : assets::MaterialEncoding::Linear,
+                                                       .luminance_to_alpha = sources[i].luminance_to_alpha,
+                                                       .normal_map = sources[i].normal_map});
             }));
         for (auto& worker : pool)
             worker.get();
@@ -803,6 +804,7 @@ void Renderer::capture(const std::filesystem::path& path) {
         for (unsigned channel = 0; channel < 3; channel++)
             rgb[i * 3 + channel] = p[i * 4 + channel];
     gpu::destroy_gpu_heap(readback);
-    assets::save_png(path, s.width, s.height, 3, rgb.data());
+    if (!assets::save_png(path, s.width, s.height, 3, rgb.data()))
+        throw std::runtime_error("Cannot save screenshot");
 }
 } // namespace space::render

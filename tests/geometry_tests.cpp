@@ -1,4 +1,4 @@
-#include "../src/scene/geometry.hpp"
+#include "scene/geometry.hpp"
 
 #include <cassert>
 #include <cmath>
