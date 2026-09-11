@@ -22,27 +22,27 @@ namespace {
 using namespace space;
 using platform::Key;
 
-struct AppSettings {
-    struct {
-        Extent2D default_size{1600, 900};
-        Range<unsigned> width{320, 7680}, height{200, 4320};
-        double title_refresh_seconds = 0.5;
-    } window;
-    struct {
-        Range<float> range{0.05f, 8.0f};
-        float step = 1.1f; // per +/- key press
-    } exposure;
-    struct {
-        double max_frame_seconds = 0.1; // a stall must not advance the simulation by more than this
-        float fast_speed_scale = 4.0f;  // Shift
-        double orbit_zoom_radii = 2.3;  // O key orbits at this many body radii
-    } control;
-    struct {
-        std::size_t warmup_frames = 60;      // dropped before computing percentiles
-        std::size_t expected_frames = 36000; // reserve for an open-ended run (10 minutes at 60 Hz)
-    } benchmark;
-};
-constexpr AppSettings settings{};
+namespace window_limits {
+inline constexpr Extent2D default_size{1600, 900};
+inline constexpr Range<unsigned> width{320, 7680}, height{200, 4320};
+inline constexpr double title_refresh_seconds = 0.5;
+} // namespace window_limits
+
+namespace exposure_keys {
+inline constexpr Range<float> range{0.05f, 8.0f};
+inline constexpr float step = 1.1f; // per +/- key press
+} // namespace exposure_keys
+
+namespace control {
+inline constexpr double max_frame_seconds = 0.1; // a stall must not advance the simulation by more than this
+inline constexpr float fast_speed_scale = 4.0f;  // Shift
+inline constexpr double orbit_zoom_radii = 2.3;  // O key orbits at this many body radii
+} // namespace control
+
+namespace benchmark {
+inline constexpr std::size_t warmup_frames = 60;      // dropped before computing percentiles
+inline constexpr std::size_t expected_frames = 36000; // reserve for an open-ended run (10 minutes at 60 Hz)
+} // namespace benchmark
 
 constexpr std::string_view hotkey_capture_path = "captures/orbital.png";
 constexpr std::string_view window_title = "ORBITAL  /  Procedural worlds";
@@ -57,7 +57,7 @@ constexpr std::string_view usage =
 struct Options {
     std::uint64_t seed = showcase_seed;
     unsigned frame_limit = 0;
-    Extent2D size = settings.window.default_size;
+    Extent2D size = window_limits::default_size;
     double fixed_time = -1; // >= 0 freezes simulation and exposure adaptation at this time
     double duration = 0;    // > 0 exits after this many wall-clock seconds
     int bookmark = -1;
@@ -82,8 +82,8 @@ bool parse_path(std::optional<std::string_view> text, std::filesystem::path& out
 }
 
 bool options_valid(const Options& options) {
-    const bool size_ok = settings.window.width.contains(options.size.width) &&
-                         settings.window.height.contains(options.size.height);
+    const bool size_ok = window_limits::width.contains(options.size.width) &&
+                         window_limits::height.contains(options.size.height);
     const bool time_ok = std::isfinite(options.fixed_time) && options.fixed_time >= -1 &&
                          std::isfinite(options.duration) && options.duration >= 0;
     const bool exposure_ok = std::isfinite(options.exposure) && options.exposure > 0;
@@ -156,22 +156,21 @@ struct AppState {
 };
 
 void handle_key(AppState& app, Key key) {
-    const auto& exposure = settings.exposure;
     switch (key) {
     case Key::escape: app.running = false; break;
     case Key::space: app.paused = !app.paused; break;
     case Key::f1: app.overlay = !app.overlay; break;
     case Key::f2: app.high = !app.high; break;
     case Key::f12: app.capture_request = hotkey_capture_path; break;
-    case Key::plus: app.exposure = exposure.range.clamp(app.exposure * exposure.step); break;
-    case Key::minus: app.exposure = exposure.range.clamp(app.exposure / exposure.step); break;
+    case Key::plus: app.exposure = exposure_keys::range.clamp(app.exposure * exposure_keys::step); break;
+    case Key::minus: app.exposure = exposure_keys::range.clamp(app.exposure / exposure_keys::step); break;
     default: break;
     }
     if (key == platform::letter_key('T'))
         app.camera.toggle_tour();
     else if (key == platform::letter_key('O'))
         app.camera.set_orbit_target(app.selected_body,
-                                    app.bodies[app.selected_body].radius * settings.control.orbit_zoom_radii);
+                                    app.bodies[app.selected_body].radius * control::orbit_zoom_radii);
     else if (key == platform::letter_key('F'))
         app.camera.set_mode(CameraMode::Free);
     else if (key == platform::letter_key('X'))
@@ -193,7 +192,7 @@ Input gather_input(platform::Window& window, AppState& app) {
     input.move_forward = axis('W', 'S');
     input.move_right = axis('D', 'A');
     input.move_up = axis('E', 'Q');
-    input.speed_scale = window.key_down(Key::shift) ? settings.control.fast_speed_scale : 1.0f;
+    input.speed_scale = window.key_down(Key::shift) ? control::fast_speed_scale : 1.0f;
     const platform::MouseDelta mouse = window.take_mouse_look_delta();
     input.mouse_dx = mouse.dx;
     input.mouse_dy = mouse.dy;
@@ -221,8 +220,8 @@ void write_benchmark(const std::filesystem::path& path, const FrameTimes& times)
     if (!file::write_text(path, csv))
         log::error("cannot write benchmark {}", path.string());
     auto sorted = times.cpu_ms;
-    if (sorted.size() > settings.benchmark.warmup_frames)
-        sorted.erase(sorted.begin(), sorted.begin() + settings.benchmark.warmup_frames);
+    if (sorted.size() > benchmark::warmup_frames)
+        sorted.erase(sorted.begin(), sorted.begin() + benchmark::warmup_frames);
     std::sort(sorted.begin(), sorted.end());
     if (!sorted.empty()) {
         const auto p95 = sorted[std::min(sorted.size() - 1, std::size_t(double(sorted.size()) * .95))];
@@ -278,8 +277,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
             continue;
         }
         const auto now = std::chrono::steady_clock::now();
-        const double dt = std::min(std::chrono::duration<double>(now - previous).count(),
-                                   settings.control.max_frame_seconds);
+        const double dt = std::min(std::chrono::duration<double>(now - previous).count(), control::max_frame_seconds);
         previous = now;
         elapsed += dt;
         if (!app.paused)
@@ -315,7 +313,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                 break;
             }
         }
-        if (elapsed - title_clock > settings.window.title_refresh_seconds) {
+        if (elapsed - title_clock > window_limits::title_refresh_seconds) {
             title_clock = elapsed;
             update_title(window, renderer.stats(), app.high);
         }
@@ -337,7 +335,7 @@ int run(const Options& options) {
     log::info(
         "Ready. RMB + WASD: fly | 1/2/3: planets | T: tour | F2: quality | F12: capture | --help for all controls");
     FrameTimes times;
-    times.cpu_ms.reserve(options.frame_limit ? options.frame_limit : settings.benchmark.expected_frames);
+    times.cpu_ms.reserve(options.frame_limit ? options.frame_limit : benchmark::expected_frames);
     times.gpu_ms.reserve(times.cpu_ms.capacity());
     const unsigned frames = frame_loop({.options = options,
                                         .system = system,

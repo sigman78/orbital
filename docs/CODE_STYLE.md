@@ -100,9 +100,12 @@ has a portable fallback. A `_WIN32`, `_MSC_VER` or `<windows.h>` anywhere else i
 
 - Standard containers are generic and allocate; use the one that fits the shape of the data, and
   prefer no container at all when a fixed array will do.
-- `SmallVec<T, N>` (`core/small_vec.hpp`) for small, bounded collections in startup and per-frame
-  code: material uploads, decode workers, resolved body positions. It stores `N` elements inline
-  and spills to the heap only past that, and it is move-only.
+- `SmallVec<T, N>` (`core/small_vec.hpp`) is a fixed-capacity sequence stored entirely inline, with
+  a size counter no wider than `N` needs and no heap fallback. Pushing past the capacity panics. Use
+  it only where the bound is a compile-time fact (`static_assert(material_count <= capacity)`) or
+  validated input (`max_body_count` in `validate_system`); `try_push_back` is for queues where
+  dropping the overflow is the intended behaviour (key presses between two pumps). Anything else,
+  including a function that accepts a caller-sized span, uses `std::vector`.
 - `std::vector` only for large owning buffers (pixels, meshes, instance lists) and for containers
   that are cleared and reused. Never a `std::vector` of `std::vector`s for a grid; use one flat
   array plus offsets (the belt clusters are a counting sort into `belt_order`, and each cluster views
@@ -225,23 +228,34 @@ Three tiers, chosen by who could act on the failure:
 - Shared read-only data that several owners need is referenced, not duplicated; copy-on-write is
   the fallback if sharing ever turns into mutation, and it has not been needed yet.
 
-## Small value types and settings scopes
+## Small value types and constant groups
 
 - Values that always travel as a pair or triple get a small named type instead of two loose fields:
   `Range<T>` for limits and clamps (`Range<float> depth{0.02f, 2000.0f}`), `Extent2D` for widths and
   heights, `Vec3` for anything spatial. The type carries the operations (`clamp`, `contains`,
   `aspect`) so callers stop re-deriving them.
-- Related tuning constants live in one `constexpr` settings struct per module (`RenderSettings`,
-  `CameraSettings`, `AppSettings`, `LodSettings`, `SeedTags`), grouped into nested anonymous
-  structs by topic: `settings.belt.billboard.min_pixels` reads as a path through the design rather
-  than a flat list of prefixed names. Single-use structs are fine; the scope is the point, not reuse.
-- The instance is `inline constexpr` in a header shared by several translation units and plain
-  `constexpr` inside an anonymous namespace in a `.cpp`. Either way every value is a compile-time
-  constant; the struct only names the scope.
+- Constants are grouped by the decision they encode, not by the file or module they happen to sit
+  in. A group is named after that decision (`exposure_meter`, `shadow_placement`, `belt_culling`,
+  `cluster_grid`) and lives next to the code that reads it; a header only when two files read it.
+- The shape of a group follows what it is:
+  - a **namespace** when it is a scope of compile-time constants that nothing ever varies
+    (`namespace exposure_meter { inline constexpr float key = 0.18f; ... }`). Namespaces reopen, so
+    each concern defines its own constants beside its consumer, and nested namespaces give the same
+    `belt_culling::billboard::min_pixels` path a nested struct would.
+  - a **struct with instances** when the group is a value: something that exists in more than one
+    configuration or gets passed around. `QualityTier` has a `baseline_quality` and a `high_quality`
+    instance that `FrameInput::high_quality` selects between.
+  - a **struct with invariants** when the members constrain each other and a `static_assert` or
+    a derived accessor should say so: `HeapLayout` relates the heap size to its offsets and exposes
+    `instance_capacity()`.
+  - a **function-local `constexpr`** when exactly one function reads it.
+- Two levels of nesting at most. A module-wide `XSettings` struct that collects unrelated decisions
+  under one prefix is the shape to avoid: it reads as a path but it is a grab bag, and `RenderSettings`
+  was replaced with six concern-sized groups for that reason.
 - Each tuned value gets a trailing comment saying what it means or where it came from. Derived
-  values (`cluster_bin_count`) are computed from the settings next to their use, not stored twice.
-- A value that a header must know (the camera's initial orbit zoom) stays a member initializer in
-  that header rather than being duplicated into the `.cpp` settings.
+  values are computed from the group next to their use, not stored twice.
+- A constant that describes the scene belongs in the scene description, not in a renderer group:
+  Earth's day-map alignment is `BodyDescription::rotation_phase`, not a render offset.
 
 ## Magic numbers
 
@@ -283,8 +297,8 @@ was tuned rather than derived.
   See "Platform layering" for the rules.
 - `src/render`: the Vulkan renderer. Depends on `core`, `scene` and `assets`; the HUD image and the
   native window handle are passed in, so it needs neither `app` nor `platform`. Split by
-  responsibility: `renderer_impl.hpp` holds the private `Impl`, the slot and mode enumerations and
-  `RenderSettings`; `renderer_resources.cpp` creates the device, meshes, materials, pipelines and
+  responsibility: `renderer_impl.hpp` holds the private `Impl`, the slot and mode enumerations, the
+  heap layout, target sizes and quality tiers; `renderer_resources.cpp` creates the device, meshes, materials, pipelines and
   targets; `renderer_frame.cpp` builds frame data, culls, records passes and captures.
 - `src/app`: options, camera, HUD layout, frame loop, `main`. Depends on everything, calls no OS API.
 - Each directory is one CMake target with the same name prefix (`orbital_core`, `orbital_scene`,

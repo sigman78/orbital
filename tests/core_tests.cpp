@@ -47,26 +47,23 @@ void test_small_types() {
 }
 
 void test_small_vec() {
-    SmallVec<std::string, 2> names;
-    assert(names.empty());
-    static_assert(SmallVec<int, 4>::inline_capacity() == 4);
+    SmallVec<std::string, 3> names;
+    static_assert(SmallVec<int, 4>::capacity() == 4);
+    static_assert(sizeof(SmallVec<int, 4>::size_type) == 1); // size counter no wider than needed
+    assert(names.empty() && !names.full());
     names.push_back("alpha");
     names.emplace_back("beta");
-    assert(names.size() == 2 && names[1] == "beta");
-    names.push_back("gamma"); // spills to the heap, elements survive the move
-    names.push_back("delta");
-    assert(names.size() == 4 && names[0] == "alpha" && names.back() == "delta");
+    assert(names.size() == 2 && names[1] == "beta" && names.back() == "beta");
+    assert(names.try_push_back("gamma") && names.full());
+    assert(!names.try_push_back("delta") && names.size() == 3); // overflow is refused, not grown
     const std::span<const std::string> view = names;
-    assert(view.size() == 4 && view[2] == "gamma");
-    SmallVec<std::string, 2> moved = std::move(names);
-    assert(moved.size() == 4 && names.empty() && moved[3] == "delta");
+    assert(view.size() == 3 && view[2] == "gamma");
+    SmallVec<std::string, 3> copied = names;
+    assert(copied.size() == 3 && copied[0] == "alpha" && names.size() == 3);
+    SmallVec<std::string, 3> moved = std::move(names);
+    assert(moved.size() == 3 && names.empty() && moved[2] == "gamma");
     moved.clear();
     assert(moved.empty());
-    SmallVec<int, 3> ints;
-    for (int i = 0; i < 3; ++i)
-        ints.push_back(i * 10);
-    SmallVec<int, 3> inline_moved = std::move(ints);
-    assert(inline_moved.size() == 3 && inline_moved[2] == 20 && ints.empty());
     const std::uint32_t words[] = {1, 2};
     const ByteView raw = bytes_of(std::span<const std::uint32_t>(words));
     assert(raw.size() == 8 && raw[0] == 1 && raw[4] == 2);

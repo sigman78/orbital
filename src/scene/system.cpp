@@ -12,17 +12,15 @@ constexpr double epsilon = 1e-9;
 
 // Hash tags that keep the derived seeds independent of each other, and the
 // stable identifiers of the showcase system's objects.
-struct SeedTags {
-    std::uint64_t variation = 0x4f52424954414cull;  // "ORBITAL"
-    std::uint64_t material = 0x535552464143454full; // "SURFACEO"
-    std::uint64_t belt_id = 2001;
-    std::uint64_t body_ids[3] = {1001, 1002, 1003};
-};
-constexpr SeedTags tags{};
+namespace tags {
+inline constexpr std::uint64_t variation = 0x4f52424954414cull;  // "ORBITAL"
+inline constexpr std::uint64_t material = 0x535552464143454full; // "SURFACEO"
+inline constexpr std::uint64_t belt_id = 2001;
+inline constexpr std::uint64_t body_ids[3] = {1001, 1002, 1003};
+} // namespace tags
 
 // Bodies per system are few (three today), so identifier lookups are linear
 // and per-frame evaluation never touches the heap.
-constexpr std::size_t inline_body_count = 8;
 
 std::uint64_t mix(std::uint64_t x) {
     x += 0x9e3779b97f4a7c15ull;
@@ -74,8 +72,8 @@ Vec3d resolve_position(std::span<const BodyDescription> bodies, std::size_t inde
 SystemDescription generate_system(std::uint64_t seed) {
     // Small size variation for non-showcase seeds, in [-1%, +1%].
     const double variation = seed == showcase_seed ? 0.0
-                                                   : (double(mix(seed ^ tags.variation) % 2001) - 1000.0) / 100000.0;
-    const auto material = [seed](std::uint64_t id) { return mix(seed ^ id ^ tags.material); };
+                                                   : (double(mix(seed ^ tags::variation) % 2001) - 1000.0) / 100000.0;
+    const auto material = [seed](std::uint64_t id) { return mix(seed ^ id ^ tags::material); };
     SystemDescription s;
     s.master_seed = seed;
     s.star = {.id = 1,
@@ -84,17 +82,18 @@ SystemDescription generate_system(std::uint64_t seed) {
               .intensity = 4.0,
               .position = {-3500.0, 1400.0, 1200.0}};
     s.bodies = {
-        BodyDescription{.id = tags.body_ids[0],
+        BodyDescription{.id = tags::body_ids[0],
                         .body_class = BodyClass::Terrestrial,
                         .radius = 2.5 * (1.0 + variation),
                         .axial_tilt = 0.41,
                         .rotation_period = 1600.0,
+                        .rotation_phase = -0.95, // aligns the day map with the lighting
                         .orbit_offset = {0, 0, 0},
                         .orbit_axis = {0, 1, 0},
                         .orbit_angular_rate = 0.000004,
-                        .material_seed = material(tags.body_ids[0]),
+                        .material_seed = material(tags::body_ids[0]),
                         .atmosphere_scale = 0.32},
-        BodyDescription{.id = tags.body_ids[1],
+        BodyDescription{.id = tags::body_ids[1],
                         .body_class = BodyClass::GasGiant,
                         .radius = 28.0 * (1.0 + variation * 0.6),
                         .axial_tilt = 0.12,
@@ -102,8 +101,8 @@ SystemDescription generate_system(std::uint64_t seed) {
                         .orbit_offset = {75, 20, -175},
                         .orbit_axis = {0.2, 1, 0.1},
                         .orbit_angular_rate = 0.000009,
-                        .material_seed = material(tags.body_ids[1])},
-        BodyDescription{.id = tags.body_ids[2],
+                        .material_seed = material(tags::body_ids[1])},
+        BodyDescription{.id = tags::body_ids[2],
                         .body_class = BodyClass::RockyMoon,
                         .radius = 0.68,
                         .axial_tilt = 0.08,
@@ -111,15 +110,15 @@ SystemDescription generate_system(std::uint64_t seed) {
                         .orbit_offset = {-65, 8, -45},
                         .orbit_axis = {0, 1, 0},
                         .orbit_angular_rate = 0.000025,
-                        .material_seed = material(tags.body_ids[2])},
+                        .material_seed = material(tags::body_ids[2])},
     };
-    s.belts = {BeltDescription{.id = tags.belt_id,
-                               .parent_id = tags.body_ids[1],
+    s.belts = {BeltDescription{.id = tags::belt_id,
+                               .parent_id = tags::body_ids[1],
                                .inner_radius = 42.0,
                                .outer_radius = 62.0,
                                .thickness = 1.4,
                                .density = 0.65,
-                               .seed = mix(seed ^ tags.belt_id)}};
+                               .seed = mix(seed ^ tags::belt_id)}};
     return s;
 }
 
@@ -128,6 +127,8 @@ ValidationErrors validate_system(const SystemDescription& s) {
     const std::span<const BodyDescription> bodies = s.bodies;
     if (s.schema_version == 0)
         errors.emplace_back("schema_version must be non-zero");
+    if (bodies.size() > max_body_count)
+        errors.push_back(std::format("at most {} bodies are supported", max_body_count));
     if (!std::isfinite(s.scale_policy) || s.scale_policy <= 0)
         errors.emplace_back("scale_policy must be finite and positive");
     if (!is_finite(s.star.position) || !std::isfinite(s.star.radius) || s.star.radius <= 0)
@@ -162,7 +163,7 @@ BodyStates evaluate_system(const SystemDescription& s, double seconds) {
     if (!std::isfinite(seconds) || !validate_system(s).empty())
         return result;
     const std::span<const BodyDescription> bodies = s.bodies;
-    SmallVec<ResolvedPosition, inline_body_count> resolved;
+    SmallVec<ResolvedPosition, max_body_count> resolved;
     for (std::size_t i = 0; i < bodies.size(); ++i)
         resolved.emplace_back();
     result.reserve(bodies.size());

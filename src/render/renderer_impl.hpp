@@ -61,57 +61,49 @@ enum class PostMode : std::uint32_t { tonemap = 0, bloom_a = 1, bloom_b = 2, pre
 constexpr unsigned major_body_count = 3; // Earth, gas giant, moon: slots 0..2 of the instance list
 constexpr unsigned earth_index = 0, giant_index = 1;
 
-// --- Budgets and tuning -------------------------------------------------------
+// --- Constants both files depend on ------------------------------------------
 
-struct RenderSettings {
-    struct {
-        std::uint64_t static_heap = 48ull << 20;    // meshes, then the per-frame region
-        std::uint64_t dynamic_offset = 32ull << 20; // per-frame data starts here
-        std::uint64_t instance_offset = 512;        // instances follow the 400-byte FrameData
-        std::uint64_t staging_budget = 64ull << 20; // texture upload staging, see upload_images
-        unsigned decode_workers = 8;                // upper bound for the material decode pool
-    } memory;
-    struct {
-        Range<float> depth{0.02f, 2000.0f}; // near and far plane, camera-relative units
-        unsigned shadow_map_size = 2048;
-        unsigned timestamp_count = 5; // frame start, after shadow, surface, atmosphere, post
-    } frame;
-    struct {
-        unsigned target_size = 16; // luminance meter edge, texels of rgba32f
-        unsigned interval = 16;    // frames between readbacks
-        float min_weight = 0.004f; // texels below this weight do not vote
-        float key = 0.18f;         // middle gray
-        float rate = 0.08f;        // smoothing toward the target per readback
-        Range<float> adapted{0.75f, 1.75f};
-    } metering;
-    struct {
-        double max_jump = 10.0;       // camera translation that invalidates the history
-        double min_forward_dot = 0.7; // turn that invalidates the history
-    } history;
-    struct {
-        double giant_distance = 100.0; // inside this the shadow map follows the giant, else Earth
-        float giant_half_size = 70.f, earth_half_size = 12.f;
-    } shadow;
-    struct {
-        float disc_radius = 3.0f;       // Frame.sun.w
-        float screen_size = 0.008f;     // Frame.screen_sun.w
-        float max_screen_offset = 1.3f; // beyond this the flare is off-screen
-    } sun;
-    struct {
-        unsigned high_count = 65000, baseline_count = 35000;
-        unsigned angle_bins = 128, radial_bins = 8, height_bins = 4; // cluster grid
-        float cluster_bound_scale = 1.30f;                           // the tilt/compression matrix has norm below 1.293
-        float rock_radius_scale = 0.025f;                            // instance scale to world radius
-        double spin_rate = 0.008, rock_spin_rate = 0.08;             // radians per simulation second
-        float lod_switch_pixels = 5.f; // above this projected radius rocks use their own LOD
-        struct {
-            float min_pixels = 0.06f;  // smaller rocks are dropped
-            float pixel_radius = 1.2f; // rocks below this become fixed-size billboards
-        } billboard;
-    } belt;
-    float earth_rotation_offset = -0.95f; // aligns the day map with the lighting
+// One host-visible heap: meshes are appended from the front at startup, the
+// per-frame FrameData and instance list live in the back half.
+struct HeapLayout {
+    std::uint64_t static_heap = 48ull << 20;
+    std::uint64_t dynamic_offset = 32ull << 20;
+    std::uint64_t instance_offset = 512;        // FrameData precedes the instances
+    std::uint64_t staging_budget = 64ull << 20; // texture upload staging, see upload_images
+
+    constexpr std::uint64_t instance_capacity() const {
+        return (static_heap - dynamic_offset - instance_offset) / sizeof(Instance);
+    }
 };
-inline constexpr RenderSettings settings{};
+inline constexpr HeapLayout heap_layout{};
+static_assert(heap_layout.instance_offset >= sizeof(FrameData));
+static_assert(heap_layout.dynamic_offset + heap_layout.instance_offset < heap_layout.static_heap);
+
+// Sizes of the fixed GPU targets, created by the resources side and addressed by the frame side.
+namespace targets {
+inline constexpr Range<float> depth{0.02f, 2000.0f}; // near and far plane, camera-relative units
+inline constexpr unsigned shadow_map_size = 2048;
+inline constexpr unsigned meter_size = 16;     // luminance meter edge, texels of rgba32f
+inline constexpr unsigned timestamp_count = 5; // frame start, after shadow, surface, atmosphere, post
+} // namespace targets
+
+// What FrameInput::high_quality selects between.
+struct QualityTier {
+    unsigned belt_count;
+};
+inline constexpr QualityTier baseline_quality{.belt_count = 35000};
+inline constexpr QualityTier high_quality{.belt_count = 65000};
+
+// Belt rock sizing, needed when clusters are bounded and again when rocks are culled.
+namespace belt {
+inline constexpr float rock_radius_scale = 0.025f; // instance scale to world radius
+
+// A sparse large-body tail exposes the fractured silhouettes between the much
+// more numerous small rocks. Stable IDs keep quality tiers nested.
+constexpr float size_tail(unsigned id) {
+    return id % 137 == 0 ? 9.f : (id % 23 == 0 ? 4.f : 1.f);
+}
+} // namespace belt
 
 // --- GPU-side records ---------------------------------------------------------
 

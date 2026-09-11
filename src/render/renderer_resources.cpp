@@ -20,13 +20,13 @@
 namespace space::render {
 namespace {
 
-constexpr unsigned cluster_bin_count = settings.belt.angle_bins * settings.belt.radial_bins * settings.belt.height_bins;
+// Polar grid the belt is binned into for culling, read by build_belt.
+namespace cluster_grid {
+inline constexpr unsigned angle_bins = 128, radial_bins = 8, height_bins = 4;
+inline constexpr unsigned count = angle_bins * radial_bins * height_bins;
+} // namespace cluster_grid
 
-// A sparse large-body tail exposes the fractured silhouettes between the much
-// more numerous small rocks. Stable IDs keep quality tiers nested.
-float size_tail(unsigned id) {
-    return id % 137 == 0 ? 9.f : (id % 23 == 0 ? 4.f : 1.f);
-}
+constexpr unsigned decode_workers_max = 8; // upper bound for the material decode pool
 
 std::vector<std::uint32_t> read_spirv(const std::filesystem::path& path) {
     const auto bytes = file::read(path);
@@ -64,6 +64,7 @@ constexpr MaterialSource material_sources[] = {
     {"rock_roughness.png", Slot::rock_roughness, {}},
 };
 constexpr std::size_t material_count = std::size(material_sources);
+static_assert(material_count <= inline_upload_count);
 
 } // namespace
 
@@ -92,7 +93,7 @@ void Renderer::Impl::destroy(GpuImage& image) {
 
 std::uint64_t Renderer::Impl::upload_static(ByteView bytes) {
     static_cursor = (static_cursor + 15) & ~15ull;
-    if (static_cursor + bytes.size() > settings.memory.dynamic_offset)
+    if (static_cursor + bytes.size() > heap_layout.dynamic_offset)
         panic("static GPU heap exhausted");
     const auto address = reinterpret_cast<std::uint64_t>(data.range.gpu) + static_cursor;
     std::memcpy(data.range.cpu + static_cursor, bytes.data(), bytes.size());
@@ -142,7 +143,8 @@ void Renderer::Impl::bind(Slot slot, const GpuImage& image) {
 // instead of sized to the whole set. Textures are created before
 // begin_commands so the backend records their layout initialization first.
 void Renderer::Impl::upload_images(std::span<Upload> uploads) {
-    SmallVec<GpuImage, inline_upload_count> images;
+    std::vector<GpuImage> images;
+    images.reserve(uploads.size());
     std::uint64_t largest = 0;
     for (const auto& upload : uploads) {
         ORBITAL_ASSERT(!upload.mips.empty());
@@ -158,7 +160,7 @@ void Renderer::Impl::upload_images(std::span<Upload> uploads) {
             bytes += padded_size(mip);
         largest = std::max(largest, bytes);
     }
-    auto staging = gpu::create_gpu_heap(device, std::max(largest, settings.memory.staging_budget));
+    auto staging = gpu::create_gpu_heap(device, std::max(largest, heap_layout.staging_budget));
     if (!staging.range.cpu)
         panic("texture staging allocation failed");
     gpu::CommandBuffer* cmd = nullptr;
@@ -225,16 +227,15 @@ void Renderer::Impl::create_device(void* window) {
     if (!caps.conventional_descriptor_backend)
         panic("the demo's shaders require the conventional descriptor backend build option");
     timeline = gpu::create_timeline_semaphore(device);
-    data = gpu::create_gpu_heap(device, settings.memory.static_heap);
+    data = gpu::create_gpu_heap(device, heap_layout.static_heap);
     texture_descriptors = gpu::create_gpu_heap(device, caps.texture_descriptor_size * unsigned(Slot::count),
                                                gpu::MemoryType::texture_descriptor_heap);
     sampler_descriptors = gpu::create_gpu_heap(device, caps.sampler_descriptor_size * unsigned(SamplerSlot::count),
                                                gpu::MemoryType::sampler_descriptor_heap);
     if (!data.range.cpu || !texture_descriptors.range.cpu || !sampler_descriptors.range.cpu)
         panic("GPU mapped heap allocation failed");
-    luminance_readback = gpu::create_gpu_heap(
-        device, settings.metering.target_size * settings.metering.target_size * sizeof(Float4),
-        gpu::MemoryType::readback);
+    luminance_readback = gpu::create_gpu_heap(device, targets::meter_size * targets::meter_size * sizeof(Float4),
+                                              gpu::MemoryType::readback);
     timestamps = gpu::create_gpu_heap(device, 64, gpu::MemoryType::readback);
 }
 
@@ -275,33 +276,33 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
     const float inner = float(description.inner_radius), outer = float(description.outer_radius),
                 thickness = float(description.thickness);
     belt = geometry::generate_belt({.seed = description.seed,
-                                    .count = settings.belt.high_count,
+                                    .count = high_quality.belt_count,
                                     .inner_radius = inner,
                                     .outer_radius = outer,
                                     .thickness = thickness});
     // Counting sort of belt indices by bin: one flat array, no per-bin allocations.
     std::vector<unsigned> bin_of(belt.size());
-    std::vector<unsigned> bin_start(cluster_bin_count + 1, 0);
+    std::vector<unsigned> bin_start(cluster_grid::count + 1, 0);
     for (unsigned i = 0; i < belt.size(); ++i) {
         const auto& p = belt[i].position;
         float angle = std::atan2(p.z, p.x);
         if (angle < 0)
             angle += 2 * pi<float>;
         const float radial = std::sqrt(p.x * p.x + p.z * p.z);
-        const unsigned a = std::min(settings.belt.angle_bins - 1,
-                                    unsigned(angle / (2 * pi<float>)*settings.belt.angle_bins));
+        const unsigned a = std::min(cluster_grid::angle_bins - 1,
+                                    unsigned(angle / (2 * pi<float>)*cluster_grid::angle_bins));
         const unsigned r = std::min(
-            settings.belt.radial_bins - 1,
+            cluster_grid::radial_bins - 1,
             unsigned(std::clamp((radial - inner) / std::max(outer - inner, 1e-4f), 0.f, .999999f) *
-                     settings.belt.radial_bins));
+                     cluster_grid::radial_bins));
         const unsigned h = std::min(
-            settings.belt.height_bins - 1,
+            cluster_grid::height_bins - 1,
             unsigned(std::clamp((p.y + thickness * .5f) / std::max(thickness, 1e-4f), 0.f, .999999f) *
-                     settings.belt.height_bins));
-        bin_of[i] = (h * settings.belt.radial_bins + r) * settings.belt.angle_bins + a;
+                     cluster_grid::height_bins));
+        bin_of[i] = (h * cluster_grid::radial_bins + r) * cluster_grid::angle_bins + a;
         ++bin_start[bin_of[i] + 1];
     }
-    for (unsigned bin = 0; bin < cluster_bin_count; ++bin)
+    for (unsigned bin = 0; bin < cluster_grid::count; ++bin)
         bin_start[bin + 1] += bin_start[bin];
     belt_order.resize(belt.size());
     {
@@ -309,8 +310,8 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
         for (unsigned i = 0; i < belt.size(); ++i)
             belt_order[cursor[bin_of[i]]++] = i;
     }
-    belt_clusters.reserve(cluster_bin_count);
-    for (unsigned bin = 0; bin < cluster_bin_count; ++bin) {
+    belt_clusters.reserve(cluster_grid::count);
+    for (unsigned bin = 0; bin < cluster_grid::count; ++bin) {
         const std::span<const unsigned> ids(belt_order.data() + bin_start[bin], bin_start[bin + 1] - bin_start[bin]);
         if (ids.empty())
             continue;
@@ -325,8 +326,7 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
         for (unsigned id : ids) {
             const auto d = belt[id].position - center;
             const auto& s = belt[id].scale;
-            const float rock_radius = settings.belt.rock_radius_scale * std::max(s.x, std::max(s.y, s.z)) *
-                                      size_tail(id);
+            const float rock_radius = belt::rock_radius_scale * std::max(s.x, std::max(s.y, s.z)) * belt::size_tail(id);
             bound = std::max(bound, std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z) + rock_radius);
         }
         belt_clusters.push_back({.center = center, .radius = bound, .indices = ids});
@@ -341,13 +341,13 @@ void Renderer::Impl::load_materials() {
     // Leave one core for this thread and cap the pool: decoding and filtering
     // are memory-bound enough that more workers stop helping.
     const unsigned cores = std::thread::hardware_concurrency();
-    const std::size_t workers = std::min(
-        material_count, std::size_t(std::clamp(cores > 1 ? cores - 1 : 1u, 1u, settings.memory.decode_workers)));
+    const std::size_t workers = std::min(material_count,
+                                         std::size_t(std::clamp(cores > 1 ? cores - 1 : 1u, 1u, decode_workers_max)));
     Uploads uploads;
     for (std::size_t i = 0; i < material_count; i++)
         uploads.emplace_back();
     std::atomic<std::size_t> next{0};
-    SmallVec<std::future<void>, settings.memory.decode_workers> pool;
+    SmallVec<std::future<void>, decode_workers_max> pool;
     for (std::size_t worker = 0; worker < workers; worker++)
         pool.push_back(std::async(std::launch::async, [&] {
             for (std::size_t i = next++; i < material_count; i = next++) {
@@ -403,11 +403,11 @@ void Renderer::Impl::create_pipelines() {
 }
 
 void Renderer::Impl::create_fixed_targets() {
-    shadow_map = create_image({.extent = {settings.frame.shadow_map_size, settings.frame.shadow_map_size},
+    shadow_map = create_image({.extent = {targets::shadow_map_size, targets::shadow_map_size},
                                .format = gpu::Format::d32_float,
                                .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::depth_stencil_attachment});
     bind(Slot::shadow_map, shadow_map);
-    luminance = create_image({.extent = {settings.metering.target_size, settings.metering.target_size},
+    luminance = create_image({.extent = {targets::meter_size, targets::meter_size},
                               .format = gpu::Format::rgba32_float,
                               .usage = gpu::TextureUsage::color_attachment | gpu::TextureUsage::transfer_source});
 }

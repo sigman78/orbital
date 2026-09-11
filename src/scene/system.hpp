@@ -15,6 +15,9 @@ namespace space {
 // The seed the demo ships with; other seeds apply small size variations.
 constexpr std::uint64_t showcase_seed = 20260911;
 
+// Upper bound validate_system enforces, so per-frame evaluation can use fixed storage.
+constexpr std::size_t max_body_count = 8;
+
 enum class BodyClass { Terrestrial, GasGiant, RockyMoon };
 
 struct BodyDescription {

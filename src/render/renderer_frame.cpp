@@ -17,16 +17,51 @@ constexpr Float4 jitter_sequence[8] = {{0, -.166667f, 0, 0},      {-.25f, .16666
                                        {.375f, .055556f, 0, 0},   {-.4375f, .388889f, 0, 0}};
 constexpr unsigned jitter_count = 8;
 
+// Exposure adaptation, read by apply_metering and record_post_passes.
+namespace exposure_meter {
+inline constexpr unsigned interval = 16;    // frames between readbacks
+inline constexpr float min_weight = 0.004f; // texels below this weight do not vote
+inline constexpr float key = 0.18f;         // middle gray
+inline constexpr float rate = 0.08f;        // smoothing toward the target per readback
+inline constexpr Range<float> adapted{0.75f, 1.75f};
+} // namespace exposure_meter
+
+// Temporal history invalidation, read by build_frame.
+namespace history {
+inline constexpr double max_jump = 10.0;       // camera translation that invalidates the history
+inline constexpr double min_forward_dot = 0.7; // turn that invalidates the history
+} // namespace history
+
+// Shadow map placement, read by build_frame.
+namespace shadow_placement {
+inline constexpr double giant_distance = 100.0; // inside this the map follows the giant, else Earth
+inline constexpr float giant_half_size = 70.f, earth_half_size = 12.f;
+} // namespace shadow_placement
+
+// Sun disc and lens flare, read by build_frame.
+namespace sun_flare {
+inline constexpr float disc_radius = 3.0f;       // Frame.sun.w
+inline constexpr float screen_size = 0.008f;     // Frame.screen_sun.w
+inline constexpr float max_screen_offset = 1.3f; // beyond this the flare is off-screen
+} // namespace sun_flare
+
+// Per-rock and per-cluster culling, read by cull_belt and classify_rock.
+namespace belt_culling {
+inline constexpr float cluster_bound_scale = 1.30f;               // the tilt/compression matrix has norm below 1.293
+inline constexpr double spin_rate = 0.008, rock_spin_rate = 0.08; // radians per simulation second
+inline constexpr float lod_switch_pixels = 5.f;                   // above this projected radius rocks use their own LOD
+namespace billboard {
+inline constexpr float min_pixels = 0.06f;  // smaller rocks are dropped
+inline constexpr float pixel_radius = 1.2f; // rocks below this become fixed-size billboards
+} // namespace billboard
+} // namespace belt_culling
+
 Float4 f4(Vec3f v, float w = 0) {
     return {v.x, v.y, v.z, w};
 }
 
 Float4 f4(Vec3d v, float w = 0) {
     return f4(to_float(v), w);
-}
-
-float size_tail(unsigned id) {
-    return id % 137 == 0 ? 9.f : (id % 23 == 0 ? 4.f : 1.f);
 }
 
 // Rock tint: slight per-instance albedo variation from the stable ID.
@@ -83,8 +118,7 @@ bool fully_occluded(Vec3f target, float target_radius, std::span<const Vec3f> oc
 void write_projection(FrameData& frame, const Camera& camera, float aspect) {
     const Vec3f right = to_float(camera.right()), up = to_float(camera.up()), forward = to_float(camera.forward());
     const float tan_half = float(std::tan(camera.vertical_fov * .5));
-    const Mat4 view_projection = perspective_matrix(tan_half, aspect, settings.frame.depth.min,
-                                                    settings.frame.depth.max) *
+    const Mat4 view_projection = perspective_matrix(tan_half, aspect, targets::depth.min, targets::depth.max) *
                                  view_matrix(right, up, forward);
     std::memcpy(frame.view_projection, view_projection.m, sizeof frame.view_projection);
     frame.right_tan = f4(right, tan_half);
@@ -140,14 +174,14 @@ void Renderer::Impl::apply_metering() {
     const auto* values = reinterpret_cast<const float*>(luminance_readback.range.cpu);
     float sum = 0;
     unsigned count = 0;
-    for (unsigned i = 0; i < settings.metering.target_size * settings.metering.target_size; i++)
-        if (values[i * 4 + 1] > settings.metering.min_weight) {
+    for (unsigned i = 0; i < targets::meter_size * targets::meter_size; i++)
+        if (values[i * 4 + 1] > exposure_meter::min_weight) {
             sum += values[i * 4];
             count++;
         }
-    const float target = count ? settings.metering.adapted.clamp(settings.metering.key / std::exp(sum / float(count)))
+    const float target = count ? exposure_meter::adapted.clamp(exposure_meter::key / std::exp(sum / float(count)))
                                : 1.f;
-    adapted_exposure += (target - adapted_exposure) * settings.metering.rate;
+    adapted_exposure += (target - adapted_exposure) * exposure_meter::rate;
     meter_pending = false;
 }
 
@@ -168,18 +202,18 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.previous_forward = previous_frame.forward_exposure;
     const Vec3d previous_forward{previous_frame.forward_exposure.x, previous_frame.forward_exposure.y,
                                  previous_frame.forward_exposure.z};
-    if (length(camera.position - previous_camera) > settings.history.max_jump ||
-        dot(camera.forward(), previous_forward) < settings.history.min_forward_dot)
+    if (length(camera.position - previous_camera) > history::max_jump ||
+        dot(camera.forward(), previous_forward) < history::min_forward_dot)
         frame.previous_camera_delta.w = 0;
     frame.camera_time = {0, 0, 0, float(input.time)};
     frame.forward_exposure.w = input.exposure * (input.auto_exposure ? adapted_exposure : 1);
-    frame.sun = f4(system.star.position - camera.position, settings.sun.disc_radius);
+    frame.sun = f4(system.star.position - camera.position, sun_flare::disc_radius);
     const bool giant_close = length(input.bodies[giant_index].position - camera.position) <
-                             settings.shadow.giant_distance;
+                             shadow_placement::giant_distance;
     const unsigned shadow_body = giant_close ? giant_index : earth_index;
     write_light_projection(frame, input.bodies[shadow_body].position - camera.position,
                            system.star.position - camera.position,
-                           giant_close ? settings.shadow.giant_half_size : settings.shadow.earth_half_size);
+                           giant_close ? shadow_placement::giant_half_size : shadow_placement::earth_half_size);
     frame.options = {float(extent.width), float(extent.height), input.high_quality ? 1.f : 0.f,
                      input.overlay ? 1.f : 0.f};
     for (unsigned i = 0; i < major_body_count; i++)
@@ -192,15 +226,15 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.screen_sun = {
         float(dot(sun_direction, camera.right()) / (view_depth * frame.right_tan.w * frame.up_aspect.w)),
         float(-dot(sun_direction, camera.up()) / (view_depth * frame.right_tan.w)), forward > 0 ? 1.f : 0.f,
-        settings.sun.screen_size};
+        sun_flare::screen_size};
     for (const auto& body : input.bodies) {
         const Vec3d v = body.position - camera.position;
         const double along = dot(v, sun_direction);
         if (along > 0 && length(v - sun_direction * along) < body.radius)
             frame.screen_sun.z = 0;
     }
-    if (std::abs(frame.screen_sun.x) > settings.sun.max_screen_offset ||
-        std::abs(frame.screen_sun.y) > settings.sun.max_screen_offset)
+    if (std::abs(frame.screen_sun.x) > sun_flare::max_screen_offset ||
+        std::abs(frame.screen_sun.y) > sun_flare::max_screen_offset)
         frame.screen_sun.z = 0;
     return frame;
 }
@@ -209,27 +243,27 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
 void Renderer::Impl::classify_rock(unsigned id, const RockCullContext& context) {
     const auto& rock = belt[id];
     const Vec3f p = to_float(context.giant_relative + to_double(context.transform.apply(rock.position)));
-    const float radius = rock.scale.x * settings.belt.rock_radius_scale * size_tail(id);
+    const float radius = rock.scale.x * belt::rock_radius_scale * belt::size_tail(id);
     const float z = dot(p, context.view.forward);
     if (z < -radius)
         return;
     const float pixel_radius = radius * context.pixels_per_unit_depth / std::max(z, .1f);
-    if (pixel_radius < settings.belt.billboard.min_pixels || context.view.outside(p, radius))
+    if (pixel_radius < belt_culling::billboard::min_pixels || context.view.outside(p, radius))
         return;
-    if (pixel_radius < settings.belt.billboard.pixel_radius) {
+    if (pixel_radius < belt_culling::billboard::pixel_radius) {
         // Sub-pixel rocks become fixed-size billboards whose coverage fades in
         // with their true size.
         float coverage = pixel_radius * pixel_radius /
-                         (settings.belt.billboard.pixel_radius * settings.belt.billboard.pixel_radius);
-        coverage *= std::clamp((pixel_radius - settings.belt.billboard.min_pixels) / settings.belt.billboard.min_pixels,
-                               0.f, 1.f);
-        distant.push_back({f4(p, radius * settings.belt.billboard.pixel_radius / pixel_radius),
+                         (belt_culling::billboard::pixel_radius * belt_culling::billboard::pixel_radius);
+        coverage *= std::clamp(
+            (pixel_radius - belt_culling::billboard::min_pixels) / belt_culling::billboard::min_pixels, 0.f, 1.f);
+        distant.push_back({f4(p, radius * belt_culling::billboard::pixel_radius / pixel_radius),
                            {0, 0, 0, float(SurfaceMode::billboard)},
                            rock_tint(id, coverage)});
         return;
     }
     const bool detailed = radius * context.pixels_per_unit_depth * 2 / std::max(z, .1f) >
-                          settings.belt.lod_switch_pixels;
+                          belt_culling::lod_switch_pixels;
     lod_groups[detailed ? rock.variant : 0].push_back(
         {f4(p, radius),
          {rock.rotation.x, rock.rotation.y + context.rock_spin, rock.rotation.z, float(SurfaceMode::billboard)},
@@ -245,13 +279,11 @@ BeltBatches Renderer::Impl::cull_belt(const FrameInput& input, const FrameData& 
     for (auto& group : lod_groups)
         group.clear();
     for (unsigned i = 0; i < major_body_count; i++)
-        instances.push_back(
-            {frame.bodies[i],
-             {0, float(input.bodies[i].rotation_angle) + (i == earth_index ? settings.earth_rotation_offset : 0.f),
-              float(system.bodies[i].axial_tilt), float(i)},
-             {1, 1, 1, 1}});
+        instances.push_back({frame.bodies[i],
+                             {0, float(input.bodies[i].rotation_angle), float(system.bodies[i].axial_tilt), float(i)},
+                             {1, 1, 1, 1}});
 
-    const float belt_angle = float(input.time * settings.belt.spin_rate);
+    const float belt_angle = float(input.time * belt_culling::spin_rate);
     const float tan_y = frame.right_tan.w, tan_x = tan_y * frame.up_aspect.w;
     // Plane normals are not unit length; scale sphere support accordingly. Two
     // pixels of padding also cover temporal jitter and expanded tiny billboards.
@@ -266,8 +298,8 @@ BeltBatches Renderer::Impl::cull_belt(const FrameInput& input, const FrameData& 
                                   .transform = {std::cos(belt_angle), std::sin(belt_angle)},
                                   .giant_relative = input.bodies[giant_index].position - camera.position,
                                   .pixels_per_unit_depth = float(extent.height) / (2 * frame.right_tan.w),
-                                  .rock_spin = float(input.time * settings.belt.rock_spin_rate),
-                                  .limit = input.high_quality ? unsigned(belt.size()) : settings.belt.baseline_count};
+                                  .rock_spin = float(input.time * belt_culling::rock_spin_rate),
+                                  .limit = (input.high_quality ? high_quality : baseline_quality).belt_count};
     Vec3f occluders[major_body_count];
     float occluder_radii[major_body_count];
     for (unsigned i = 0; i < major_body_count; i++) {
@@ -276,7 +308,7 @@ BeltBatches Renderer::Impl::cull_belt(const FrameInput& input, const FrameData& 
     }
     for (const auto& cluster : belt_clusters) {
         const Vec3f position = to_float(context.giant_relative + to_double(context.transform.apply(cluster.center)));
-        const float radius = cluster.radius * settings.belt.cluster_bound_scale;
+        const float radius = cluster.radius * belt_culling::cluster_bound_scale;
         if (context.view.behind(position, radius) || context.view.outside(position, radius) ||
             fully_occluded(position, radius, occluders, occluder_radii))
             continue;
@@ -376,7 +408,7 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
     fullscreen_pass(cmd, bloom_b, pso.bloom, root);
     root.mode = std::uint32_t(PostMode::tonemap);
     fullscreen_pass(cmd, final_image, pso.post, root);
-    if (frame_index % settings.metering.interval == 0) {
+    if (frame_index % exposure_meter::interval == 0) {
         root.mode = std::uint32_t(PostMode::meter);
         fullscreen_pass(cmd, luminance, pso.meter, root);
         gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::transfer,
@@ -416,19 +448,19 @@ bool Renderer::draw(const FrameInput& input) {
     s.stats.triangles = 0;
 
     // Per-frame constants and instances live in the dynamic half of the static heap.
-    const auto frame_address = reinterpret_cast<std::uint64_t>(s.data.range.gpu) + settings.memory.dynamic_offset;
-    std::memcpy(s.data.range.cpu + settings.memory.dynamic_offset, &frame, sizeof frame);
-    std::memcpy(s.data.range.cpu + settings.memory.dynamic_offset + settings.memory.instance_offset, s.instances.data(),
+    const auto frame_address = reinterpret_cast<std::uint64_t>(s.data.range.gpu) + heap_layout.dynamic_offset;
+    std::memcpy(s.data.range.cpu + heap_layout.dynamic_offset, &frame, sizeof frame);
+    std::memcpy(s.data.range.cpu + heap_layout.dynamic_offset + heap_layout.instance_offset, s.instances.data(),
                 s.instances.size() * sizeof(Instance));
     Root root{.frame = frame_address,
               .vertices = 0,
-              .instances = frame_address + settings.memory.instance_offset,
+              .instances = frame_address + heap_layout.instance_offset,
               .base = 0,
               .mode = 0};
 
     auto* cmd = gpu::begin_commands(s.device);
     const auto stamp = [&](unsigned index) {
-        ORBITAL_ASSERT(index < settings.frame.timestamp_count);
+        ORBITAL_ASSERT(index < targets::timestamp_count);
         gpu::write_timestamp(cmd,
                              reinterpret_cast<gpu::uint64*>(s.timestamps.range.gpu + index * sizeof(std::uint64_t)));
     };

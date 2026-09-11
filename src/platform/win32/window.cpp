@@ -95,7 +95,7 @@ struct Window::Impl {
         case WM_KEYDOWN:
             if (!(l & key_repeat_bit))
                 if (const Key key = key_from_virtual(w); key != Key::none)
-                    presses.push_back(key);
+                    presses.try_push_back(key); // beyond capacity, extra presses are dropped
             return 0;
         }
         return DefWindowProcW(handle, message, w, l);
