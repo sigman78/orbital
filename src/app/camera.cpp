@@ -1,26 +1,69 @@
-#include "camera.hpp"
+#include "app/camera.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 namespace space {
 namespace {
-constexpr double pi = 3.14159265358979323846;
-Vec3d cross(Vec3d a, Vec3d b) {
-    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+
+constexpr double base_speed = 8.0;           // scene units per second at speed_scale 1
+constexpr double max_speed_scale = 100.0;    // guards against a runaway scale from input
+constexpr double max_step_seconds = 0.25;    // a long stall must not teleport the camera
+constexpr double mouse_sensitivity = 0.0025; // radians per pixel
+constexpr double orbit_pitch_limit = 1.45;   // radians, keeps the orbit camera off the poles
+constexpr double free_pitch_limit = 0.995;   // limit on forward.y, avoids a degenerate basis
+constexpr double collision_margin = 1.08;    // camera stays outside body radius * margin
+constexpr double tour_period_seconds = 90.0;
+constexpr double basis_epsilon = 1e-8;
+
+// A view anchored to a body: body position + radius-scaled offset + fixed offset.
+struct ViewDefinition {
+    std::size_t body;
+    Vec3d radius_scale;
+    Vec3d offset;
+};
+
+constexpr ViewDefinition bookmark_views[bookmark_count] = {
+    {.body = 0, .radius_scale = {0.0, 0.45, 2.1}, .offset = {}},
+    {.body = 1, .radius_scale = {-0.6, 0.25, 2.2}, .offset = {}},
+    {.body = 2, .radius_scale = {1.0, 0.4, 2.0}, .offset = {}},
+    {.body = 0, .radius_scale = {}, .offset = {4.8, -0.2, 0.8}},
+    {.body = 1, .radius_scale = {}, .offset = {45.0, -8.0, 22.0}},
+};
+
+// Catmull-Rom waypoints of the tour, visited in order over one period.
+constexpr ViewDefinition tour_views[] = {
+    {.body = 0, .radius_scale = {0.0, 0.45, 2.1}, .offset = {}},
+    {.body = 0, .radius_scale = {}, .offset = {4.4, -1.0, -1.8}},
+    {.body = 1, .radius_scale = {-0.6, 0.25, 2.2}, .offset = {}},
+    {.body = 2, .radius_scale = {1.0, 0.4, 2.0}, .offset = {}},
+    {.body = 1, .radius_scale = {}, .offset = {45.0, -8.0, 22.0}},
+};
+constexpr std::size_t tour_count = std::size(tour_views);
+
+// Body index clamped so a short body list still yields a usable view.
+const BodyState& view_body(const ViewDefinition& view, std::span<const BodyState> bodies) {
+    return bodies[std::min(view.body, bodies.size() - 1)];
 }
+
+Vec3d view_position(const ViewDefinition& view, const BodyState& body) {
+    const double r = body.radius;
+    return body.position + Vec3d{view.radius_scale.x * r, view.radius_scale.y * r, view.radius_scale.z * r} +
+           view.offset;
+}
+
 Vec3d rotate_y(Vec3d p, double a) {
     const double c = std::cos(a), s = std::sin(a);
     return {c * p.x - s * p.z, p.y, s * p.x + c * p.z};
 }
-double clampd(double x, double a, double b) {
-    return std::max(a, std::min(b, x));
-}
+
 Vec3d catmull(Vec3d a, Vec3d b, Vec3d c, Vec3d d, double t) {
     const double t2 = t * t, t3 = t2 * t;
     return (b * 2.0 + (c - a) * t + (a * 2.0 - b * 5.0 + c * 4.0 - d) * t2 + (a * -1.0 + b * 3.0 - c * 3.0 + d) * t3) *
            0.5;
 }
+
 } // namespace
 
 Camera::Camera() {
@@ -31,17 +74,17 @@ Camera::Camera() {
 void Camera::rebuild_basis() {
     forward_ = normalized(forward_);
     // Keep world Y as the stable up direction except when looking nearly up.
-    Vec3d world_up{0, 1, 0};
+    const Vec3d world_up{0, 1, 0};
     right_ = normalized(cross(forward_, world_up));
-    if (length(right_) < 1e-8)
+    if (length(right_) < basis_epsilon)
         right_ = {1, 0, 0};
     up_ = normalized(cross(right_, forward_));
 }
 
-void Camera::collision_clamp(const std::vector<BodyState>& bodies) {
+void Camera::collision_clamp(std::span<const BodyState> bodies) {
     for (const auto& body : bodies) {
         const Vec3d delta = position - body.position;
-        const double distance = length(delta), minimum = std::max(0.0, body.radius * 1.08);
+        const double distance = length(delta), minimum = std::max(0.0, body.radius * collision_margin);
         if (minimum > 0.0 && distance < minimum) {
             const Vec3d outward = distance > 1e-9 ? delta * (1.0 / distance) : Vec3d{0, 1, 0};
             position = body.position + outward * minimum;
@@ -49,116 +92,94 @@ void Camera::collision_clamp(const std::vector<BodyState>& bodies) {
     }
 }
 
-void Camera::step(double dt, double time, const Input& input, const std::vector<BodyState>& bodies) {
+void Camera::step(double dt, double time, const Input& input, std::span<const BodyState> bodies) {
     if (!std::isfinite(dt) || dt <= 0.0)
         return;
-    dt = std::min(dt, 0.25);
-    const double speed = 8.0 * clampd(std::isfinite(input.speed_scale) ? input.speed_scale : 1.0, 0.0, 100.0);
-
+    dt = std::min(dt, max_step_seconds);
+    const double scale = std::isfinite(input.speed_scale) ? input.speed_scale : 1.0;
+    const double speed = base_speed * std::clamp(scale, 0.0, max_speed_scale);
     if (mode_ == CameraMode::Tour && !bodies.empty()) {
-        if (!tour_clock_valid_) {
-            tour_start_ = time;
-            tour_clock_valid_ = true;
-        }
-        const double tour_time = tour_override_ ? tour_override_time_ : (time - tour_start_);
-        const double phase = std::fmod(std::max(0.0, tour_time), 90.0) / 90.0;
-        Vec3d p[5], q[5];
-        const auto& earth = bodies[0];
-        p[0] = earth.position + Vec3d{0, earth.radius * .45, earth.radius * 2.1};
-        q[0] = earth.position;
-        p[1] = earth.position + Vec3d{4.4, -1.0, -1.8};
-        q[1] = earth.position;
-        const auto& giant = bodies[std::min<std::size_t>(1, bodies.size() - 1)];
-        p[2] = giant.position + Vec3d{-giant.radius * .6, giant.radius * .25, giant.radius * 2.2};
-        q[2] = giant.position;
-        const auto& moon = bodies[std::min<std::size_t>(2, bodies.size() - 1)];
-        p[3] = moon.position + Vec3d{moon.radius, .4 * moon.radius, 2 * moon.radius};
-        q[3] = moon.position;
-        p[4] = giant.position + Vec3d{45, -8, 22};
-        q[4] = giant.position;
-        const double scaled = phase * 5.0, segf = std::floor(scaled);
-        const int seg = static_cast<int>(segf) % 5;
-        const double local = scaled - segf;
-        const int a = (seg + 4) % 5, b = seg, c = (seg + 1) % 5, d = (seg + 2) % 5;
-        position = catmull(p[a], p[b], p[c], p[d], local);
-        forward_ = normalized(catmull(q[a], q[b], q[c], q[d], local) - position);
-        rebuild_basis();
-        collision_clamp(bodies);
+        step_tour(time, bodies);
         return;
     }
-
-    if (mode_ == CameraMode::Orbit && orbit_target_ < bodies.size()) {
-        const auto& body = bodies[orbit_target_];
-        orbit_zoom_ = std::max(body.radius * 1.08, orbit_zoom_ - input.move_forward * speed * dt);
-        orbit_zoom_ = std::max(body.radius * 1.08, orbit_zoom_);
-        orbit_yaw_ += input.mouse_dx * 0.0025;
-        orbit_pitch_ = clampd(orbit_pitch_ - input.mouse_dy * 0.0025, -1.45, 1.45);
-        const double cp = std::cos(orbit_pitch_);
-        const Vec3d from{orbit_zoom_ * cp * std::sin(orbit_yaw_), orbit_zoom_ * std::sin(orbit_pitch_),
-                         orbit_zoom_ * cp * std::cos(orbit_yaw_)};
-        position = body.position + from;
-        forward_ = normalized(body.position - position);
-    } else {
-        const double yaw = input.mouse_dx * 0.0025;
-        const double pitch = clampd(-input.mouse_dy * 0.0025, -1.5, 1.5);
-        forward_ = normalized(rotate_y(forward_, yaw));
-        forward_.y = clampd(forward_.y + pitch, -0.995, 0.995);
-        forward_ = normalized(forward_);
-        rebuild_basis();
-        position = position +
-                   (forward_ * input.move_forward + right_ * input.move_right + up_ * input.move_up) * (speed * dt);
-    }
+    if (mode_ == CameraMode::Orbit && orbit_target_ < bodies.size())
+        step_orbit(dt, speed, input, bodies[orbit_target_]);
+    else
+        step_free(dt, speed, input);
     rebuild_basis();
     collision_clamp(bodies);
 }
 
-void Camera::set_bookmark(std::size_t index, const std::vector<BodyState>& bodies) {
-    if (index >= bookmarks_.size())
-        bookmarks_.resize(index + 1);
-    if (bookmarks_[index].valid && index < bodies.size()) {
-        position = bodies[index].position + bookmarks_[index].offset;
-        forward_ = normalized(bodies[index].position - position);
-        rebuild_basis();
+void Camera::step_tour(double time, std::span<const BodyState> bodies) {
+    if (!tour_clock_valid_) {
+        tour_start_ = time;
+        tour_clock_valid_ = true;
+    }
+    const double tour_time = tour_override_ ? tour_override_time_ : (time - tour_start_);
+    const double phase = std::fmod(std::max(0.0, tour_time), tour_period_seconds) / tour_period_seconds;
+    Vec3d eyes[tour_count], targets[tour_count];
+    for (std::size_t i = 0; i < tour_count; ++i) {
+        const auto& body = view_body(tour_views[i], bodies);
+        eyes[i] = view_position(tour_views[i], body);
+        targets[i] = body.position;
+    }
+    const double scaled = phase * double(tour_count), segment_floor = std::floor(scaled);
+    const std::size_t segment = static_cast<std::size_t>(segment_floor) % tour_count;
+    const double local = scaled - segment_floor;
+    const std::size_t a = (segment + tour_count - 1) % tour_count, b = segment, c = (segment + 1) % tour_count,
+                      d = (segment + 2) % tour_count;
+    position = catmull(eyes[a], eyes[b], eyes[c], eyes[d], local);
+    forward_ = normalized(catmull(targets[a], targets[b], targets[c], targets[d], local) - position);
+    rebuild_basis();
+    collision_clamp(bodies);
+}
+
+void Camera::step_orbit(double dt, double speed, const Input& input, const BodyState& body) {
+    const double minimum_zoom = body.radius * collision_margin;
+    orbit_zoom_ = std::max(minimum_zoom, orbit_zoom_ - input.move_forward * speed * dt);
+    orbit_yaw_ += input.mouse_dx * mouse_sensitivity;
+    orbit_pitch_ = std::clamp(orbit_pitch_ - input.mouse_dy * mouse_sensitivity, -orbit_pitch_limit, orbit_pitch_limit);
+    const double cp = std::cos(orbit_pitch_);
+    const Vec3d from{orbit_zoom_ * cp * std::sin(orbit_yaw_), orbit_zoom_ * std::sin(orbit_pitch_),
+                     orbit_zoom_ * cp * std::cos(orbit_yaw_)};
+    position = body.position + from;
+    forward_ = normalized(body.position - position);
+}
+
+void Camera::step_free(double dt, double speed, const Input& input) {
+    const double yaw = input.mouse_dx * mouse_sensitivity;
+    const double pitch = std::clamp(-input.mouse_dy * mouse_sensitivity, -1.5, 1.5);
+    forward_ = normalized(rotate_y(forward_, yaw));
+    forward_.y = std::clamp(forward_.y + pitch, -free_pitch_limit, free_pitch_limit);
+    forward_ = normalized(forward_);
+    rebuild_basis();
+    position += (forward_ * double(input.move_forward) + right_ * double(input.move_right) +
+                 up_ * double(input.move_up)) *
+                (speed * dt);
+}
+
+void Camera::set_bookmark(std::size_t index, std::span<const BodyState> bodies) {
+    if (index >= bookmark_count || bodies.empty())
         return;
+    const auto& view = bookmark_views[index];
+    if (view.body >= bodies.size())
+        return;
+    const auto& body = bodies[view.body];
+    if (bookmarks_[index].valid) {
+        // Re-selecting a bookmark keeps the body-relative offset from the first visit.
+        position = body.position + bookmarks_[index].offset;
+    } else {
+        position = view_position(view, body);
     }
-    if (index < bodies.size()) {
-        const auto& b = bodies[index];
-        Vec3d local;
-        if (index == 0)
-            local = {0.0, b.radius * 0.45, b.radius * 2.1};
-        else if (index == 1)
-            local = {-b.radius * 0.6, b.radius * 0.25, b.radius * 2.2};
-        else
-            local = {b.radius, b.radius * 0.4, b.radius * 2.0};
-        position = b.position + local;
-        forward_ = normalized(b.position - position);
-        rebuild_basis();
-        bookmarks_[index] = {position - b.position, forward_, true};
-    } else if (index == 3 && !bodies.empty()) {
-        const auto& b = bodies[0];
-        position = b.position + Vec3d{4.8, -0.2, 0.8};
-        forward_ = normalized(b.position - position);
-        rebuild_basis();
-        bookmarks_[index] = {position - b.position, forward_, true};
-    } else if (index == 4 && bodies.size() > 1) {
-        const auto& b = bodies[1];
-        position = b.position + Vec3d{45.0, -8.0, 22.0};
-        forward_ = normalized(b.position - position);
-        rebuild_basis();
-        bookmarks_[index] = {position - b.position, forward_, true};
-    }
+    forward_ = normalized(body.position - position);
+    rebuild_basis();
+    bookmarks_[index] = {.offset = position - body.position, .forward = forward_, .valid = true};
 }
 
 void Camera::toggle_tour() {
-    if (mode_ == CameraMode::Tour) {
-        mode_ = CameraMode::Free;
-        tour_clock_valid_ = false;
-        tour_override_ = false;
-    } else {
-        mode_ = CameraMode::Tour;
-        tour_clock_valid_ = false;
-        tour_override_ = false;
-    }
+    mode_ = mode_ == CameraMode::Tour ? CameraMode::Free : CameraMode::Tour;
+    tour_clock_valid_ = false;
+    tour_override_ = false;
 }
 
 void Camera::look_at(Vec3d eye, Vec3d target) {
@@ -184,9 +205,11 @@ void Camera::set_orbit_target(std::size_t index, double zoom) {
     orbit_yaw_ = 0.0;
     orbit_pitch_ = 0.35;
 }
+
 void Camera::set_mode(CameraMode mode) {
     mode_ = mode;
     if (mode != CameraMode::Tour)
         tour_clock_valid_ = false;
 }
+
 } // namespace space

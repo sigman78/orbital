@@ -105,7 +105,7 @@ struct Renderer::Impl {
     std::array<Mesh, 4> rocks{};
     std::vector<geometry::AsteroidInstance> belt;
     struct BeltCluster {
-        geometry::Vec3 center{};
+        Vec3f center{};
         float radius{};
         std::vector<unsigned> indices;
     };
@@ -362,8 +362,11 @@ struct Renderer::Impl {
             spheres[i] = mesh(geometry::generate_sphere(32u << i, 16u << i));
             rocks[i] = mesh(geometry::generate_rock(71 + i * 37, 2 + i));
         }
-        belt = geometry::generate_belt(sys.belts[0].seed, 65000, float(sys.belts[0].inner_radius),
-                                       float(sys.belts[0].outer_radius), float(sys.belts[0].thickness));
+        belt = geometry::generate_belt({.seed = sys.belts[0].seed,
+                                        .count = 65000,
+                                        .inner_radius = float(sys.belts[0].inner_radius),
+                                        .outer_radius = float(sys.belts[0].outer_radius),
+                                        .thickness = float(sys.belts[0].thickness)});
         // The seeded belt order defines quality tiers, but is spatially random.
         // Build a separate index into compact polar cells without reordering IDs.
         constexpr unsigned angleBins = 128, radialBins = 8, heightBins = 4,
@@ -389,7 +392,7 @@ struct Renderer::Impl {
         belt_clusters.reserve(binCount);
         for (auto& ids : bins)
             if (!ids.empty()) {
-                geometry::Vec3 lo = belt[ids[0]].position, hi = lo;
+                Vec3f lo = belt[ids[0]].position, hi = lo;
                 for (unsigned id : ids) {
                     const auto& p = belt[id].position;
                     lo.x = std::min(lo.x, p.x);
@@ -399,7 +402,7 @@ struct Renderer::Impl {
                     hi.y = std::max(hi.y, p.y);
                     hi.z = std::max(hi.z, p.z);
                 }
-                geometry::Vec3 centre = (lo + hi) * .5f;
+                Vec3f centre = (lo + hi) * .5f;
                 float bound = 0;
                 for (unsigned id : ids) {
                     auto d = belt[id].position - centre;
@@ -578,7 +581,7 @@ bool Renderer::draw(const Camera& camera, const std::vector<BodyState>& bodies, 
     double beltAngle = time * .008, beltCos = std::cos(beltAngle), beltSin = std::sin(beltAngle);
     const double tanY = frame.right_tan.w, tanX = tanY * frame.up_aspect.w;
     const double planeXScale = std::sqrt(1 + tanX * tanX), planeYScale = std::sqrt(1 + tanY * tanY);
-    auto beltTransform = [&](geometry::Vec3 v) {
+    auto beltTransform = [&](Vec3f v) {
         double bx = v.x * beltCos - v.z * beltSin, bz = v.x * beltSin + v.z * beltCos;
         return Vec3d{bx, v.y * .7 - bz * .36, bz * .933};
     };

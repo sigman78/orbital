@@ -39,9 +39,9 @@ template <class T> T length(Vec3<T> a) {
 
 // Unit vector, or +Y when the input is too short to have a direction.
 template <class T> Vec3<T> normalized(Vec3<T> a) {
-    constexpr T epsilon = sizeof(T) == sizeof(float) ? static_cast<T>(1e-20) : static_cast<T>(1e-9);
+    constexpr T min_length = sizeof(T) == sizeof(float) ? static_cast<T>(1e-20) : static_cast<T>(1e-9);
     const T n = length(a);
-    return n > epsilon ? a * (static_cast<T>(1) / n) : Vec3<T>{0, 1, 0};
+    return n > min_length ? a * (static_cast<T>(1) / n) : Vec3<T>{0, 1, 0};
 }
 
 template <class T> constexpr Vec3<T> lerp(Vec3<T> a, Vec3<T> b, T t) {

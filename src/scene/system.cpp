@@ -1,16 +1,20 @@
-#include "system.hpp"
+#include "scene/system.hpp"
 
-#include <algorithm>
 #include <cmath>
-#include <functional>
-#include <sstream>
+#include <format>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace space {
 namespace {
-constexpr double pi = 3.14159265358979323846;
-constexpr double eps = 1e-9;
+
+constexpr double epsilon = 1e-9;
+
+// Hash tags that keep the derived seeds independent of each other.
+constexpr std::uint64_t variation_tag = 0x4f52424954414cull;  // "ORBITAL"
+constexpr std::uint64_t material_tag = 0x535552464143454full; // "SURFACEO"
+constexpr std::uint64_t belt_id = 2001;
+constexpr std::uint64_t body_ids[] = {1001, 1002, 1003};
 
 std::uint64_t mix(std::uint64_t x) {
     x += 0x9e3779b97f4a7c15ull;
@@ -19,87 +23,84 @@ std::uint64_t mix(std::uint64_t x) {
     return x ^ (x >> 31);
 }
 
-Vec3d cross(Vec3d a, Vec3d b) {
-    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+using BodyIndex = std::unordered_map<std::uint64_t, const BodyDescription*>;
+
+// Local orbit position composed with every ancestor, memoized per body.
+Vec3d resolve_position(std::uint64_t id, const BodyIndex& by_id, std::unordered_map<std::uint64_t, Vec3d>& positions,
+                       double seconds) {
+    if (const auto cached = positions.find(id); cached != positions.end())
+        return cached->second;
+    const auto& body = *by_id.at(id);
+    Vec3d position = rotate_about(body.orbit_offset, body.orbit_axis, body.orbit_angular_rate * seconds);
+    if (body.parent_id)
+        position += resolve_position(body.parent_id, by_id, positions, seconds);
+    return positions[id] = position;
 }
-Vec3d rotate(Vec3d v, Vec3d axis, double radians) {
-    axis = normalized(axis);
-    const double c = std::cos(radians), s = std::sin(radians);
-    return v * c + cross(axis, v) * s + axis * (dot(axis, v) * (1.0 - c));
+
+bool has_parent_cycle(const BodyDescription& body, const BodyIndex& by_id) {
+    std::unordered_set<std::uint64_t> seen;
+    for (auto parent = body.parent_id; parent;) {
+        if (!seen.insert(parent).second)
+            return true;
+        const auto it = by_id.find(parent);
+        if (it == by_id.end())
+            return false;
+        parent = it->second->parent_id;
+    }
+    return false;
 }
-bool finite(Vec3d v) {
-    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
-}
-bool finite(double x) {
-    return std::isfinite(x);
-}
+
 } // namespace
 
-Vec3d operator+(Vec3d a, Vec3d b) {
-    return {a.x + b.x, a.y + b.y, a.z + b.z};
-}
-Vec3d operator-(Vec3d a, Vec3d b) {
-    return {a.x - b.x, a.y - b.y, a.z - b.z};
-}
-Vec3d operator*(Vec3d a, double s) {
-    return {a.x * s, a.y * s, a.z * s};
-}
-double dot(Vec3d a, Vec3d b) {
-    return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-double length(Vec3d a) {
-    return std::sqrt(dot(a, a));
-}
-Vec3d normalized(Vec3d a) {
-    const double n = length(a);
-    return n > eps ? a * (1.0 / n) : Vec3d{0, 1, 0};
-}
-
 SystemDescription generate_system(std::uint64_t seed) {
+    // Small size variation for non-showcase seeds, in [-1%, +1%].
+    const double variation = seed == showcase_seed ? 0.0
+                                                   : (double(mix(seed ^ variation_tag) % 2001) - 1000.0) / 100000.0;
+    const auto material = [seed](std::uint64_t id) { return mix(seed ^ id ^ material_tag); };
     SystemDescription s;
     s.master_seed = seed;
-    const bool showcase = seed == 20260911ull;
-    const double variation = showcase ? 0.0 : (double(mix(seed ^ 0x4f52424954414cull) % 2001) - 1000.0) / 100000.0;
-    s.star = {1, 35.0, 5600.0 + double(mix(seed) % 1800), 4.0, {-3500.0, 1400.0, 1200.0}};
-    const auto material = [seed](std::uint64_t id) { return mix(seed ^ id ^ 0x535552464143454full); };
-    const double earth_r = 2.5 * (1.0 + variation), giant_r = 28.0 * (1.0 + variation * 0.6);
-    s.bodies = {{1001,
-                 0,
-                 BodyClass::Terrestrial,
-                 earth_r,
-                 0.41,
-                 1600.0,
-                 0.0,
-                 {0, 0, 0},
-                 {0, 1, 0},
-                 0.000004,
-                 material(1001),
-                 0.32},
-                {1002,
-                 0,
-                 BodyClass::GasGiant,
-                 giant_r,
-                 0.12,
-                 1100.0,
-                 0.0,
-                 {75, 20, -175},
-                 {0.2, 1, 0.1},
-                 0.000009,
-                 material(1002),
-                 0.0},
-                {1003,
-                 0,
-                 BodyClass::RockyMoon,
-                 0.68,
-                 0.08,
-                 22000.0,
-                 0.0,
-                 {-65, 8, -45},
-                 {0, 1, 0},
-                 0.000025,
-                 material(1003),
-                 0.0}};
-    s.belts = {{2001, 1002, 42.0, 62.0, 1.4, 0.65, mix(seed ^ 2001)}};
+    s.star = {.id = 1,
+              .radius = 35.0,
+              .temperature = 5600.0 + double(mix(seed) % 1800),
+              .intensity = 4.0,
+              .position = {-3500.0, 1400.0, 1200.0}};
+    s.bodies = {
+        BodyDescription{.id = body_ids[0],
+                        .body_class = BodyClass::Terrestrial,
+                        .radius = 2.5 * (1.0 + variation),
+                        .axial_tilt = 0.41,
+                        .rotation_period = 1600.0,
+                        .orbit_offset = {0, 0, 0},
+                        .orbit_axis = {0, 1, 0},
+                        .orbit_angular_rate = 0.000004,
+                        .material_seed = material(body_ids[0]),
+                        .atmosphere_scale = 0.32},
+        BodyDescription{.id = body_ids[1],
+                        .body_class = BodyClass::GasGiant,
+                        .radius = 28.0 * (1.0 + variation * 0.6),
+                        .axial_tilt = 0.12,
+                        .rotation_period = 1100.0,
+                        .orbit_offset = {75, 20, -175},
+                        .orbit_axis = {0.2, 1, 0.1},
+                        .orbit_angular_rate = 0.000009,
+                        .material_seed = material(body_ids[1])},
+        BodyDescription{.id = body_ids[2],
+                        .body_class = BodyClass::RockyMoon,
+                        .radius = 0.68,
+                        .axial_tilt = 0.08,
+                        .rotation_period = 22000.0,
+                        .orbit_offset = {-65, 8, -45},
+                        .orbit_axis = {0, 1, 0},
+                        .orbit_angular_rate = 0.000025,
+                        .material_seed = material(body_ids[2])},
+    };
+    s.belts = {BeltDescription{.id = belt_id,
+                               .parent_id = body_ids[1],
+                               .inner_radius = 42.0,
+                               .outer_radius = 62.0,
+                               .thickness = 1.4,
+                               .density = 0.65,
+                               .seed = mix(seed ^ belt_id)}};
     return s;
 }
 
@@ -107,39 +108,30 @@ std::vector<std::string> validate_system(const SystemDescription& s) {
     std::vector<std::string> errors;
     if (s.schema_version == 0)
         errors.emplace_back("schema_version must be non-zero");
-    if (!finite(s.scale_policy) || s.scale_policy <= 0)
+    if (!std::isfinite(s.scale_policy) || s.scale_policy <= 0)
         errors.emplace_back("scale_policy must be finite and positive");
-    if (!finite(s.star.position) || !finite(s.star.radius) || s.star.radius <= 0)
+    if (!is_finite(s.star.position) || !std::isfinite(s.star.radius) || s.star.radius <= 0)
         errors.emplace_back("star has invalid position or radius");
-    std::unordered_map<std::uint64_t, const BodyDescription*> by_id;
+    BodyIndex by_id;
     for (const auto& b : s.bodies) {
         if (b.id == 0 || !by_id.emplace(b.id, &b).second)
             errors.emplace_back("body IDs must be unique and non-zero");
-        if (!finite(b.radius) || b.radius <= 0 || !finite(b.orbit_offset) || !finite(b.orbit_axis) ||
-            !finite(b.orbit_angular_rate))
-            errors.emplace_back("body " + std::to_string(b.id) + " has invalid finite/radius parameters");
+        if (!std::isfinite(b.radius) || b.radius <= 0 || !is_finite(b.orbit_offset) || !is_finite(b.orbit_axis) ||
+            !std::isfinite(b.orbit_angular_rate))
+            errors.push_back(std::format("body {} has invalid finite/radius parameters", b.id));
         if (b.parent_id == b.id)
-            errors.emplace_back("body " + std::to_string(b.id) + " is its own parent");
+            errors.push_back(std::format("body {} is its own parent", b.id));
     }
-    for (const auto& b : s.bodies)
-        if (b.parent_id && !by_id.count(b.parent_id))
-            errors.emplace_back("body " + std::to_string(b.id) + " references missing parent");
     for (const auto& b : s.bodies) {
-        std::unordered_set<std::uint64_t> seen;
-        for (auto p = b.parent_id; p;) {
-            if (!seen.insert(p).second) {
-                errors.emplace_back("parent graph contains a cycle");
-                break;
-            }
-            auto it = by_id.find(p);
-            if (it == by_id.end())
-                break;
-            p = it->second->parent_id;
-        }
+        if (b.parent_id && !by_id.count(b.parent_id))
+            errors.push_back(std::format("body {} references missing parent", b.id));
+        if (has_parent_cycle(b, by_id))
+            errors.emplace_back("parent graph contains a cycle");
     }
     for (const auto& belt : s.belts) {
-        if (belt.id == 0 || !finite(belt.inner_radius) || !finite(belt.outer_radius) || belt.inner_radius <= 0 ||
-            belt.outer_radius <= belt.inner_radius || belt.thickness < 0 || !finite(belt.density) || belt.density < 0)
+        if (belt.id == 0 || !std::isfinite(belt.inner_radius) || !std::isfinite(belt.outer_radius) ||
+            belt.inner_radius <= 0 || belt.outer_radius <= belt.inner_radius || belt.thickness < 0 ||
+            !std::isfinite(belt.density) || belt.density < 0)
             errors.emplace_back("belt has invalid bounds or density");
         if (belt.parent_id && !by_id.count(belt.parent_id))
             errors.emplace_back("belt references missing parent");
@@ -149,26 +141,21 @@ std::vector<std::string> validate_system(const SystemDescription& s) {
 
 std::vector<BodyState> evaluate_system(const SystemDescription& s, double seconds) {
     std::vector<BodyState> result;
-    if (!finite(seconds) || !validate_system(s).empty())
+    if (!std::isfinite(seconds) || !validate_system(s).empty())
         return result;
-    std::unordered_map<std::uint64_t, const BodyDescription*> by_id;
+    BodyIndex by_id;
     for (const auto& b : s.bodies)
         by_id[b.id] = &b;
     std::unordered_map<std::uint64_t, Vec3d> positions;
-    std::function<Vec3d(std::uint64_t)> position = [&](std::uint64_t id) {
-        auto cached = positions.find(id);
-        if (cached != positions.end())
-            return cached->second;
-        const auto& b = *by_id.at(id);
-        Vec3d p = rotate(b.orbit_offset, b.orbit_axis, b.orbit_angular_rate * seconds);
-        if (b.parent_id)
-            p = position(b.parent_id) + p;
-        return positions[id] = p;
-    };
-    for (const auto& b : s.bodies)
-        result.push_back({b.id, position(b.id),
-                          b.rotation_phase + (b.rotation_period > eps ? 2 * pi * seconds / b.rotation_period : 0.0),
-                          b.radius});
+    result.reserve(s.bodies.size());
+    for (const auto& b : s.bodies) {
+        const double spin = b.rotation_period > epsilon ? 2 * pi<double> * seconds / b.rotation_period : 0.0;
+        result.push_back({.id = b.id,
+                          .position = resolve_position(b.id, by_id, positions, seconds),
+                          .rotation_angle = b.rotation_phase + spin,
+                          .radius = b.radius});
+    }
     return result;
 }
+
 } // namespace space

@@ -1,21 +1,18 @@
 #pragma once
 
+#include "core/math.hpp"
+
 #include <cstdint>
 #include <string>
 #include <vector>
 
+// Deterministic description and evaluation of the planetary system. Distances
+// are artistic scene units, not physical ones; everything here is double
+// because the simulation runs for minutes and the tests pin positions to 1e-12.
 namespace space {
 
-struct Vec3d {
-    double x = 0.0, y = 0.0, z = 0.0;
-};
-
-Vec3d operator+(Vec3d a, Vec3d b);
-Vec3d operator-(Vec3d a, Vec3d b);
-Vec3d operator*(Vec3d a, double s);
-double dot(Vec3d a, Vec3d b);
-double length(Vec3d a);
-Vec3d normalized(Vec3d a);
+// The seed the demo ships with; other seeds apply small size variations.
+constexpr std::uint64_t showcase_seed = 20260911;
 
 enum class BodyClass { Terrestrial, GasGiant, RockyMoon };
 
@@ -69,7 +66,12 @@ struct BodyState {
 };
 
 SystemDescription generate_system(std::uint64_t seed);
+
+// Empty when the description is consistent; otherwise one message per problem.
 std::vector<std::string> validate_system(const SystemDescription& system);
+
+// Body positions and rotations at the given simulation time. Empty for an
+// invalid description or non-finite time.
 std::vector<BodyState> evaluate_system(const SystemDescription& system, double seconds);
 
 } // namespace space

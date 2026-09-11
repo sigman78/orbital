@@ -4,19 +4,11 @@
 #include <cmath>
 #include <cstdint>
 
+using namespace space;
 using namespace space::geometry;
 
-static float dot(Vec3 a, Vec3 b) {
-    return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-static Vec3 cross(Vec3 a, Vec3 b) {
-    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
-}
-static float length_squared(Vec3 value) {
+static float length_squared(Vec3f value) {
     return dot(value, value);
-}
-static bool finite(Vec3 value) {
-    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
 
 static void validate_flat_rock(const Mesh& rock) {
@@ -26,7 +18,7 @@ static void validate_flat_rock(const Mesh& rock) {
     assert(!rock.vertices.empty());
     assert(!rock.indices.empty() && rock.indices.size() % 3 == 0);
     for (const auto& vertex : rock.vertices) {
-        assert(finite(vertex.position) && finite(vertex.normal));
+        assert(is_finite(vertex.position) && is_finite(vertex.normal));
         assert(length_squared(vertex.position) <= radius_limit_squared);
         assert(std::abs(length_squared(vertex.normal) - 1.0f) <= normal_tolerance);
     }
@@ -36,9 +28,9 @@ static void validate_flat_rock(const Mesh& rock) {
         const auto& a = rock.vertices[ia];
         const auto& b = rock.vertices[ib];
         const auto& c = rock.vertices[ic];
-        const Vec3 face_cross = cross(b.position - a.position, c.position - a.position);
-        assert(finite(face_cross) && length_squared(face_cross) > area_epsilon_squared);
-        const Vec3 centroid = (a.position + b.position + c.position) * (1.0f / 3.0f);
+        const Vec3f face_cross = cross(b.position - a.position, c.position - a.position);
+        assert(is_finite(face_cross) && length_squared(face_cross) > area_epsilon_squared);
+        const Vec3f centroid = (a.position + b.position + c.position) * (1.0f / 3.0f);
         assert(dot(face_cross, centroid) > 0.0f);
         assert(length_squared(a.normal - b.normal) <= normal_tolerance * normal_tolerance);
         assert(length_squared(a.normal - c.normal) <= normal_tolerance * normal_tolerance);
@@ -81,8 +73,10 @@ int main() {
         const auto second_seed = generate_rock(rock_seeds[1], detail);
         assert(distinct_silhouette(first_seed, second_seed));
     }
-    const auto belt_a = generate_belt(1234, 100, 10.0f, 20.0f, 4.0f);
-    const auto belt_b = generate_belt(1234, 100, 10.0f, 20.0f, 4.0f);
+    constexpr BeltParams belt_params{
+        .seed = 1234, .count = 100, .inner_radius = 10, .outer_radius = 20, .thickness = 4};
+    const auto belt_a = generate_belt(belt_params);
+    const auto belt_b = generate_belt(belt_params);
     assert(belt_a.size() == 100 && belt_a[37].position.x == belt_b[37].position.x);
     for (const auto& i : belt_a) {
         const float r = std::sqrt(i.position.x * i.position.x + i.position.z * i.position.z);

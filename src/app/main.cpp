@@ -238,12 +238,12 @@ int main(int argc, char** argv) {
                 return GetForegroundWindow() == window.handle && (GetAsyncKeyState(key) & 0x8000) != 0;
             };
             space::Input input;
-            input.move_forward = double(down('W')) - down('S');
-            input.move_right = double(down('D')) - down('A');
-            input.move_up = double(down('E')) - down('Q');
-            input.speed_scale = down(VK_SHIFT) ? 4 : 1;
-            input.mouse_dx = app.mouse_dx;
-            input.mouse_dy = app.mouse_dy;
+            input.move_forward = float(down('W')) - float(down('S'));
+            input.move_right = float(down('D')) - float(down('A'));
+            input.move_up = float(down('E')) - float(down('Q'));
+            input.speed_scale = down(VK_SHIFT) ? 4.f : 1.f;
+            input.mouse_dx = float(app.mouse_dx);
+            input.mouse_dy = float(app.mouse_dy);
             app.mouse_dx = app.mouse_dy = 0;
             if (input.move_forward || input.move_right || input.move_up)
                 if (app.camera.mode() == space::CameraMode::Tour)

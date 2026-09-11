@@ -1,26 +1,32 @@
 #pragma once
 
+#include "core/math.hpp"
 #include "scene/system.hpp"
 
 #include <cstddef>
+#include <span>
 #include <vector>
 
 namespace space {
 
 enum class CameraMode { Free, Orbit, Tour };
 
+// Per-step navigation input. Axes are -1, 0 or 1; mouse deltas are in pixels.
 struct Input {
-    double move_forward = 0.0;
-    double move_right = 0.0;
-    double move_up = 0.0;
-    double mouse_dx = 0.0;
-    double mouse_dy = 0.0;
-    double speed_scale = 1.0;
+    float move_forward = 0.0f;
+    float move_right = 0.0f;
+    float move_up = 0.0f;
+    float mouse_dx = 0.0f;
+    float mouse_dy = 0.0f;
+    float speed_scale = 1.0f;
 };
+
+// Number of preset views reachable with the number keys.
+constexpr std::size_t bookmark_count = 5;
 
 struct Camera {
     Vec3d position{0.0, 0.8, 4.8};
-    double vertical_fov = 1.0471975511965976; // 60 degrees, radians
+    double vertical_fov = pi<double> / 3; // 60 degrees
 
     Camera();
     CameraMode mode() const { return mode_; }
@@ -30,8 +36,8 @@ struct Camera {
 
     // Advances navigation by dt. Simulation time is supplied separately so a
     // paused simulation does not pause camera input or the tour clock.
-    void step(double dt, double time, const Input& input, const std::vector<BodyState>& bodies);
-    void set_bookmark(std::size_t index, const std::vector<BodyState>& bodies);
+    void step(double dt, double time, const Input& input, std::span<const BodyState> bodies);
+    void set_bookmark(std::size_t index, std::span<const BodyState> bodies);
     void toggle_tour();
     void look_at(Vec3d eye, Vec3d target);
     void set_tour_time(double seconds);
@@ -40,6 +46,11 @@ struct Camera {
     std::size_t orbit_target() const { return orbit_target_; }
 
 private:
+    struct Bookmark {
+        Vec3d offset, forward;
+        bool valid = false;
+    };
+
     Vec3d forward_{0.188144f, -0.125429f, -0.97493f};
     Vec3d right_{0.981f, 0.0f, 0.188f};
     Vec3d up_{0.0236f, 0.992f, -0.123f};
@@ -50,14 +61,13 @@ private:
     bool tour_clock_valid_ = false;
     bool tour_override_ = false;
     double tour_override_time_ = 0.0;
-    struct Bookmark {
-        Vec3d offset, forward;
-        bool valid = false;
-    };
-    std::vector<Bookmark> bookmarks_;
+    Bookmark bookmarks_[bookmark_count]{};
 
+    void step_tour(double time, std::span<const BodyState> bodies);
+    void step_orbit(double dt, double speed, const Input& input, const BodyState& body);
+    void step_free(double dt, double speed, const Input& input);
     void rebuild_basis();
-    void collision_clamp(const std::vector<BodyState>& bodies);
+    void collision_clamp(std::span<const BodyState> bodies);
 };
 
 } // namespace space

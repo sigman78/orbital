@@ -1,23 +1,18 @@
 #pragma once
 
+#include "core/math.hpp"
+
 #include <cstdint>
+#include <span>
 #include <vector>
 
+// Procedural meshes and belt layout. Everything is float: meshes live in a
+// unit-radius local frame and instances are placed relative to their parent.
 namespace space::geometry {
 
-struct Vec3 {
-    float x = 0.0f, y = 0.0f, z = 0.0f;
-    constexpr Vec3() = default;
-    constexpr Vec3(float x_, float y_, float z_) : x(x_), y(y_), z(z_) {}
-    constexpr Vec3 operator+(Vec3 b) const { return {x + b.x, y + b.y, z + b.z}; }
-    constexpr Vec3 operator-(Vec3 b) const { return {x - b.x, y - b.y, z - b.z}; }
-    constexpr Vec3 operator*(float s) const { return {x * s, y * s, z * s}; }
-    constexpr bool operator==(const Vec3&) const = default;
-};
-
 struct Vertex {
-    Vec3 position;
-    Vec3 normal;
+    Vec3f position;
+    Vec3f normal;
     float u = 0.0f, v = 0.0f;
     constexpr bool operator==(const Vertex&) const = default;
 };
@@ -28,16 +23,14 @@ struct Mesh {
 };
 
 struct AsteroidInstance {
-    Vec3 position;
-    Vec3 scale;
-    Vec3 rotation; // Euler angles in radians (x, y, z).
+    Vec3f position;
+    Vec3f scale;
+    Vec3f rotation; // Euler angles in radians (x, y, z).
     std::uint32_t variant = 0;
 };
-using BeltInstance = AsteroidInstance;
-using Instance = AsteroidInstance;
 
 struct Plane {
-    Vec3 normal;
+    Vec3f normal;
     float distance = 0.0f; // Plane equation: dot(normal, p) + distance >= 0.
 };
 
@@ -45,16 +38,28 @@ struct Frustum {
     Plane planes[6];
 };
 
+struct BeltParams {
+    std::uint64_t seed = 0;
+    std::uint32_t count = 0;
+    float inner_radius = 0.0f;
+    float outer_radius = 0.0f;
+    float thickness = 0.0f;
+};
+
+// Number of LOD levels for spheres and rocks; 0 is the cheapest, 3 the most detailed.
+constexpr std::uint32_t lod_count = 4;
+
 Mesh generate_sphere(std::uint32_t longitude, std::uint32_t latitude);
 Mesh generate_rock(std::uint32_t seed, std::uint32_t detail);
-std::vector<AsteroidInstance> generate_belt(std::uint64_t seed, std::uint32_t count, float inner, float outer,
-                                            float thickness);
+std::vector<AsteroidInstance> generate_belt(const BeltParams& params);
 
-// LOD 0 is the cheapest representation, LOD 3 the most detailed. The previous
-// level is used to apply a 15% hysteresis band around each transition.
+// Picks a LOD from the projected radius, keeping the previous level inside a
+// 15% hysteresis band around each transition.
 std::uint32_t select_lod(float projected_radius_pixels, std::uint32_t previous);
 
-bool sphere_in_frustum(const Frustum& frustum, Vec3 center, float radius);
-bool sphere_in_frustum(const Plane* planes, std::uint32_t plane_count, Vec3 center, float radius);
+bool sphere_in_frustum(std::span<const Plane> planes, Vec3f center, float radius);
+inline bool sphere_in_frustum(const Frustum& frustum, Vec3f center, float radius) {
+    return sphere_in_frustum(frustum.planes, center, radius);
+}
 
 } // namespace space::geometry
