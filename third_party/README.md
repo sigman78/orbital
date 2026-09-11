@@ -7,7 +7,7 @@ at upstream commit `8e414bd0a8010b9f721d06d470860e27aa69c071` (MIT, see `NoGraph
 
 The copy carries local compatibility changes: an opt-in conventional Vulkan 1.3 descriptor backend
 (`NOGRAPHICSAPI_ENABLE_CONVENTIONAL_BACKEND` / `NOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND`) for GPUs
-without the experimental descriptor and address-command extensions. The public C++ API is unchanged.
+without the experimental descriptor and address-command extensions. The public C++ API and shader entry-point names are unchanged.
 See [docs/FOUNDATION.md](../docs/FOUNDATION.md) for the investigation.
 
 `NoGraphicsAPI-compat.patch` is the full diff against the upstream commit. To regenerate it after

@@ -17,7 +17,7 @@ Implementation is authorized. Continue the native C++20/MSVC/CMake NoGraphicsAPI
 
 The app builds and renders on GTX 1080 Ti. NoGraphicsAPI has an in-tree conventional Vulkan descriptor/pipeline fallback because upstream experimental requirements are unavailable on this GPU. The demo forces that path on all devices for a consistent shader ABI. Upstream revision and deviations are documented in FOUNDATION.md.
 
-Default shaders are now .slang, compiled offline to SPIR-V by pinned Slang. Shared CPU/shader data layout is shaders/scene_shared.h; GLSL equivalents remain a comparison option. Native WIC loads sourced Earth day/night/cloud/normal/specular, Jupiter, Moon and rock maps with CPU mip generation. The optional seeded asset generator is not the default material source.
+Default shaders are now .slang, compiled offline to SPIR-V by pinned Slang. Shared CPU/shader data layout is shaders/scene_shared.h. Native WIC loads sourced Earth day/night/cloud/normal/specular, Jupiter, Moon and rock maps with CPU mip generation. The optional seeded asset generator is not the default material source.
 
 Rendering includes camera-relative coordinates, sphere/rock LODs, shadow map, material lighting, separate clouds, Rayleigh/Mie atmosphere approximation, floating-point HDR, exposure, bloom/solar flare, ACES fit, correct sRGB output, and reprojection-based temporal filtering. Tiny asteroids use filtered area-weighted billboards rather than subpixel triangles. Planet sampling corrects longitude-wrap derivatives. Recent display-space static dither replaces noisy linear-space dither.
 

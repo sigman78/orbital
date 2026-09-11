@@ -211,8 +211,8 @@ struct Renderer::Impl {
         gpu::destroy_gpu_heap(staging);
     }
     gpu::PSO* pipeline(const char* vs, const char* fs, gpu::Format format, bool depthTest, bool blend) {
-        auto v = read_spv(directory / "shaders" / (std::string(vs) + ".spv")),
-             f = read_spv(directory / "shaders" / (std::string(fs) + ".spv"));
+        auto v = read_spv(directory / "shaders" / (std::string(vs) + ".vertex.spv")),
+             f = read_spv(directory / "shaders" / (std::string(fs) + ".fragment.spv"));
         gpu::BlendState blending{};
         if (blend)
             blending = {.enabled = true,
@@ -335,16 +335,16 @@ struct Renderer::Impl {
         material("rock_normal.jpg", 12, false, false, true);
         material("rock_roughness.jpg", 13, false);
         upload_image({assets::make_hud()}, 14);
-        opaque = pipeline("surface.vert", "surface.frag", gpu::Format::rgba16_float, true, false);
-        cloud = pipeline("surface.vert", "surface.frag", gpu::Format::rgba16_float, true, true);
-        background = pipeline("fullscreen.vert", "background.frag", gpu::Format::rgba16_float, true, false);
-        atmosphere = pipeline("fullscreen.vert", "atmosphere.frag", gpu::Format::rgba16_float, false, true);
-        bloom = pipeline("fullscreen.vert", "post.frag", gpu::Format::rgba16_float, false, false);
-        post = pipeline("fullscreen.vert", "post.frag", gpu::Format::rgba8_srgb, false, false);
-        present = pipeline("fullscreen.vert", "post.frag", gpu::Format::bgra8_srgb, false, false);
-        meter = pipeline("fullscreen.vert", "post.frag", gpu::Format::rgba32_float, false, false);
-        temporal = pipeline("fullscreen.vert", "temporal.frag", gpu::Format::rgba16_float, false, false);
-        auto shadowVS = read_spv(directory / "shaders/surface.vert.spv");
+        opaque = pipeline("surface", "surface", gpu::Format::rgba16_float, true, false);
+        cloud = pipeline("surface", "surface", gpu::Format::rgba16_float, true, true);
+        background = pipeline("fullscreen", "background", gpu::Format::rgba16_float, true, false);
+        atmosphere = pipeline("fullscreen", "atmosphere", gpu::Format::rgba16_float, false, true);
+        bloom = pipeline("fullscreen", "post", gpu::Format::rgba16_float, false, false);
+        post = pipeline("fullscreen", "post", gpu::Format::rgba8_srgb, false, false);
+        present = pipeline("fullscreen", "post", gpu::Format::bgra8_srgb, false, false);
+        meter = pipeline("fullscreen", "post", gpu::Format::rgba32_float, false, false);
+        temporal = pipeline("fullscreen", "temporal", gpu::Format::rgba16_float, false, false);
+        auto shadowVS = read_spv(directory / "shaders/surface.vertex.spv");
         shadow = gpu::create_graphics_pso(device,
                                           {.vertex_spirv = shadowVS,
                                            .depth_format = gpu::Format::d32_float,

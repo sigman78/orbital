@@ -7,8 +7,7 @@ Pinned NoGraphicsAPI revision: `8e414bd0a8010b9f721d06d470860e27aa69c071` (upstr
 - MSVC 19.44.35222 (v14.44 toolset), initialized with `vcvarsall.bat x64`. `tools/build.ps1` locates it through `vswhere`; set `ORBITAL_VCVARS` for a standalone or custom installation.
 - Vulkan headers 1.4.357 at `.tools/Vulkan-Headers/include`, pinned externally at commit `e3b1eec08173d6b825cd3ac88c885a63b621504a`.
 - Vulkan loader import library (`vulkan-1.lib`) from an external installation, passed to CMake as `Vulkan_LIBRARY` (typically in an ignored `CMakeUserPresets.json`). It is not redistributed.
-- glslang 16.5.0 at `.tools/glslang/bin/glslang.exe`. `tools/bootstrap.ps1` fetches the tagged Windows archive and verifies SHA-256 `06B71298B750268C127F2EE7AE0EF7525E2068120C6C8A3A08B2F58CA6F325CE`.
-- Slang 2026.14.1 at `.tools/slang/bin/slangc.exe`; the official tagged Windows archive SHA-256 is `5ED0A59D650A0AF0ACA45D5DB4E083B3D8FB5CEA05748747DD95DFBE9C580658`.
+- Slang 2026.14.1 at `.tools/slang/bin/slangc.exe`. `tools/bootstrap.ps1` fetches the tagged Windows archive and verifies SHA-256 `5ED0A59D650A0AF0ACA45D5DB4E083B3D8FB5CEA05748747DD95DFBE9C580658`.
 - The tested device is NVIDIA GeForce GTX 1080 Ti, Vulkan 1.4.312, driver 582.66. It lacks `VK_EXT_descriptor_heap`, `VK_KHR_device_address_commands`, `VK_KHR_shader_untyped_pointers`, and `VK_EXT_mesh_shader`.
 
 ## Compatibility ABI
@@ -16,15 +15,15 @@ Pinned NoGraphicsAPI revision: `8e414bd0a8010b9f721d06d470860e27aa69c071` (upstr
 Configure NoGraphicsAPI with `NOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND=ON`. `DeviceCaps::conventional_descriptor_backend` reports the active path. On this path:
 
 - Root bytes are ordinary Vulkan push constants, visible to all stages. The maximum is `DeviceCaps::max_push_data_size`.
-- GPU buffer pointers remain Vulkan buffer device addresses and GLSL may use `GL_EXT_buffer_reference`.
+- GPU buffer pointers remain Vulkan buffer device addresses, exposed to shaders as typed Slang pointers.
 - Set 0, binding 0 is a fixed array of 24 separate sampled images.
 - Set 0, binding 1 is a fixed array of 4 separate samplers.
-- Compatibility GLSL SPIR-V uses the standard `main` entry point; the experimental path retains `vertexMain` and `fragmentMain`.
+- Entry points are `vertexMain` and `fragmentMain` on both backends, as upstream; Slang is compiled with `-fvk-use-entrypoint-name`.
 - Mesh shaders and storage image descriptors are unsupported. `DeviceCaps::mesh_shaders` is false.
 
 The descriptor-heap allocation/write/bind calls retain their signatures. Writes update the conventional descriptor set using the byte offset as the descriptor index. Direct and indexed draw, push roots, dynamic rendering, HDR/depth attachments, buffer copies, texture upload/readback, barriers, and swapchain presentation use core Vulkan operations.
 
-The parallel Slang shader path preserves this ABI in `shaders/common.slang` and `shaders/scene_shared.h`. Reflection verifies texture binding 0/count 24, sampler binding 1/count 4, and a 32-byte push root containing three typed 64-bit GPU pointers plus `base` and `mode`. Compile with SPIR-V 1.6 and column-major matrix layout; omit `-fvk-use-entrypoint-name` so Vulkan entry points remain `main` as required by the compatibility backend.
+The Slang shaders implement this ABI in `shaders/common.slang` and `shaders/scene_shared.h`. Reflection verifies texture binding 0/count 24, sampler binding 1/count 4, and a 32-byte push root containing three typed 64-bit GPU pointers plus `base` and `mode`. Compile with SPIR-V 1.6, column-major matrix layout and `-fvk-use-entrypoint-name`.
 
 ## Build evidence and remaining validation
 

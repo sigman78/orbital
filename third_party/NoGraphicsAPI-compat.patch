@@ -40,7 +40,7 @@ index 5d9e398..0a512df 100644
  
  // A windowed device and every call using it must remain on the native
 diff --git a/src/NoGraphicsAPI.cpp b/src/NoGraphicsAPI.cpp
-index fab3a6b..e1df77f 100644
+index fab3a6b..1082ab7 100644
 --- a/src/NoGraphicsAPI.cpp
 +++ b/src/NoGraphicsAPI.cpp
 @@ -44,6 +44,7 @@ constexpr VkPresentModeKHR swapchain_present_mode = VK_PRESENT_MODE_FIFO_KHR;
@@ -451,22 +451,6 @@ index fab3a6b..e1df77f 100644
      const VkHostAddressRangeEXT destination{
          .address = cpu_destination,
          .size = static_cast<size_t>(device->heap_properties.samplerDescriptorSize),
-@@ -2790,13 +2913,13 @@ PSO* create_raster_pso(Device* device, Span<const uint32> first_stage_spirv, Spa
-             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-             .pNext = &first_stage_module_info,
-             .stage = mesh ? VK_SHADER_STAGE_MESH_BIT_EXT : VK_SHADER_STAGE_VERTEX_BIT,
--            .pName = mesh ? "meshMain" : "vertexMain",
-+            .pName = device->conventional_backend ? "main" : (mesh ? "meshMain" : "vertexMain"),
-         },
-         VkPipelineShaderStageCreateInfo{
-             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-             .pNext = &fragment_module_info,
-             .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
--            .pName = "fragmentMain",
-+            .pName = device->conventional_backend ? "main" : "fragmentMain",
-         },
-     };
-     const VkPipelineVertexInputStateCreateInfo vertex_input{
 @@ -2881,11 +3004,11 @@ PSO* create_raster_pso(Device* device, Span<const uint32> first_stage_spirv, Spa
      const VkPipelineCreateFlags2CreateInfo flags_info{
          .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO,

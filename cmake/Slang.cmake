@@ -12,7 +12,7 @@ function(orbital_compile_slang output source entry stage)
         OUTPUT "${output_absolute}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${output_directory}"
         COMMAND "${ORBITAL_SLANGC}" "${source_absolute}"
-                -target spirv -profile spirv_1_6 -matrix-layout-column-major
+                -target spirv -profile spirv_1_6 -matrix-layout-column-major -fvk-use-entrypoint-name
                 -entry "${entry}" -stage "${stage}" -o "${output_absolute}"
         ${validation}
         DEPENDS "${source_absolute}"

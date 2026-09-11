@@ -23,7 +23,7 @@ ctest --preset release
 
 Bootstrap downloads pinned shader tools; it does not install a GPU driver or full Vulkan SDK. Material textures are fetched and hash-verified by `download-assets.ps1` and are not tracked in git. Machine-specific overrides (for example an existing Vulkan loader library) go in an ignored `CMakeUserPresets.json`; in an MSVC developer shell, `cmake --preset <your-preset>` then `cmake --build --preset release`.
 
-Slang is the default shader language, with offline compilation and a shared C++/shader layout header. `-DORBITAL_USE_SLANG=OFF` selects the GLSL comparison path. See [foundation details](docs/FOUNDATION.md) for upstream compatibility changes.
+Slang is the default shader language, with offline compilation and a shared C++/shader layout header. See [foundation details](docs/FOUNDATION.md) for upstream compatibility changes.
 
 ## Explore
 
@@ -45,10 +45,10 @@ RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. K
 | `src/scene` | Deterministic system generation and mesh geometry |
 | `src/procedural` | Procedural asset generation and sourced material loading |
 | `src/render` | Vulkan renderer on top of NoGraphicsAPI, GPU-side types |
-| `shaders/` | Slang shaders (default) and the GLSL comparison path; `scene_shared.h` is the shared C++/shader layout |
+| `shaders/` | Slang shaders; `scene_shared.h` is the shared C++/shader layout |
 | `tests/` | Executable-assertion tests run through CTest |
 | `tools/` | PowerShell scripts: bootstrap, asset download, build, format, smoke and stability checks |
-| `cmake/` | Slang and GLSL shader compilation helpers |
+| `cmake/` | Slang shader compilation helper |
 | `docs/` | Product, architecture, decisions, validation and handoff documents ([index](docs/README.md)) |
 | `third_party/` | Vendored NoGraphicsAPI fork and its patch against upstream ([details](third_party/README.md)) |
 

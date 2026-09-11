@@ -2913,13 +2913,13 @@ PSO* create_raster_pso(Device* device, Span<const uint32> first_stage_spirv, Spa
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .pNext = &first_stage_module_info,
             .stage = mesh ? VK_SHADER_STAGE_MESH_BIT_EXT : VK_SHADER_STAGE_VERTEX_BIT,
-            .pName = device->conventional_backend ? "main" : (mesh ? "meshMain" : "vertexMain"),
+            .pName = mesh ? "meshMain" : "vertexMain",
         },
         VkPipelineShaderStageCreateInfo{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .pNext = &fragment_module_info,
             .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .pName = device->conventional_backend ? "main" : "fragmentMain",
+            .pName = "fragmentMain",
         },
     };
     const VkPipelineVertexInputStateCreateInfo vertex_input{
