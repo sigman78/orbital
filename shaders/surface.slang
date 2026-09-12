@@ -8,7 +8,7 @@ static const int KIND_EARTH = 0, KIND_GIANT = 1, KIND_MOON = 2, KIND_ROCK = 3, K
 
 static const float EARTH_NORMAL_Y = 1.0;      // the sourced map is DirectX-style (green = south), matching B below
 static const float2 EARTH_TEXELS = float2(4096.0, 2048.0);
-static const float2 GAS_TEXELS = float2(2048.0, 1024.0);
+static const float2 GAS_TEXELS = float2(3600.0, 1800.0);
 static const float2 RELIEF_TEXELS = float2(4096.0, 2048.0); // Moon and Mars albedo and normal+height maps
 // Height range of the baked DEM alpha channel in radii (manifest height_min_m..height_max_m over the body radius).
 static const float MOON_HEIGHT_RANGE = 19603.0 / 1737400.0;

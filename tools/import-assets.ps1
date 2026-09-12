@@ -31,15 +31,18 @@ $moonKit = 'https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/'
 $mola = 'https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x/meg016/'
 $nasaMoon = 'NASA/GSFC Scientific Visualization Studio, CGI Moon Kit (LRO LROC and LOLA data)'
 $nasaMars = 'NASA/JPL/GSFC, Mars Global Surveyor MOLA MEGDR (PDS Geosciences Node)'
+$photojournal = 'https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia07/pia07782/'
+$nasaJupiter = 'NASA/JPL/Space Science Institute, Cassini ISS cylindrical map of Jupiter, December 2000 (PIA07782)'
 $assets = @(
     @{ Name = 'earth_albedo';   Source = '8k_earth_daymap.jpg';   Url = $solar; Hash = '88AB060B6E7D241CFC590C69F528FAB2B3247B738D40124CB590999A6FE44ABC'; License = 'CC-BY-4.0'; Attribution = 'Solar System Scope'; ColorSpace = 'sRGB' }
     @{ Name = 'earth_normal';   Source = '2k_earth_normal_map.tif'; Url = $solar; Hash = 'F518CE2646CA935DBC17E316041DE4FEA7A5DA0EC441E4EB22E711EABD843BA2'; License = 'CC-BY-4.0'; Attribution = 'Solar System Scope'; ColorSpace = 'linear-data'; NormalConvention = 'source convention; verify Y orientation in shader' }
     @{ Name = 'earth_specular'; Source = '2k_earth_specular_map.tif'; Url = $solar; Hash = '6B90ECFCE248591A1ECC9A3E49ACCA1A7059B6828877E718302ED9A6B4471BD7'; License = 'CC-BY-4.0'; Attribution = 'Solar System Scope'; ColorSpace = 'linear-data' }
     @{ Name = 'earth_clouds';   Source = '8k_earth_clouds.jpg';   Url = $solar; Hash = 'C792ECA228989D36EBB45D3EA6FF1198BE5E21A25D70D2FBCB2124FFD14BA7F5'; License = 'CC-BY-4.0'; Attribution = 'Solar System Scope'; ColorSpace = 'linear-data' }
     @{ Name = 'earth_night';    Source = '8k_earth_nightmap.jpg'; Url = $solar; Hash = '9894E83A585A22C1C425E7CA4F987A9BA625BF08ECEE45D3C9DCACAE3C2AD5F7'; License = 'CC-BY-4.0'; Attribution = 'Solar System Scope'; ColorSpace = 'sRGB-emissive' }
-    # Stored at 2K: the 4K JPEG source carries visible block artifacts that the downscale suppresses; the
-    # surface shader adds procedural band and storm detail on top.
-    @{ Name = 'gas_albedo';     Source = '8k_jupiter.jpg';        Url = $solar; Hash = '0BD844BF20822C4E3E80882B077859833C0DAC44C7E4E1E0CD63D1B1B6D43085'; License = 'CC-BY-4.0'; Attribution = 'Solar System Scope'; ColorSpace = 'sRGB'; MaxWidth = 2048 }
+    # Cassini's December 2000 cylindrical map, 10 px per degree, full latitude; the 3601x1801 TIFF repeats the
+    # 0/360 column and the south pole row, cropped off so the map wraps cleanly. Colour is reconstructed from the
+    # 750 and 451 nm filters. The flow and detail maps are baked from this image below.
+    @{ Name = 'gas_albedo';     Source = 'PIA07782.tif';          Url = $photojournal; Hash = 'F92FFC7A2FA0235C47EC8F1F168DD36BFFEB6ACC318292B237878A00A48CF7D9'; License = 'Public-Domain-NASA'; Attribution = $nasaJupiter; ColorSpace = 'sRGB'; Crop = @(3600, 1800) }
     @{ Name = 'moon_albedo';    Source = 'lroc_color_poles_4k.tif'; Url = $moonKit; Hash = '918649A7F8ED2F1329B2CD95BB0D25483BEFDCB60AE1A66DB681A637CC21344F'; License = 'Public-Domain-NASA'; Attribution = $nasaMoon; ColorSpace = 'sRGB' }
     # DEM-derived normal maps: red = east, green = south, height in alpha; slopes exaggerated 1.5x for readability.
     @{ Name = 'moon_normal';    Source = 'ldem_16_uint.tif';      Url = $moonKit; Hash = '45A2B32D56E81ED30DB07FEAD8ABC842B249B6511219D9CA2C53F81BC2DC5D62'; License = 'Public-Domain-NASA'; Attribution = $nasaMoon; ColorSpace = 'linear-data'; NormalConvention = 'DirectX (green = south), height in alpha'; Bake = @{ Format = 'ldem-uint16'; RadiusKm = 1737.4; Strength = 1.5 } }
@@ -92,11 +95,12 @@ function New-SaturationMatrix([float]$saturation) {
     return New-Object System.Drawing.Imaging.ColorMatrix(,$rows)
 }
 
-function Convert-Texture($sourcePath, $outputPath, $widthLimit, [float]$desaturate = 0) {
+function Convert-Texture($sourcePath, $outputPath, $widthLimit, [float]$desaturate = 0, $crop = $null) {
     $source = [System.Drawing.Image]::FromFile($sourcePath)
     try {
-        $sourceWidth = $source.Width
-        $sourceHeight = $source.Height
+        # An optional crop takes the top-left region only: equirectangular sources that repeat their wrap column.
+        $sourceWidth = if ($crop) { [int]$crop[0] } else { $source.Width }
+        $sourceHeight = if ($crop) { [int]$crop[1] } else { $source.Height }
         # Always re-encode through a 24-bit surface: a grayscale source would otherwise be
         # saved as a palette PNG, which the runtime decoder does not accept.
         $width = [Math]::Min($sourceWidth, $widthLimit)
@@ -155,7 +159,7 @@ foreach ($asset in $assets) {
         $dimensions = @($packed.source_width, $packed.source_height, $packed.width, $packed.height)
     } else {
         $desaturate = if ($asset.Desaturate) { [float]$asset.Desaturate } else { 0 }
-        $dimensions = Convert-Texture $sourcePath $outputPath $widthLimit $desaturate
+        $dimensions = Convert-Texture $sourcePath $outputPath $widthLimit $desaturate $asset.Crop
     }
     Write-Host ("{0,-20} {1}x{2} -> {3}x{4} ({5:N1} MB)" -f ($asset.Name + '.png'), $dimensions[0], $dimensions[1],
         $dimensions[2], $dimensions[3], ((Get-Item -LiteralPath $outputPath).Length / 1MB))
@@ -173,6 +177,7 @@ foreach ($asset in $assets) {
     }
     if ($asset.NormalConvention) { $entry.normal_convention = $asset.NormalConvention }
     if ($asset.Desaturate) { $entry.desaturation = [float]$asset.Desaturate }
+    if ($asset.Crop) { $entry.crop = 'top-left ' + $asset.Crop[0] + 'x' + $asset.Crop[1] + ' of the source, which repeats its wrap column and pole row' }
     if ($asset.Pack) {
         $entry.height_source = $asset.Pack.Url + $asset.Pack.Source
         $entry.height_source_sha256 = $asset.Pack.Hash
@@ -217,7 +222,7 @@ if ($Only.Count -gt 0 -and $Only -notcontains $flowName) {
         height = $flow.height
         color_space = 'linear-data'
         license = 'CC-BY-4.0'
-        attribution = 'Baked by tools/bake-flow-map.py: zonal winds after Porco et al. 2003 and Limaye 1986, vortices placed for the Solar System Scope Jupiter albedo'
+        attribution = 'Baked by tools/bake-flow-map.py: zonal winds after Porco et al. 2003 and Limaye 1986, vortices placed for the Cassini PIA07782 albedo'
         source = 'gas_albedo.png'
         layout = 'R east and G south flow, 0.5 + v * 1.6e6 / 2 in texture units per second at real speed; B turbulence weight'
         max_speed_ms = $flow.max_speed_ms
@@ -232,6 +237,7 @@ $manifest = [ordered]@{
         'Poly Haven' = 'https://polyhaven.com/license'
         'NASA CGI Moon Kit' = 'https://svs.gsfc.nasa.gov/4720'
         'NASA MOLA MEGDR' = 'https://pds-geosciences.wustl.edu/missions/mgs/megdr.html'
+        'NASA Photojournal' = 'https://www.jpl.nasa.gov/jpl-image-use-policy/'
     }
     assets = $manifestEntries
 }

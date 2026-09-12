@@ -5,7 +5,8 @@
     "Solar System Scope": "https://www.solarsystemscope.com/textures/",
     "Poly Haven": "https://polyhaven.com/license",
     "NASA CGI Moon Kit": "https://svs.gsfc.nasa.gov/4720",
-    "NASA MOLA MEGDR": "https://pds-geosciences.wustl.edu/missions/mgs/megdr.html"
+    "NASA MOLA MEGDR": "https://pds-geosciences.wustl.edu/missions/mgs/megdr.html",
+    "NASA Photojournal": "https://www.jpl.nasa.gov/jpl-image-use-policy/"
   },
   "assets": [
     {
@@ -71,15 +72,16 @@
     },
     {
       "file": "gas_albedo.png",
-      "width": 2048,
-      "height": 1024,
+      "width": 3600,
+      "height": 1800,
       "color_space": "sRGB",
-      "license": "CC-BY-4.0",
-      "attribution": "Solar System Scope",
-      "source": "https://www.solarsystemscope.com/textures/download/8k_jupiter.jpg",
-      "source_sha256": "0BD844BF20822C4E3E80882B077859833C0DAC44C7E4E1E0CD63D1B1B6D43085",
-      "source_width": 4096,
-      "source_height": 2048
+      "license": "Public-Domain-NASA",
+      "attribution": "NASA/JPL/Space Science Institute, Cassini ISS cylindrical map of Jupiter, December 2000 (PIA07782)",
+      "source": "https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia07/pia07782/PIA07782.tif",
+      "source_sha256": "F92FFC7A2FA0235C47EC8F1F168DD36BFFEB6ACC318292B237878A00A48CF7D9",
+      "source_width": 3600,
+      "source_height": 1800,
+      "crop": "top-left 3600x1800 of the source, which repeats its wrap column and pole row"
     },
     {
       "file": "moon_albedo.png",
@@ -273,10 +275,10 @@
       "height": 512,
       "color_space": "linear-data",
       "license": "CC-BY-4.0",
-      "attribution": "Baked by tools/bake-flow-map.py: zonal winds after Porco et al. 2003 and Limaye 1986, vortices placed for the Solar System Scope Jupiter albedo",
+      "attribution": "Baked by tools/bake-flow-map.py: zonal winds after Porco et al. 2003 and Limaye 1986, vortices placed for the Cassini PIA07782 albedo",
       "source": "gas_albedo.png",
       "layout": "R east and G south flow, 0.5 + v * 1.6e6 / 2 in texture units per second at real speed; B turbulence weight",
-      "max_speed_ms": 202.6
+      "max_speed_ms": 201.0
     }
   ]
 }

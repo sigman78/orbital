@@ -18,8 +18,9 @@ invisible. The winds decide the speed and the sign:
                 approximately (within about 15 m/s) from the Cassini profile
                 in Porco et al. 2003 (Science 299) and Voyager's in Limaye
                 1986 (Icarus 65), plus hand-placed vortices for this albedo
-                (the Great Red Spot and the ovals, anticyclones that turn
-                anticlockwise in the southern hemisphere). Where the picture
+                (Cassini's December 2000 map, PIA07782: the Great Red Spot
+                and the white ovals, anticyclones that turn anticlockwise in
+                the southern hemisphere). Where the picture
                 has no clear contour (a blank zone) the flow is the guide.
   alignment     the contour direction, oriented to agree with the guide, at
                 the guide's speed. Around a vortex the contours are its own
@@ -69,19 +70,22 @@ ZONAL_PROFILE = [
 # of longitude and latitude, rim speed in m/s, and the sense of rotation seen
 # from above (+1 anticlockwise, the southern anticyclones).
 VORTICES = [
-    {"name": "Great Red Spot", "u": .3662, "v": .6074, "a": 9.0, "b": 4.6, "speed": 110, "sense": +1},
-    {"name": "oval east of the Spot", "u": .4551, "v": .6123, "a": 2.0, "b": 1.6, "speed": 45, "sense": +1},
-    # The string of white ovals at 39 S.
-    {"name": "white oval 1", "u": .195, "v": .718, "a": 1.8, "b": 1.4, "speed": 50, "sense": +1},
-    {"name": "white oval 2", "u": .405, "v": .718, "a": 1.8, "b": 1.4, "speed": 50, "sense": +1},
-    {"name": "white oval 3", "u": .562, "v": .716, "a": 1.8, "b": 1.4, "speed": 50, "sense": +1},
-    {"name": "white oval 4", "u": .703, "v": .718, "a": 1.8, "b": 1.4, "speed": 50, "sense": +1},
-    {"name": "white oval 5", "u": .879, "v": .718, "a": 1.8, "b": 1.4, "speed": 50, "sense": +1},
+    {"name": "Great Red Spot", "u": .3643, "v": .615, "a": 10.0, "b": 4.7, "speed": 110, "sense": +1},
+    {"name": "oval east of the Spot", "u": .450, "v": .634, "a": 1.8, "b": 1.4, "speed": 45, "sense": +1},
+    # The string of white ovals at 37 S.
+    {"name": "white oval 1", "u": .149, "v": .707, "a": 1.6, "b": 1.3, "speed": 50, "sense": +1},
+    {"name": "white oval 2", "u": .195, "v": .707, "a": 1.6, "b": 1.3, "speed": 50, "sense": +1},
+    {"name": "white oval 3", "u": .261, "v": .707, "a": 1.6, "b": 1.3, "speed": 50, "sense": +1},
+    {"name": "white oval 4", "u": .305, "v": .707, "a": 1.6, "b": 1.3, "speed": 50, "sense": +1},
+    {"name": "white oval 5", "u": .464, "v": .707, "a": 1.6, "b": 1.3, "speed": 50, "sense": +1},
+    {"name": "white oval 6", "u": .557, "v": .707, "a": 1.6, "b": 1.3, "speed": 50, "sense": +1},
+    {"name": "white oval 7", "u": .659, "v": .707, "a": 1.6, "b": 1.3, "speed": 50, "sense": +1},
+    {"name": "white oval 8", "u": .762, "v": .707, "a": 1.6, "b": 1.3, "speed": 50, "sense": +1},
 ]
 
 # Turbulent wakes: texture centre, half-size in texture units, weight.
 WAKES = [
-    {"name": "Red Spot wake", "u": .325, "v": .597, "ru": .040, "rv": .022, "weight": .9},
+    {"name": "Red Spot wake", "u": .295, "v": .612, "ru": .045, "rv": .020, "weight": .9},
 ]
 
 
@@ -121,7 +125,7 @@ def sample_bilinear(field, x, y):
     height, width = field.shape
     x = np.mod(x, width)
     y = np.clip(y, 0.0, height - 1.001)
-    x0 = np.floor(x).astype(np.int32)
+    x0 = np.mod(np.floor(x).astype(np.int32), width)  # float32 mod can land exactly on the width
     y0 = np.floor(y).astype(np.int32)
     fx = (x - x0).astype(np.float32)
     fy = (y - y0).astype(np.float32)
