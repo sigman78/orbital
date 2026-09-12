@@ -73,7 +73,7 @@ struct Options {
     unsigned rocks = 0; // belt override for benchmarks; 0 keeps the quality tiers
     unsigned aa = 2;    // initial anti-aliasing mode
     unsigned splat = 2; // initial splat cut-off mode, an index into splat_radii
-    unsigned tone = 0;  // initial tone curve
+    unsigned tone = 2;  // initial tone curve (PBR Neutral)
     bool tour = false, high = false, no_hud = false, help = false;
     std::filesystem::path capture, benchmark;
 };
@@ -175,7 +175,7 @@ struct AppState {
     unsigned anti_aliasing = 2;                         // 0 off, 1 temporal, 2 temporal plus FXAA
     unsigned splat_mode = 2;                            // index into splat_radii
     bool splat_light_twice = false;                     // light splats in the count pass too
-    unsigned tone_curve = 0;                            // 0 ACES filmic, 1 AgX, 2 PBR Neutral
+    unsigned tone_curve = 2;                            // 0 ACES filmic, 1 AgX, 2 PBR Neutral
     float exposure = 1.0f;
     unsigned selected_body = 0;
     std::filesystem::path capture_request;
