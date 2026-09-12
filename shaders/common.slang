@@ -101,7 +101,7 @@ float beltDensity(float3 q, float4 ring, float3 n)
 float beltExtinction(float3 point)
 {
     float4 ring = root.frame->belt_ring;
-    if (ring.z <= 0.0) return 1.0;
+    if (ring.z <= 0.0 || root.frame->scene.w < .5) return 1.0;
     float3 n = root.frame->belt_normal.xyz;
     float3 q = point - root.frame->bodies[int(root.frame->scene.y)].xyz;
     float3 light = normalize(root.frame->sun.xyz - point);
@@ -113,6 +113,32 @@ float beltExtinction(float3 point)
     for (int i = 0; i < BELT_EXTINCTION_STEPS; ++i)
         tau += beltDensity(q + light * ((float(i) + .5) * ds), ring, n) * ds;
     return exp(-tau * ring.z * BELT_EXTINCTION);
+}
+
+// Sunlight left after the rocks between a belt point and the sun: the
+// transmittance map holds per-texel coverage in four slices along the sun ray
+// (see beltsplat.slang); the slices on the sun side of the point attenuate it.
+static const float BELT_MAP_OPACITY = 1.0; // optical depth per unit of texel coverage
+static const float BELT_MAP_SLICES = 4.0;
+
+float beltRockTransmittance(float3 point)
+{
+    if (root.frame->scene.z < .5) return 1.0;
+    float4 clip = mul(root.frame->belt_light_projection, float4(point, 1.0));
+    float2 uv = clip.xy * .5 + .5;
+    if (any(uv < 0.0) || any(uv > 1.0)) return 1.0;
+    float4 coverage = textures[28].SampleLevel(samplers[0], uv, 0.0);
+    float3 n = root.frame->belt_normal.xyz;
+    float3 q = point - root.frame->bodies[int(root.frame->scene.y)].xyz;
+    float3 light = normalize(root.frame->sun.xyz - point);
+    float along = dot(q, n) / (dot(light, n) + 1e-6);
+    float c = clamp((along / root.frame->belt_light.w * .5 + .5) * BELT_MAP_SLICES, 0.0, BELT_MAP_SLICES);
+    // Only slices wholly on the sun side count: the receiver's own slice holds
+    // its own splat, which must not shadow it.
+    float sum = 0.0;
+    for (int slice = 0; slice < 4; ++slice)
+        sum += coverage[slice] * (float(slice) >= c ? 1.0 : 0.0);
+    return exp(-sum * BELT_MAP_OPACITY);
 }
 
 // Shadow the asteroid belt casts on the gas giant: the sun ray from a surface

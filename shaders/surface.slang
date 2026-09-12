@@ -356,7 +356,8 @@ float4 shadeBillboard(SurfaceVaryings input, Instance inst)
     float3 l = normalize(root.frame->sun.xyz - input.worldPosition);
     float3 averageRock = textures[11].SampleLevel(samplers[1], float2(.5), 10).rgb;
     float3 radiance = averageRock * inst.tint.xyz * root.frame->sun.w / PI * max(dot(n, l), .025)
-                    * solarVisibility(input.worldPosition, -1) * beltExtinction(input.worldPosition);
+                    * solarVisibility(input.worldPosition, -1) * beltExtinction(input.worldPosition)
+                    * beltRockTransmittance(input.worldPosition);
     return float4(radiance, coverage * inst.tint.w);
 }
 
@@ -372,7 +373,8 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     float3 L = normalize(root.frame->sun.xyz - input.worldPosition);
     int selfBody = input.instanceIndex < uint(root.frame->scene.x) ? int(input.instanceIndex) : -1;
     // Belt rocks lose light to the belt itself; bodies use the planet-anchored shadow map.
-    float shadow = selfBody < 0 ? beltExtinction(input.worldPosition) : localShadow(input.worldPosition, N);
+    float shadow = selfBody < 0 ? beltExtinction(input.worldPosition) * beltRockTransmittance(input.worldPosition)
+                                : localShadow(input.worldPosition, N);
     float visibility = solarVisibility(input.worldPosition, selfBody) * shadow;
     float nl = max(dot(N, L), 0.0);
     if (root.mode == MODE_CLOUD) return shadeClouds(input, N, L, visibility, nl);

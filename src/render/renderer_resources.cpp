@@ -76,8 +76,8 @@ Renderer::Impl::~Impl() {
         gpu::destroy_pso(pipeline);
     for (auto& image : material_images)
         destroy(image);
-    for (auto* image :
-         {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &shadow_map, &luminance, &history[0], &history[1]})
+    for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &shadow_map, &luminance, &history[0],
+                        &history[1], &belt_light, &belt_light_blur})
         destroy(*image);
     for (auto* heap : {&data, &texture_descriptors, &sampler_descriptors, &luminance_readback, &timestamps})
         gpu::destroy_gpu_heap(*heap);
@@ -225,10 +225,14 @@ gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
     const auto vertex = read_spirv(directory / "shaders" / std::format("{}.vertex.spv", desc.vertex_shader));
     const auto fragment = read_spirv(directory / "shaders" / std::format("{}.fragment.spv", desc.fragment_shader));
     gpu::BlendState blending{};
-    if (desc.alpha_blend)
+    if (desc.blend == Blend::alpha)
         blending = {.enabled = true,
                     .color = {gpu::BlendFactor::source_alpha, gpu::BlendFactor::one_minus_source_alpha},
                     .alpha = {gpu::BlendFactor::one, gpu::BlendFactor::one_minus_source_alpha}};
+    else if (desc.blend == Blend::additive)
+        blending = {.enabled = true,
+                    .color = {gpu::BlendFactor::one, gpu::BlendFactor::one},
+                    .alpha = {gpu::BlendFactor::one, gpu::BlendFactor::one}};
     const gpu::ColorTargetDesc target{.format = desc.color_format, .blend = blending};
     auto* pipeline = gpu::create_graphics_pso(
         device, {.vertex_spirv = vertex,
@@ -377,17 +381,19 @@ void Renderer::Impl::load_materials() {
 void Renderer::Impl::create_pipelines() {
     using gpu::Format;
     const auto make = [&](const char* vertex, const char* fragment, Format format, bool depth_test = false,
-                          bool alpha_blend = false) {
+                          Blend blend = Blend::none) {
         return create_pipeline({.vertex_shader = vertex,
                                 .fragment_shader = fragment,
                                 .color_format = format,
                                 .depth_test = depth_test,
-                                .alpha_blend = alpha_blend});
+                                .blend = blend});
     };
     pso.opaque = make("surface", "surface", Format::rgba16_float, true);
-    pso.cloud = make("surface", "surface", Format::rgba16_float, true, true);
+    pso.cloud = make("surface", "surface", Format::rgba16_float, true, Blend::alpha);
     pso.background = make("fullscreen", "background", Format::rgba16_float, true);
-    pso.atmosphere = make("fullscreen", "atmosphere", Format::rgba16_float, false, true);
+    pso.atmosphere = make("fullscreen", "atmosphere", Format::rgba16_float, false, Blend::alpha);
+    pso.belt_splat = make("beltsplat", "beltsplat", Format::rgba16_float, false, Blend::additive);
+    pso.belt_blur = make("fullscreen", "beltblur", Format::rgba16_float);
     pso.bloom = make("fullscreen", "post", Format::rgba16_float);
     pso.post = make("fullscreen", "post", Format::rgba8_srgb);
     pso.present = make("fullscreen", "post", Format::bgra8_srgb);
@@ -411,6 +417,12 @@ void Renderer::Impl::create_fixed_targets() {
                                .format = gpu::Format::d32_float,
                                .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::depth_stencil_attachment});
     bind(Slot::shadow_map, shadow_map);
+    for (auto* map : {&belt_light, &belt_light_blur})
+        *map = create_image({.extent = {targets::belt_light_map_size, targets::belt_light_map_size},
+                             .format = gpu::Format::rgba16_float,
+                             .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment});
+    bind(Slot::belt_light_map, belt_light);
+    bind(Slot::belt_light_blur, belt_light_blur);
     luminance = create_image({.extent = {targets::meter_size, targets::meter_size},
                               .format = gpu::Format::rgba32_float,
                               .usage = gpu::TextureUsage::color_attachment | gpu::TextureUsage::transfer_source});

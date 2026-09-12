@@ -32,6 +32,8 @@ Key key_from_virtual(WPARAM code) {
     case VK_OEM_MINUS: return Key::minus;
     case VK_F1: return Key::f1;
     case VK_F2: return Key::f2;
+    case VK_F3: return Key::f3;
+    case VK_F4: return Key::f4;
     case VK_F12: return Key::f12;
     default:
         if ((code >= 'A' && code <= 'Z') || (code >= '0' && code <= '9'))
@@ -49,6 +51,8 @@ int virtual_from_key(Key key) {
     case Key::minus: return VK_OEM_MINUS;
     case Key::f1: return VK_F1;
     case Key::f2: return VK_F2;
+    case Key::f3: return VK_F3;
+    case Key::f4: return VK_F4;
     case Key::f12: return VK_F12;
     default: return int(key); // letters and digits
     }

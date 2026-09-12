@@ -53,7 +53,8 @@ constexpr std::string_view usage =
     "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..4\n"
     "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --rocks N\n"
     "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F free;\n"
-    "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F12 capture; Esc exit.";
+    "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
+    "F12 capture; Esc exit.";
 
 struct Options {
     std::uint64_t seed = showcase_seed;
@@ -154,6 +155,7 @@ struct AppState {
     Camera camera;
     BodyStates bodies;
     bool running = true, paused = false, high = false, overlay = true, auto_exposure = true;
+    bool belt_light_map = true, belt_extinction = true; // development toggles for the belt shading
     float exposure = 1.0f;
     unsigned selected_body = 0;
     std::filesystem::path capture_request;
@@ -165,6 +167,8 @@ void handle_key(AppState& app, Key key) {
     case Key::space: app.paused = !app.paused; break;
     case Key::f1: app.overlay = !app.overlay; break;
     case Key::f2: app.high = !app.high; break;
+    case Key::f3: app.belt_light_map = !app.belt_light_map; break;
+    case Key::f4: app.belt_extinction = !app.belt_extinction; break;
     case Key::f12: app.capture_request = hotkey_capture_path; break;
     case Key::plus: app.exposure = exposure_keys::range.clamp(app.exposure * exposure_keys::step); break;
     case Key::minus: app.exposure = exposure_keys::range.clamp(app.exposure / exposure_keys::step); break;
@@ -218,13 +222,14 @@ float recent_p95_ms(std::span<const float> frame_ms) {
     return *nth;
 }
 
-void update_title(platform::Window& window, const render::Stats& stats, bool high, float p95_ms) {
+void update_title(platform::Window& window, const render::Stats& stats, const AppState& app, float p95_ms) {
     const int fps = int(1000 / std::max(stats.frame_ms, 0.1f));
     window.set_title(
         std::format("ORBITAL  |  {} FPS  |  {:.1f} ms (p95 {:.1f})  |  GPU {:.1f} ms  |  {} draws ({} rock groups)  |  "
-                    "{} rocks  |  {:.2f} M tris  |  {}",
+                    "{} rocks  |  {:.2f} M tris  |  {}  |  belt map {} ext {}",
                     fps, stats.frame_ms, p95_ms, stats.gpu_ms, stats.draw_calls, stats.rock_groups_drawn,
-                    stats.visible_asteroids, stats.triangles / 1e6, high ? "HIGH" : "BASELINE"));
+                    stats.visible_asteroids, stats.triangles / 1e6, app.high ? "HIGH" : "BASELINE",
+                    app.belt_light_map ? "on" : "off", app.belt_extinction ? "on" : "off"));
 }
 
 struct FrameTimes {
@@ -315,7 +320,9 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .exposure = app.exposure,
                                              .high_quality = app.high,
                                              .overlay = app.overlay,
-                                             .auto_exposure = app.auto_exposure};
+                                             .auto_exposure = app.auto_exposure,
+                                             .belt_light_map = app.belt_light_map,
+                                             .belt_extinction = app.belt_extinction};
         if (renderer.draw(frame_input)) {
             frames++;
             const auto stats = renderer.stats();
@@ -342,7 +349,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
         }
         if (elapsed - title_clock > window_limits::title_refresh_seconds) {
             title_clock = elapsed;
-            update_title(window, renderer.stats(), app.high, recent_p95_ms(times.cpu_ms));
+            update_title(window, renderer.stats(), app, recent_p95_ms(times.cpu_ms));
         }
     }
     return frames;

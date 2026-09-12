@@ -51,6 +51,8 @@ enum class Slot : unsigned {
     rock_boulder_albedo = 25,
     rock_boulder_normal = 26,
     rock_boulder_roughness = 27,
+    belt_light_map = 28,  // belt transmittance, blurred
+    belt_light_blur = 29, // scratch between the two blur directions
     count = 32,
 };
 
@@ -106,8 +108,9 @@ static_assert(heap_layout.dynamic_offset + heap_layout.instance_offset < heap_la
 namespace targets {
 inline constexpr Range<float> depth{0.02f, 2000.0f}; // near and far plane, camera-relative units
 inline constexpr unsigned shadow_map_size = 2048;
-inline constexpr unsigned meter_size = 16;     // luminance meter edge, texels of rgba32f
-inline constexpr unsigned timestamp_count = 5; // frame start, after shadow, surface, atmosphere, post
+inline constexpr unsigned belt_light_map_size = 2048; // the whole belt in light space, rgba16f coverage slices
+inline constexpr unsigned meter_size = 16;            // luminance meter edge, texels of rgba32f
+inline constexpr unsigned timestamp_count = 5;        // frame start, after shadow, surface, atmosphere, post
 } // namespace targets
 
 // What FrameInput::high_quality selects between.
@@ -150,12 +153,14 @@ struct ImageDesc {
     unsigned mips = 1;
 };
 
+enum class Blend { none, alpha, additive };
+
 struct PipelineDesc {
     const char* vertex_shader;   // shaders/<name>.vertex.spv
     const char* fragment_shader; // shaders/<name>.fragment.spv
     gpu::Format color_format;
     bool depth_test = false;
-    bool alpha_blend = false;
+    Blend blend = Blend::none;
 };
 
 struct Upload {
@@ -176,6 +181,12 @@ constexpr unsigned rock_group(unsigned shape, unsigned level) {
 static_assert(rock_group_count == ORBITAL_ROCK_GROUPS && geometry::rock_level_count == ORBITAL_ROCK_LEVELS &&
               belt::radial_bands == ORBITAL_BELT_BANDS);
 
+// Orthographic light box, camera relative: right and up span the map, forward is the light direction.
+struct LightFrame {
+    Vec3f centre{}, forward{}, right{}, up{};
+    float half_x = 1, half_y = 1, half_depth = 1;
+};
+
 struct Renderer::Impl {
     // Device and heaps.
     gpu::Device* device = nullptr;
@@ -188,10 +199,11 @@ struct Renderer::Impl {
     std::vector<GpuImage> material_images;
     std::vector<gpu::PSO*> pipelines;
     GpuImage hdr{}, depth{}, bloom_a{}, bloom_b{}, final_image{}, shadow_map{}, luminance{}, history[2]{};
+    GpuImage belt_light{}, belt_light_blur{};
     struct {
         gpu::PSO *opaque = nullptr, *cloud = nullptr, *background = nullptr, *atmosphere = nullptr, *bloom = nullptr,
                  *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr,
-                 *cull = nullptr;
+                 *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr;
     } pso;
     std::array<GpuMesh, geometry::lod_count> spheres{};
     std::array<GpuMesh, rock_group_count> rocks{}; // the rock library, indexed by rock_group; slices of rock_pool
@@ -253,6 +265,7 @@ struct Renderer::Impl {
                             std::uint64_t instance_address);
     void read_cull_counts(const CullScratch& scratch);
     void record_cull_passes(gpu::CommandBuffer* cmd, const CullRoot& root);
+    void record_belt_light_pass(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root, unsigned rock_limit);
     void record_shadow_pass(gpu::CommandBuffer* cmd, Root root);
     void record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input, const FrameData& frame,
                            std::uint64_t args_address);

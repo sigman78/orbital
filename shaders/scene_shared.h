@@ -26,7 +26,9 @@ struct Frame {
     SHADER_FLOAT4 previous_camera_delta, previous_forward, jitter;
     SHADER_FLOAT4 belt_ring;   // inner radius, outer radius, density, thickness (giant-relative units)
     SHADER_FLOAT4 belt_normal; // unit normal of the belt plane, w unused
-    SHADER_FLOAT4 scene;       // body count, giant body index, unused, unused
+    SHADER_FLOAT4 scene;       // body count, giant body index, belt transmittance map on, belt extinction on
+    SHADER_MATRIX4 belt_light_projection; // orthographic box over the whole belt from the sun
+    SHADER_FLOAT4 belt_light;  // box half width, half height, map texels, half span of the slice range along the light
 };
 struct Root {
 #ifdef __cplusplus
@@ -66,7 +68,7 @@ struct CullParams {
     SHADER_FLOAT4 belt_tilt;            // y scale, y from z, z scale, unused
     SHADER_FLOAT4 band_spin[ORBITAL_BELT_BANDS]; // cos and sin of each radial band's spin angle
     SHADER_FLOAT4 levels;               // projected-radius thresholds of levels 1 to 4, in pixels
-    SHADER_FLOAT4 billboard;            // level 5 threshold, billboard radius, minimum radius, unused
+    SHADER_FLOAT4 billboard;            // level 5 threshold, billboard radius, minimum radius, smallest radius splatted into the belt map
     SHADER_UINT rock_limit, body_count, unused0, unused1;
     // Each rock group's slice of the pooled rock mesh.
     SHADER_UINT index_counts[ORBITAL_ROCK_GROUPS];

@@ -26,6 +26,8 @@ struct FrameInput {
     bool high_quality = false;
     bool overlay = true;
     bool auto_exposure = true;
+    bool belt_light_map = true;  // rock-on-rock transmittance map (F3)
+    bool belt_extinction = true; // analytic belt dust extinction (F4)
 };
 
 // Startup choices that are not part of the scene description.

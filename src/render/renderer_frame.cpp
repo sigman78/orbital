@@ -53,6 +53,8 @@ namespace belt_culling {
 inline constexpr double spin_rate = 0.0012, rock_spin_rate = 0.02; // radians per simulation second, barely visible
 inline constexpr float shear_exponent =
     0.35f; // orbital rate falls with radius as r^-0.35: a hint of Kepler shear, not the real 1.5
+inline constexpr float map_min_radius =
+    .015f; // smaller rocks cover under a fifth of a belt-map texel and are not splatted
 namespace billboard {
 inline constexpr float min_pixels = 0.06f;  // smaller rocks are dropped
 inline constexpr float pixel_radius = 1.2f; // rocks below this become fixed-size billboards
@@ -104,18 +106,50 @@ void write_projection(FrameData& frame, const Camera& camera, float aspect) {
     frame.forward_exposure = f4(forward, 1);
 }
 
-// Orthographic light projection looking from the sun at a body, in double
-// like the positions it is built from.
-void write_light_projection(FrameData& frame, Vec3d center, Vec3d sun, float half_size) {
-    const Vec3d forward = normalized(center - sun), r = normalized(Vec3d{-forward.z, 0, forward.x});
-    const Vec3d u = cross(r, forward);
-    const Vec3d eye = center - forward * (half_size * 3);
-    const double depth_range = half_size * 6;
-    float* m = frame.light_projection;
-    m[0] = float(r.x / half_size), m[4] = float(r.y / half_size), m[8] = float(r.z / half_size);
-    m[12] = float(-dot(r, eye) / half_size);
-    m[1] = float(-u.x / half_size), m[5] = float(-u.y / half_size), m[9] = float(-u.z / half_size);
-    m[13] = float(dot(u, eye) / half_size);
+// Light box looking from the sun at a camera-relative body, square and
+// three half sizes deep either way.
+LightFrame body_light_frame(Vec3d centre, Vec3d sun, float half_size) {
+    const Vec3d forward = normalized(centre - sun), r = normalized(Vec3d{-forward.z, 0, forward.x});
+    return {.centre = to_float(centre),
+            .forward = to_float(forward),
+            .right = to_float(r),
+            .up = to_float(cross(r, forward)),
+            .half_x = half_size,
+            .half_y = half_size,
+            .half_depth = half_size * 3};
+}
+
+// Light box fitted to the whole belt annulus: up follows the belt normal's
+// component across the light, so the tilted annulus projects to a rectangle
+// outer wide and outer * cos(tilt) tall.
+LightFrame belt_light_frame(Vec3d giant, Vec3d sun, const BeltDescription& belt) {
+    constexpr double margin = 2.0; // world units of slack around the belt's extent
+    const Vec3d forward = normalized(giant - sun);
+    const Vec3d normal = to_double(belt_plane_normal);
+    const double tilt = dot(normal, forward);
+    Vec3d up = normal - forward * tilt;
+    if (dot(up, up) < 1e-8)
+        up = Vec3d{0, 1, 0} - forward * forward.y;
+    up = normalized(up);
+    const double extent = belt.outer_radius + belt.thickness + margin;
+    return {.centre = to_float(giant),
+            .forward = to_float(forward),
+            .right = to_float(cross(up, forward)),
+            .up = to_float(up),
+            .half_x = float(extent),
+            .half_y = float(belt.outer_radius * std::abs(tilt) + belt.thickness + margin),
+            .half_depth = float(extent)};
+}
+
+// Orthographic projection of a light box, in double like the frame it comes from.
+void write_light_projection(float* m, const LightFrame& light) {
+    const Vec3d forward = to_double(light.forward), r = to_double(light.right), u = to_double(light.up);
+    const Vec3d eye = to_double(light.centre) - forward * light.half_depth;
+    const double depth_range = light.half_depth * 2.0;
+    m[0] = float(r.x / light.half_x), m[4] = float(r.y / light.half_x), m[8] = float(r.z / light.half_x);
+    m[12] = float(-dot(r, eye) / light.half_x);
+    m[1] = float(-u.x / light.half_y), m[5] = float(-u.y / light.half_y), m[9] = float(-u.z / light.half_y);
+    m[13] = float(dot(u, eye) / light.half_y);
     m[2] = float(forward.x / depth_range), m[6] = float(forward.y / depth_range),
     m[10] = float(forward.z / depth_range);
     m[14] = float(-dot(forward, eye) / depth_range);
@@ -191,16 +225,28 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     const float shadow_half_size = giant_close   ? shadow_placement::giant_half_size
                                    : mars_closer ? shadow_placement::mars_half_size
                                                  : shadow_placement::earth_half_size;
-    write_light_projection(frame, input.bodies[shadow_body].position - camera.position,
-                           system.star.position - camera.position, shadow_half_size);
+    const Vec3d sun_relative = system.star.position - camera.position;
+    write_light_projection(
+        frame.light_projection,
+        body_light_frame(input.bodies[shadow_body].position - camera.position, sun_relative, shadow_half_size));
     const auto& ring = system.belts[0];
+    // The belt transmittance map's box, and the slice span along the light
+    // that the belt's thickness covers at the sun's tilt.
+    const Vec3d giant_relative = input.bodies[giant_index].position - camera.position;
+    const LightFrame belt_box = belt_light_frame(giant_relative, sun_relative, ring);
+    write_light_projection(frame.belt_light_projection, belt_box);
+    const double light_tilt = std::abs(dot(to_double(belt_box.forward), to_double(belt_plane_normal)));
+    constexpr double slice_slack = 1.3; // the slices reach a little past the slab's nominal thickness
+    frame.belt_light = {belt_box.half_x, belt_box.half_y, float(targets::belt_light_map_size),
+                        float(slice_slack * ring.thickness * .5 / std::max(light_tilt, .1))};
     frame.belt_ring = {float(ring.inner_radius), float(ring.outer_radius), float(ring.density), float(ring.thickness)};
     frame.belt_normal = f4(belt_plane_normal);
     frame.options = {float(extent.width), float(extent.height), input.high_quality ? 1.f : 0.f,
                      input.overlay ? 1.f : 0.f};
     for (unsigned i = 0; i < body_count; i++)
         frame.bodies[i] = f4(input.bodies[i].position - camera.position, float(input.bodies[i].radius));
-    frame.scene = {float(body_count), float(giant_index), 0, 0};
+    frame.scene = {float(body_count), float(giant_index), input.belt_light_map ? 1.f : 0.f,
+                   input.belt_extinction ? 1.f : 0.f};
 
     // Sun position in screen space for the lens flare, hidden when a body covers it.
     const Vec3d sun_direction = normalized(system.star.position - camera.position);
@@ -259,7 +305,7 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
     p.levels = {geometry::rock_level_thresholds[0], geometry::rock_level_thresholds[1],
                 geometry::rock_level_thresholds[2], geometry::rock_level_thresholds[3]};
     p.billboard = {geometry::rock_level_thresholds[4], belt_culling::billboard::pixel_radius,
-                   belt_culling::billboard::min_pixels, 0};
+                   belt_culling::billboard::min_pixels, belt_culling::map_min_radius};
     const unsigned tier_count = (input.high_quality ? high_quality : baseline_quality).belt_count;
     p.rock_limit = std::min(rock_count, belt_count_override ? belt_count_override : tier_count);
     p.body_count = body_count;
@@ -326,6 +372,25 @@ void Renderer::Impl::fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, 
     gpu::end_render_pass(cmd);
     gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
                  gpu::Access::shader_read);
+}
+
+// Belt transmittance map: splat every rock's coverage into its light-space
+// column and depth slice, then blur in both directions.
+void Renderer::Impl::record_belt_light_pass(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root,
+                                            unsigned rock_limit) {
+    // Coverage accumulates from zero in every slice, alpha included.
+    gpu::ColorAttachment attachment{.render_view = belt_light.view, .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
+    gpu::begin_render_pass(cmd, {.colors = {&attachment, 1}});
+    gpu::bind_pso(cmd, pso.belt_splat);
+    gpu::draw(cmd, cull_root, 6, rock_limit);
+    stats.draw_calls++;
+    gpu::end_render_pass(cmd);
+    gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
+                 gpu::Access::shader_read);
+    root.mode = 0;
+    fullscreen_pass(cmd, belt_light_blur, pso.belt_blur, root);
+    root.mode = 1;
+    fullscreen_pass(cmd, belt_light, pso.belt_blur, root);
 }
 
 void Renderer::Impl::record_shadow_pass(gpu::CommandBuffer* cmd, Root root) {
@@ -470,6 +535,8 @@ bool Renderer::draw(const FrameInput& input) {
                  gpu::Access::color_write | gpu::Access::depth_stencil_write | gpu::Access::shader_read);
     s.record_cull_passes(cmd, cull_root);
     s.record_shadow_pass(cmd, root);
+    if (input.belt_light_map)
+        s.record_belt_light_pass(cmd, cull_root, root, scratch->params.rock_limit);
     stamp(1);
     s.record_scene_pass(cmd, root, input, frame, args_address);
     stamp(2);
