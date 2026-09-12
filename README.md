@@ -10,7 +10,7 @@ Native Windows and Linux C++20 space demo on a compatibility fork of [NoGraphics
 
 ## The belt
 
-280,000 rocks in baseline and 520,000 in high quality, placed with rings, a gap, tapered edges, flared height, a power-law size distribution and three composition classes. Rocks come from a library of 16 seeded shapes at 6 detail levels (20 to 20k triangles), with three scanned rock sets blended per rock and triplanar mapping with parallax up close. A compute pass culls the whole population every frame (frustum, planet occlusion, projected size) and writes indirect draws for one pooled multi-draw; rocks under a few pixels become lit sphere-impostor splats. Rocks lose sunlight to the belt's own density, to a transmittance map splatted by the largest rocks and to the planets' shadows, and the fine matter between them is a scattering medium marched at half resolution, which reads as haze inside the belt and as a shadowed disc from afar.
+280,000 rocks in baseline and 520,000 in high quality, placed with rings, a gap, tapered edges, flared height, a power-law size distribution and three composition classes. Rocks come from a library of 16 seeded shapes at 6 detail levels (20 to 20k triangles), with three scanned rock sets blended per rock and triplanar mapping with parallax up close. A compute pass culls the whole population every frame (frustum, planet occlusion, projected size) and writes indirect draws for one pooled multi-draw; rocks under a few pixels become lit sphere-impostor splats. Rocks lose sunlight to the belt's own density, to a transmittance map splatted by the largest rocks and to the planets' shadows, and the fine matter between them is a scattering medium marched at half resolution. Once the camera leaves the belt, the rocks and dust blend into a baked disc: two maps over the belt plane, sunlight with the planets' shadows and the small rocks' coverage, marched through the slab's thickness so edge-on views keep their depth.
 
 ## Build
 
@@ -42,7 +42,7 @@ F12 opens the control panel (`--ui` opens it at start), which holds frame statis
 ./build/release/orbital.exe --bookmark 5 --time 0 --frames 40 --pan 3 --spatial 0 --capture captures/pan.png
 ```
 
-`--help` lists every option. `--time` freezes the simulation and exposure adaptation for reproducible captures; `--benchmark` writes per-frame CPU and GPU pass timings; `--pan` strafes the camera at a fixed rate to compare anti-aliasing modes in motion; `--rocks N` overrides the belt size.
+`--help` lists every option. `--time` freezes the simulation and exposure adaptation for reproducible captures; `--benchmark` writes per-frame CPU and GPU pass timings and runs with vsync off (`--vsync 0|1` overrides, and the panel has a switch), because a vsynced GPU idles between frames and clocks down, which inflates its timestamps on a fast card; `--pan` strafes the camera at a fixed rate to compare anti-aliasing modes in motion; `--rocks N` overrides the belt size.
 
 ## Repository layout
 

@@ -61,6 +61,8 @@ enum class Slot : unsigned {
     smaa_weights = 35,    // SMAA blending weights
     ui_font = 36,         // Dear ImGui font atlas
     belt_dust = 37,       // half-resolution belt dust march, composited with a depth-aware upsample
+    belt_disc_light = 38, // far-belt map: sunlight reaching the belt plane, baked every few frames
+    belt_disc_rocks = 39, // far-belt map: rock coverage times albedo, splatted every few dozen frames
     count = ORBITAL_TEXTURE_COUNT,
 };
 
@@ -129,9 +131,12 @@ static_assert(sizeof(UiVertex) == 32 && sizeof(UiRoot) == 32);
 namespace targets {
 inline constexpr Range<float> depth{0.02f, 2000.0f}; // near and far plane, camera-relative units
 inline constexpr unsigned shadow_map_size = 2048;
-inline constexpr unsigned belt_light_map_size = 2048; // the whole belt in light space, rgba16f coverage slices
-inline constexpr unsigned meter_size = 16;            // luminance meter edge, texels of rgba32f
-inline constexpr unsigned timestamp_count = 5;        // frame start, after shadow, surface, atmosphere, post
+inline constexpr unsigned belt_light_map_size = 2048;    // the whole belt in light space, rgba16f coverage slices
+inline constexpr unsigned belt_disc_map_size = 1024;     // the whole belt over its plane, for the far tier: sunlight
+inline constexpr unsigned belt_disc_rock_map_size = 256; // rock coverage, coarse so each texel averages many rocks
+inline constexpr unsigned belt_disc_light_interval = 16, belt_disc_rock_interval = 32; // frames between bakes
+inline constexpr unsigned meter_size = 16;     // luminance meter edge, texels of rgba32f
+inline constexpr unsigned timestamp_count = 5; // frame start, after shadow, surface, atmosphere, post
 } // namespace targets
 
 // What FrameInput::high_quality selects between.
@@ -217,14 +222,14 @@ struct Renderer::Impl {
     std::vector<GpuImage> material_images;
     std::vector<gpu::PSO*> pipelines;
     GpuImage hdr{}, depth{}, bloom_a{}, bloom_b{}, final_image{}, ldr{}, shadow_map{}, luminance{}, history[2]{};
-    GpuImage splat_mask{}, smaa_edges{}, smaa_weights{}, belt_dust{};
+    GpuImage splat_mask{}, smaa_edges{}, smaa_weights{}, belt_dust{}, belt_disc_light{}, belt_disc_rocks{};
     GpuImage belt_light{}, belt_light_blur{};
     struct {
         gpu::PSO *opaque = nullptr, *cloud = nullptr, *background = nullptr, *atmosphere = nullptr, *bloom = nullptr,
                  *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr,
                  *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr, *fxaa = nullptr, *splat_mask = nullptr,
                  *smaa_edges = nullptr, *smaa_weights = nullptr, *smaa_blend = nullptr, *ui = nullptr,
-                 *belt_dust = nullptr, *belt_dust_blend = nullptr;
+                 *belt_dust = nullptr, *belt_dust_blend = nullptr, *belt_disc = nullptr, *belt_disc_splat = nullptr;
     } pso;
     std::array<GpuMesh, geometry::lod_count> spheres{};
     std::array<GpuMesh, rock_group_count> rocks{}; // the rock library, indexed by rock_group; slices of rock_pool
@@ -252,6 +257,10 @@ struct Renderer::Impl {
     Vec3d previous_camera{};
     bool history_valid = false;
     bool ui_overflow_logged = false;
+    bool belt_disc_baked = false;          // the far-belt maps hold data (baked once the far tier is first needed)
+    gpu::SwapchainInfo logged_swapchain{}; // last presentation mode and image count reported to the log
+    void record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root, unsigned rock_limit,
+                                float far_weight);
 
     // Per-frame scratch, cleared and reused: the body instances only, rocks
     // are placed by the GPU.

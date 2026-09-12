@@ -40,27 +40,7 @@ struct Placement {
 // dark neutral carbonaceous (C) rocks outside, with a few grey metallic (M).
 // The class rides in the integer part of Instance.tint.w, the material seed
 // in its fraction; billboards carry their coverage there instead.
-static const uint CLASS_S = 0, CLASS_C = 1, CLASS_M = 2;
-static const float METAL_FRACTION = .03;
-
-float hashId(uint x) { x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16; return float(x & 0xffffffu) / 16777216.0; }
-float rockMaterialSeed(uint id) { return hashId(id * 2654435761u + 17u); }
-
-uint rockClass(uint id, float radial)
-{
-    float carbon = lerp(.12, .85, smoothstep(0.0, 1.0, radial));
-    float h = hashId(id * 747796405u + 5u);
-    if (h < METAL_FRACTION) return CLASS_M;
-    return h < METAL_FRACTION + carbon * (1.0 - METAL_FRACTION) ? CLASS_C : CLASS_S;
-}
-
-float3 rockColour(uint rockClass, uint id)
-{
-    // Telescope-grey: silicate rocks only faintly warm, carbonaceous ones charcoal, metallic ones cool grey.
-    float3 base = rockClass == CLASS_S ? float3(.80, .76, .70) : rockClass == CLASS_C ? float3(.36, .36, .36) : float3(.70, .71, .74);
-    float variation = .8 + .4 * hashId(id * 2891336453u + 3u);
-    return base * variation;
-}
+#include "rockclass.slang"
 
 // True when the rock's sphere lies entirely behind one of the bodies.
 bool occludedByBodies(float3 target, float targetRadius)
@@ -118,6 +98,8 @@ Placement placeRock(uint id, bool lightSplats)
     float3 colour = rockColour(composition, id);
     if (pixelRadius < p->billboard.y)
     {
+        bool onDisc = radius <= DISC_BAKE_MAX_RADIUS; // small rocks live in the far-belt map once the camera is out
+        if (onDisc && p->billboard.w >= .99) { result.visible = false; return result; }
         result.group = BILLBOARD_GROUP;
         if (!lightSplats) return result; // the count pass only needs the group
         // Sub-pixel rocks become splats lit here, once per rock: a Lambert sphere
@@ -129,6 +111,7 @@ Placement placeRock(uint id, bool lightSplats)
         float splatPixels = disc ? pixelRadius * sqrt(SPLAT_AREA) : SPLAT_POINT_PIXELS;
         float coverage = disc ? 1.0 : SPLAT_AREA * pixelRadius * pixelRadius / (SPLAT_POINT_PIXELS * SPLAT_POINT_PIXELS);
         coverage *= saturate((pixelRadius - p->billboard.z) / p->billboard.z);
+        if (onDisc) coverage *= 1.0 - p->billboard.w; // the far-belt disc carries the rest
         float3 light = normalize(frame->sun.xyz - position);
         float phase = acos(clamp(dot(light, normalize(-position)), -1.0, 1.0));
         // The same scanned set the mesh material would lead with, at its coarsest mip.

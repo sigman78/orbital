@@ -453,6 +453,7 @@ struct DeviceDesc
     Format swapchain_format = Format::undefined;
     uint32 desired_swapchain_image_count = 2; // 1..8 presentation contexts.
     uint32 timestamp_query_count = 256; // Per command buffer; zero disables timestamps.
+    bool vsync = true; // FIFO presentation; false selects mailbox when available, else immediate (conventional backend addition).
 };
 
 struct DeviceInit
@@ -654,6 +655,16 @@ void destroy_device(Device* device) noexcept;
 [[nodiscard]] const DeviceCaps& get_device_caps(const Device* device) noexcept;
 [[nodiscard]] bool supports_texture_format(const Device* device, Format format, TextureUsage usage) noexcept;
 [[nodiscard]] uint32x2 get_drawable_extent(Device* device) noexcept;
+// Switches between FIFO and unsynchronized presentation; the swapchain is recreated on the next acquire.
+void set_vsync(Device* device, bool vsync) noexcept;
+enum class PresentMode : uint8 { fifo, mailbox, immediate };
+struct SwapchainInfo
+{
+    PresentMode present_mode = PresentMode::fifo;
+    uint32 image_count = 0;
+};
+// What the driver granted at the last (re)creation.
+[[nodiscard]] SwapchainInfo get_swapchain_info(const Device* device) noexcept;
 
 [[nodiscard]] TimelineSemaphore* create_timeline_semaphore(Device* device, uint64 initial_value = 0) noexcept;
 void destroy_timeline_semaphore(TimelineSemaphore* semaphore) noexcept;

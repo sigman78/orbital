@@ -78,9 +78,9 @@ Renderer::Impl::~Impl() {
         gpu::destroy_pso(pipeline);
     for (auto& image : material_images)
         destroy(image);
-    for (auto* image :
-         {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &shadow_map, &luminance, &history[0], &history[1],
-          &belt_light, &belt_light_blur, &splat_mask, &smaa_edges, &smaa_weights, &belt_dust})
+    for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &shadow_map, &luminance, &history[0],
+                        &history[1], &belt_light, &belt_light_blur, &splat_mask, &smaa_edges, &smaa_weights, &belt_dust,
+                        &belt_disc_light, &belt_disc_rocks})
         destroy(*image);
     for (auto* heap : {&data, &texture_descriptors, &sampler_descriptors, &luminance_readback, &timestamps})
         gpu::destroy_gpu_heap(*heap);
@@ -421,6 +421,8 @@ void Renderer::Impl::create_pipelines() {
     pso.ui = make("ui", "ui", Format::bgra8_srgb, false, Blend::alpha);
     pso.belt_dust = make("fullscreen", "dust", Format::rgba16_float);
     pso.belt_dust_blend = make("fullscreen", "dust", Format::rgba16_float, false, Blend::premultiplied);
+    pso.belt_disc = make("fullscreen", "disc", Format::rgba16_float);
+    pso.belt_disc_splat = make("discsplat", "discsplat", Format::rgba16_float, false, Blend::additive);
     pso.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
     panic_if(!pso.cull, "compute pipeline creation failed: cull");
     pipelines.push_back(pso.cull);
@@ -445,6 +447,14 @@ void Renderer::Impl::create_fixed_targets() {
                              .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment});
     bind(Slot::belt_light_map, belt_light);
     bind(Slot::belt_light_blur, belt_light_blur);
+    belt_disc_light = create_image({.extent = {targets::belt_disc_map_size, targets::belt_disc_map_size},
+                                    .format = gpu::Format::rgba16_float,
+                                    .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment});
+    belt_disc_rocks = create_image({.extent = {targets::belt_disc_rock_map_size, targets::belt_disc_rock_map_size},
+                                    .format = gpu::Format::rgba16_float,
+                                    .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment});
+    bind(Slot::belt_disc_light, belt_disc_light);
+    bind(Slot::belt_disc_rocks, belt_disc_rocks);
     luminance = create_image({.extent = {targets::meter_size, targets::meter_size},
                               .format = gpu::Format::rgba32_float,
                               .usage = gpu::TextureUsage::color_attachment | gpu::TextureUsage::transfer_source});
