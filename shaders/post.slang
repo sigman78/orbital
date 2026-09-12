@@ -5,7 +5,8 @@ static const uint MODE_TONEMAP = 0, MODE_BLOOM_A = 1, MODE_BLOOM_B = 2, MODE_PRE
 
 // Small finishing effects on top of exposure, bloom and the ACES curve.
 static const float VIGNETTE = .17;             // darkening at the frame corners
-static const float ABERRATION = .00025;        // lateral colour fringe at the edges, in uv per cubic radius
+static const float ABERRATION = .00025;        // lateral colour fringe at the edges, in uv per cubic radius of a REFERENCE_FRAME
+static const float2 REFERENCE_FRAME = float2(1600.0, 900.0); // the default window; pixel-sized effects are tuned here and keep their pixel size elsewhere
 static const float GRAIN = .010;               // film grain amplitude in display space
 static const float METER_CENTRE_WEIGHT = .6;   // how much the metering favours the frame centre
 
@@ -86,10 +87,13 @@ float4 fxaa(float2 uv, float2 texel)
 
 // Lateral chromatic aberration: red and blue are sampled slightly outward and
 // inward along the radius, growing quadratically toward the edges.
-float3 sampleAberrated(float2 uv, float2 p, float2 aspect)
+// The fringe is sized in pixels of the reference frame, so a larger or wider
+// window does not grow it: the radius uses the reference aspect and the shift
+// converts through the reference resolution.
+float3 sampleAberrated(float2 uv, float2 p, float2 resolution)
 {
-    float2 radial = p * aspect;
-    float2 shift = radial * dot(radial, radial) * ABERRATION;
+    float2 radial = p * float2(REFERENCE_FRAME.x / REFERENCE_FRAME.y, 1.0);
+    float2 shift = radial * dot(radial, radial) * ABERRATION * REFERENCE_FRAME / resolution;
     return float3(sampleHDR(uv + shift).r, sampleHDR(uv).g, sampleHDR(uv - shift).b);
 }
 // --- Tone mapping curves, selected by Frame.quality.y ---------------------------
@@ -203,7 +207,8 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         float2 uv = position.xy / max(floor(resolution * .25), float2(1.0, 1.0));
         float3 sum = float3(0.0, 0.0, 0.0);
         for (int i = -4; i <= 4; ++i) {
-            float2 delta = (root.mode == MODE_BLOOM_A ? float2(float(i), 0.0) : float2(0.0, float(i))) * 4.0 / resolution;
+            // Tap spacing scales with the frame height, so the halo keeps its size relative to the picture.
+            float2 delta = (root.mode == MODE_BLOOM_A ? float2(float(i), 0.0) : float2(0.0, float(i))) * 4.0 * (resolution.y / REFERENCE_FRAME.y) / resolution;
             float3 c = root.mode == MODE_BLOOM_A ? sampleHDR(uv + delta) : textures[1].Sample(samplers[0], uv + delta).rgb;
             if (root.mode == MODE_BLOOM_A) c = max(c - float3(.85, .85, .85), float3(0.0, 0.0, 0.0));
             sum += c * exp(-float(i * i) / 8.0);
@@ -213,7 +218,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float2 uv = position.xy / resolution;
     float2 p = uv * 2.0 - 1.0;
     float2 aspect = float2(resolution.x / resolution.y, 1.0);
-    float3 color = sampleAberrated(uv, p, aspect) + textures[2].Sample(samplers[0], uv).rgb * .24;
+    float3 color = sampleAberrated(uv, p, resolution) + textures[2].Sample(samplers[0], uv).rgb * .24;
     float2 sun = root.frame.screen_sun.xy;
     float vis = root.frame.screen_sun.z;
     float dist = length((p - sun) * aspect);
