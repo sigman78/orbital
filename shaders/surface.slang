@@ -41,6 +41,8 @@ SurfaceVaryings vertexMain(uint vertexIndex : SV_VertexID, uint firstVertex : SV
         output.worldPosition = inst.center_radius.xyz + (root.frame->right_tan.xyz*q.x + root.frame->up_aspect.xyz*q.y)*inst.center_radius.w;
         output.worldNormal = -root.frame->forward_exposure.xyz; output.localNormal = float3(q,0);
         output.position = mul(root.frame->view_projection, float4(output.worldPosition,1));
+        // Splats are smooth by construction and bypass the temporal pass, so they take no jitter.
+        output.position.xy -= 2.0 * root.frame->jitter.xy / root.frame->options.xy * output.position.w;
         return output;
     }
     Vertex vertex = root.vertices[vertexIndex];
@@ -380,7 +382,11 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
 {
     Instance inst = root.instances[input.instanceIndex];
     int kind = int(inst.rotation_kind.w + .5);
-    if (root.mode == MODE_BILLBOARD) return shadeBillboard(input, inst);
+    if (root.mode == MODE_BILLBOARD)
+    {
+        float4 splat = shadeBillboard(input, inst);
+        return float4(splat.rgb * splat.a, splat.a); // premultiplied, into the splat layer
+    }
 
     float3 N = normalize(input.worldNormal);
     float3 V = normalize(root.frame->camera_time.xyz - input.worldPosition);

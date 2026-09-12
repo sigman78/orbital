@@ -9,13 +9,20 @@ static const float ABERRATION = .00025;        // lateral colour fringe at the e
 static const float GRAIN = .010;               // film grain amplitude in display space
 static const float METER_CENTRE_WEIGHT = .6;   // how much the metering favours the frame centre
 
-float3 sampleHDR(float2 uv) { return textures[16].Sample(samplers[0], uv).rgb; }
+// The anti-aliased scene with the rock splat layer (premultiplied) composited over it.
+float3 sampleHDR(float2 uv)
+{
+    float4 splats = textures[31].Sample(samplers[0], uv);
+    return textures[16].Sample(samplers[0], uv).rgb * (1.0 - splats.a) + splats.rgb;
+}
 
 // FXAA over the tone-mapped image in textures[30] (the quality variant: edge
 // end search plus sub-pixel blend), written to the final image in mode FXAA.
 static const float FXAA_EDGE_MIN = .0312, FXAA_EDGE_RELATIVE = .125;
 static const int FXAA_SEARCH_STEPS = 8;
-static const float FXAA_SUBPIXEL = .75;
+static const float FXAA_SUBPIXEL = .5;
+static const float FXAA_MIN_EDGE_TEXELS = 2.5; // shorter features are specks, not edges
+static const float FXAA_SPECK_MAX_LUMA = .35;   // specks brighter than this are close-rock highlights
 
 float fxaaLuma(float2 uv) { float3 c = textures[30].SampleLevel(samplers[0], uv, 0.0).rgb; return dot(c, float3(.299, .587, .114)); }
 
@@ -29,6 +36,11 @@ float4 fxaa(float2 uv, float2 texel)
     float lumaMax = max(lumaM, max(max(lumaN, lumaS), max(lumaW, lumaE)));
     float range = lumaMax - lumaMin;
     if (range < max(FXAA_EDGE_MIN, lumaMax * FXAA_EDGE_RELATIVE)) return centre;
+    // A dim isolated speck, brighter than all four neighbours, is a distant
+    // rock rather than an edge: it stays sharp, the temporal pass settles it.
+    // Bright ones are highlights on close rocks, which still want the filter.
+    float lumaNeighbourMax = max(max(lumaN, lumaS), max(lumaW, lumaE));
+    if (lumaM > lumaNeighbourMax && lumaM < FXAA_SPECK_MAX_LUMA) return centre;
     float lumaNW = fxaaLuma(uv + float2(-texel.x, -texel.y)), lumaNE = fxaaLuma(uv + float2(texel.x, -texel.y));
     float lumaSW = fxaaLuma(uv + float2(-texel.x, texel.y)), lumaSE = fxaaLuma(uv + float2(texel.x, texel.y));
     float lumaNS = lumaN + lumaS, lumaWE = lumaW + lumaE;
@@ -61,6 +73,8 @@ float4 fxaa(float2 uv, float2 texel)
     bool direction1 = distance1 < distance2;
     float distanceFinal = min(distance1, distance2);
     float edgeThickness = distance1 + distance2;
+    // The search ended within a couple of texels each way: a few-pixel rock, not an edge.
+    if (edgeThickness < FXAA_MIN_EDGE_TEXELS * (horizontal ? texel.x : texel.y)) return centre;
     float pixelOffset = -distanceFinal / edgeThickness + .5;
     bool isLumaCentreSmaller = lumaM < lumaLocalAverage;
     bool correctVariation = ((direction1 ? lumaEnd1 : lumaEnd2) < 0.0) != isLumaCentreSmaller;

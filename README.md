@@ -33,9 +33,10 @@ RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. K
 ./build/release/orbital.exe --bookmark 5 --time 0 --frames 300 --high --rocks 650000 --benchmark belt.csv
 ./build/release/orbital.exe --bookmark 4 --time 0 --frames 124 --no-hud --capture captures/belt.png
 ./build/release/orbital.exe --duration 60 --tour --benchmark captures/tour.csv
+./build/release/orbital.exe --bookmark 5 --time 0 --frames 40 --pan 3 --aa 1 --capture captures/pan.png
 ```
 
-`--help` lists options. `--time` freezes simulation and exposure adaptation for reproducible captures.
+`--help` lists options. `--time` freezes simulation and exposure adaptation for reproducible captures; `--pan` strafes the camera at a fixed rate, to compare anti-aliasing modes in motion.
 
 ## Repository layout
 

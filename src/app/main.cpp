@@ -52,7 +52,8 @@ constexpr std::string_view window_title = "ORBITAL  /  Procedural worlds";
 constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
     "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..4\n"
-    "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --rocks N --aa 0|1|2 --splat "
+    "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --rocks N --aa 0|1|2 "
+    "--splat "
     "0..3 --tone 0|1|2\n"
     "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F free;\n"
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
@@ -74,6 +75,7 @@ struct Options {
     unsigned aa = 2;    // initial anti-aliasing mode
     unsigned splat = 2; // initial splat cut-off mode, an index into splat_radii
     unsigned tone = 2;  // initial tone curve (PBR Neutral)
+    float pan = 0;      // lateral drift as a fraction of the flight speed, stepped at a fixed 60 Hz for captures
     bool tour = false, high = false, no_hud = false, help = false;
     std::filesystem::path capture, benchmark;
 };
@@ -129,6 +131,8 @@ std::optional<Options> parse_options(int argc, char** argv) {
             ok = parse_number(value(), options.rocks);
         else if (arg == "--aa")
             ok = parse_number(value(), options.aa) && options.aa <= 2;
+        else if (arg == "--pan")
+            ok = parse_number(value(), options.pan);
         else if (arg == "--tone")
             ok = parse_number(value(), options.tone) && options.tone <= 2;
         else if (arg == "--splat")
@@ -176,6 +180,7 @@ struct AppState {
     unsigned splat_mode = 2;                            // index into splat_radii
     bool splat_light_twice = false;                     // light splats in the count pass too
     unsigned tone_curve = 2;                            // 0 ACES filmic, 1 AgX, 2 PBR Neutral
+    float pan = 0;                                      // lateral drift added to the move axis (--pan)
     float exposure = 1.0f;
     unsigned selected_body = 0;
     std::filesystem::path capture_request;
@@ -222,7 +227,7 @@ Input gather_input(platform::Window& window, AppState& app) {
     };
     Input input;
     input.move_forward = axis('W', 'S');
-    input.move_right = axis('D', 'A');
+    input.move_right = axis('D', 'A') + app.pan;
     input.move_up = axis('E', 'Q');
     input.speed_scale = window.key_down(Key::shift) ? control::fast_speed_scale : 1.0f;
     const platform::MouseDelta mouse = window.take_mouse_look_delta();
@@ -295,6 +300,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.anti_aliasing = options.aa;
     app.splat_mode = options.splat;
     app.tone_curve = options.tone;
+    app.pan = options.pan;
     app.overlay = !options.no_hud;
     app.exposure = options.exposure;
     app.auto_exposure = options.fixed_time < 0;
@@ -347,7 +353,8 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
         if (options.fixed_time >= 0)
             simulation_time = options.fixed_time;
         app.bodies = evaluate_system(session.system, simulation_time);
-        app.camera.step(dt, elapsed, gather_input(window, app), app.bodies);
+        // A panning capture steps the camera at a fixed rate so runs are comparable.
+        app.camera.step(app.pan != 0 ? 1.0 / 60 : dt, elapsed, gather_input(window, app), app.bodies);
 
         const render::FrameInput frame_input{.camera = app.camera,
                                              .bodies = app.bodies,

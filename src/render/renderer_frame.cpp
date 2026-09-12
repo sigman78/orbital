@@ -445,16 +445,32 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
          sizeof(std::uint32_t)},
         rock_group_count, sizeof(DrawArgs));
     stats.draw_calls++;
+    stats.triangles += stats.rock_triangles;
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
     gpu::bind_pso(cmd, pso.cloud);
+    root.mode = std::uint32_t(SurfaceMode::cloud);
+    draw_mesh(cmd, root, spheres[geometry::lod_count - 1], earth_index, 1);
+    gpu::end_render_pass(cmd);
+}
+
+// The rock splats go to their own layer, premultiplied and depth tested
+// against the scene, and the post pass composites the layer over the
+// anti-aliased image. They are smooth by construction and drawn without the
+// jitter, so they need no temporal filtering, and a sub-pixel feature in
+// motion could not survive the resampling and clipping of history anyway:
+// that faded the splats whenever the camera translated.
+void Renderer::Impl::record_splat_layer_pass(gpu::CommandBuffer* cmd, Root root, std::uint64_t args_address) {
     root.mode = std::uint32_t(SurfaceMode::billboard);
+    root.base = 0;
+    gpu::ColorAttachment layer{.render_view = splat_layer.view, .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
+    gpu::begin_render_pass(cmd,
+                           {.colors = {&layer, 1}, .depth = {.render_view = depth.view, .load = gpu::LoadOp::load}});
+    gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
+    gpu::bind_pso(cmd, pso.splat_layer);
     gpu::draw_indirect(cmd, root,
                        {reinterpret_cast<void*>(args_address + rock_group_count * sizeof(DrawArgs)), sizeof(DrawArgs)},
                        1, sizeof(DrawArgs));
     stats.draw_calls++;
-    stats.triangles += stats.rock_triangles;
-    root.mode = std::uint32_t(SurfaceMode::cloud);
-    draw_mesh(cmd, root, spheres[geometry::lod_count - 1], earth_index, 1);
     gpu::end_render_pass(cmd);
 }
 
@@ -578,6 +594,11 @@ bool Renderer::draw(const FrameInput& input) {
         root.base = body;
         s.fullscreen_pass(cmd, s.hdr, s.pso.atmosphere, root, true);
     }
+    gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,
+                 gpu::Access::depth_stencil_write);
+    s.record_splat_layer_pass(cmd, root, args_address);
+    gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
+                 gpu::Access::shader_read);
     stamp(3);
     s.record_post_passes(cmd, root, swap.render_view, input.anti_aliasing >= 2);
     stamp(4);
