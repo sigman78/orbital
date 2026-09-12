@@ -54,19 +54,32 @@ float solarVisibility(float3 point, int skip)
     return visibility;
 }
 
-float localShadow(float3 point, float3 normal)
+// 3x3 filtered lookup into an orthographic shadow map; 1 outside its box.
+float shadowLookup(Texture2D<float4> map, float4x4 projection, float3 point, float3 normal)
 {
-    float4 light = mul(root.frame->light_projection, float4(point + normal * 0.015, 1.0));
+    float4 light = mul(projection, float4(point + normal * 0.015, 1.0));
     float3 coord = light.xyz / light.w;
     float2 uv = coord.xy * 0.5 + 0.5;
     if (any(uv < 0.001) || any(uv > 0.999) || coord.z < 0.0 || coord.z > 1.0) return 1.0;
     uint width, height;
-    textures[15].GetDimensions(width, height);
+    map.GetDimensions(width, height);
     float2 texel = 1.0 / float2(width, height);
     float result = 0.0;
     for (int y = -1; y <= 1; ++y) for (int x = -1; x <= 1; ++x)
-        result += textures[15].SampleLevel(samplers[0], uv + float2(x, y) * texel, 0.0).r >= coord.z - 0.0003 ? 1.0 : 0.0;
+        result += map.SampleLevel(samplers[0], uv + float2(x, y) * texel, 0.0).r >= coord.z - 0.0003 ? 1.0 : 0.0;
     return result / 9.0;
+}
+
+// Shadows from the bodies' map, anchored on the nearest planet.
+float localShadow(float3 point, float3 normal)
+{
+    return shadowLookup(textures[15], root.frame->light_projection, point, normal);
+}
+
+// Shadows the large belt rocks cast on each other: one map over the whole belt.
+float beltRockShadow(float3 point, float3 normal)
+{
+    return shadowLookup(textures[28], root.frame->belt_light_projection, point, normal);
 }
 
 // Relative rock density across the belt (0 inner edge, 1 outer edge); mirrors
@@ -98,7 +111,7 @@ float beltShadow(float3 point)
     float inside = smoothstep(ring.x - feather, ring.x + feather, r) * (1.0 - smoothstep(ring.y - feather, ring.y + feather, r));
     float density = beltRingDensity(saturate((r - ring.x) / (ring.y - ring.x)));
     float grain = .8 + .2 * noise(q * .5);
-    return 1.0 - ring.z * .45 * inside * density * grain;
+    return 1.0 - ring.z * .585 * inside * density * grain;
 }
 
 float3x3 rotation(float3 a)

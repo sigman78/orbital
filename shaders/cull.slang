@@ -63,16 +63,31 @@ Placement placeRock(uint id)
     float3 position = p->giant.xyz + local;
     float radius = rock.position_radius.w;
 
-    float z = dot(position, p->forward.xyz);
-    if (z < -radius) return result;
-    float pixelRadius = radius * p->view.x / max(z, .1);
-    if (pixelRadius < p->billboard.z) return result;
-    // Frustum planes with non-unit normals; padding covers jitter and expanded billboards.
-    float zc = max(z, 0.0);
-    float padding = radius + zc * p->forward.w;
-    if (abs(dot(position, p->right.xyz)) > zc * p->right.w + padding * p->view.y) return result;
-    if (abs(dot(position, p->up.xyz)) > zc * p->up.w + padding * p->view.z) return result;
-    if (occludedByBodies(position, radius)) return result;
+    float pixelRadius;
+    if (p->orthographic != 0)
+    {
+        // Shadow casters: large rocks inside the light's box, sized in shadow texels.
+        if (radius < p->light.w) return result;
+        float3 d = position - p->light.xyz;
+        if (abs(dot(d, p->right.xyz)) > p->right.w + radius) return result;
+        if (abs(dot(d, p->up.xyz)) > p->up.w + radius) return result;
+        if (abs(dot(d, p->forward.xyz)) > p->forward.w + radius) return result;
+        pixelRadius = radius * p->view.x;
+        if (pixelRadius < p->billboard.z) return result;
+    }
+    else
+    {
+        float z = dot(position, p->forward.xyz);
+        if (z < -radius) return result;
+        pixelRadius = radius * p->view.x / max(z, .1);
+        if (pixelRadius < p->billboard.z) return result;
+        // Frustum planes with non-unit normals; padding covers jitter and expanded billboards.
+        float zc = max(z, 0.0);
+        float padding = radius + zc * p->forward.w;
+        if (abs(dot(position, p->right.xyz)) > zc * p->right.w + padding * p->view.y) return result;
+        if (abs(dot(position, p->up.xyz)) > zc * p->up.w + padding * p->view.z) return result;
+        if (occludedByBodies(position, radius)) return result;
+    }
 
     result.visible = true;
     if (pixelRadius < p->billboard.y)

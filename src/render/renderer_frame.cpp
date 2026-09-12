@@ -39,7 +39,17 @@ inline constexpr double min_forward_dot = 0.7; // turn that invalidates the hist
 namespace shadow_placement {
 inline constexpr double giant_distance = 100.0; // inside this the map follows the giant, else the nearer planet
 inline constexpr float giant_half_size = 70.f, earth_half_size = 12.f, mars_half_size = 10.f;
+inline constexpr float depth_half_range = 3.f; // the body light box is this many half sizes deep either way
 } // namespace shadow_placement
+
+// Rock-on-rock shadows: one orthographic map over the whole belt, drawn from
+// the large size-tail rocks only, read by build_frame and write_shadow_cull_scratch.
+namespace belt_shadows {
+inline constexpr float caster_min_radius =
+    .05f; // the larger half of the 4x tail and all 9x rocks, about 3% of the belt
+inline constexpr float caster_min_texels = .5f;
+inline constexpr double margin = 2.0; // world units of slack around the belt's extent in the light box
+} // namespace belt_shadows
 
 // Sun disc and lens flare, read by build_frame.
 namespace sun_flare {
@@ -104,18 +114,49 @@ void write_projection(FrameData& frame, const Camera& camera, float aspect) {
     frame.forward_exposure = f4(forward, 1);
 }
 
-// Orthographic light projection looking from the sun at a body, in double
-// like the positions it is built from.
-void write_light_projection(FrameData& frame, Vec3d center, Vec3d sun, float half_size) {
-    const Vec3d forward = normalized(center - sun), r = normalized(Vec3d{-forward.z, 0, forward.x});
-    const Vec3d u = cross(r, forward);
-    const Vec3d eye = center - forward * (half_size * 3);
-    const double depth_range = half_size * 6;
-    float* m = frame.light_projection;
-    m[0] = float(r.x / half_size), m[4] = float(r.y / half_size), m[8] = float(r.z / half_size);
-    m[12] = float(-dot(r, eye) / half_size);
-    m[1] = float(-u.x / half_size), m[5] = float(-u.y / half_size), m[9] = float(-u.z / half_size);
-    m[13] = float(dot(u, eye) / half_size);
+// Light box looking from the sun at a camera-relative body, square and
+// three half sizes deep either way.
+LightFrame body_light_frame(Vec3d centre, Vec3d sun, float half_size) {
+    const Vec3d forward = normalized(centre - sun), r = normalized(Vec3d{-forward.z, 0, forward.x});
+    return {.centre = to_float(centre),
+            .forward = to_float(forward),
+            .right = to_float(r),
+            .up = to_float(cross(r, forward)),
+            .half_x = half_size,
+            .half_y = half_size,
+            .half_depth = half_size * shadow_placement::depth_half_range};
+}
+
+// Light box fitted to the whole belt annulus: up follows the belt normal's
+// component across the light, so the tilted annulus projects to a rectangle
+// outer wide and outer * cos(tilt) tall.
+LightFrame belt_light_frame(Vec3d giant, Vec3d sun, const BeltDescription& belt) {
+    const Vec3d forward = normalized(giant - sun);
+    const Vec3d normal = to_double(belt_plane_normal);
+    const double tilt = dot(normal, forward);
+    Vec3d up = normal - forward * tilt;
+    if (dot(up, up) < 1e-8)
+        up = Vec3d{0, 1, 0} - forward * forward.y;
+    up = normalized(up);
+    const double extent = belt.outer_radius + belt.thickness + belt_shadows::margin;
+    return {.centre = to_float(giant),
+            .forward = to_float(forward),
+            .right = to_float(cross(up, forward)),
+            .up = to_float(up),
+            .half_x = float(extent),
+            .half_y = float(belt.outer_radius * std::abs(tilt) + belt.thickness + belt_shadows::margin),
+            .half_depth = float(extent)};
+}
+
+// Orthographic projection of a light box, in double like the frame it comes from.
+void write_light_projection(float* m, const LightFrame& light) {
+    const Vec3d forward = to_double(light.forward), r = to_double(light.right), u = to_double(light.up);
+    const Vec3d eye = to_double(light.centre) - forward * light.half_depth;
+    const double depth_range = light.half_depth * 2.0;
+    m[0] = float(r.x / light.half_x), m[4] = float(r.y / light.half_x), m[8] = float(r.z / light.half_x);
+    m[12] = float(-dot(r, eye) / light.half_x);
+    m[1] = float(-u.x / light.half_y), m[5] = float(-u.y / light.half_y), m[9] = float(-u.z / light.half_y);
+    m[13] = float(dot(u, eye) / light.half_y);
     m[2] = float(forward.x / depth_range), m[6] = float(forward.y / depth_range),
     m[10] = float(forward.z / depth_range);
     m[14] = float(-dot(forward, eye) / depth_range);
@@ -191,9 +232,13 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     const float shadow_half_size = giant_close   ? shadow_placement::giant_half_size
                                    : mars_closer ? shadow_placement::mars_half_size
                                                  : shadow_placement::earth_half_size;
-    write_light_projection(frame, input.bodies[shadow_body].position - camera.position,
-                           system.star.position - camera.position, shadow_half_size);
+    const Vec3d sun_relative = system.star.position - camera.position;
+    write_light_projection(
+        frame.light_projection,
+        body_light_frame(input.bodies[shadow_body].position - camera.position, sun_relative, shadow_half_size));
     const auto& ring = system.belts[0];
+    belt_light = belt_light_frame(input.bodies[giant_index].position - camera.position, sun_relative, ring);
+    write_light_projection(frame.belt_light_projection, belt_light);
     frame.belt_ring = {float(ring.inner_radius), float(ring.outer_radius), float(ring.density), float(ring.thickness)};
     frame.belt_normal = f4(belt_plane_normal);
     frame.options = {float(extent.width), float(extent.height), input.high_quality ? 1.f : 0.f,
@@ -236,23 +281,14 @@ void Renderer::Impl::write_body_instances(const FrameInput& input, const FrameDa
     }
 }
 
-// Everything the GPU culling pass needs this frame, mirroring the CPU
-// frustum test it replaced: plane normals are not unit length, so sphere
-// support is scaled, and two pixels of padding cover temporal jitter and
-// expanded tiny billboards.
-void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
-                                        std::uint64_t instance_address) {
-    const Camera& camera = input.camera;
-    const float tan_y = frame.right_tan.w, tan_x = tan_y * frame.up_aspect.w;
+// The parts of the culling parameters both the camera and the shadow pass
+// share: belt motion, level thresholds, the rock mesh table and cleared counters.
+void Renderer::Impl::write_cull_common(const FrameInput& input, CullScratch& scratch, std::uint64_t instance_address) {
     const BeltTransform transform = belt_transform(system.belts[0], float(input.time * belt_culling::spin_rate));
     CullParams& p = scratch.params;
     p = {};
-    p.right = f4(to_float(camera.right()), tan_x);
-    p.up = f4(to_float(camera.up()), tan_y);
-    p.forward = f4(to_float(camera.forward()), tan_y * 4 / float(extent.height));
-    p.view = {float(extent.height) / (2 * frame.right_tan.w), std::sqrt(1 + tan_x * tan_x),
-              std::sqrt(1 + tan_y * tan_y), float(input.time * belt_culling::rock_spin_rate)};
-    p.giant = f4(input.bodies[giant_index].position - camera.position);
+    p.view.w = float(input.time * belt_culling::rock_spin_rate);
+    p.giant = f4(input.bodies[giant_index].position - input.camera.position);
     p.belt_tilt = {belt_tilt.y_scale, belt_tilt.y_from_z, belt_tilt.z_scale, 0};
     for (unsigned band = 0; band < belt::radial_bands; band++)
         p.band_spin[band] = {transform.cos_spin[band], transform.sin_spin[band], 0, 0};
@@ -273,6 +309,45 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
     std::memset(scratch.cursors, 0, sizeof scratch.cursors);
 }
 
+// Everything the camera culling pass needs this frame, mirroring the CPU
+// frustum test it replaced: plane normals are not unit length, so sphere
+// support is scaled, and two pixels of padding cover temporal jitter and
+// expanded tiny billboards.
+void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
+                                        std::uint64_t instance_address) {
+    write_cull_common(input, scratch, instance_address);
+    const Camera& camera = input.camera;
+    const float tan_y = frame.right_tan.w, tan_x = tan_y * frame.up_aspect.w;
+    CullParams& p = scratch.params;
+    p.right = f4(to_float(camera.right()), tan_x);
+    p.up = f4(to_float(camera.up()), tan_y);
+    p.forward = f4(to_float(camera.forward()), tan_y * 4 / float(extent.height));
+    p.view.x = float(extent.height) / (2 * frame.right_tan.w);
+    p.view.y = std::sqrt(1 + tan_x * tan_x);
+    p.view.z = std::sqrt(1 + tan_y * tan_y);
+}
+
+// The belt shadow casters: large rocks inside the belt light box, levelled by
+// their size in shadow texels, no billboards and no planet occlusion (a rock in
+// a planet's shadow casts nothing that matters).
+void Renderer::Impl::write_shadow_cull_scratch(const FrameInput& input, CullScratch& scratch,
+                                               std::uint64_t instance_address) {
+    write_cull_common(input, scratch, instance_address);
+    const LightFrame& light = belt_light;
+    CullParams& p = scratch.params;
+    p.right = f4(light.right, light.half_x);
+    p.up = f4(light.up, light.half_y);
+    p.forward = f4(light.forward, light.half_depth);
+    p.view.x = float(targets::belt_shadow_map_size) / (2 * light.half_x); // texels per world unit, coarse axis
+    p.view.y = 1;
+    p.view.z = 1;
+    p.light = f4(light.centre, belt_shadows::caster_min_radius);
+    p.billboard.y = 0; // never a billboard
+    p.billboard.z = belt_shadows::caster_min_texels;
+    p.body_count = 0; // casters start at the first instance slot
+    p.orthographic = 1;
+}
+
 // Statistics from the previous frame's culling, read back once its GPU work
 // has completed. The triangle count is what those draws submitted.
 void Renderer::Impl::read_cull_counts(const CullScratch& scratch) {
@@ -287,6 +362,13 @@ void Renderer::Impl::read_cull_counts(const CullScratch& scratch) {
     triangles += scratch.counts[rock_group_count] * 2;
     stats.visible_asteroids = rocks_visible;
     stats.rock_triangles = triangles;
+}
+
+void Renderer::Impl::read_shadow_counts(const CullScratch& scratch) {
+    unsigned casters = 0;
+    for (unsigned group = 0; group < rock_group_count; group++)
+        casters += scratch.counts[group];
+    stats.shadow_casters = casters;
 }
 
 void Renderer::Impl::record_cull_passes(gpu::CommandBuffer* cmd, const CullRoot& root) {
@@ -328,16 +410,31 @@ void Renderer::Impl::fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, 
                  gpu::Access::shader_read);
 }
 
-void Renderer::Impl::record_shadow_pass(gpu::CommandBuffer* cmd, Root root) {
+void Renderer::Impl::record_shadow_pass(gpu::CommandBuffer* cmd, Root root, const ShadowCasters& casters) {
+    const unsigned triangles_before = stats.triangles;
+    // Bodies into the planet-anchored map.
     root.mode = std::uint32_t(SurfaceMode::shadow);
     gpu::begin_render_pass(cmd, {.depth = {.render_view = shadow_map.view, .load = gpu::LoadOp::clear}});
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
     gpu::bind_pso(cmd, pso.shadow);
-    const unsigned triangles_before = stats.triangles;
     for (unsigned i = 0; i < body_count; i++)
         draw_mesh(cmd, root, body_mesh(i, 2), i, 1);
-    stats.triangles = triangles_before; // shadow geometry is not counted in the frame statistic
     gpu::end_render_pass(cmd);
+    // Large belt rocks into the belt map, from their own culled instance list.
+    root.mode = std::uint32_t(SurfaceMode::belt_shadow);
+    root.base = 0;
+    root.instances = casters.instances;
+    root.vertices = rock_pool.vertices;
+    gpu::begin_render_pass(cmd, {.depth = {.render_view = belt_shadow_map.view, .load = gpu::LoadOp::clear}});
+    gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
+    gpu::bind_pso(cmd, pso.shadow);
+    gpu::draw_indexed_indirect_count(
+        cmd, root, {reinterpret_cast<void*>(rock_pool.indices), std::uint64_t(rock_pool.index_count) * 4},
+        gpu::IndexType::uint32, {reinterpret_cast<void*>(casters.arguments), sizeof(DrawArgs) * rock_group_count},
+        {reinterpret_cast<void*>(casters.draw_count), sizeof(std::uint32_t)}, rock_group_count, sizeof(DrawArgs));
+    stats.draw_calls++;
+    gpu::end_render_pass(cmd);
+    stats.triangles = triangles_before; // shadow geometry is not counted in the frame statistic
     gpu::barrier(cmd, gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_write, gpu::Stage::fragment,
                  gpu::Access::shader_read);
 }
@@ -439,9 +536,12 @@ bool Renderer::draw(const FrameInput& input) {
     const auto frame_address = reinterpret_cast<std::uint64_t>(s.data.range.gpu) + heap_layout.dynamic_offset;
     auto* dynamic = s.data.range.cpu + heap_layout.dynamic_offset;
     auto* scratch = reinterpret_cast<CullScratch*>(dynamic + heap_layout.cull_offset);
+    auto* shadow_scratch = reinterpret_cast<CullScratch*>(dynamic + heap_layout.shadow_cull_offset);
     s.read_cull_counts(*scratch);
+    s.read_shadow_counts(*shadow_scratch);
     std::memcpy(dynamic, &frame, sizeof frame);
     s.write_cull_scratch(input, frame, *scratch, frame_address + heap_layout.instance_offset);
+    s.write_shadow_cull_scratch(input, *shadow_scratch, frame_address + heap_layout.shadow_instance_offset);
     std::memcpy(dynamic + heap_layout.instance_offset, s.instances.data(), s.instances.size() * sizeof(Instance));
     Root root{.frame = frame_address,
               .vertices = 0,
@@ -454,6 +554,14 @@ bool Renderer::draw(const FrameInput& input) {
                              .pass = 0,
                              .unused = 0};
     const std::uint64_t args_address = frame_address + heap_layout.cull_offset + offsetof(CullScratch, args);
+    const CullRoot shadow_cull_root{.frame = frame_address,
+                                    .rocks = s.rock_data,
+                                    .scratch = frame_address + heap_layout.shadow_cull_offset,
+                                    .pass = 0,
+                                    .unused = 0};
+    const ShadowCasters casters{.instances = frame_address + heap_layout.shadow_instance_offset,
+                                .arguments = shadow_cull_root.scratch + offsetof(CullScratch, args),
+                                .draw_count = shadow_cull_root.scratch + offsetof(CullScratch, draw_count)};
 
     auto* cmd = gpu::begin_commands(s.device);
     const auto stamp = [&](unsigned index) {
@@ -469,7 +577,8 @@ bool Renderer::draw(const FrameInput& input) {
                  gpu::Stage::all_commands,
                  gpu::Access::color_write | gpu::Access::depth_stencil_write | gpu::Access::shader_read);
     s.record_cull_passes(cmd, cull_root);
-    s.record_shadow_pass(cmd, root);
+    s.record_cull_passes(cmd, shadow_cull_root);
+    s.record_shadow_pass(cmd, root, casters);
     stamp(1);
     s.record_scene_pass(cmd, root, input, frame, args_address);
     stamp(2);
