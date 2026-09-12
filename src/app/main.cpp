@@ -219,10 +219,11 @@ float recent_p95_ms(std::span<const float> frame_ms) {
 }
 
 void update_title(platform::Window& window, const render::Stats& stats, bool high, float p95_ms) {
+    const int fps = int(1000 / std::max(stats.frame_ms, 0.1f));
     window.set_title(
-        std::format("ORBITAL  |  {:.1f} ms (p95 {:.1f})  |  GPU {:.1f} ms  |  {} draws ({} rock groups)  |  "
+        std::format("ORBITAL  |  {} FPS  |  {:.1f} ms (p95 {:.1f})  |  GPU {:.1f} ms  |  {} draws ({} rock groups)  |  "
                     "{} rocks  |  {:.2f} M tris  |  {}",
-                    stats.frame_ms, p95_ms, stats.gpu_ms, stats.draw_calls, stats.rock_groups_drawn,
+                    fps, stats.frame_ms, p95_ms, stats.gpu_ms, stats.draw_calls, stats.rock_groups_drawn,
                     stats.visible_asteroids, stats.triangles / 1e6, high ? "HIGH" : "BASELINE"));
 }
 
