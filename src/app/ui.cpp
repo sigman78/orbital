@@ -128,8 +128,12 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::SliderFloat("Dust density", &app.dust_density, .1f, 8.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
         ImGui::SliderFloat("Dust brightness", &app.dust_brightness, .1f, 8.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
         ImGui::SliderFloat("Dust far-view scale", &app.dust_far, .1f, 8.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
-        if (ImGui::SmallButton("Reset dust"))
-            app.dust_density = app.dust_brightness = app.dust_far = 1;
+        ImGui::ColorEdit3("Dust tint", app.dust_tint, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_Float);
+        ImGui::SliderFloat("Dust saturation", &app.dust_saturation, 0.f, 3.f, "%.2f");
+        if (ImGui::SmallButton("Reset dust")) {
+            app.dust_density = app.dust_brightness = app.dust_far = app.dust_saturation = 1;
+            app.dust_tint[0] = app.dust_tint[1] = app.dust_tint[2] = 1;
+        }
         ImGui::EndDisabled();
         static constexpr const char* cutoffs[] = {"Off", "1.2 px", "2.5 px", "4 px"};
         combo("Splat cut-off (F6)", app.splat_mode, cutoffs);

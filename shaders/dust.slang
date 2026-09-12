@@ -108,6 +108,9 @@ float4 march(float2 fullResPixel, int2 depthPixel)
     float outside = max(max(abs(hn) - halfHeight, 0.0), max(length(qp) - outer, 0.0)) / (halfHeight * DUST_FAR_DISTANCE);
     float farScale = lerp(1.0, DUST_FAR_SCALE * frame->dust.z, saturate(outside));
 
+    // Tint and saturation from the panel: the tinted colour pulled toward or past its luminance.
+    float3 tinted = DUST_COLOUR * frame->dust_tint.xyz;
+    float3 dustColour = max(lerp(dot(tinted, float3(.2126, .7152, .0722)).xxx, tinted, frame->dust.w), 0.0);
     float jitter = hash(float3(fullResPixel, frac(frame->camera_time.w * 13.0) * 100.0 + frame->jitter.x * 37.0));
     float ds = (t1 - t0) / float(DUST_STEPS);
     float transmittance = 1.0;
@@ -123,7 +126,7 @@ float4 march(float2 fullResPixel, int2 depthPixel)
         float3 light = normalize(frame->sun.xyz - p);
         float sunlight = frame->sun.w * sunTransmittance(q, light, ring, n) * solarVisibility(frame, p, -1)
                        * beltRockTransmittance(frame, p);
-        float3 inscatter = DUST_COLOUR * DUST_ALBEDO * frame->dust.y * sigma * phase(dot(light, rd)) * sunlight;
+        float3 inscatter = dustColour * DUST_ALBEDO * frame->dust.y * sigma * phase(dot(light, rd)) * sunlight;
         // Analytic integral of the in-scatter over the step under constant density.
         float stepTransmittance = exp(-sigma * ds);
         radiance += transmittance * inscatter * (1.0 - stepTransmittance) / sigma;

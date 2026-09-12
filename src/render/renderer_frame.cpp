@@ -260,7 +260,8 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.scene = {float(body_count), float(giant_index), input.belt_light_map ? 1.f : 0.f,
                    input.belt_extinction ? 1.f : 0.f};
     frame.quality = {input.temporal_aa ? 1.f : 0.f, float(input.tone_curve), input.belt_dust ? 1.f : 0.f, 0};
-    frame.dust = {input.dust_density, input.dust_brightness, input.dust_far, 0};
+    frame.dust = {input.dust_density, input.dust_brightness, input.dust_far, input.dust_saturation};
+    frame.dust_tint = {input.dust_tint[0], input.dust_tint[1], input.dust_tint[2], 0};
 
     // Sun position in screen space for the lens flare, hidden when a body covers it.
     const Vec3d sun_direction = normalized(system.star.position - camera.position);
