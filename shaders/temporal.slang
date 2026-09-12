@@ -5,12 +5,18 @@
 // current 3x3 neighbourhood in YCoCg, and blended with luminance weights so
 // bright specks settle instead of flickering. Depth only rejects history when
 // both frames saw a surface and disagree: a pixel that flips between a thin
-// rock and the sky keeps its history and lets the colour clip decide.
+// rock and the sky keeps its history and lets the colour clip decide. Rock
+// splats (textures[31] marks their pixels, and they wrote their depth) are
+// reprojected exactly and keep their history unclipped: a sub-pixel feature in
+// motion never survives the neighbourhood clip, and the exact reprojection
+// makes the clip unnecessary.
 // Frame.quality.x below 1 turns the pass into a copy.
 
 static const float HISTORY_WEIGHT = .95;      // at rest
 static const float HISTORY_WEIGHT_MOVING = .80; // at one pixel of motion per frame and beyond
 static const float CLIP_SIGMA = 1.5;          // variance clip half-width, in standard deviations
+static const float SPLAT_WEIGHT_MOVING = .3;  // splat pixels at SPLAT_MOTION_PIXELS of motion and beyond: already filtered, so a short history keeps them sharp
+static const float SPLAT_MOTION_PIXELS = 4.0;
 
 float3 toYCoCg(float3 c) { return float3(.25 * c.r + .5 * c.g + .25 * c.b, .5 * c.r - .5 * c.b, -.25 * c.r + .5 * c.g - .25 * c.b); }
 float3 fromYCoCg(float3 c) { return float3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z); }
@@ -79,9 +85,10 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     if (behind || outside || (!sky && predictedPreviousZ <= 0.0)) return float4(current, currentZ);
 
     float4 history = sampleHistory(previousUV, float2(size));
+    bool splat = textures[31].Load(int3(pixel, 0)).r > .5;
     // A disocclusion: both frames saw surfaces at clearly different depths.
     bool historySky = history.a >= FAR_Z * .999;
-    if (!sky && !historySky) {
+    if (!sky && !historySky && !splat) {
         float tolerance = .05 * max(predictedPreviousZ, 0.0) + .1;
         if (abs(history.a - predictedPreviousZ) > tolerance) return float4(current, currentZ);
     }
@@ -96,10 +103,11 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     mean /= 9.0;
     float3 sigma = sqrt(max(meanSquare / 9.0 - mean * mean, float3(0.0, 0.0, 0.0)));
     float3 boxMin = mean - sigma * CLIP_SIGMA, boxMax = mean + sigma * CLIP_SIGMA;
-    float3 clippedHistory = fromYCoCg(clipToBox(boxMin, boxMax, toYCoCg(history.rgb)));
+    float3 clippedHistory = splat ? history.rgb : fromYCoCg(clipToBox(boxMin, boxMax, toYCoCg(history.rgb)));
 
     float motionPixels = length((previousUV - uv) * float2(size));
-    float historyWeight = lerp(HISTORY_WEIGHT, HISTORY_WEIGHT_MOVING, smoothstep(.25, 1.0, motionPixels));
+    float historyWeight = splat ? lerp(HISTORY_WEIGHT, SPLAT_WEIGHT_MOVING, smoothstep(.25, SPLAT_MOTION_PIXELS, motionPixels))
+                              : lerp(HISTORY_WEIGHT, HISTORY_WEIGHT_MOVING, smoothstep(.25, 1.0, motionPixels));
     // Luminance-weighted blend: bright specks count less, so they settle instead of flickering.
     float currentWeight = (1.0 - historyWeight) / (1.0 + dot(current, float3(.2126, .7152, .0722)));
     float previousWeight = historyWeight / (1.0 + dot(clippedHistory, float3(.2126, .7152, .0722)));

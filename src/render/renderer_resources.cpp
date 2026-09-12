@@ -77,7 +77,7 @@ Renderer::Impl::~Impl() {
     for (auto& image : material_images)
         destroy(image);
     for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &shadow_map, &luminance, &history[0],
-                        &history[1], &belt_light, &belt_light_blur, &splat_layer})
+                        &history[1], &belt_light, &belt_light_blur, &splat_mask})
         destroy(*image);
     for (auto* heap : {&data, &texture_descriptors, &sampler_descriptors, &luminance_readback, &timestamps})
         gpu::destroy_gpu_heap(*heap);
@@ -233,10 +233,6 @@ gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
         blending = {.enabled = true,
                     .color = {gpu::BlendFactor::one, gpu::BlendFactor::one},
                     .alpha = {gpu::BlendFactor::one, gpu::BlendFactor::one}};
-    else if (desc.blend == Blend::premultiplied)
-        blending = {.enabled = true,
-                    .color = {gpu::BlendFactor::one, gpu::BlendFactor::one_minus_source_alpha},
-                    .alpha = {gpu::BlendFactor::one, gpu::BlendFactor::one_minus_source_alpha}};
     const gpu::ColorTargetDesc target{.format = desc.color_format, .blend = blending};
     auto* pipeline = gpu::create_graphics_pso(
         device, {.vertex_spirv = vertex,
@@ -411,7 +407,7 @@ void Renderer::Impl::create_pipelines() {
     pso.fxaa = make("fullscreen", "post", Format::rgba8_srgb);
     pso.meter = make("fullscreen", "post", Format::rgba32_float);
     pso.temporal = make("fullscreen", "temporal", Format::rgba16_float);
-    pso.splat_layer = make("surface", "surface", Format::rgba16_float, true, Blend::premultiplied);
+    pso.splat_mask = make("surface", "surface", Format::r8_unorm, true);
     pso.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
     panic_if(!pso.cull, "compute pipeline creation failed: cull");
     pipelines.push_back(pso.cull);
@@ -477,7 +473,7 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     if (extent == new_extent)
         return;
     gpu::wait_idle(device);
-    for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &history[0], &history[1], &splat_layer})
+    for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &history[0], &history[1], &splat_mask})
         destroy(*image);
     extent = new_extent;
     history_valid = false;
@@ -497,14 +493,14 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     ldr = create_image({.extent = extent, .format = gpu::Format::rgba8_srgb, .usage = color_usage});
     for (auto& image : history)
         image = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
-    splat_layer = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
+    splat_mask = create_image({.extent = extent, .format = gpu::Format::r8_unorm, .usage = color_usage});
     bind(Slot::hdr, hdr);
     bind(Slot::bloom_a, bloom_a);
     bind(Slot::bloom_b, bloom_b);
     bind(Slot::final_image, final_image);
     bind(Slot::ldr, ldr);
     bind(Slot::depth, depth);
-    bind(Slot::splat_layer, splat_layer);
+    bind(Slot::splat_mask, splat_mask);
 }
 
 Renderer::Renderer(void* window, const SystemDescription& system, const std::filesystem::path& directory,

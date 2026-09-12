@@ -54,7 +54,7 @@ enum class Slot : unsigned {
     belt_light_map = 28,  // belt transmittance, blurred
     belt_light_blur = 29, // scratch between the two blur directions
     ldr = 30,             // tone-mapped image before FXAA
-    splat_layer = 31,     // rock splats, premultiplied, composited over the anti-aliased scene
+    splat_mask = 31,      // pixels covered by rock splats, whose history the temporal pass keeps unclipped
     count = 32,
 };
 
@@ -68,7 +68,7 @@ enum class SamplerSlot : unsigned {
 };
 
 // Root.mode as interpreted by surface.slang.
-enum class SurfaceMode : std::uint32_t { opaque = 0, cloud = 1, shadow = 2, billboard = 3 };
+enum class SurfaceMode : std::uint32_t { opaque = 0, cloud = 1, shadow = 2, billboard = 3, splat_mask = 4 };
 // Root.mode as interpreted by post.slang; atmosphere.slang uses Root.base as the body index.
 enum class PostMode : std::uint32_t { tonemap = 0, bloom_a = 1, bloom_b = 2, present = 3, meter = 4, fxaa = 5 };
 
@@ -152,7 +152,7 @@ struct ImageDesc {
     unsigned mips = 1;
 };
 
-enum class Blend { none, alpha, additive, premultiplied };
+enum class Blend { none, alpha, additive };
 
 struct PipelineDesc {
     const char* vertex_shader;   // shaders/<name>.vertex.spv
@@ -198,12 +198,12 @@ struct Renderer::Impl {
     std::vector<GpuImage> material_images;
     std::vector<gpu::PSO*> pipelines;
     GpuImage hdr{}, depth{}, bloom_a{}, bloom_b{}, final_image{}, ldr{}, shadow_map{}, luminance{}, history[2]{};
-    GpuImage splat_layer{};
+    GpuImage splat_mask{};
     GpuImage belt_light{}, belt_light_blur{};
     struct {
         gpu::PSO *opaque = nullptr, *cloud = nullptr, *background = nullptr, *atmosphere = nullptr, *bloom = nullptr,
                  *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr,
-                 *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr, *fxaa = nullptr, *splat_layer = nullptr;
+                 *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr, *fxaa = nullptr, *splat_mask = nullptr;
     } pso;
     std::array<GpuMesh, geometry::lod_count> spheres{};
     std::array<GpuMesh, rock_group_count> rocks{}; // the rock library, indexed by rock_group; slices of rock_pool
@@ -269,7 +269,7 @@ struct Renderer::Impl {
     void record_cull_passes(gpu::CommandBuffer* cmd, const CullRoot& root);
     void record_belt_light_pass(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root, unsigned rock_limit);
     void record_shadow_pass(gpu::CommandBuffer* cmd, Root root);
-    void record_splat_layer_pass(gpu::CommandBuffer* cmd, Root root, std::uint64_t args_address);
+    void record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, std::uint64_t args_address);
     void record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input, const FrameData& frame,
                            std::uint64_t args_address);
     void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view, bool spatial_aa);

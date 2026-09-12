@@ -1,7 +1,7 @@
 #include "common.slang"
 
 // Root.mode values (SurfaceMode on the C++ side).
-static const uint MODE_OPAQUE = 0, MODE_CLOUD = 1, MODE_SHADOW = 2, MODE_BILLBOARD = 3;
+static const uint MODE_OPAQUE = 0, MODE_CLOUD = 1, MODE_SHADOW = 2, MODE_BILLBOARD = 3, MODE_SPLAT_MASK = 4;
 // Instance kinds (rotation_kind.w); SurfaceKind on the C++ side.
 static const int KIND_EARTH = 0, KIND_GIANT = 1, KIND_MOON = 2, KIND_ROCK = 3, KIND_MARS = 4;
 
@@ -34,15 +34,13 @@ SurfaceVaryings vertexMain(uint vertexIndex : SV_VertexID, uint firstVertex : SV
     SurfaceVaryings output;
     output.instanceIndex = root.base + firstInstance + instanceId;
     Instance inst = root.instances[output.instanceIndex];
-    if (root.mode == MODE_BILLBOARD)
+    if (root.mode == MODE_BILLBOARD || root.mode == MODE_SPLAT_MASK)
     {
         const float2 corners[6] = {float2(-1,-1),float2(1,-1),float2(1,1),float2(-1,-1),float2(1,1),float2(-1,1)};
         float2 q = corners[vertexIndex];
         output.worldPosition = inst.center_radius.xyz + (root.frame->right_tan.xyz*q.x + root.frame->up_aspect.xyz*q.y)*inst.center_radius.w;
         output.worldNormal = -root.frame->forward_exposure.xyz; output.localNormal = float3(q,0);
         output.position = mul(root.frame->view_projection, float4(output.worldPosition,1));
-        // Splats are smooth by construction and bypass the temporal pass, so they take no jitter.
-        output.position.xy -= 2.0 * root.frame->jitter.xy / root.frame->options.xy * output.position.w;
         return output;
     }
     Vertex vertex = root.vertices[vertexIndex];
@@ -382,10 +380,11 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
 {
     Instance inst = root.instances[input.instanceIndex];
     int kind = int(inst.rotation_kind.w + .5);
-    if (root.mode == MODE_BILLBOARD)
+    if (root.mode == MODE_BILLBOARD) return shadeBillboard(input, inst);
+    if (root.mode == MODE_SPLAT_MASK)
     {
-        float4 splat = shadeBillboard(input, inst);
-        return float4(splat.rgb * splat.a, splat.a); // premultiplied, into the splat layer
+        // Depth and mask over the whole quad, since the Gaussian footprint fills it.
+        return float4(1.0, 1.0, 1.0, 1.0);
     }
 
     float3 N = normalize(input.worldNormal);

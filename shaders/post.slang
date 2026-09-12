@@ -9,12 +9,7 @@ static const float ABERRATION = .00025;        // lateral colour fringe at the e
 static const float GRAIN = .010;               // film grain amplitude in display space
 static const float METER_CENTRE_WEIGHT = .6;   // how much the metering favours the frame centre
 
-// The anti-aliased scene with the rock splat layer (premultiplied) composited over it.
-float3 sampleHDR(float2 uv)
-{
-    float4 splats = textures[31].Sample(samplers[0], uv);
-    return textures[16].Sample(samplers[0], uv).rgb * (1.0 - splats.a) + splats.rgb;
-}
+float3 sampleHDR(float2 uv) { return textures[16].Sample(samplers[0], uv).rgb; }
 
 // FXAA over the tone-mapped image in textures[30] (the quality variant: edge
 // end search plus sub-pixel blend), written to the final image in mode FXAA.
