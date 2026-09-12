@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <future>
 #include <iterator>
@@ -42,6 +43,7 @@ struct MaterialSource {
     const char* file;
     Slot slot;
     assets::MaterialDesc desc;
+    bool optional = false; // missing on disk binds a neutral map with a warning instead of a panic
 };
 
 using assets::MaterialEncoding;
@@ -65,6 +67,7 @@ constexpr MaterialSource material_sources[] = {
     {"rock_boulder_albedo.png", Slot::rock_boulder_albedo, {.encoding = MaterialEncoding::SRGB}},
     {"rock_boulder_normal.png", Slot::rock_boulder_normal, {.normal_map = true}},
     {"rock_boulder_roughness.png", Slot::rock_boulder_roughness, {}},
+    {"gas_flow.png", Slot::gas_flow, {}, true}, // baked from the gas albedo; neutral (no flow) when absent
 };
 constexpr std::size_t material_count = std::size(material_sources);
 static_assert(material_count <= inline_upload_count);
@@ -372,8 +375,19 @@ void Renderer::Impl::load_materials() {
         pool.push_back(std::async(std::launch::async, [&] {
             for (std::size_t i = next++; i < material_count; i = next++) {
                 const auto& source = material_sources[i];
-                uploads[i] = {.mips = assets::load_material(directory / "assets/materials" / source.file, source.desc),
-                              .slot = source.slot};
+                const auto path = directory / "assets/materials" / source.file;
+                if (source.optional && !std::filesystem::exists(path)) {
+                    log::warn("{} is missing; run tools/import-assets.ps1 to bake it (its effect is off)", source.file);
+                    assets::Image neutral{.extent = {4, 4}, .pixels = {}};
+                    neutral.pixels.resize(4 * 4 * 4);
+                    for (std::size_t p = 0; p < 16; p++) {
+                        neutral.pixels[p * 4] = neutral.pixels[p * 4 + 1] = 128; // zero signed flow
+                        neutral.pixels[p * 4 + 3] = 255;
+                    }
+                    uploads[i] = {.mips = {neutral}, .slot = source.slot};
+                    continue;
+                }
+                uploads[i] = {.mips = assets::load_material(path, source.desc), .slot = source.slot};
             }
         }));
     for (auto& worker : pool)

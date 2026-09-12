@@ -256,6 +256,17 @@
       "source_sha256": "63BB4105E6F60B5968DA785AFC292B94026A5AFA6F18388E98B00232E9E2C433",
       "source_width": 2048,
       "source_height": 2048
+    },
+    {
+      "file": "gas_flow.png",
+      "width": 1024,
+      "height": 512,
+      "color_space": "linear-data",
+      "license": "CC-BY-4.0",
+      "attribution": "Baked by tools/bake-flow-map.py: zonal winds after Porco et al. 2003 and Limaye 1986, vortices placed for the Solar System Scope Jupiter albedo",
+      "source": "gas_albedo.png",
+      "layout": "R east and G south flow, 0.5 + v * 1.6e6 / 2 in texture units per second at real speed; B turbulence weight",
+      "max_speed_ms": 202.6
     }
   ]
 }

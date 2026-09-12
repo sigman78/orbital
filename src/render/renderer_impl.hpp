@@ -63,6 +63,7 @@ enum class Slot : unsigned {
     belt_dust = 37,       // half-resolution belt dust march, composited with a depth-aware upsample
     belt_disc_light = 38, // far-belt map: sunlight reaching the belt plane, baked every few frames
     belt_disc_rocks = 39, // far-belt map: rock coverage times albedo, splatted every few dozen frames
+    gas_flow = 40,        // gas giant wind flow map, baked by tools/bake-flow-map.py
     count = ORBITAL_TEXTURE_COUNT,
 };
 

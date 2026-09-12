@@ -65,6 +65,11 @@ struct FrameInput {
     float aberration = 1.f;       // chromatic aberration scale
     float vignette = .17f;        // corner darkening
     float grain = .010f;          // film grain amplitude in display space
+    // Gas giant (panel): flow-map advection of the cloud deck.
+    bool gas_flow = true;          // off falls back to the noise warp
+    float gas_time_scale = 1500.f; // wind speed, times real
+    float gas_cycle = 12.f;        // seconds per advection phase
+    float gas_turbulence = 1.f;    // fine roiling detail
 };
 
 // Startup choices that are not part of the scene description.

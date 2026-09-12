@@ -320,6 +320,8 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.sun_disc = {input.sun_disc_radius, input.sun_limb_darkening, 0, 0};
     frame.post = {input.bloom_intensity, input.bloom_threshold, input.bloom_knee, input.aberration};
     frame.post_more = {input.vignette, input.grain, 0, 0};
+    frame.giant = {input.gas_time_scale, std::max(input.gas_cycle, .1f), input.gas_turbulence,
+                   input.gas_flow ? 1.f : 0.f};
 
     // Sun position in screen space for the lens flare, hidden when a body covers it.
     const Vec3d sun_direction = normalized(system.star.position - camera.position);

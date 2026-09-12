@@ -421,7 +421,11 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .bloom_knee = app.bloom_knee,
                                              .aberration = app.aberration,
                                              .vignette = app.vignette,
-                                             .grain = app.grain};
+                                             .grain = app.grain,
+                                             .gas_flow = app.gas_flow,
+                                             .gas_time_scale = app.gas_time_scale,
+                                             .gas_cycle = app.gas_cycle,
+                                             .gas_turbulence = app.gas_turbulence};
         renderer.set_vsync(app.vsync);
         if (renderer.draw(frame_input)) {
             frames++;

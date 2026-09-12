@@ -185,6 +185,31 @@ foreach ($asset in $assets) {
     $manifestEntries += [pscustomobject]$entry
 }
 
+# Derived maps, baked from imported textures rather than downloaded.
+$flowName = 'gas_flow'
+if ($Only.Count -gt 0 -and $Only -notcontains $flowName) {
+    $manifestEntries += ($existingManifest.assets | Where-Object { $_.file -eq ($flowName + '.png') })
+} else {
+    $flowScript = Join-Path $PSScriptRoot 'bake-flow-map.py'
+    $flowOutput = Join-Path $OutputDirectory ($flowName + '.png')
+    $json = & python $flowScript --albedo (Join-Path $OutputDirectory 'gas_albedo.png') --output $flowOutput
+    if ($LASTEXITCODE -ne 0) { throw "bake-flow-map.py failed" }
+    $flow = $json | ConvertFrom-Json
+    Write-Host ("{0,-20} {1}x{2} ({3:N1} MB)" -f ($flowName + '.png'), $flow.width, $flow.height,
+        ((Get-Item -LiteralPath $flowOutput).Length / 1MB))
+    $manifestEntries += [pscustomobject][ordered]@{
+        file = $flowName + '.png'
+        width = $flow.width
+        height = $flow.height
+        color_space = 'linear-data'
+        license = 'CC-BY-4.0'
+        attribution = 'Baked by tools/bake-flow-map.py: zonal winds after Porco et al. 2003 and Limaye 1986, vortices placed for the Solar System Scope Jupiter albedo'
+        source = 'gas_albedo.png'
+        layout = 'R east and G south flow, 0.5 + v * 1.6e6 / 2 in texture units per second at real speed; B turbulence weight'
+        max_speed_ms = $flow.max_speed_ms
+    }
+}
+
 $manifest = [ordered]@{
     version = 2
     note = 'PNG textures derived from the listed sources by tools/import-assets.ps1 (downscaled to at most 4096 px wide). Keep attribution when redistributing.'

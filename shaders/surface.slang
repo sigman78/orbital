@@ -165,7 +165,8 @@ Material earthMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     return m;
 }
 
-Material giantMaterial(SurfaceVaryings input, float3 N, float visibility)
+// The earlier look, kept behind the panel switch: a noise warp of the albedo.
+Material giantWarpMaterial(SurfaceVaryings input, float3 N, float visibility)
 {
     float t = root.frame->camera_time.w;
     float2 uv = sphereUV(normalize(input.localNormal));
@@ -190,6 +191,47 @@ Material giantMaterial(SurfaceVaryings input, float3 N, float visibility)
     float2 streamUV = uvA + warp.yx * float2(.02, .004);
     m.albedo *= 1.0 + (fbm2(streamUV * float2(700, 350) + t * .004, 3) - .5) * .30 * fine;
     m.albedo *= 1.0 + (fbm2(streamUV * float2(2400, 480) - t * .003, 2) - .5) * .18 * fine;
+    m.N = N;
+    m.rough = .95;
+    m.water = 0.0;
+    m.visibility = visibility * beltShadow(input.worldPosition);
+    return m;
+}
+
+static const uint GAS_FLOW = 40;
+// Texture units per second per unit of the flow map's signed channels, at real wind speed (FLOW_SCALE in tools/bake-flow-map.py).
+static const float GAS_FLOW_UNIT = 6.25e-7;
+
+// Fine turbulence once the 2K map is magnified so its softness never shows; rides the advected coordinate.
+float giantDetail(float2 uv, float t, float fine)
+{
+    float detail = 1.0 + (fbm2(uv * float2(700, 350) + t * .004, 3) - .5) * .30 * fine;
+    return detail * (1.0 + (fbm2(uv * float2(2400, 480) - t * .003, 2) - .5) * .18 * fine);
+}
+
+// The cloud deck advected along the baked wind map: bands shear past each
+// other, the Red Spot turns, the wakes roil. Two phases half a cycle apart
+// each displace the albedo backwards along the flow and reset before the
+// displacement smears; a triangle weight hands over between them, and a
+// per-region phase offset keeps the resets from lining up across the disc.
+Material giantMaterial(SurfaceVaryings input, float3 N, float visibility)
+{
+    float4 giant = root.frame->giant;
+    if (giant.w < .5) return giantWarpMaterial(input, N, visibility);
+    float t = root.frame->camera_time.w;
+    float2 uv = sphereUV(normalize(input.localNormal));
+    float4 flowMap = sampleSphere(textures[GAS_FLOW], uv);
+    float2 flow = (flowMap.rg * 2.0 - 1.0) * GAS_FLOW_UNIT * giant.x;
+    float cycle = giant.y;
+    float phase = fbm2(uv * float2(60, 30), 2);
+    float p0 = frac(t / cycle + phase), p1 = frac(p0 + .5);
+    float w0 = 1.0 - abs(2.0 * p0 - 1.0);
+    float2 uv0 = uv - flow * (p0 - .5) * cycle, uv1 = uv - flow * (p1 - .5) * cycle;
+    float fine = magnification(uv, GAS_TEXELS) * giant.z * (.5 + flowMap.b);
+    float3 c0 = sampleSphere(textures[4], uv0).rgb * giantDetail(uv0, t, fine);
+    float3 c1 = sampleSphere(textures[4], uv1).rgb * giantDetail(uv1, t, fine);
+    Material m;
+    m.albedo = lerp(c1, c0, w0);
     m.N = N;
     m.rough = .95;
     m.water = 0.0;

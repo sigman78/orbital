@@ -151,6 +151,22 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::EndDisabled();
         ImGui::PopID();
     }
+    if (section("Gas giant")) {
+        ImGui::Checkbox("Flow map", &app.gas_flow);
+        ImGui::BeginDisabled(!app.gas_flow);
+        ImGui::SliderFloat("Wind speed", &app.gas_time_scale, 100.f, 20000.f, "%.0f x real",
+                           ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Cycle", &app.gas_cycle, 4.f, 60.f, "%.0f s");
+        ImGui::SliderFloat("Turbulence", &app.gas_turbulence, 0.f, 3.f, "%.2f x");
+        ImGui::EndDisabled();
+        if (ImGui::SmallButton("Reset giant")) {
+            app.gas_flow = true;
+            app.gas_time_scale = 1500.f;
+            app.gas_cycle = 12.f;
+            app.gas_turbulence = 1.f;
+        }
+        ImGui::PopID();
+    }
     if (section("Earth")) {
         ImGui::SliderFloat("Ocean roughness", &app.ocean_roughness, .03f, .6f, "%.3f", ImGuiSliderFlags_Logarithmic);
         ImGui::SliderFloat("Glint intensity", &app.glint_intensity, .1f, 4.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
