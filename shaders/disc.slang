@@ -17,11 +17,6 @@ static const uint MODE_BAKE = 0, MODE_DRAW = 1;
 static const int DISC_STEPS = 12;
 static const float DUST_DENSITY = .08;   // as dust.slang: dust extinction relative to the rock coefficient
 static const float DUST_ALBEDO = .5;
-// At true scale the far belt is faint: the dust is thin and the rocks cover a
-// fraction of a percent of the plane. This boost, ramped in with the blend
-// weight and scaled by the panel's far-belt brightness, keeps the disc legible.
-static const float DISC_BOOST = 25.0;      // dust
-static const float DISC_ROCK_BOOST = 8.0;  // the rock map; small rocks are numerous, so less is needed
 static const float3 DUST_COLOUR = float3(.62, .56, .48);
 static const float DUST_FORWARD = .55, DUST_ISOTROPIC = .35;
 static const float DUST_SLAB = 3.5;      // slab half-height in flared scale heights
@@ -114,9 +109,9 @@ float4 draw(float2 position)
     // Tint and saturation from the panel, as dust.slang.
     float3 tinted = DUST_COLOUR * frame->dust_tint.xyz;
     float3 dustColour = max(lerp(dot(tinted, float3(.2126, .7152, .0722)).xxx, tinted, frame->dust.w), 0.0);
-    float boost = lerp(1.0, DISC_BOOST * frame->dust.z, weight);
-    float rockBoost = lerp(1.0, DISC_ROCK_BOOST * frame->dust.z, weight);
-    float dustDensity = frame->dust.x, dustBrightness = frame->dust.y * boost;
+    // The same distance ramp as the near march, so the handover is seamless.
+    float farScale = dustFarScale(abs(hn) - halfHeight, length(qp) - outer, halfHeight, frame->dust.z);
+    float dustDensity = frame->dust.x * farScale, dustBrightness = frame->dust.y;
 
     // Rock map minification: texels per pixel at the slab's distance.
     float texelSize = 2.0 * frame->belt_disc_right.w / frame->belt_disc.z;
@@ -148,7 +143,7 @@ float4 draw(float2 position)
 
         float4 rocks = rockMapAt(uv, taps) * profile; // coverage per unit length along the ray
         float phase = acos(clamp(dot(light, -rd), -1.0, 1.0));
-        float3 rock = rocks.rgb * rockBoost * (sunlight / PI * lambertSpherePhase(phase) + frame->sun.w * ROCK_AMBIENT);
+        float3 rock = rocks.rgb * (sunlight / PI * lambertSpherePhase(phase) + frame->sun.w * ROCK_AMBIENT);
 
         float sigma = sigmaDust + rocks.a;
         if (sigma < 1e-6) continue;

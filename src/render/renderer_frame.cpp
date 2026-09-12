@@ -34,11 +34,13 @@ inline constexpr float exposure_trim[3] = {1.f, .37f, .75f}; // ACES filmic, AgX
 } // namespace tone_curves
 
 // The belt fades from its near paths (dust march, splats) to the baked disc
-// between these distances outside the belt, in belt widths; the slab half
-// height matches DUST_SLAB in dust.slang.
+// between these distances outside the belt, in units of the dust's distance
+// ramp (DUST_FAR_DISTANCE slab half-heights; the ramp saturates at 1), so the
+// handover happens once both paths agree on brightness. The slab half height
+// matches DUST_SLAB in dust.slang.
 namespace belt_lod {
-inline constexpr double fade_start = .5, fade_end = 2.0;
-inline constexpr double slab_half_heights = 3.5;
+inline constexpr double fade_start = 1.0, fade_end = 2.0;
+inline constexpr double slab_half_heights = 3.5, ramp_half_heights = 6.0;
 } // namespace belt_lod
 
 namespace exposure_meter {
@@ -286,8 +288,8 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
         const double h = dot(q, normal);
         const double r = length(q - normal * h);
         const double slab = ring.thickness * .5 * 1.4 * belt_lod::slab_half_heights;
-        const double width = ring.outer_radius - ring.inner_radius;
-        const double outside = std::max(std::max(std::abs(h) - slab, r - reach), 0.0) / width;
+        const double outside = std::max(std::max(std::abs(h) - slab, r - reach), 0.0) /
+                               (slab * belt_lod::ramp_half_heights);
         const double scale = std::max(double(input.belt_lod_scale), .05);
         const double u = std::clamp(
             (outside / scale - belt_lod::fade_start) / (belt_lod::fade_end - belt_lod::fade_start), 0.0, 1.0);

@@ -25,13 +25,6 @@ static const float DUST_ALBEDO = .5;     // single-scattering albedo of the medi
 static const float3 DUST_COLOUR = float3(.62, .56, .48); // the belt's greyish-brown regolith, finer
 static const float DUST_FORWARD = .55;   // Henyey-Greenstein g: fine dust scatters forward
 static const float DUST_ISOTROPIC = .35; // share of an isotropic lobe, standing in for multiple scattering and back-scatter
-// With the far-belt disc LOD switched off, this pass is the belt at every
-// distance: seen from outside, each pixel's column through the thin medium is
-// short and the belt would vanish, so the density rises with the camera's
-// distance from the slab (in slab half-heights) and the belt keeps reading as
-// a faint disc, the look the disc LOD replaced.
-static const float DUST_FAR_SCALE = 30.0;
-static const float DUST_FAR_DISTANCE = 6.0;
 static const float DUST_SLAB = 3.5;      // slab half-height in flared scale heights; the Gaussian is negligible beyond
 static const float UPSAMPLE_DEPTH_TOLERANCE = .05; // relative depth difference at which a tap loses half its weight
 
@@ -106,8 +99,7 @@ float4 march(float2 fullResPixel, int2 depthPixel)
     t0 = max(t0, 0.0);
     t1 = min(t1, sceneDepthAt(depthPixel) / max(dot(rd, frame->forward_exposure.xyz), 1e-4));
     if (t1 <= t0) return float4(0.0, 0.0, 0.0, 0.0);
-    float outside = max(max(abs(hn) - halfHeight, 0.0), max(length(qp) - outer, 0.0)) / (halfHeight * DUST_FAR_DISTANCE);
-    float farScale = frame->belt_disc.w > .5 ? 1.0 : lerp(1.0, DUST_FAR_SCALE * frame->dust.z, saturate(outside));
+    float farScale = dustFarScale(abs(hn) - halfHeight, length(qp) - outer, halfHeight, frame->dust.z);
 
     // Tint and saturation from the panel: the tinted colour pulled toward or past its luminance.
     float3 tinted = DUST_COLOUR * frame->dust_tint.xyz;

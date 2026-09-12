@@ -102,6 +102,20 @@ float beltRockTransmittance(Frame* frame, float3 point)
     return exp(-sum * BELT_MAP_OPACITY);
 }
 
+// Seen from outside the belt, each pixel's column through the thin dust is
+// short and the belt would vanish; the dust density rises with the camera's
+// distance from the slab (in slab half-heights) so the belt keeps reading as
+// a faint disc. Both the near march and the baked far disc apply the same
+// ramp, so handing over between them changes nothing but the integration.
+static const float DUST_FAR_SCALE = 30.0;
+static const float DUST_FAR_DISTANCE = 6.0; // half-heights at which the ramp saturates
+
+float dustFarScale(float aboveSlab, float beyondEdge, float halfHeight, float brightness)
+{
+    float outside = max(max(aboveSlab, beyondEdge), 0.0) / (halfHeight * DUST_FAR_DISTANCE);
+    return lerp(1.0, DUST_FAR_SCALE * brightness, saturate(outside));
+}
+
 // Disc-averaged brightness of a Lambertian sphere at phase angle alpha (the
 // sun-rock-camera angle), relative to a flat lit surface: 2/3 at full phase,
 // falling to zero at new phase. This is what a sub-pixel rock looks like.
