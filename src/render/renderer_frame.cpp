@@ -197,28 +197,32 @@ void Renderer::Impl::read_gpu_timings() {
 }
 
 void Renderer::Impl::apply_metering() {
-    if (!meter_pending)
-        return;
-    // Each meter texel holds log luminance, luminance and its centre weight.
-    const auto* values = reinterpret_cast<const float*>(luminance_readback.range.cpu);
-    float log_sum = 0, weight_sum = 0;
-    for (unsigned i = 0; i < targets::meter_size * targets::meter_size; i++)
-        if (values[i * 4 + 1] > exposure_meter::min_luminance) {
-            log_sum += values[i * 4] * values[i * 4 + 2];
-            weight_sum += values[i * 4 + 2];
-        }
-    const float target = weight_sum > 0
-                             ? exposure_meter::adapted.clamp(exposure_meter::key / std::exp(log_sum / weight_sum))
-                             : 1.f;
+    if (meter_pending) {
+        // Each meter texel holds log luminance, luminance and its centre weight.
+        const auto* values = reinterpret_cast<const float*>(luminance_readback.range.cpu);
+        float log_sum = 0, weight_sum = 0;
+        for (unsigned i = 0; i < targets::meter_size * targets::meter_size; i++)
+            if (values[i * 4 + 1] > exposure_meter::min_luminance) {
+                log_sum += values[i * 4] * values[i * 4 + 2];
+                weight_sum += values[i * 4 + 2];
+            }
+        exposure_target = weight_sum > 0
+                              ? exposure_meter::adapted.clamp(exposure_meter::key / std::exp(log_sum / weight_sum))
+                              : 1.f;
+        meter_pending = false;
+    }
+    // The meter sets the target every few frames; the filter runs toward it every
+    // frame, so the exposure glides between readbacks instead of stepping at their
+    // cadence, which at the darkening time constant was a third of the gap per step.
     const auto now = std::chrono::steady_clock::now();
     const float dt = meter_time == std::chrono::steady_clock::time_point{}
                          ? exposure_meter::max_step_seconds
                          : std::min(std::chrono::duration<float>(now - meter_time).count(),
                                     exposure_meter::max_step_seconds);
     meter_time = now;
-    const float tau = target < adapted_exposure ? exposure_meter::darken_seconds : exposure_meter::brighten_seconds;
-    adapted_exposure += (target - adapted_exposure) * (1 - std::exp(-dt / tau));
-    meter_pending = false;
+    const float tau = exposure_target < adapted_exposure ? exposure_meter::darken_seconds
+                                                         : exposure_meter::brighten_seconds;
+    adapted_exposure += (exposure_target - adapted_exposure) * (1 - std::exp(-dt / tau));
 }
 
 FrameData Renderer::Impl::build_frame(const FrameInput& input) {
