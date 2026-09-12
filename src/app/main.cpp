@@ -428,7 +428,13 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .gas_turbulence = app.gas_turbulence,
                                              .gas_haze = app.gas_haze,
                                              .gas_terminator = app.gas_terminator,
-                                             .gas_relief = app.gas_relief};
+                                             .gas_relief = app.gas_relief,
+                                             .gas_lightning_rate = app.gas_lightning_rate,
+                                             .gas_lightning = app.gas_lightning,
+                                             .gas_polar = app.gas_polar,
+                                             .gas_cap_size = app.gas_cap_size,
+                                             .gas_cap_blend = app.gas_cap_blend,
+                                             .gas_cap_opacity = app.gas_cap_opacity};
         renderer.set_vsync(app.vsync);
         if (renderer.draw(frame_input)) {
             frames++;

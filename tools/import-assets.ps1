@@ -193,14 +193,16 @@ foreach ($asset in $assets) {
 # Derived maps, baked from imported textures rather than downloaded.
 $flowName = 'gas_flow'
 if ($Only.Count -gt 0 -and $Only -notcontains $flowName) {
-    $manifestEntries += ($existingManifest.assets | Where-Object { $_.file -eq ($flowName + '.png') -or $_.file -eq 'gas_detail.png' -or $_.file -eq 'gas_relief.png' })
+    $manifestEntries += ($existingManifest.assets | Where-Object { $_.file -eq ($flowName + '.png') -or $_.file -eq 'gas_detail.png' -or $_.file -eq 'gas_relief.png' -or $_.file -eq 'gas_polar.png' -or $_.file -eq 'gas_polar_flow.png' })
 } else {
     $flowScript = Join-Path $PSScriptRoot 'bake-flow-map.py'
     $flowOutput = Join-Path $OutputDirectory ($flowName + '.png')
     $detailOutput = Join-Path $OutputDirectory 'gas_detail.png'
     $reliefOutput = Join-Path $OutputDirectory 'gas_relief.png'
+    $polarOutput = Join-Path $OutputDirectory 'gas_polar.png'
+    $polarFlowOutput = Join-Path $OutputDirectory 'gas_polar_flow.png'
     $json = & python $flowScript --albedo (Join-Path $OutputDirectory 'gas_albedo.png') --output $flowOutput `
-        --detail-output $detailOutput --relief-output $reliefOutput
+        --detail-output $detailOutput --relief-output $reliefOutput --polar-output $polarOutput --polar-flow-output $polarFlowOutput
     if ($LASTEXITCODE -ne 0) { throw "bake-flow-map.py failed" }
     $flow = $json | ConvertFrom-Json
     Write-Host ("{0,-20} {1}x{2} ({3:N1} MB)" -f ($flowName + '.png'), $flow.width, $flow.height,
@@ -221,6 +223,30 @@ if ($Only.Count -gt 0 -and $Only -notcontains $flowName) {
         height_min_m = $flow.relief_height_min_m
         height_max_m = $flow.relief_height_max_m
         slope_max = $flow.relief_slope_max
+    }
+    Write-Host ("{0,-20} {1}x{2} ({3:N1} MB)" -f 'gas_polar.png', $flow.polar_size, (2 * $flow.polar_size),
+        ((Get-Item -LiteralPath $polarOutput).Length / 1MB))
+    $manifestEntries += [pscustomobject][ordered]@{
+        file = 'gas_polar.png'
+        width = $flow.polar_size
+        height = 2 * $flow.polar_size
+        color_space = 'sRGB'
+        license = 'CC-BY-4.0'
+        attribution = 'Baked by tools/bake-flow-map.py alongside gas_flow.png: the polar caps: the albedo itself, its 67 to 77 degree cloud texture projected planarly over the smeared pole, cyclone clusters after Adriani et al. 2018 (Nature 555)'
+        source = 'gas_albedo.png'
+        layout = 'azimuthal projection of the cap within polar_cap_deg of each pole, north above south'
+        polar_cap_deg = $flow.polar_cap_deg
+    }
+    $manifestEntries += [pscustomobject][ordered]@{
+        file = 'gas_polar_flow.png'
+        width = $flow.polar_size / 2
+        height = $flow.polar_size
+        color_space = 'linear-data'
+        license = 'CC-BY-4.0'
+        attribution = 'Baked by tools/bake-flow-map.py alongside gas_polar.png: the cyclones'' winds in the cap projection'
+        source = 'gas_polar.png'
+        layout = 'R and G cap-space flow, 0.5 + v * 4e5 / 2 in cap texture units per second at real speed; same atlas layout'
+        max_speed_ms = $flow.polar_max_speed_ms
     }
     $manifestEntries += [pscustomobject][ordered]@{
         file = 'gas_detail.png'

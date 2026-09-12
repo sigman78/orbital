@@ -273,6 +273,28 @@
       "slope_max": 0.1
     },
     {
+      "file": "gas_polar.png",
+      "width": 1024,
+      "height": 2048,
+      "color_space": "sRGB",
+      "license": "CC-BY-4.0",
+      "attribution": "Baked by tools/bake-flow-map.py alongside gas_flow.png: the polar caps: the albedo itself, its 67 to 77 degree cloud texture projected planarly over the smeared pole, cyclone clusters after Adriani et al. 2018 (Nature 555)",
+      "source": "gas_albedo.png",
+      "layout": "azimuthal projection of the cap within polar_cap_deg of each pole, north above south",
+      "polar_cap_deg": 20.0
+    },
+    {
+      "file": "gas_polar_flow.png",
+      "width": 512,
+      "height": 1024,
+      "color_space": "linear-data",
+      "license": "CC-BY-4.0",
+      "attribution": "Baked by tools/bake-flow-map.py alongside gas_polar.png: the cyclones' winds in the cap projection",
+      "source": "gas_polar.png",
+      "layout": "R and G cap-space flow, 0.5 + v * 4e5 / 2 in cap texture units per second at real speed; same atlas layout",
+      "max_speed_ms": 116.8
+    },
+    {
       "file": "gas_detail.png",
       "width": 4096,
       "height": 2048,

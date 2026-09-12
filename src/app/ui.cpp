@@ -162,6 +162,14 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::SliderFloat("Limb haze", &app.gas_haze, 0.f, .5f, "%.3f");
         ImGui::SliderFloat("Terminator softness", &app.gas_terminator, 0.f, .3f, "%.3f");
         ImGui::SliderFloat("Cloud relief", &app.gas_relief, 0.f, 20.f, "%.1f x");
+        ImGui::SliderFloat("Lightning rate", &app.gas_lightning_rate, 0.f, 40.f, "%.0f /s");
+        ImGui::SliderFloat("Lightning brightness", &app.gas_lightning, 0.f, 4.f, "%.2f x");
+        ImGui::Checkbox("Polar cyclones", &app.gas_polar);
+        ImGui::BeginDisabled(!app.gas_polar);
+        ImGui::SliderFloat("Cap size", &app.gas_cap_size, .5f, 3.f, "%.2f x");
+        ImGui::SliderFloat("Cap blend", &app.gas_cap_blend, .05f, 1.f, "%.2f");
+        ImGui::SliderFloat("Cap opacity", &app.gas_cap_opacity, 0.f, 1.f, "%.2f");
+        ImGui::EndDisabled();
         if (ImGui::SmallButton("Reset giant")) {
             app.gas_flow = true;
             app.gas_time_scale = 1500.f;
@@ -170,6 +178,12 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
             app.gas_haze = .08f;
             app.gas_terminator = .08f;
             app.gas_relief = 6.f;
+            app.gas_lightning_rate = 4.f;
+            app.gas_lightning = 1.f;
+            app.gas_polar = true;
+            app.gas_cap_size = 1.5f;
+            app.gas_cap_blend = .5f;
+            app.gas_cap_opacity = 1.f;
         }
         ImGui::PopID();
     }

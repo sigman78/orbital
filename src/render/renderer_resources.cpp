@@ -70,6 +70,8 @@ constexpr MaterialSource material_sources[] = {
     {"gas_flow.png", Slot::gas_flow, {}, true},     // baked from the gas albedo; neutral (no flow) when absent
     {"gas_detail.png", Slot::gas_detail, {}, true}, // baked alongside it; flat (no detail) when absent
     {"gas_relief.png", Slot::gas_relief, {}, true}, // baked alongside it; flat (no relief) when absent
+    {"gas_polar.png", Slot::gas_polar, {.encoding = MaterialEncoding::SRGB}, true}, // baked alongside it; the caps stay the map when absent
+    {"gas_polar_flow.png", Slot::gas_polar_flow, {}, true},
 };
 constexpr std::size_t material_count = std::size(material_sources);
 static_assert(material_count <= inline_upload_count);
@@ -380,6 +382,8 @@ void Renderer::Impl::load_materials() {
                 const auto path = directory / "assets/materials" / source.file;
                 if (source.optional && !std::filesystem::exists(path)) {
                     log::warn("{} is missing; run tools/import-assets.ps1 to bake it (its effect is off)", source.file);
+                    if (source.slot == Slot::gas_polar)
+                        polar_caps = false;
                     assets::Image neutral{.extent = {4, 4}, .pixels = {}};
                     neutral.pixels.resize(4 * 4 * 4);
                     for (std::size_t p = 0; p < 16; p++) {

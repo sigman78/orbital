@@ -73,6 +73,12 @@ struct FrameInput {
     float gas_haze = .08f;         // optical depth of the limb haze at normal incidence
     float gas_terminator = .08f;   // wrap of the deck's lighting past the terminator (cosine units)
     float gas_relief = 6.f;        // exaggeration of the cloud-top slopes
+    float gas_lightning_rate = 4.f; // night-side lightning, flashes per second over the planet
+    float gas_lightning = 1.f;      // lightning brightness
+    bool gas_polar = true;          // baked polar cyclone caps over the map's smeared poles
+    float gas_cap_size = 1.5f;      // scale of the caps on the sphere; 1 is Juno's measured size
+    float gas_cap_blend = .5f;      // crossfade into the map, as a fraction of the cap's radius
+    float gas_cap_opacity = 1.f;    // how fully the cap replaces the map
 };
 
 // Startup choices that are not part of the scene description.

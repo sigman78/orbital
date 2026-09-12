@@ -55,6 +55,9 @@ struct AppState {
     bool gas_flow = true; // Gas giant panel
     float gas_time_scale = 1500.f, gas_cycle = 12.f, gas_turbulence = 1.f;
     float gas_haze = .08f, gas_terminator = .08f, gas_relief = 6.f;
+    float gas_lightning_rate = 4.f, gas_lightning = 1.f;
+    bool gas_polar = true;
+    float gas_cap_size = 1.5f, gas_cap_blend = .5f, gas_cap_opacity = 1.f;
     float pan = 0; // lateral drift added to the move axis (--pan)
     float exposure = 1.0f;
     unsigned selected_body = 0;

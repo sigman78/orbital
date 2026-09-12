@@ -59,6 +59,19 @@ RELIEF_SLOPE_MAX) / 2) rather than as a normal, because the slopes that matter
 are a few thousandths and at grazing light an 8-bit normal's quantisation
 draws the texel rows as stripes; the encoding gives them ten times the levels.
 
+With --polar-output and --polar-flow-output, the polar caps: Juno found each
+pole holds a central cyclone ringed by circumpolar cyclones near 84 degrees,
+eight of 4,000 to 4,600 km in the north and five of 5,600 to 7,000 km in the
+south, with winds of 55 to 95 m/s (Adriani et al. 2018, Nature 555). The
+Cassini map is oblique and smeared there, so above 74 degrees the shader
+blends to these caps instead: an atlas of two azimuthal projections (north
+above south) of the cap within 20 degrees of each pole, holding an albedo
+synthesised over the map's own polar cloud texture (filaments from
+line integral convolution along the cyclones' flow, a darker eye and brighter
+ring per cyclone, a few white pop-up ovals) and a flow map of the cyclones in
+the cap's own coordinates (0.5 + v * POLAR_FLOW_SCALE / 2, in cap texture
+units per second), so the same two-phase advection turns them.
+
 Requires Python 3 with numpy and Pillow.
 """
 import argparse
@@ -216,6 +229,129 @@ RELIEF_OVAL_KM = 4.0
 
 RELIEF_SLOPE_MAX = .1  # slope at the encoding's full scale; the physical slopes peak near .05
 
+# --- Polar caps -------------------------------------------------------------------
+
+POLAR_CAP_DEG = 20.0          # colatitude the cap covers; the shader blends it in above 74 degrees
+POLAR_FLOW_SCALE = 4e5        # 1.0 in a decoded channel is 2.5e-6 cap texture units per second (122 m/s)
+# Circumpolar cyclones after Adriani et al. 2018: count, diameter, the central cyclone's, the ring's latitude.
+POLES = [
+    {"name": "north", "count": 8, "diameter_km": 4300.0, "central_km": 4000.0, "ring_lat": 84.0, "phase": .1},
+    {"name": "south", "count": 5, "diameter_km": 6300.0, "central_km": 5800.0, "ring_lat": 84.0, "phase": .4},
+]
+CYCLONE_SPEED_MS = 95.0       # peak tangential wind at a cyclone's radius
+
+
+def bake_polar(albedo_path, size, rng):
+    """Albedo and flow atlases of the two polar caps, north above south."""
+    cap = math.sin(math.radians(POLAR_CAP_DEG))
+    radius_km = RADIUS_EQUATORIAL_M / 1000.0
+    source = np.asarray(Image.open(albedo_path).convert("RGB"), dtype=np.float64) / 255.0
+    rows = source.shape[0]
+    u = (np.arange(size) + .5) / size
+    xx, zz = np.meshgrid((u - .5) * 2.0 * cap, (u - .5) * 2.0 * cap)  # unit-sphere x and z, rows run along z
+    rho = np.sqrt(xx * xx + zz * zz)
+    colat = np.degrees(np.arcsin(np.clip(rho, 0.0, 1.0)))
+    albedo_atlas = np.zeros((2 * size, size, 4), dtype=np.uint8)
+    flow_atlas = np.zeros((size, size // 2, 4), dtype=np.uint8)
+    for index, pole in enumerate(POLES):
+        # Cyclones: the central one and the ring; each a Rankine vortex tapered beyond its radius,
+        # turning with the planet (from +x toward +z), which is cyclonic at both poles.
+        centres = [(0.0, 0.0, pole["central_km"] / 2.0)]
+        ring = math.sin(math.radians(90.0 - pole["ring_lat"]))
+        for k in range(pole["count"]):
+            angle = 2.0 * math.pi * (k + pole["phase"]) / pole["count"]
+            centres.append((ring * math.cos(angle), ring * math.sin(angle), pole["diameter_km"] / 2.0))
+        vx = np.zeros_like(xx)
+        vz = np.zeros_like(xx)
+        structure = np.zeros_like(xx)  # eye and ring shading
+        for cx, cz, radius_c in centres:
+            dx, dz = xx - cx, zz - cz
+            r = np.maximum(np.sqrt(dx * dx + dz * dz), 1e-9) * radius_km
+            inside = r < radius_c
+            speed = np.where(inside, CYCLONE_SPEED_MS * r / radius_c,
+                             CYCLONE_SPEED_MS * radius_c / r * np.exp(-((r - radius_c) / (1.6 * radius_c)) ** 2))
+            vx += speed * (-dz) / (r / radius_km)
+            vz += speed * dx / (r / radius_km)
+            structure += -.14 * np.exp(-(r / (.35 * radius_c)) ** 2) + .07 * np.exp(-((r - .7 * radius_c) / (.18 * radius_c)) ** 2)
+        # The folded filamentary region between and beyond the cyclones: a slow
+        # circumpolar drift with large, slow eddies folded into it.
+        drift = 8.0 * smoothstep(4.0, 12.0, colat)
+        vx += drift * (-zz) / np.maximum(rho, 1e-9)
+        vz += drift * xx / np.maximum(rho, 1e-9)
+        potential = periodic_noise(size, size, 7, rng) + .5 * periodic_noise(size, size, 16, rng) + .2 * periodic_noise(size, size, 40, rng)
+        dpz, dpx = np.gradient(potential, 1.0 / size, 1.0 / size)
+        turb_x, turb_z = -dpz, dpx
+        rms = math.sqrt(float(np.mean(turb_x ** 2 + turb_z ** 2)))
+        vx += turb_x / rms * 10.0
+        vz += turb_z / rms * 10.0
+        flow_u = vx / (2.0 * cap * RADIUS_EQUATORIAL_M)
+        flow_v = vz / (2.0 * cap * RADIUS_EQUATORIAL_M)
+
+        # Colour: the map itself beyond 15 degrees from the pole, so the blend margin joins
+        # identical pixels. Nearer the pole the map is smeared into spokes, so the inner disc
+        # is a planar projection of a clean patch of the map's own polar cloud texture, from
+        # the 67 to 77 degree band, at physical scale times 1.5 (like a triplanar projection,
+        # but for one pole), crossfaded between 11 and 15 degrees; with a hint of the
+        # blue-grey JunoCam shows toward the pole.
+        channels = [blur(source[..., c], .7) for c in range(3)]
+
+        def map_colour(px, py):
+            return np.stack([sample_bilinear(channel, px, np.clip(py, 0.0, rows - 1.001)) for channel in channels], axis=-1)
+
+        lon_u = np.arctan2(zz, xx) / (2.0 * math.pi) + .5
+        lat = 90.0 - colat if pole["name"] == "north" else colat - 90.0
+        direct = map_colour(lon_u * source.shape[1] - .5, (.5 - lat / 180.0) * rows - .5)
+        patch_lat = 72.0 if pole["name"] == "north" else -72.0
+        patch_u = .25 if pole["name"] == "north" else .65
+        scale = 1.5
+        patch_px = (patch_u + xx / (2.0 * math.pi * math.cos(math.radians(patch_lat))) / scale) * source.shape[1] - .5
+        patch_py = (.5 - (patch_lat + np.degrees(zz) / scale) / 180.0) * rows - .5
+        planar = map_colour(patch_px, patch_py)
+        inner = smoothstep(15.0, 11.0, colat)[..., None]
+        base = direct * (1.0 - inner) + planar * inner
+        luminance = base @ np.array([.2126, .7152, .0722])
+        polar_tint = np.array([.88, .92, 1.0]) * luminance[..., None]
+        toward_pole = (.12 * smoothstep(12.0, 4.0, colat))[..., None]
+        colour = base * (1.0 - toward_pole) + polar_tint * toward_pole
+        # Filaments belong to the cyclones; between them the map's own clouds carry the texture.
+        cyclone_mask = np.zeros_like(xx)
+        for cx, cz, radius_c in centres:
+            cyclone_mask = np.maximum(cyclone_mask, np.exp(-(((xx - cx) ** 2 + (zz - cz) ** 2) * radius_km ** 2) / (1.4 * radius_c) ** 2))
+
+        # Filaments along the flow, two octaves, plus a darker eye and brighter ring per cyclone and white pop-up ovals.
+        speed = np.sqrt(flow_u ** 2 + flow_v ** 2)
+        du = (flow_u / np.maximum(speed, 1e-20)).astype(np.float32)
+        dv = (flow_v / np.maximum(speed, 1e-20)).astype(np.float32)
+        norm = np.maximum(np.sqrt((du * size) ** 2 + (dv * size) ** 2), 1e-9)
+        du, dv = du / norm, dv / norm
+        shading = np.zeros_like(xx)
+        for sigma, length, weight in ((.8, 18, .06), (2.4, 45, .05)):
+            noise = blur(rng.standard_normal((size, size)).astype(np.float32), sigma).astype(np.float32)
+            streaks = lic(du, dv, noise, length)
+            streaks = (streaks - streaks.mean()) / max(float(streaks.std()), 1e-9)
+            shading += weight * streaks
+        shading *= .25 + .75 * cyclone_mask  # filaments belong to the cyclones; between them the map carries the texture
+        shading += structure
+        shading *= smoothstep(16.0, 9.0, colat)  # nothing added where the map takes over
+        for _ in range(4):
+            angle, distance = rng.uniform(0, 2 * math.pi), rng.uniform(.5, 1.6) * ring
+            r_oval = rng.uniform(250.0, 450.0) / radius_km
+            dx, dz = xx - distance * math.cos(angle), zz - distance * math.sin(angle)
+            shading += .2 * np.exp(-(dx * dx + dz * dz) / (2.0 * r_oval * r_oval))
+        rgb = np.clip(colour * (1.0 + shading)[..., None], 0.0, 1.0)
+        albedo_atlas[index * size:(index + 1) * size, :, :3] = np.rint(rgb * 255.0).astype(np.uint8)
+        albedo_atlas[index * size:(index + 1) * size, :, 3] = 255
+        half = size // 2
+        fu = np.asarray(Image.fromarray(flow_u.astype(np.float32), mode="F").resize((half, half), Image.BOX), dtype=np.float64)
+        fv = np.asarray(Image.fromarray(flow_v.astype(np.float32), mode="F").resize((half, half), Image.BOX), dtype=np.float64)
+        flow_atlas[index * half:(index + 1) * half, :, 0] = np.clip(np.rint((0.5 + fu * POLAR_FLOW_SCALE * 0.5) * 255.0), 0, 255)
+        flow_atlas[index * half:(index + 1) * half, :, 1] = np.clip(np.rint((0.5 + fv * POLAR_FLOW_SCALE * 0.5) * 255.0), 0, 255)
+        flow_atlas[index * half:(index + 1) * half, :, 2] = 0
+        flow_atlas[index * half:(index + 1) * half, :, 3] = 255
+    stats = {"polar_size": size, "polar_cap_deg": POLAR_CAP_DEG, "polar_flow_scale": POLAR_FLOW_SCALE,
+             "polar_max_speed_ms": round(float(np.sqrt(vx ** 2 + vz ** 2).max()), 1)}
+    return albedo_atlas, flow_atlas, stats
+
 
 def bake_relief(albedo_path, detail, width):
     """Slope+height map of the cloud deck: bright is high at the band scale, vortices are domes, filaments ridges."""
@@ -293,9 +429,14 @@ def main():
     parser.add_argument("--detail-width", type=int, default=4096)
     parser.add_argument("--relief-output", help="also bake the cloud-top relief (normal+height) map here; needs the detail")
     parser.add_argument("--relief-width", type=int, default=2048)
+    parser.add_argument("--polar-output", help="also bake the polar cap albedo atlas here")
+    parser.add_argument("--polar-flow-output", help="and the polar cap flow atlas here")
+    parser.add_argument("--polar-size", type=int, default=1024)
     args = parser.parse_args()
     if args.relief_output and not args.detail_output:
         parser.error("--relief-output needs --detail-output")
+    if bool(args.polar_output) != bool(args.polar_flow_output):
+        parser.error("--polar-output and --polar-flow-output go together")
 
     width, height = args.width, args.width // 2
     albedo = Image.open(args.albedo).convert("RGB").resize((width, height), Image.LANCZOS)
@@ -408,6 +549,11 @@ def main():
         if args.relief_output:
             relief, relief_stats = bake_relief(args.albedo, detail, args.relief_width)
             Image.fromarray(relief, mode="RGBA").save(args.relief_output, optimize=True)
+    polar_stats = {}
+    if args.polar_output:
+        polar_albedo, polar_flow, polar_stats = bake_polar(args.albedo, args.polar_size, np.random.default_rng(args.seed + 1))
+        Image.fromarray(polar_albedo, mode="RGBA").save(args.polar_output, optimize=True)
+        Image.fromarray(polar_flow, mode="RGBA").save(args.polar_flow_output, optimize=True)
 
     speed_ms = np.sqrt((flow_u * 2.0 * math.pi * RADIUS_EQUATORIAL_M * cos_lat) ** 2
                        + (flow_v * math.pi * RADIUS_POLAR_M) ** 2)
@@ -420,6 +566,7 @@ def main():
         "flow_scale": FLOW_SCALE,
         "clipped": int(np.sum((np.abs(flow_u) > 1.0 / FLOW_SCALE) | (np.abs(flow_v) > 1.0 / FLOW_SCALE))),
         **relief_stats,
+        **polar_stats,
     }))
 
 

@@ -65,7 +65,9 @@ enum class Slot : unsigned {
     belt_disc_rocks = 39, // far-belt map: rock coverage times albedo, splatted every few dozen frames
     gas_flow = 40,        // gas giant wind flow map, baked by tools/bake-flow-map.py
     gas_detail = 41,      // gas giant flow-aligned fine detail, baked alongside it
-    gas_relief = 42,      // gas giant cloud-top normal+height, baked alongside it
+    gas_relief = 42,      // gas giant cloud-top slopes and height, baked alongside it
+    gas_polar = 43,       // gas giant polar cap albedo atlas (north above south), baked alongside it
+    gas_polar_flow = 44,  // gas giant polar cap flow atlas
     count = ORBITAL_TEXTURE_COUNT,
 };
 
@@ -248,6 +250,7 @@ struct Renderer::Impl {
     // The bodies occupy instance slots 0..body_count-1 in system order. The
     // three anchors carry atmospheres and shadow maps.
     unsigned body_count = 0, earth_index = 0, giant_index = 0, mars_index = 0;
+    bool polar_caps = true; // the gas giant's polar cap atlas loaded; the blend is skipped without it
 
     // Frame state.
     Extent2D extent{};
