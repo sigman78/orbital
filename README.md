@@ -1,6 +1,6 @@
 # ORBITAL
 
-Native Windows and Linux C++20 space demo on a compatibility fork of [NoGraphicsAPI](https://github.com/sebbbi/NoGraphicsAPI): an Earth-like world, a gas giant with a half-million-rock asteroid belt, a rocky moon, a desert world with two moonlets. Sourced material maps, atmospheric scattering, shadows, HDR with exposure adaptation and bloom, temporal plus SMAA anti-aliasing, three tone curves and a Dear ImGui control panel.
+Native Windows and Linux C++20 space demo on a compatibility fork of [NoGraphicsAPI](https://github.com/sebbbi/NoGraphicsAPI): an Earth-like world, a gas giant with asteroid belt, a rocky moon, a desert world.
 
 ![Earth with the gas giant and its belt behind it](docs/images/earth.jpg)
 
@@ -8,9 +8,9 @@ Native Windows and Linux C++20 space demo on a compatibility fork of [NoGraphics
 | --- | --- |
 | ![City lights at dawn](docs/images/dawn.jpg) | ![The desert world](docs/images/mars.jpg) |
 
-## The belt
+## Details
 
-280,000 rocks in baseline and 520,000 in high quality, placed with rings, a gap, tapered edges, flared height, a power-law size distribution and three composition classes. Rocks come from a library of 16 seeded shapes at 6 detail levels (20 to 20k triangles), with three scanned rock sets blended per rock and triplanar mapping with parallax up close. A compute pass culls the whole population every frame (frustum, planet occlusion, projected size) and writes indirect draws for one pooled multi-draw; rocks under a few pixels become lit sphere-impostor splats. Rocks lose sunlight to the belt's own density, to a transmittance map splatted by the largest rocks and to the planets' shadows, and the fine matter between them is a scattering medium marched at half resolution. Once the camera leaves the belt, the rocks and dust blend into a baked disc: two maps over the belt plane, sunlight with the planets' shadows and the small rocks' coverage, marched through the slab's thickness so edge-on views keep their depth.
+Sourced material maps, atmospheric scattering, shadows, HDR with exposure adaptation and bloom, temporal plus SMAA anti-aliasing, three tone curves and a Dear ImGui control panel.
 
 ## Build
 
@@ -61,19 +61,6 @@ F12 opens the control panel (`--ui` opens it at start), which holds frame statis
 | `docs/` | Architecture, decisions, foundation, assets and code style ([index](docs/README.md)) |
 | `third_party/` | Vendored NoGraphicsAPI fork with its patch against upstream, Dear ImGui, SMAA tables, Wuffs and stb_image_write ([details](third_party/README.md)) |
 
-## Development
-
-Sources are formatted with clang-format and checked in CI; `.clang-tidy` provides advisory static analysis. Conventions are in [docs/CODE_STYLE.md](docs/CODE_STYLE.md); see [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow. Every rendering decision is logged with its measurements in [docs/DECISIONS.md](docs/DECISIONS.md).
-
-```powershell
-./tools/format.ps1          # format src/ and tests/
-./tools/format.ps1 -Check   # verify without changing files
-./tools/check-gcc.ps1       # build and run the CPU layers with MinGW GCC, as CI does on Linux
-```
-
-## Status
-
-Developed and measured on a GeForce GTX 1080 Ti, where the belt view runs at about 7.7 ms per frame at 1080p in high quality. Internal HDR is tone-mapped to SDR; there is no native HDR display output. Distances are deliberately compressed so several bodies share a frame. Atmospheres, clouds and the belt dust are single-scattering approximations, and the temporal pass has no per-object motion vectors.
 
 ## License
 
