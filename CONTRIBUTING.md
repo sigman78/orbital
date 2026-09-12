@@ -40,9 +40,9 @@ clang-tidy -p build/release src/scene/system.cpp
 ctest --preset release
 ```
 
-All CTest suites (system, geometry, camera, image and material loading) are CPU-only and run in CI with
+All seven CTest suites (core, system, geometry, camera, image, kernels and materials) are CPU-only and run in CI with
 `ORBITAL_BUILD_DEMO=OFF`. The window smoke test (`tools/smoke-window.ps1`) needs a GPU and runs locally.
-`tools/check-stability.ps1` compares two fixed-time captures; see [docs/STABILITY.md](docs/STABILITY.md).
+`tools/check-stability.ps1` compares two fixed-time captures pixel by pixel; it needs a GPU as well.
 
 ## Portability check
 
@@ -58,4 +58,4 @@ Changes to `third_party/NoGraphicsAPI` must keep the upstream style and be refle
 ## Documentation
 
 Design and status documents live in `docs/`; start with [docs/README.md](docs/README.md).
-Record design changes in `docs/DECISIONS.md` and keep task status in `docs/TASKS.md`.
+Record design changes, with what was measured, in `docs/DECISIONS.md`; keep `docs/ARCHITECTURE.md` describing what exists.

@@ -16,14 +16,14 @@ Configure NoGraphicsAPI with `NOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND=ON`. `Dev
 
 - Root bytes are ordinary Vulkan push constants, visible to all stages. The maximum is `DeviceCaps::max_push_data_size`.
 - GPU buffer pointers remain Vulkan buffer device addresses, exposed to shaders as typed Slang pointers.
-- Set 0, binding 0 is a fixed array of 24 separate sampled images.
+- Set 0, binding 0 is a fixed array of 40 separate sampled images.
 - Set 0, binding 1 is a fixed array of 4 separate samplers.
 - Entry points are `vertexMain` and `fragmentMain` on both backends, as upstream; Slang is compiled with `-fvk-use-entrypoint-name`.
 - Mesh shaders and storage image descriptors are unsupported. `DeviceCaps::mesh_shaders` is false.
 
 The descriptor-heap allocation/write/bind calls retain their signatures. Writes update the conventional descriptor set using the byte offset as the descriptor index. Direct and indexed draw, push roots, dynamic rendering, HDR/depth attachments, buffer copies, texture upload/readback, barriers, and swapchain presentation use core Vulkan operations.
 
-The Slang shaders implement this ABI in `shaders/common.slang` and `shaders/scene_shared.h`. Reflection verifies texture binding 0/count 24, sampler binding 1/count 4, and a 32-byte push root containing three typed 64-bit GPU pointers plus `base` and `mode`. Compile with SPIR-V 1.6, column-major matrix layout and `-fvk-use-entrypoint-name`.
+The Slang shaders implement this ABI in `shaders/common.slang` and `shaders/scene_shared.h`. Reflection verifies texture binding 0/count 40, sampler binding 1/count 4, and a 32-byte push root per pipeline: three typed 64-bit GPU pointers plus `base` and `mode` for the surface and fullscreen shaders, the rock data and scratch pointers for the culling compute shader, and a vertex pointer with a pixel scale for the overlay. Compile with SPIR-V 1.6, column-major matrix layout and `-fvk-use-entrypoint-name`.
 
 ## Build evidence and remaining validation
 
@@ -45,22 +45,4 @@ Conventional descriptor views are retired when their source texture is destroyed
 
 `tools/build-validation.ps1` reproducibly builds the official Khronos Validation Layers tag `vulkan-sdk-1.4.357.0` at commit `f4874eee15c78d7bdb2b7e60659d539f14741500`. Its pinned dependency graph supplies SPIRV-Tools 2026.3. The local install is `.tools/Vulkan-ValidationLayers/bin`; it does not register a layer globally or install a driver.
 
-### Final density/faceted/cluster validation — 2026-09-11
-
-The isolated Debug tree was configured with `cmake --preset local-debug` and built with `cmake --build build/debug`; the Release cache was not configured or modified. `ctest --test-dir build/debug --output-on-failure` passed all five tests (`system`, `geometry`, `assets`, `camera`, and `materials`) in 7.97 seconds.
-
-With `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation`, `VK_LAYER_VALIDATE_SYNC=1`, the local `VK_LAYER_PATH`, and implicit layers disabled, the following final smoke completed successfully on the GTX 1080 Ti:
-
-```text
-build/debug/orbital.exe --frames 30 --width 960 --height 540 --time 0 --bookmark 4 --high --capture captures/final-validation-bookmark4.png
-```
-
-The process exited 0 after 30 frames. Loader output confirms insertion of the local Khronos validation layer; searches for `NoGraphicsAPI validation`, `Validation Error`, `SYNC-HAZARD`, and `VUID-` returned zero findings. The 2,073,654-byte capture and stdout/stderr logs are under `captures/final-validation-bookmark4.*`.
-
-With `VK_LAYER_PATH` set to that directory and implicit layers disabled, `build/debug/orbital.exe --frames 30 --width 960 --height 540 --time 0` completed successfully on the GTX 1080 Ti with no validation warnings or errors. The installed layer DLL SHA-256 is `369ABD66F7148DD18A346760A14B346D60F8B049E4786F45378AA502D491C5F7`.
-
-Synchronization validation was then enabled explicitly with `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` and `VK_LAYER_VALIDATE_SYNC=1`. Loader diagnostics confirm the local DLL was inserted as the instance and device layer. The latest Debug executable completed the same 30-frame run without core or synchronization messages; logs are `captures/validation-sync.stdout.log` and `captures/validation-sync.stderr.log`.
-
-The window lifecycle smoke also passed under synchronization validation, including minimize/restore, three resize shapes, camera/bookmark/tour/quality inputs, clean exit, and BMP capture. Logs are `captures/validation-window.stdout.log` and `captures/validation-window.stderr.log`. The smoke script now discovers its hidden test window by process ID and class instead of relying on `MainWindowHandle`, which remains zero for a deliberately hidden launch.
-
-SPIRV-Tools 2026.3 `spirv-val --target-env vulkan1.4` accepted all seven packaged Release modules: atmosphere, background, fullscreen, post, surface vertex/fragment, and temporal. Per-file results are in `captures/spirv-validation.log`.
+With `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation`, `VK_LAYER_VALIDATE_SYNC=1` and the local `VK_LAYER_PATH`, a Debug build runs the fixed-time capture path and the window lifecycle smoke (minimize, restore, resize, key transitions) without core or synchronization findings; SPIRV-Tools `spirv-val --target-env vulkan1.4` accepts every packaged module. Repeat both after changing the backend, resource lifetimes or the shader ABI.

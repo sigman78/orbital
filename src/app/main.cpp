@@ -41,7 +41,7 @@ constexpr std::string_view window_title = "ORBITAL  /  Procedural worlds";
 
 constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
-    "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..4\n"
+    "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..5\n"
     "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --rocks N\n"
     "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --splat 0..3 --tone 0|1|2 --maximize-at N --fullscreen-at "
     "N\n"

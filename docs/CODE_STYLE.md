@@ -39,17 +39,17 @@ The tree is a strict stack. A module may include headers from the layers below i
 the layers above or beside it.
 
 ```
-app        options, camera, HUD layout, frame loop, main        (no OS headers)
+app        options, camera, HUD, control panel, frame loop     (no OS headers)
 render     Vulkan renderer through NoGraphicsAPI                (no OS headers; opaque native handle)
-platform   window, events, process, text overlay interfaces    platform/<os>/ implements them
+platform   window, events, process, text and ImGui overlays    platform/<os>/ implements them
 scene      system generation, geometry                         assets  image I/O, kernels, materials
 core       log, panic, file, math, types, small_vec            depends on nothing
 ```
 
 ### Interfaces
 
-- `platform/window.hpp`, `platform/process.hpp` and `platform/text.hpp` are the whole OS surface the
-  demo uses. They are written in the project's own types (`Extent2D`, `Bytes`, `std::string_view`,
+- `platform/window.hpp`, `platform/process.hpp`, `platform/text.hpp` and `platform/overlay.hpp` are the
+  whole OS surface the demo uses. They are written in the project's own types (`Extent2D`, `Bytes`, `std::string_view`,
   `std::filesystem::path`) and expose no OS type: no `HWND`, no `POINT`, no wide strings. The one
   concession is `Window::native_handle()`, an opaque `void*` that the renderer forwards to the
   graphics backend without interpreting it.
@@ -73,7 +73,7 @@ core       log, panic, file, math, types, small_vec            depends on nothin
   OS libraries; the demo executable links the target, not `user32` or `gdi32`.
 - Backend code follows the same rules as the rest of the tree (panics, settings, RAII wrappers such
   as `Canvas` and `SelectedFont`) and may use OS types freely inside its own `.cpp` files.
-- Adding a platform means adding `platform/<os>/` with the three implementation files, a CMake branch
+- Adding a platform means adding `platform/<os>/` with the four implementation files, a CMake branch
   selecting it, and a swapchain path for it in the graphics backend. Nothing in `app/` or `render/`
   changes.
 
