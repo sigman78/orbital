@@ -439,7 +439,9 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .gas_cap_opacity = app.gas_cap_opacity,
                                              .gas_layers = app.gas_layers,
                                              .gas_layer_lift = app.gas_layer_lift,
-                                             .gas_layer_shadow = app.gas_layer_shadow};
+                                             .gas_layer_shadow = app.gas_layer_shadow,
+                                             .gas_streaks = app.gas_streaks,
+                                             .gas_streak_strength = app.gas_streak_strength};
         renderer.set_vsync(app.vsync);
         if (renderer.draw(frame_input)) {
             frames++;

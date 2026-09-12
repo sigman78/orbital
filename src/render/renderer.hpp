@@ -68,7 +68,7 @@ struct FrameInput {
     bool motion_streaks = true;   // dust motes streaking past the moving camera
     float motion_streak_intensity = 1.f;
     // Gas giant (panel): flow-map advection of the cloud deck.
-    bool gas_flow = true;           // off falls back to the noise warp
+    bool gas_flow = true;           // off holds the cloud deck still
     float gas_time_scale = 1500.f;  // wind speed, times real
     float gas_cycle = 12.f;         // seconds per advection phase
     float gas_turbulence = 1.f;     // fine roiling detail
@@ -81,9 +81,11 @@ struct FrameInput {
     float gas_cap_size = 1.5f;      // scale of the caps on the sphere; 1 is Juno's measured size
     float gas_cap_blend = .5f;      // crossfade into the map, as a fraction of the cap's radius
     float gas_cap_opacity = 1.f;    // how fully the cap replaces the map
-    bool gas_layers = false;        // the zones' upper deck drawn with parallax over the belts
+    bool gas_layers = true;         // the zones' upper deck drawn with parallax over the belts
     float gas_layer_lift = .0015f;  // parallax lift of the zones' upper deck, texture units at a 45 degree view
     float gas_layer_shadow = .3f;   // how much the upper deck shades the belts below it
+    bool gas_streaks = true;        // per-pixel wind streaks where the filament map runs out of texels
+    float gas_streak_strength = 1.f;
 };
 
 // Startup choices that are not part of the scene description.

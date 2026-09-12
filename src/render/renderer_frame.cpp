@@ -340,7 +340,8 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.giant_more = {input.gas_haze, input.gas_terminator, input.gas_relief, input.gas_cap_opacity};
     frame.giant_night = {input.gas_lightning_rate, input.gas_lightning,
                          input.gas_polar && polar_caps ? input.gas_cap_size : 0.f, input.gas_cap_blend};
-    frame.giant_layers = {input.gas_layers ? input.gas_layer_lift : 0.f, input.gas_layer_shadow, 0, 0};
+    frame.giant_layers = {input.gas_layers ? input.gas_layer_lift : 0.f, input.gas_layer_shadow,
+                          input.gas_streaks ? input.gas_streak_strength : 0.f, 0};
 
     // Sun position in screen space for the lens flare, hidden when a body covers it.
     const Vec3d sun_direction = normalized(system.star.position - camera.position);
@@ -835,6 +836,24 @@ bool Renderer::draw(const FrameInput& input) {
         gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
                      gpu::Access::shader_read);
     }
+    }
+    // Motion streaks: world-fixed motes streak past by their own screen motion, depth tested against the scene.
+    if (input.motion_streaks && input.motion_streak_intensity > 0) {
+        gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,
+                     gpu::Access::depth_stencil_read);
+        gpu::ColorAttachment color{.render_view = s.hdr.view, .load = gpu::LoadOp::load};
+        gpu::begin_render_pass(
+            cmd, {.colors = {&color, 1}, .depth = {.render_view = s.depth.view, .load = gpu::LoadOp::load}});
+        gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
+        gpu::bind_pso(cmd, s.pso.motes);
+        root.mode = 0;
+        gpu::draw(cmd, root, 6, targets::mote_count);
+        s.stats.draw_calls++;
+        gpu::end_render_pass(cmd);
+        gpu::barrier(cmd, gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_read, gpu::Stage::fragment,
+                     gpu::Access::shader_read);
+        gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
+                     gpu::Access::shader_read);
     }
     if (input.temporal_aa) {
         gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,

@@ -152,12 +152,16 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::PopID();
     }
     if (section("Gas giant")) {
-        ImGui::Checkbox("Flow map", &app.gas_flow);
+        ImGui::Checkbox("Flow map", &app.gas_flow); // off holds the deck still
         ImGui::BeginDisabled(!app.gas_flow);
         ImGui::SliderFloat("Wind speed", &app.gas_time_scale, 100.f, 20000.f, "%.0f x real",
                            ImGuiSliderFlags_Logarithmic);
         ImGui::SliderFloat("Cycle", &app.gas_cycle, 4.f, 60.f, "%.0f s");
+        ImGui::EndDisabled();
         ImGui::SliderFloat("Turbulence", &app.gas_turbulence, 0.f, 3.f, "%.2f x");
+        ImGui::Checkbox("Close streaks", &app.gas_streaks); // per-pixel wind streaks where the filament map runs out
+        ImGui::BeginDisabled(!app.gas_streaks);
+        ImGui::SliderFloat("Streak strength", &app.gas_streak_strength, 0.f, 3.f, "%.2f x");
         ImGui::EndDisabled();
         ImGui::SliderFloat("Limb haze", &app.gas_haze, 0.f, .5f, "%.3f");
         ImGui::SliderFloat("Terminator softness", &app.gas_terminator, 0.f, .3f, "%.3f");
@@ -189,9 +193,11 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
             app.gas_cap_size = 1.5f;
             app.gas_cap_blend = .5f;
             app.gas_cap_opacity = 1.f;
-            app.gas_layers = false;
+            app.gas_layers = true;
             app.gas_layer_lift = .0015f;
             app.gas_layer_shadow = .3f;
+            app.gas_streaks = true;
+            app.gas_streak_strength = 1.f;
         }
         ImGui::PopID();
     }

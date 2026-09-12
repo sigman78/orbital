@@ -4,6 +4,7 @@
 #include "surface_common.slang"
 
 static const float2 GAS_TEXELS = float2(3600.0, 1800.0);
+static const float2 GAS_DETAIL_TEXELS = float2(4096.0, 2048.0);
 static const uint GAS_FLOW = 40, GAS_DETAIL = 41, GAS_RELIEF = 42, GAS_POLAR = 43, GAS_POLAR_FLOW = 44;
 // Texture units per second per unit of the flow map's signed channels, at real wind speed (FLOW_SCALE in tools/bake-flow-map.py).
 static const float GAS_FLOW_UNIT = 6.25e-7;
@@ -16,39 +17,6 @@ static const float GAS_SLOPE_MAX = .1;
 static const float GAS_CAP_SIN = .34202;   // sin 20 degrees, the atlas's extent at cap size 1
 static const float GAS_POLAR_FLOW_UNIT = 2.5e-6;
 static const float2 GAS_POLAR_TEXELS = float2(1024.0, 1024.0);
-
-// The earlier look, kept behind the panel switch: a noise warp of the albedo.
-Material giantWarpMaterial(SurfaceVaryings input, float3 N, float visibility)
-{
-    float t = root.frame->camera_time.w;
-    float2 uv = sphereUV(normalize(input.localNormal));
-    float lat = uv.y * 2.0 - 1.0;
-    // Zonal jets: bands drift east or west by latitude, slowly.
-    float wind = (sin(lat * PI * 5.0) * .5 + cos(lat * PI * 11.0) * .25) * .00035;
-    float2 flow = float2(uv.x + t * wind, uv.y);
-    // Large, slow vortices: a domain warp that turns over minutes.
-    float2 warp = float2(fbm2(flow * float2(10, 20) + t * .0015, 3),
-                         fbm2(flow * float2(10, 20) + float2(5.2, 1.3) - t * .001, 3)) - .5;
-    float2 uvA = flow + warp * float2(.010, .005);
-    float2 uvB = flow + warp.yx * float2(-.006, .004) + float2(.003, 0);
-    float3 lower = sampleSphere(textures[4], uvA).rgb;
-    float3 upper = sampleSphere(textures[4], uvB).rgb * float3(1.03, .99, .92);
-    float layerMask = smoothstep(.35, .65, fbm2(flow * float2(4, 9) + t * .0008, 3));
-    Material m;
-    m.albedo = lerp(lower, upper, layerMask * .6);
-    // Storm systems as broad brightness variation, and fine turbulence once
-    // the 2K map is magnified so its softness never shows.
-    m.albedo *= 1.0 + (fbm2(flow * float2(60, 120) - t * .002, 2) - .5) * .12;
-    float fine = magnification(uv, GAS_TEXELS);
-    float2 streamUV = uvA + warp.yx * float2(.02, .004);
-    m.albedo *= 1.0 + (fbm2(streamUV * float2(700, 350) + t * .004, 3) - .5) * .30 * fine;
-    m.albedo *= 1.0 + (fbm2(streamUV * float2(2400, 480) - t * .003, 2) - .5) * .18 * fine;
-    m.N = N;
-    m.rough = .95;
-    m.water = 0.0;
-    m.visibility = visibility * beltShadow(input.worldPosition);
-    return m;
-}
 
 // The polar cap's albedo at a local normal, advected on the cap's own flow the
 // same way as the map: Juno's cyclone clusters, since the map is smeared there.
@@ -70,15 +38,39 @@ float3 giantPolar(float3 localN, float2 uv, float2 dx, float2 dy, float t, float
     return colour * (1.0 + (fbm2((uv + lerp(d1, d0, w0)) * float2(2400, 2400) - t * .003, 2) - .5) * .12 * fine);
 }
 
-// Fine structure once the 2K map is magnified so its softness never shows,
+// Streaks along the local wind from noise: four taps of one noise octave
+// averaged along the flow direction, the bake's line integral convolution
+// evaluated per pixel at whatever scale the view needs. In standard deviations.
+float giantStreaks(float2 uv, float2 along, float frequency)
+{
+    float sum = 0.0;
+    for (int i = 0; i < 4; ++i)
+        sum += noise2((uv + along * (float(i) - 1.5) * (.9 / frequency)) * float2(frequency, frequency * .5));
+    return (sum * .25 - .5) * 5.0;
+}
+
+// Fine structure once the map is magnified so its softness never shows,
 // riding the advected coordinate: baked filaments that run with the wind
-// (tools/bake-flow-map.py, in standard deviations), and the finest noise
-// beyond the 4K they hold.
-float giantDetail(float2 uv, float t, float fine)
+// (tools/bake-flow-map.py, in standard deviations) and the finest noise
+// beyond the 4K they hold. Closer still, where a filament texel would cover
+// several pixels and bilinear filtering draws the texels as a comb, the baked
+// map fades here and the per-pixel streaks of giantCloseDetail take over.
+float giantDetail(float2 uv, float t, float fine, float extreme)
 {
     float filaments = (sampleSphere(textures[GAS_DETAIL], uv).r - .5) * 6.0;
-    float detail = 1.0 + filaments * .11 * fine;
+    float detail = 1.0 + filaments * .11 * fine * (1.0 - .65 * extreme);
     return detail * (1.0 + (fbm2(uv * float2(2400, 480) - t * .003, 2) - .5) * .12 * fine);
+}
+
+// The streaks, once per pixel on the phase-blended advected coordinate (which
+// is continuous through the handover, since a phase resets only while its
+// weight is zero), a second octave arriving closer in.
+float giantCloseDetail(float2 uv, float2 along, float fine, float extreme)
+{
+    float closer = magnification(uv, GAS_DETAIL_TEXELS * 12.0);
+    float detail = 1.0 + giantStreaks(uv, along, 9000.0) * .07 * fine * extreme;
+    if (closer > 0.0) detail *= 1.0 + giantStreaks(uv, along, 24000.0) * .05 * fine * closer;
+    return detail;
 }
 
 // The cloud deck advected along the baked wind map: bands shear past each
@@ -101,11 +93,11 @@ float giantDetail(float2 uv, float t, float fine)
 // tap up-sun, so at a low sun the belts darken along the zone edges.
 float upperDeck(float2 uv) { return smoothstep(.3, .7, sampleSphere(textures[GAS_RELIEF], uv).a); }
 
-float3 layeredDeck(float2 uv, float2 lift, float2 cast, float2 layers, float t, float fine)
+float3 layeredDeck(float2 uv, float2 lift, float2 cast, float2 layers, float t, float fine, float extreme)
 {
-    float3 lower = sampleSphere(textures[4], uv).rgb * giantDetail(uv, t, fine);
+    float3 lower = sampleSphere(textures[4], uv).rgb * giantDetail(uv, t, fine, extreme);
     if (layers.x <= 0.0) return lower;
-    float3 upper = sampleSphere(textures[4], uv + lift).rgb * giantDetail(uv + lift, t, fine);
+    float3 upper = sampleSphere(textures[4], uv + lift).rgb * giantDetail(uv + lift, t, fine, extreme);
     float upperHere = upperDeck(uv + lift);
     float shade = 1.0 - layers.y * upperDeck(uv + cast) * (1.0 - upperHere);
     return lerp(lower * shade, upper, upperHere);
@@ -114,7 +106,7 @@ float3 layeredDeck(float2 uv, float2 lift, float2 cast, float2 layers, float t, 
 Material giantMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float3 V, float visibility)
 {
     float4 giant = root.frame->giant;
-    if (giant.w < .5) return giantWarpMaterial(input, N, visibility);
+    if (giant.w < .5) giant.x = 0.0; // the panel's flow switch off: the deck and the caps hold still
     float t = root.frame->camera_time.w;
     float3 localN = normalize(input.localNormal);
     float2 uv = sphereUV(localN);
@@ -126,6 +118,9 @@ Material giantMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     float w0 = 1.0 - abs(2.0 * p0 - 1.0);
     float2 uv0 = uv - flow * (p0 - .5) * cycle, uv1 = uv - flow * (p1 - .5) * cycle;
     float fine = magnification(uv, GAS_TEXELS) * giant.z * (.5 + flowMap.b);
+    // The wind's direction in texture space, for the per-pixel streaks (the map's, not the switch's).
+    float2 windUV = flowMap.rg * 2.0 - 1.0;
+    float2 along = dot(windUV, windUV) > 1e-6 ? normalize(windUV) : float2(1.0, 0.0);
     float3 T, B;
     tangentFrame(localN, rotate, N, T, B);
     float2 layers = root.frame->giant_layers.xy;
@@ -133,10 +128,14 @@ Material giantMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     float3 lightTS = float3(dot(L, T), dot(L, B), max(dot(L, N), .2));
     float2 lift = viewTS.xy / viewTS.z * layers.x;  // toward the viewer, in texture units
     float2 cast = lightTS.xy / lightTS.z * layers.x; // toward the sun
-    float3 c0 = layeredDeck(uv0, lift, cast, layers, t, fine);
-    float3 c1 = layeredDeck(uv1, lift, cast, layers, t, fine);
+    // Close-range streaks: 1 once a filament texel covers 8 pixels; nothing with the panel's switch off.
+    float streaks = root.frame->giant_layers.z;
+    float extreme = streaks > 0.0 ? magnification(uv, GAS_DETAIL_TEXELS * 4.0) : 0.0;
+    float3 c0 = layeredDeck(uv0, lift, cast, layers, t, fine, extreme);
+    float3 c1 = layeredDeck(uv1, lift, cast, layers, t, fine, extreme);
     Material m;
     m.albedo = lerp(c1, c0, w0);
+    if (extreme > 0.0) m.albedo *= giantCloseDetail(lerp(uv1, uv0, w0), along, fine * streaks, extreme);
     // Over the outer part of the cap's radius the map gives way to the baked polar caps.
     float capSin = GAS_CAP_SIN * max(root.frame->giant_night.z, 1e-3);
     float capEdge = length(localN.xz) / capSin; // 1 at the cap's edge
