@@ -2,11 +2,6 @@
 #include "clouds.slang"
 
 float airDensity(float altitude, float scaleHeight) { return exp(-max(altitude, 0.0) / scaleHeight); }
-float miePhase(float mu, float g) {
-    float g2 = g * g;
-    return (3.0 / (8.0 * PI)) * ((1.0 - g2) * (1.0 + mu * mu)) /
-           ((2.0 + g2) * pow(max(1.0 + g2 - 2.0 * g * mu, 1e-4), 1.5));
-}
 
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
@@ -46,7 +41,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float phaseR = 3.0 * (1.0 + mu * mu) / (16.0 * PI);
     // Earth: blue Rayleigh sky. Gas giant: warm haze. Desert: a thin, dusty
     // butterscotch atmosphere dominated by forward-scattering dust.
-    float phaseM = miePhase(mu, gas ? .62 : desert ? .55 : .72);
+    float phaseM = cornetteShanks(mu, gas ? .62 : desert ? .55 : .72);
     float3 betaR = gas ? float3(15.0, 23.0, 34.0) : desert ? float3(4.0, 5.0, 7.0) : float3(15.0, 35.0, 85.0);
     float3 betaM = gas ? float3(15.0, 12.0, 10.0) : desert ? float3(9.0, 6.0, 3.5) : float3(9.0, 9.0, 9.0);
     float3 scatterR = gas ? float3(.88, .70, .48) : desert ? float3(.85, .72, .58) : float3(.68, .86, 1.0);

@@ -15,6 +15,19 @@ using ShaderMatrix4 = float[16];
 #define SHADER_UINT uint
 #endif
 
+// Root.mode of the surface pipelines (SurfaceMode on the C++ side).
+#define ORBITAL_SURFACE_OPAQUE 0
+#define ORBITAL_SURFACE_CLOUD 1
+#define ORBITAL_SURFACE_SHADOW 2
+#define ORBITAL_SURFACE_BILLBOARD 3
+#define ORBITAL_SURFACE_SPLAT_MASK 4
+// Instance.rotation_kind.w (SurfaceKind on the C++ side); each kind has its own fragment shader.
+#define ORBITAL_KIND_EARTH 0
+#define ORBITAL_KIND_GIANT 1
+#define ORBITAL_KIND_MOON 2
+#define ORBITAL_KIND_ROCK 3
+#define ORBITAL_KIND_MARS 4
+
 struct Instance { SHADER_FLOAT4 center_radius; SHADER_FLOAT4 rotation_kind; SHADER_FLOAT4 tint; };
 struct Vertex { SHADER_FLOAT4 position; SHADER_FLOAT4 normal; };
 struct Frame {

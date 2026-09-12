@@ -70,7 +70,10 @@ constexpr MaterialSource material_sources[] = {
     {"gas_flow.png", Slot::gas_flow, {}, true},     // baked from the gas albedo; neutral (no flow) when absent
     {"gas_detail.png", Slot::gas_detail, {}, true}, // baked alongside it; flat (no detail) when absent
     {"gas_relief.png", Slot::gas_relief, {}, true}, // baked alongside it; flat (no relief) when absent
-    {"gas_polar.png", Slot::gas_polar, {.encoding = MaterialEncoding::SRGB}, true}, // baked alongside it; the caps stay the map when absent
+    {"gas_polar.png",
+     Slot::gas_polar,
+     {.encoding = MaterialEncoding::SRGB},
+     true}, // baked alongside it; the caps stay the map when absent
     {"gas_polar_flow.png", Slot::gas_polar_flow, {}, true},
 };
 constexpr std::size_t material_count = std::size(material_sources);
@@ -422,8 +425,13 @@ void Renderer::Impl::create_pipelines() {
                                 .depth_test = depth_test,
                                 .blend = blend});
     };
-    pso.opaque = make("surface", "surface", Format::rgba16_float, true);
-    pso.cloud = make("surface", "surface", Format::rgba16_float, true, Blend::alpha);
+    // One fragment shader per body kind, all on the shared vertex stage.
+    pso.surface_earth = make("surface", "surface_earth", Format::rgba16_float, true);
+    pso.surface_giant = make("surface", "surface_giant", Format::rgba16_float, true);
+    pso.surface_airless = make("surface", "surface_airless", Format::rgba16_float, true);
+    pso.surface_rock = make("surface", "surface_rock", Format::rgba16_float, true);
+    pso.billboard = make("surface", "surface_rock", Format::rgba16_float, true, Blend::alpha);
+    pso.cloud = make("surface", "surface_earth", Format::rgba16_float, true, Blend::alpha);
     pso.background = make("fullscreen", "background", Format::rgba16_float, true);
     pso.atmosphere = make("fullscreen", "atmosphere", Format::rgba16_float, false, Blend::alpha);
     pso.belt_splat = make("beltsplat", "beltsplat", Format::rgba16_float, false, Blend::additive);
@@ -434,7 +442,7 @@ void Renderer::Impl::create_pipelines() {
     pso.fxaa = make("fullscreen", "post", Format::rgba8_srgb);
     pso.meter = make("fullscreen", "post", Format::rgba32_float);
     pso.temporal = make("fullscreen", "temporal", Format::rgba16_float);
-    pso.splat_mask = make("surface", "surface", Format::r8_unorm, true);
+    pso.splat_mask = make("surface", "surface_rock", Format::r8_unorm, true);
     pso.smaa_edges = make("fullscreen", "smaa", Format::rg8_unorm);
     pso.smaa_weights = make("fullscreen", "smaa", Format::rgba8_unorm);
     pso.smaa_blend = make("fullscreen", "smaa", Format::rgba8_srgb);

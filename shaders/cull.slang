@@ -22,11 +22,10 @@
 static const float SPLAT_DISC_PIXELS = .5;
 static const float SPLAT_POINT_PIXELS = 1.0;
 static const float SPLAT_AMBIENT = .004;
-static const float SPLAT_AREA = .80;      // the rock shapes' projected area relative to their bounding disc (calibrated against the meshes)
 static const float SPLAT_RIM = .12;       // forward-scatter rim the meshes' grazing specular gives at high phase angles
 
 static const uint BILLBOARD_GROUP = ORBITAL_ROCK_GROUPS;
-static const float KIND_ROCK = 3.0; // SurfaceKind::rock, also SurfaceMode::billboard
+static const float KIND_ROCK = float(ORBITAL_KIND_ROCK); // SurfaceKind::rock, also SurfaceMode::billboard
 static const float BILLBOARD_VERTICES = 6.0;
 
 struct Placement {

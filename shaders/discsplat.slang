@@ -10,7 +10,6 @@
 
 [[vk::push_constant]] ConstantBuffer<CullRoot> root;
 
-static const float SPLAT_AREA = .80; // the rock shapes' projected area relative to their bounding disc, as the splats use
 
 struct SplatVaryings {
     float4 position : SV_Position;

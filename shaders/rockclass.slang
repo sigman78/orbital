@@ -36,3 +36,4 @@ static const float3 ROCK_SET_AVERAGE_C = float3(.42, .40, .38);
 // of the splats as the map fades in; larger rocks are rare, would dominate
 // their map texel, and keep drawing as splats and meshes at any distance.
 static const float DISC_BAKE_MAX_RADIUS = .06;
+static const float SPLAT_AREA = .80; // the rock shapes' projected area relative to their bounding disc (calibrated against the meshes)

@@ -109,8 +109,8 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float historyWeight = splat ? lerp(HISTORY_WEIGHT, SPLAT_WEIGHT_MOVING, smoothstep(.25, SPLAT_MOTION_PIXELS, motionPixels))
                               : lerp(HISTORY_WEIGHT, HISTORY_WEIGHT_MOVING, smoothstep(.25, 1.0, motionPixels));
     // Luminance-weighted blend: bright specks count less, so they settle instead of flickering.
-    float currentWeight = (1.0 - historyWeight) / (1.0 + dot(current, float3(.2126, .7152, .0722)));
-    float previousWeight = historyWeight / (1.0 + dot(clippedHistory, float3(.2126, .7152, .0722)));
+    float currentWeight = (1.0 - historyWeight) / (1.0 + luma709(current));
+    float previousWeight = historyWeight / (1.0 + luma709(clippedHistory));
     float3 blended = (current * currentWeight + clippedHistory * previousWeight) / (currentWeight + previousWeight);
     return float4(blended, currentZ);
 }

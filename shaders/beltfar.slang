@@ -24,12 +24,7 @@ static const int DISC_STEPS = 12;
 static const float ROCK_AMBIENT = .004;  // the splats' ambient share, relative to the sun's irradiance
 static const int MAX_FOOTPRINT = 4;      // box-filter taps per axis when the rock map is minified
 
-float phaseHG(float c, float g)
-{
-    float d = 1.0 + g * g - 2.0 * g * c;
-    return (1.0 - g * g) / (4.0 * PI * d * sqrt(d));
-}
-float dustPhase(float c) { return lerp(phaseHG(c, DUST_FORWARD), 1.0 / (4.0 * PI), DUST_ISOTROPIC); }
+float dustPhase(float c) { return lerp(henyeyGreenstein(c, DUST_FORWARD), 1.0 / (4.0 * PI), DUST_ISOTROPIC); }
 
 float sceneDepthAt(int2 pixel)
 {
@@ -41,7 +36,7 @@ float sceneDepthAt(int2 pixel)
 float3 dustColour(Frame* frame)
 {
     float3 tinted = DUST_COLOUR * frame->dust_tint.xyz;
-    return max(lerp(dot(tinted, float3(.2126, .7152, .0722)).xxx, tinted, frame->dust.w), 0.0);
+    return max(lerp(luma709(tinted).xxx, tinted, frame->dust.w), 0.0);
 }
 
 // The view ray's segment inside the belt slab and outer cylinder, clipped to

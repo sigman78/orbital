@@ -33,8 +33,7 @@ float4 weightsAt(float2 uv) { return textures[35].SampleLevel(samplers[0], uv, 0
 // is stored sRGB, so samples come back linear.
 float lumaAt(float2 uv)
 {
-    float3 c = pow(max(colourAt(uv).rgb, 0.0), 1.0 / 2.2);
-    return dot(c, float3(.2126, .7152, .0722));
+    return luma709(pow(max(colourAt(uv).rgb, 0.0), 1.0 / 2.2));
 }
 
 // --- Pass 1: luma edge detection --------------------------------------------

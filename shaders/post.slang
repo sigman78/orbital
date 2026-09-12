@@ -18,12 +18,12 @@ static const float FXAA_SUBPIXEL = .5;
 static const float FXAA_MIN_EDGE_TEXELS = 2.5; // shorter features are specks, not edges
 static const float FXAA_SPECK_MAX_LUMA = .35;   // specks brighter than this are close-rock highlights
 
-float fxaaLuma(float2 uv) { float3 c = textures[30].SampleLevel(samplers[0], uv, 0.0).rgb; return dot(c, float3(.299, .587, .114)); }
+float fxaaLuma(float2 uv) { return luma601(textures[30].SampleLevel(samplers[0], uv, 0.0).rgb); }
 
 float4 fxaa(float2 uv, float2 texel)
 {
     float4 centre = textures[30].SampleLevel(samplers[0], uv, 0.0);
-    float lumaM = dot(centre.rgb, float3(.299, .587, .114));
+    float lumaM = luma601(centre.rgb);
     float lumaN = fxaaLuma(uv + float2(0, -texel.y)), lumaS = fxaaLuma(uv + float2(0, texel.y));
     float lumaW = fxaaLuma(uv + float2(-texel.x, 0)), lumaE = fxaaLuma(uv + float2(texel.x, 0));
     float lumaMin = min(lumaM, min(min(lumaN, lumaS), min(lumaW, lumaE)));
@@ -256,7 +256,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         float2 uv = position.xy * cell;
         float3 c = sampleHDR(uv - cell * .25) + sampleHDR(uv + cell * float2(.25, -.25))
                  + sampleHDR(uv + cell * float2(-.25, .25)) + sampleHDR(uv + cell * .25);
-        float lum = dot(c * .25, float3(.2126, .7152, .0722));
+        float lum = luma709(c * .25);
         float weight = 1.0 - METER_CENTRE_WEIGHT * smoothstep(0.0, 1.0, length(uv * 2.0 - 1.0));
         return float4(log(max(lum, .0001)), lum, weight, 1.0);
     }
@@ -292,7 +292,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     color *= 1.0 - root.frame.post_more.x * pow(length(p * .65), 2.0);
     // Dither and grain in display-code space; linear-space noise is far too
     // bright in black space. Grain is strongest in the midtones.
-    float luminance = dot(color, float3(.2126, .7152, .0722));
+    float luminance = luma709(color);
     float grain = (hash(float3(position.xy, frac(root.frame.camera_time.w * 7.0) * 100.0)) - .5) * root.frame.post_more.y
                   * (4.0 * luminance * (1.0 - luminance));
     float dither = (hash(float3(position.xy, 0.0)) - .5) / 255.0 + grain;

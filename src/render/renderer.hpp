@@ -66,13 +66,13 @@ struct FrameInput {
     float vignette = .17f;        // corner darkening
     float grain = .010f;          // film grain amplitude in display space
     // Gas giant (panel): flow-map advection of the cloud deck.
-    bool gas_flow = true;          // off falls back to the noise warp
-    float gas_time_scale = 1500.f; // wind speed, times real
-    float gas_cycle = 12.f;        // seconds per advection phase
-    float gas_turbulence = 1.f;    // fine roiling detail
-    float gas_haze = .08f;         // optical depth of the limb haze at normal incidence
-    float gas_terminator = .08f;   // wrap of the deck's lighting past the terminator (cosine units)
-    float gas_relief = 6.f;        // exaggeration of the cloud-top slopes
+    bool gas_flow = true;           // off falls back to the noise warp
+    float gas_time_scale = 1500.f;  // wind speed, times real
+    float gas_cycle = 12.f;         // seconds per advection phase
+    float gas_turbulence = 1.f;     // fine roiling detail
+    float gas_haze = .08f;          // optical depth of the limb haze at normal incidence
+    float gas_terminator = .08f;    // wrap of the deck's lighting past the terminator (cosine units)
+    float gas_relief = 6.f;         // exaggeration of the cloud-top slopes
     float gas_lightning_rate = 4.f; // night-side lightning, flashes per second over the planet
     float gas_lightning = 1.f;      // lightning brightness
     bool gas_polar = true;          // baked polar cyclone caps over the map's smeared poles

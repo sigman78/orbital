@@ -106,6 +106,24 @@ float noise(float3 p)
 }
 float fbm(float3 p) { float n=0,a=.5; for(int i=0;i<4;i++){n+=a*noise(p);p=p*2.03+float3(2.1,1.7,4.3);a*=.5;} return n; }
 
+// Scattering phase functions, normalised over the sphere (isotropic is 1 / 4 pi).
+float henyeyGreenstein(float mu, float g)
+{
+    float d = 1.0 + g * g - 2.0 * g * mu;
+    return (1.0 - g * g) / (4.0 * PI * d * sqrt(d));
+}
+// Cornette-Shanks: the Mie lobe with the Rayleigh-like (1 + mu^2) factor.
+float cornetteShanks(float mu, float g)
+{
+    float g2 = g * g;
+    return (3.0 / (8.0 * PI)) * ((1.0 - g2) * (1.0 + mu * mu)) /
+           ((2.0 + g2) * pow(max(1.0 + g2 - 2.0 * g * mu, 1e-4), 1.5));
+}
+
+// Luma: Rec. 709 weights for linear light, Rec. 601 for gamma-encoded reads.
+float luma709(float3 c) { return dot(c, float3(.2126, .7152, .0722)); }
+float luma601(float3 c) { return dot(c, float3(.299, .587, .114)); }
+
 // 2D value noise for surface detail; cheaper than the 3D variant above.
 float hash2(float2 p) { float3 q = frac(float3(p.xyx) * .1031); q += dot(q, q.yzx + 33.33); return frac((q.x + q.y) * q.z); }
 float noise2(float2 p)

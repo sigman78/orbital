@@ -81,12 +81,24 @@ enum class SamplerSlot : unsigned {
 };
 
 // Root.mode as interpreted by surface.slang.
-enum class SurfaceMode : std::uint32_t { opaque = 0, cloud = 1, shadow = 2, billboard = 3, splat_mask = 4 };
+enum class SurfaceMode : std::uint32_t {
+    opaque = ORBITAL_SURFACE_OPAQUE,
+    cloud = ORBITAL_SURFACE_CLOUD,
+    shadow = ORBITAL_SURFACE_SHADOW,
+    billboard = ORBITAL_SURFACE_BILLBOARD,
+    splat_mask = ORBITAL_SURFACE_SPLAT_MASK
+};
 // Root.mode as interpreted by post.slang; atmosphere.slang uses Root.base as the body index.
 enum class PostMode : std::uint32_t { tonemap = 0, bloom_a = 1, bloom_b = 2, present = 3, meter = 4, fxaa = 5 };
 
 // Instance.rotation_kind.w as interpreted by surface.slang and atmosphere.slang.
-enum class SurfaceKind : unsigned { earth = 0, giant = 1, moon = 2, rock = 3, mars = 4 };
+enum class SurfaceKind : unsigned {
+    earth = ORBITAL_KIND_EARTH,
+    giant = ORBITAL_KIND_GIANT,
+    moon = ORBITAL_KIND_MOON,
+    rock = ORBITAL_KIND_ROCK,
+    mars = ORBITAL_KIND_MARS
+};
 
 constexpr SurfaceKind surface_kind(BodyClass body_class) {
     switch (body_class) {
@@ -230,12 +242,24 @@ struct Renderer::Impl {
     GpuImage splat_mask{}, smaa_edges{}, smaa_weights{}, belt_dust{}, belt_disc_light{}, belt_disc_rocks{};
     GpuImage belt_light{}, belt_light_blur{};
     struct {
-        gpu::PSO *opaque = nullptr, *cloud = nullptr, *background = nullptr, *atmosphere = nullptr, *bloom = nullptr,
-                 *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr,
-                 *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr, *fxaa = nullptr, *splat_mask = nullptr,
-                 *smaa_edges = nullptr, *smaa_weights = nullptr, *smaa_blend = nullptr, *ui = nullptr,
-                 *belt_dust = nullptr, *belt_dust_blend = nullptr, *belt_disc = nullptr, *belt_disc_splat = nullptr;
+        gpu::PSO *surface_earth = nullptr, *surface_giant = nullptr, *surface_airless = nullptr,
+                 *surface_rock = nullptr, *billboard = nullptr, *cloud = nullptr, *background = nullptr,
+                 *atmosphere = nullptr, *bloom = nullptr, *post = nullptr, *present = nullptr, *shadow = nullptr,
+                 *meter = nullptr, *temporal = nullptr, *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr,
+                 *fxaa = nullptr, *splat_mask = nullptr, *smaa_edges = nullptr, *smaa_weights = nullptr,
+                 *smaa_blend = nullptr, *ui = nullptr, *belt_dust = nullptr, *belt_dust_blend = nullptr,
+                 *belt_disc = nullptr, *belt_disc_splat = nullptr;
     } pso;
+    gpu::PSO* surface_pso(SurfaceKind kind) const {
+        switch (kind) {
+        case SurfaceKind::earth: return pso.surface_earth;
+        case SurfaceKind::giant: return pso.surface_giant;
+        case SurfaceKind::moon:
+        case SurfaceKind::mars: return pso.surface_airless;
+        case SurfaceKind::rock: return pso.surface_rock;
+        }
+        return pso.surface_rock;
+    }
     std::array<GpuMesh, geometry::lod_count> spheres{};
     std::array<GpuMesh, rock_group_count> rocks{}; // the rock library, indexed by rock_group; slices of rock_pool
     GpuMesh rock_pool{};                           // every rock mesh in one vertex and one index range

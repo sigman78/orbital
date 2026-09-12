@@ -21,6 +21,7 @@ function(orbital_compile_slang output source entry stage)
                 "${CMAKE_SOURCE_DIR}/shaders/rockclass.slang"
                 "${CMAKE_SOURCE_DIR}/shaders/beltfar.slang"
                 "${CMAKE_SOURCE_DIR}/shaders/clouds.slang"
+                "${CMAKE_SOURCE_DIR}/shaders/surface_common.slang"
                 "${CMAKE_SOURCE_DIR}/shaders/scene_shared.h"
         VERBATIM
         COMMENT "Compiling Slang ${entry} (${stage})"
