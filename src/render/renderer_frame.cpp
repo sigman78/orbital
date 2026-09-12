@@ -54,8 +54,9 @@ inline constexpr double spin_rate = 0.0012, rock_spin_rate = 0.02; // radians pe
 inline constexpr float shear_exponent =
     0.35f; // orbital rate falls with radius as r^-0.35: a hint of Kepler shear, not the real 1.5
 namespace billboard {
-inline constexpr float min_pixels = 0.06f;  // smaller rocks are dropped
-inline constexpr float pixel_radius = 1.2f; // rocks below this become fixed-size billboards
+inline constexpr float min_pixels = 0.06f; // smaller rocks are dropped
+inline constexpr float pixel_radius =
+    2.5f; // rocks below this become analytic disc splats: meshes this small only alias
 } // namespace billboard
 } // namespace belt_culling
 
@@ -246,6 +247,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
         frame.bodies[i] = f4(input.bodies[i].position - camera.position, float(input.bodies[i].radius));
     frame.scene = {float(body_count), float(giant_index), input.belt_light_map ? 1.f : 0.f,
                    input.belt_extinction ? 1.f : 0.f};
+    frame.quality = {float(input.anti_aliasing), 0, 0, 0};
 
     // Sun position in screen space for the lens flare, hidden when a body covers it.
     const Vec3d sun_direction = normalized(system.star.position - camera.position);
@@ -446,7 +448,8 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
     gpu::end_render_pass(cmd);
 }
 
-void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view) {
+void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view,
+                                        bool spatial_aa) {
     const unsigned history_write = frame_index % 2;
     root.mode = std::uint32_t(PostMode::tonemap);
     fullscreen_pass(cmd, history[history_write], pso.temporal, root);
@@ -454,8 +457,13 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
     fullscreen_pass(cmd, bloom_a, pso.bloom, root);
     root.mode = std::uint32_t(PostMode::bloom_b);
     fullscreen_pass(cmd, bloom_b, pso.bloom, root);
+    // Tone map into the final image, or through an intermediate when FXAA follows.
     root.mode = std::uint32_t(PostMode::tonemap);
-    fullscreen_pass(cmd, final_image, pso.post, root);
+    fullscreen_pass(cmd, spatial_aa ? ldr : final_image, pso.post, root);
+    if (spatial_aa) {
+        root.mode = std::uint32_t(PostMode::fxaa);
+        fullscreen_pass(cmd, final_image, pso.fxaa, root);
+    }
     if (frame_index % exposure_meter::interval == 0) {
         root.mode = std::uint32_t(PostMode::meter);
         fullscreen_pass(cmd, luminance, pso.meter, root);
@@ -561,7 +569,7 @@ bool Renderer::draw(const FrameInput& input) {
         s.fullscreen_pass(cmd, s.hdr, s.pso.atmosphere, root, true);
     }
     stamp(3);
-    s.record_post_passes(cmd, root, swap.render_view);
+    s.record_post_passes(cmd, root, swap.render_view, input.anti_aliasing >= 2);
     stamp(4);
     s.stats.prepare_ms =
         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - prepare_start).count();

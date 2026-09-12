@@ -29,6 +29,7 @@ struct Frame {
     SHADER_FLOAT4 scene;       // body count, giant body index, belt transmittance map on, belt extinction on
     SHADER_MATRIX4 belt_light_projection; // orthographic box over the whole belt from the sun
     SHADER_FLOAT4 belt_light;  // box half width, half height, map texels, half span of the slice range along the light
+    SHADER_FLOAT4 quality;     // anti-aliasing mode (0 off, 1 temporal, 2 temporal + FXAA), unused x3
 };
 struct Root {
 #ifdef __cplusplus

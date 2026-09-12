@@ -53,6 +53,7 @@ enum class Slot : unsigned {
     rock_boulder_roughness = 27,
     belt_light_map = 28,  // belt transmittance, blurred
     belt_light_blur = 29, // scratch between the two blur directions
+    ldr = 30,             // tone-mapped image before FXAA
     count = 32,
 };
 
@@ -68,7 +69,7 @@ enum class SamplerSlot : unsigned {
 // Root.mode as interpreted by surface.slang.
 enum class SurfaceMode : std::uint32_t { opaque = 0, cloud = 1, shadow = 2, billboard = 3 };
 // Root.mode as interpreted by post.slang; atmosphere.slang uses Root.base as the body index.
-enum class PostMode : std::uint32_t { tonemap = 0, bloom_a = 1, bloom_b = 2, present = 3, meter = 4 };
+enum class PostMode : std::uint32_t { tonemap = 0, bloom_a = 1, bloom_b = 2, present = 3, meter = 4, fxaa = 5 };
 
 // Instance.rotation_kind.w as interpreted by surface.slang and atmosphere.slang.
 enum class SurfaceKind : unsigned { earth = 0, giant = 1, moon = 2, rock = 3, mars = 4 };
@@ -195,12 +196,12 @@ struct Renderer::Impl {
     // Resources.
     std::vector<GpuImage> material_images;
     std::vector<gpu::PSO*> pipelines;
-    GpuImage hdr{}, depth{}, bloom_a{}, bloom_b{}, final_image{}, shadow_map{}, luminance{}, history[2]{};
+    GpuImage hdr{}, depth{}, bloom_a{}, bloom_b{}, final_image{}, ldr{}, shadow_map{}, luminance{}, history[2]{};
     GpuImage belt_light{}, belt_light_blur{};
     struct {
         gpu::PSO *opaque = nullptr, *cloud = nullptr, *background = nullptr, *atmosphere = nullptr, *bloom = nullptr,
                  *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr,
-                 *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr;
+                 *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr, *fxaa = nullptr;
     } pso;
     std::array<GpuMesh, geometry::lod_count> spheres{};
     std::array<GpuMesh, rock_group_count> rocks{}; // the rock library, indexed by rock_group; slices of rock_pool
@@ -268,7 +269,7 @@ struct Renderer::Impl {
     void record_shadow_pass(gpu::CommandBuffer* cmd, Root root);
     void record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input, const FrameData& frame,
                            std::uint64_t args_address);
-    void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view);
+    void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view, bool spatial_aa);
     void fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, gpu::PSO* pipeline, Root root,
                          bool preserve = false);
     void draw_mesh(gpu::CommandBuffer* cmd, Root& root, const GpuMesh& mesh, unsigned base, unsigned instance_count);

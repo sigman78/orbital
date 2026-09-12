@@ -76,7 +76,7 @@ Renderer::Impl::~Impl() {
         gpu::destroy_pso(pipeline);
     for (auto& image : material_images)
         destroy(image);
-    for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &shadow_map, &luminance, &history[0],
+    for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &shadow_map, &luminance, &history[0],
                         &history[1], &belt_light, &belt_light_blur})
         destroy(*image);
     for (auto* heap : {&data, &texture_descriptors, &sampler_descriptors, &luminance_readback, &timestamps})
@@ -404,6 +404,7 @@ void Renderer::Impl::create_pipelines() {
     pso.bloom = make("fullscreen", "post", Format::rgba16_float);
     pso.post = make("fullscreen", "post", Format::rgba8_srgb);
     pso.present = make("fullscreen", "post", Format::bgra8_srgb);
+    pso.fxaa = make("fullscreen", "post", Format::rgba8_srgb);
     pso.meter = make("fullscreen", "post", Format::rgba32_float);
     pso.temporal = make("fullscreen", "temporal", Format::rgba16_float);
     pso.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
@@ -471,7 +472,7 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     if (extent == new_extent)
         return;
     gpu::wait_idle(device);
-    for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &history[0], &history[1]})
+    for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &history[0], &history[1]})
         destroy(*image);
     extent = new_extent;
     history_valid = false;
@@ -488,12 +489,14 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     final_image = create_image({.extent = extent,
                                 .format = gpu::Format::rgba8_srgb,
                                 .usage = color_usage | gpu::TextureUsage::transfer_source});
+    ldr = create_image({.extent = extent, .format = gpu::Format::rgba8_srgb, .usage = color_usage});
     for (auto& image : history)
         image = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
     bind(Slot::hdr, hdr);
     bind(Slot::bloom_a, bloom_a);
     bind(Slot::bloom_b, bloom_b);
     bind(Slot::final_image, final_image);
+    bind(Slot::ldr, ldr);
     bind(Slot::depth, depth);
 }
 
