@@ -54,32 +54,19 @@ float solarVisibility(float3 point, int skip)
     return visibility;
 }
 
-// 3x3 filtered lookup into an orthographic shadow map; 1 outside its box.
-float shadowLookup(Texture2D<float4> map, float4x4 projection, float3 point, float3 normal)
+float localShadow(float3 point, float3 normal)
 {
-    float4 light = mul(projection, float4(point + normal * 0.015, 1.0));
+    float4 light = mul(root.frame->light_projection, float4(point + normal * 0.015, 1.0));
     float3 coord = light.xyz / light.w;
     float2 uv = coord.xy * 0.5 + 0.5;
     if (any(uv < 0.001) || any(uv > 0.999) || coord.z < 0.0 || coord.z > 1.0) return 1.0;
     uint width, height;
-    map.GetDimensions(width, height);
+    textures[15].GetDimensions(width, height);
     float2 texel = 1.0 / float2(width, height);
     float result = 0.0;
     for (int y = -1; y <= 1; ++y) for (int x = -1; x <= 1; ++x)
-        result += map.SampleLevel(samplers[0], uv + float2(x, y) * texel, 0.0).r >= coord.z - 0.0003 ? 1.0 : 0.0;
+        result += textures[15].SampleLevel(samplers[0], uv + float2(x, y) * texel, 0.0).r >= coord.z - 0.0003 ? 1.0 : 0.0;
     return result / 9.0;
-}
-
-// Shadows from the bodies' map, anchored on the nearest planet.
-float localShadow(float3 point, float3 normal)
-{
-    return shadowLookup(textures[15], root.frame->light_projection, point, normal);
-}
-
-// Shadows the large belt rocks cast on each other: one map over the whole belt.
-float beltRockShadow(float3 point, float3 normal)
-{
-    return shadowLookup(textures[28], root.frame->belt_light_projection, point, normal);
 }
 
 // Relative rock density across the belt (0 inner edge, 1 outer edge); mirrors
@@ -89,6 +76,43 @@ float beltRingDensity(float t)
     float bands = .5 + .5 * cos(2.0 * PI * (t * 3.0 + .15));
     float gap = (t - .58) / .035;
     return (.5 + .5 * bands) * (1.0 - .7 * exp(-gap * gap));
+}
+
+// Belt as a translucent slab: relative rock and dust density at a point given
+// in the giant's frame (height above the belt plane, distance from the axis).
+static const float BELT_EXTINCTION = .4;     // optical depth per unit path at density 1; the far side of a full-thickness path loses about half its light
+static const int BELT_EXTINCTION_STEPS = 8;
+
+float beltDensity(float3 q, float4 ring, float3 n)
+{
+    float h = dot(q, n);
+    float r = length(q - n * h);
+    float half = ring.w * .5;
+    float vertical = 1.0 - smoothstep(half * .6, half * 1.3, abs(h));
+    float feather = (ring.y - ring.x) * .08;
+    float inside = smoothstep(ring.x - feather, ring.x + feather, r) * (1.0 - smoothstep(ring.y - feather, ring.y + feather, r));
+    return vertical * inside * beltRingDensity(saturate((r - ring.x) / (ring.y - ring.x)));
+}
+
+// Sunlight left after crossing the belt to reach a point inside it: the
+// density is integrated along the sun ray until the ray leaves the slab.
+// Rocks on the sunward rim stay bright, rocks buried deep or on the far side
+// sit in a smooth dusk. No texels, so nothing shimmers.
+float beltExtinction(float3 point)
+{
+    float4 ring = root.frame->belt_ring;
+    if (ring.z <= 0.0) return 1.0;
+    float3 n = root.frame->belt_normal.xyz;
+    float3 q = point - root.frame->bodies[int(root.frame->scene.y)].xyz;
+    float3 light = normalize(root.frame->sun.xyz - point);
+    // Distance until the ray has left the slab's height band, capped for the near-grazing case.
+    float climb = max(abs(dot(light, n)), .08);
+    float length = min((ring.w * .5 * 1.3 + abs(dot(q, n))) / climb, ring.y - ring.x);
+    float ds = length / float(BELT_EXTINCTION_STEPS);
+    float tau = 0.0;
+    for (int i = 0; i < BELT_EXTINCTION_STEPS; ++i)
+        tau += beltDensity(q + light * ((float(i) + .5) * ds), ring, n) * ds;
+    return exp(-tau * ring.z * BELT_EXTINCTION);
 }
 
 // Shadow the asteroid belt casts on the gas giant: the sun ray from a surface

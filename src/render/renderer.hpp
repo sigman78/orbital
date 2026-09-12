@@ -15,7 +15,6 @@ struct Stats {
              rock_triangles = 0;    // rock figures are from the previous frame's culling
     unsigned draw_calls = 0;        // API draw calls submitted this frame (an indirect multi-draw counts once)
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
-    unsigned shadow_casters = 0;    // large rocks drawn into the belt shadow map, from the previous frame
 };
 
 // Everything the renderer needs for one frame; owned by the caller.

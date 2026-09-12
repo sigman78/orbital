@@ -1,7 +1,7 @@
 #include "common.slang"
 
 // Root.mode values (SurfaceMode on the C++ side).
-static const uint MODE_OPAQUE = 0, MODE_CLOUD = 1, MODE_SHADOW = 2, MODE_BILLBOARD = 3, MODE_BELT_SHADOW = 4;
+static const uint MODE_OPAQUE = 0, MODE_CLOUD = 1, MODE_SHADOW = 2, MODE_BILLBOARD = 3;
 // Instance kinds (rotation_kind.w); SurfaceKind on the C++ side.
 static const int KIND_EARTH = 0, KIND_GIANT = 1, KIND_MOON = 2, KIND_ROCK = 3, KIND_MARS = 4;
 
@@ -48,9 +48,7 @@ SurfaceVaryings vertexMain(uint vertexIndex : SV_VertexID, uint firstVertex : SV
     float scale = inst.center_radius.w * (root.mode == MODE_CLOUD ? 1.0 + CLOUD_HEIGHT : 1.0);
     output.worldPosition = inst.center_radius.xyz + mul(rotate, vertex.position.xyz) * scale;
     output.worldNormal = normalize(mul(rotate, vertex.normal.xyz)); output.localNormal = normalize(vertex.position.xyz);
-    float4x4 projection = root.mode == MODE_SHADOW ? root.frame->light_projection
-                        : root.mode == MODE_BELT_SHADOW ? root.frame->belt_light_projection : root.frame->view_projection;
-    output.position = mul(projection, float4(output.worldPosition, 1.0));
+    output.position = mul(root.mode == MODE_SHADOW ? root.frame->light_projection : root.frame->view_projection, float4(output.worldPosition, 1.0));
     return output;
 }
 
@@ -357,7 +355,8 @@ float4 shadeBillboard(SurfaceVaryings input, Instance inst)
     float3 n = normalize(root.frame->right_tan.xyz * q.x + root.frame->up_aspect.xyz * q.y - root.frame->forward_exposure.xyz * sqrt(max(0, 1 - rr)));
     float3 l = normalize(root.frame->sun.xyz - input.worldPosition);
     float3 averageRock = textures[11].SampleLevel(samplers[1], float2(.5), 10).rgb;
-    float3 radiance = averageRock * inst.tint.xyz * root.frame->sun.w / PI * max(dot(n, l), .025) * solarVisibility(input.worldPosition, -1);
+    float3 radiance = averageRock * inst.tint.xyz * root.frame->sun.w / PI * max(dot(n, l), .025)
+                    * solarVisibility(input.worldPosition, -1) * beltExtinction(input.worldPosition);
     return float4(radiance, coverage * inst.tint.w);
 }
 
@@ -372,8 +371,8 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     float3 V = normalize(root.frame->camera_time.xyz - input.worldPosition);
     float3 L = normalize(root.frame->sun.xyz - input.worldPosition);
     int selfBody = input.instanceIndex < uint(root.frame->scene.x) ? int(input.instanceIndex) : -1;
-    // Belt rocks shade each other through the belt map; bodies use the planet-anchored map.
-    float shadow = selfBody < 0 ? beltRockShadow(input.worldPosition, N) : localShadow(input.worldPosition, N);
+    // Belt rocks lose light to the belt itself; bodies use the planet-anchored shadow map.
+    float shadow = selfBody < 0 ? beltExtinction(input.worldPosition) : localShadow(input.worldPosition, N);
     float visibility = solarVisibility(input.worldPosition, selfBody) * shadow;
     float nl = max(dot(N, L), 0.0);
     if (root.mode == MODE_CLOUD) return shadeClouds(input, N, L, visibility, nl);

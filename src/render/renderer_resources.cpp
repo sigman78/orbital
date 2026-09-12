@@ -76,8 +76,8 @@ Renderer::Impl::~Impl() {
         gpu::destroy_pso(pipeline);
     for (auto& image : material_images)
         destroy(image);
-    for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &shadow_map, &belt_shadow_map, &luminance,
-                        &history[0], &history[1]})
+    for (auto* image :
+         {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &shadow_map, &luminance, &history[0], &history[1]})
         destroy(*image);
     for (auto* heap : {&data, &texture_descriptors, &sampler_descriptors, &luminance_readback, &timestamps})
         gpu::destroy_gpu_heap(*heap);
@@ -411,10 +411,6 @@ void Renderer::Impl::create_fixed_targets() {
                                .format = gpu::Format::d32_float,
                                .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::depth_stencil_attachment});
     bind(Slot::shadow_map, shadow_map);
-    belt_shadow_map = create_image({.extent = {targets::belt_shadow_map_size, targets::belt_shadow_map_size},
-                                    .format = gpu::Format::d32_float,
-                                    .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::depth_stencil_attachment});
-    bind(Slot::belt_shadow_map, belt_shadow_map);
     luminance = create_image({.extent = {targets::meter_size, targets::meter_size},
                               .format = gpu::Format::rgba32_float,
                               .usage = gpu::TextureUsage::color_attachment | gpu::TextureUsage::transfer_source});

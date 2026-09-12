@@ -51,7 +51,6 @@ enum class Slot : unsigned {
     rock_boulder_albedo = 25,
     rock_boulder_normal = 26,
     rock_boulder_roughness = 27,
-    belt_shadow_map = 28,
     count = 32,
 };
 
@@ -65,7 +64,7 @@ enum class SamplerSlot : unsigned {
 };
 
 // Root.mode as interpreted by surface.slang.
-enum class SurfaceMode : std::uint32_t { opaque = 0, cloud = 1, shadow = 2, billboard = 3, belt_shadow = 4 };
+enum class SurfaceMode : std::uint32_t { opaque = 0, cloud = 1, shadow = 2, billboard = 3 };
 // Root.mode as interpreted by post.slang; atmosphere.slang uses Root.base as the body index.
 enum class PostMode : std::uint32_t { tonemap = 0, bloom_a = 1, bloom_b = 2, present = 3, meter = 4 };
 
@@ -90,35 +89,25 @@ constexpr SurfaceKind surface_kind(BodyClass body_class) {
 struct HeapLayout {
     std::uint64_t static_heap = 128ull << 20;   // with the 64 MiB upload staging this stays inside the BAR window
     std::uint64_t dynamic_offset = 80ull << 20; // meshes and rock records before, per-frame data after
-    // FrameData, the camera and shadow culling scratches, then the camera
-    // instance list and the shadow caster instance list.
-    std::uint64_t cull_offset = 1024;
-    std::uint64_t shadow_cull_offset = 1024 + 8192;
-    std::uint64_t instance_offset = 1024 + 16384;
-    std::uint64_t shadow_instance_offset = instance_offset + (42ull << 20);
+    std::uint64_t cull_offset = 1024;           // FrameData, then the culling scratch, then the instances
+    std::uint64_t instance_offset = 1024 + 8192;
     std::uint64_t staging_budget = 64ull << 20; // texture upload staging, see upload_images
 
     constexpr std::uint64_t instance_capacity() const {
-        return (shadow_instance_offset - instance_offset) / sizeof(Instance);
-    }
-    constexpr std::uint64_t shadow_instance_capacity() const {
-        return (static_heap - dynamic_offset - shadow_instance_offset) / sizeof(Instance);
+        return (static_heap - dynamic_offset - instance_offset) / sizeof(Instance);
     }
 };
 inline constexpr HeapLayout heap_layout{};
 static_assert(heap_layout.cull_offset >= sizeof(FrameData));
-static_assert(heap_layout.shadow_cull_offset >= heap_layout.cull_offset + sizeof(CullScratch));
-static_assert(heap_layout.instance_offset >= heap_layout.shadow_cull_offset + sizeof(CullScratch));
-static_assert(heap_layout.dynamic_offset + heap_layout.shadow_instance_offset < heap_layout.static_heap);
-static_assert(heap_layout.shadow_instance_capacity() > 100000);
+static_assert(heap_layout.instance_offset >= heap_layout.cull_offset + sizeof(CullScratch));
+static_assert(heap_layout.dynamic_offset + heap_layout.instance_offset < heap_layout.static_heap);
 
 // Sizes of the fixed GPU targets, created by the resources side and addressed by the frame side.
 namespace targets {
-inline constexpr Range<float> depth{0.02f, 2000.0f};   // near and far plane, camera-relative units
-inline constexpr unsigned shadow_map_size = 2048;      // planet-anchored body shadows
-inline constexpr unsigned belt_shadow_map_size = 4096; // the whole belt in light space
-inline constexpr unsigned meter_size = 16;             // luminance meter edge, texels of rgba32f
-inline constexpr unsigned timestamp_count = 5;         // frame start, after shadow, surface, atmosphere, post
+inline constexpr Range<float> depth{0.02f, 2000.0f}; // near and far plane, camera-relative units
+inline constexpr unsigned shadow_map_size = 2048;
+inline constexpr unsigned meter_size = 16;     // luminance meter edge, texels of rgba32f
+inline constexpr unsigned timestamp_count = 5; // frame start, after shadow, surface, atmosphere, post
 } // namespace targets
 
 // What FrameInput::high_quality selects between.
@@ -187,17 +176,6 @@ constexpr unsigned rock_group(unsigned shape, unsigned level) {
 static_assert(rock_group_count == ORBITAL_ROCK_GROUPS && geometry::rock_level_count == ORBITAL_ROCK_LEVELS &&
               belt::radial_bands == ORBITAL_BELT_BANDS);
 
-// Orthographic light box, camera relative: right and up span the map, forward is the light direction.
-struct LightFrame {
-    Vec3f centre{}, forward{}, right{}, up{};
-    float half_x = 1, half_y = 1, half_depth = 1;
-};
-
-// Where the shadow pass finds the belt casters the GPU culling placed.
-struct ShadowCasters {
-    std::uint64_t instances = 0, arguments = 0, draw_count = 0; // GPU addresses
-};
-
 struct Renderer::Impl {
     // Device and heaps.
     gpu::Device* device = nullptr;
@@ -209,8 +187,7 @@ struct Renderer::Impl {
     // Resources.
     std::vector<GpuImage> material_images;
     std::vector<gpu::PSO*> pipelines;
-    GpuImage hdr{}, depth{}, bloom_a{}, bloom_b{}, final_image{}, shadow_map{}, belt_shadow_map{}, luminance{},
-        history[2]{};
+    GpuImage hdr{}, depth{}, bloom_a{}, bloom_b{}, final_image{}, shadow_map{}, luminance{}, history[2]{};
     struct {
         gpu::PSO *opaque = nullptr, *cloud = nullptr, *background = nullptr, *atmosphere = nullptr, *bloom = nullptr,
                  *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr,
@@ -239,7 +216,6 @@ struct Renderer::Impl {
     FrameData previous_frame{};
     Vec3d previous_camera{};
     bool history_valid = false;
-    LightFrame belt_light{}; // this frame's belt shadow box, also the caster culling volume
 
     // Per-frame scratch, cleared and reused: the body instances only, rocks
     // are placed by the GPU.
@@ -273,14 +249,11 @@ struct Renderer::Impl {
     void apply_metering();
     FrameData build_frame(const FrameInput& input);
     void write_body_instances(const FrameInput& input, const FrameData& frame);
-    void write_cull_common(const FrameInput& input, CullScratch& scratch, std::uint64_t instance_address);
     void write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
                             std::uint64_t instance_address);
-    void write_shadow_cull_scratch(const FrameInput& input, CullScratch& scratch, std::uint64_t instance_address);
     void read_cull_counts(const CullScratch& scratch);
-    void read_shadow_counts(const CullScratch& scratch);
     void record_cull_passes(gpu::CommandBuffer* cmd, const CullRoot& root);
-    void record_shadow_pass(gpu::CommandBuffer* cmd, Root root, const ShadowCasters& casters);
+    void record_shadow_pass(gpu::CommandBuffer* cmd, Root root);
     void record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input, const FrameData& frame,
                            std::uint64_t args_address);
     void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view);
