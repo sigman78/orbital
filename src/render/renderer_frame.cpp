@@ -20,11 +20,14 @@ constexpr unsigned jitter_count = 8;
 // Exposure adaptation, read by apply_metering and record_post_passes. The
 // meter is centre weighted; adaptation is slight (about one stop either way)
 // and asymmetric like the eye: quick to close down, slow to open up.
-// Per-curve exposure trims, read by build_frame. Each curve places its toe and
-// shoulder differently; these scales fit each curve's tonal response to the
-// ACES filmic response in log space over scene values 0.02 to 2, so switching
-// curves compares rendering intent rather than brightness.
+// Exposure gain ahead of the tone curves, read by build_frame. The base gain
+// brings the Hill ACES fit, which sits about a stop under the Narkowicz
+// approximation it replaced, back toward the earlier brightness. The per-curve
+// trims were fitted on captures so the shadows of each curve match ACES (see
+// docs/DECISIONS.md); switching curves then compares rendering intent rather
+// than brightness.
 namespace tone_curves {
+inline constexpr float base_gain = 1.5f;
 inline constexpr float exposure_trim[3] = {1.f, .37f, .75f}; // ACES filmic, AgX, Khronos PBR Neutral
 } // namespace tone_curves
 
@@ -222,7 +225,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
         dot(camera.forward(), previous_forward) < history::min_forward_dot)
         frame.previous_camera_delta.w = 0;
     frame.camera_time = {0, 0, 0, float(input.time)};
-    frame.forward_exposure.w = input.exposure * (input.auto_exposure ? adapted_exposure : 1) *
+    frame.forward_exposure.w = input.exposure * (input.auto_exposure ? adapted_exposure : 1) * tone_curves::base_gain *
                                tone_curves::exposure_trim[std::min(input.tone_curve, 2u)];
     frame.sun = f4(system.star.position - camera.position, sun_flare::disc_radius);
     const auto distance_to = [&](unsigned body) { return length(input.bodies[body].position - camera.position); };
