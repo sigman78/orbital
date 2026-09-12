@@ -71,12 +71,13 @@ struct Options {
     double duration = 0;    // > 0 exits after this many wall-clock seconds
     int bookmark = -1;
     float exposure = 1;
-    unsigned rocks = 0;   // belt override for benchmarks; 0 keeps the quality tiers
-    unsigned taa = 1;     // temporal anti-aliasing on
-    unsigned spatial = 2; // spatial pass: 0 off, 1 FXAA, 2 SMAA
-    unsigned splat = 2;   // initial splat cut-off mode, an index into splat_radii
-    unsigned tone = 2;    // initial tone curve (PBR Neutral)
-    float pan = 0;        // lateral drift as a fraction of the flight speed, stepped at a fixed 60 Hz for captures
+    unsigned rocks = 0;       // belt override for benchmarks; 0 keeps the quality tiers
+    unsigned taa = 1;         // temporal anti-aliasing on
+    unsigned spatial = 2;     // spatial pass: 0 off, 1 FXAA, 2 SMAA
+    unsigned splat = 2;       // initial splat cut-off mode, an index into splat_radii
+    unsigned tone = 2;        // initial tone curve (PBR Neutral)
+    float pan = 0;            // lateral drift as a fraction of the flight speed, stepped at a fixed 60 Hz for captures
+    unsigned maximize_at = 0; // > 0 maximizes the window after this many frames, to test resizing in captures
     bool tour = false, high = false, no_hud = false, help = false;
     std::filesystem::path capture, benchmark;
 };
@@ -136,6 +137,8 @@ std::optional<Options> parse_options(int argc, char** argv) {
             ok = parse_number(value(), options.spatial) && options.spatial <= 2;
         else if (arg == "--pan")
             ok = parse_number(value(), options.pan);
+        else if (arg == "--maximize-at")
+            ok = parse_number(value(), options.maximize_at);
         else if (arg == "--tone")
             ok = parse_number(value(), options.tone) && options.tone <= 2;
         else if (arg == "--splat")
@@ -378,6 +381,8 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .tone_curve = app.tone_curve};
         if (renderer.draw(frame_input)) {
             frames++;
+            if (options.maximize_at && frames == options.maximize_at)
+                window.maximize();
             const auto stats = renderer.stats();
             times.cpu_ms.push_back(stats.frame_ms);
             times.gpu_ms.push_back(stats.gpu_ms);

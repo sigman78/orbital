@@ -200,4 +200,8 @@ void Window::set_title(std::string_view utf8) {
     SetWindowTextW(impl_->handle, to_wide(utf8).c_str());
 }
 
+void Window::maximize() {
+    ShowWindow(impl_->handle, SW_MAXIMIZE);
+}
+
 } // namespace space::platform

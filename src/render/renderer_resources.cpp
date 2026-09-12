@@ -495,6 +495,8 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     if (extent == new_extent)
         return;
     gpu::wait_idle(device);
+    log::info("Resizing frame targets {}x{} -> {}x{}", extent.width, extent.height, new_extent.width,
+              new_extent.height);
     for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &history[0], &history[1], &splat_mask,
                         &smaa_edges, &smaa_weights})
         destroy(*image);
