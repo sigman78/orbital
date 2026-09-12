@@ -226,6 +226,7 @@ static const float ROCK_TILE = 1.4;            // texture repeats per unit of ro
 static const float ROCK_PARALLAX = .03;        // parallax depth as a fraction of one tile
 static const int ROCK_PARALLAX_STEPS = 10;
 static const float ROCK_NEAR = .012, ROCK_FAR = .09; // fwidth(object position) per pixel: full detail below, cheap path above
+static const float ROCK_DESATURATION = .6;           // the scans are warm tan; asteroids are mostly grey
 // Descriptor slots of the three sets (albedo, normal+height, roughness);
 // selected by branch so every texture access keeps a constant index.
 struct RockSample {
@@ -338,7 +339,9 @@ Material rockMaterial(SurfaceVaryings input, Instance inst, float3x3 rotate, flo
     else { albedoB = albedoA; normalB = normalA; roughB = roughA; patches = 0.0; }
 
     Material m;
-    m.albedo = lerp(albedoA, albedoB, patches) * inst.tint.xyz * (.8 + .4 * frac(seed * 5.1));
+    float3 scanned = lerp(albedoA, albedoB, patches);
+    scanned = lerp(scanned, dot(scanned, float3(.2126, .7152, .0722)).xxx, ROCK_DESATURATION);
+    m.albedo = scanned * inst.tint.xyz * (.8 + .4 * frac(seed * 5.1));
     // Scanned microsurface roughness plus stable body-to-body variation.
     // Rock stays dielectric; smoother patches produce broad glints, not metal.
     m.rough = clamp(lerp(roughA, roughB, patches) * .85 + .10 + (frac(seed * 3.3) - .5) * .2, .3, .98);
@@ -359,6 +362,7 @@ float4 shadeBillboard(SurfaceVaryings input, Instance inst)
     float3 n = normalize(root.frame->right_tan.xyz * q.x + root.frame->up_aspect.xyz * q.y - root.frame->forward_exposure.xyz * sqrt(max(0, 1 - rr)));
     float3 l = normalize(root.frame->sun.xyz - input.worldPosition);
     float3 averageRock = textures[11].SampleLevel(samplers[1], float2(.5), 10).rgb;
+    averageRock = lerp(averageRock, dot(averageRock, float3(.2126, .7152, .0722)).xxx, ROCK_DESATURATION);
     float3 radiance = averageRock * inst.tint.xyz * root.frame->sun.w / PI * max(dot(n, l), .025)
                     * solarVisibility(input.worldPosition, -1) * beltExtinction(input.worldPosition)
                     * beltRockTransmittance(input.worldPosition);

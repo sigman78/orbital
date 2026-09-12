@@ -42,7 +42,8 @@ uint rockClass(uint id, float radial)
 
 float3 rockColour(uint rockClass, uint id)
 {
-    float3 base = rockClass == CLASS_S ? float3(.92, .78, .62) : rockClass == CLASS_C ? float3(.42, .40, .38) : float3(.74, .76, .80);
+    // Telescope-grey: silicate rocks only faintly warm, carbonaceous ones charcoal, metallic ones cool grey.
+    float3 base = rockClass == CLASS_S ? float3(.80, .76, .70) : rockClass == CLASS_C ? float3(.36, .36, .36) : float3(.70, .71, .74);
     float variation = .8 + .4 * hashId(id * 2891336453u + 3u);
     return base * variation;
 }
