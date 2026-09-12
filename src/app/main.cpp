@@ -53,10 +53,10 @@ constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
     "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..4\n"
     "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --rocks N --aa 0|1|2 --splat "
-    "0..3\n"
+    "0..3 --tone 0|1|2\n"
     "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F free;\n"
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
-    "F5 anti-aliasing mode; F6 rock splat cut-off; F7 splat lighting in both cull passes;\n"
+    "F5 anti-aliasing mode; F6 rock splat cut-off; F7 splat lighting in both cull passes; F8 tone curve;\n"
     "F12 capture; Esc exit.";
 
 // Projected rock radius, in pixels, below which rocks draw as disc splats; 0 means never (F6 cycles).
@@ -73,6 +73,7 @@ struct Options {
     unsigned rocks = 0; // belt override for benchmarks; 0 keeps the quality tiers
     unsigned aa = 2;    // initial anti-aliasing mode
     unsigned splat = 2; // initial splat cut-off mode, an index into splat_radii
+    unsigned tone = 0;  // initial tone curve
     bool tour = false, high = false, no_hud = false, help = false;
     std::filesystem::path capture, benchmark;
 };
@@ -128,6 +129,8 @@ std::optional<Options> parse_options(int argc, char** argv) {
             ok = parse_number(value(), options.rocks);
         else if (arg == "--aa")
             ok = parse_number(value(), options.aa) && options.aa <= 2;
+        else if (arg == "--tone")
+            ok = parse_number(value(), options.tone) && options.tone <= 2;
         else if (arg == "--splat")
             ok = parse_number(value(), options.splat) && options.splat < splat_radii.size();
         else if (arg == "--width")
@@ -172,6 +175,7 @@ struct AppState {
     unsigned anti_aliasing = 2;                         // 0 off, 1 temporal, 2 temporal plus FXAA
     unsigned splat_mode = 2;                            // index into splat_radii
     bool splat_light_twice = false;                     // light splats in the count pass too
+    unsigned tone_curve = 0;                            // 0 ACES filmic, 1 AgX, 2 PBR Neutral
     float exposure = 1.0f;
     unsigned selected_body = 0;
     std::filesystem::path capture_request;
@@ -188,6 +192,7 @@ void handle_key(AppState& app, Key key) {
     case Key::f5: app.anti_aliasing = (app.anti_aliasing + 1) % 3; break;
     case Key::f6: app.splat_mode = (app.splat_mode + 1) % splat_radii.size(); break;
     case Key::f7: app.splat_light_twice = !app.splat_light_twice; break;
+    case Key::f8: app.tone_curve = (app.tone_curve + 1) % 3; break;
     case Key::f12: app.capture_request = hotkey_capture_path; break;
     case Key::plus: app.exposure = exposure_keys::range.clamp(app.exposure * exposure_keys::step); break;
     case Key::minus: app.exposure = exposure_keys::range.clamp(app.exposure / exposure_keys::step); break;
@@ -243,17 +248,20 @@ float recent_p95_ms(std::span<const float> frame_ms) {
 
 void update_title(platform::Window& window, const render::Stats& stats, const AppState& app, float p95_ms) {
     const int fps = int(1000 / std::max(stats.frame_ms, 0.1f));
-    window.set_title(
-        std::format("ORBITAL  |  {} FPS  |  {:.1f} ms (p95 {:.1f})  |  GPU {:.1f} ms  |  {} draws ({} rock groups)  |  "
-                    "{} rocks  |  {:.2f} M tris  |  {}  |  belt map {} ext {}  |  AA {}  |  splats {} lit {}",
-                    fps, stats.frame_ms, p95_ms, stats.gpu_ms, stats.draw_calls, stats.rock_groups_drawn,
-                    stats.visible_asteroids, stats.triangles / 1e6, app.high ? "HIGH" : "BASELINE",
-                    app.belt_light_map ? "on" : "off", app.belt_extinction ? "on" : "off",
-                    app.anti_aliasing == 0   ? "off"
-                    : app.anti_aliasing == 1 ? "temporal"
-                                             : "temporal+fxaa",
-                    splat_radii[app.splat_mode] > 0 ? std::format("< {:.1f} px", splat_radii[app.splat_mode]) : "off",
-                    app.splat_light_twice ? "2x" : "1x"));
+    window.set_title(std::format(
+        "ORBITAL  |  {} FPS  |  {:.1f} ms (p95 {:.1f})  |  GPU {:.1f} ms  |  {} draws ({} rock groups)  |  "
+        "{} rocks  |  {:.2f} M tris  |  {}  |  belt map {} ext {}  |  AA {}  |  splats {} lit {}  |  tone {}",
+        fps, stats.frame_ms, p95_ms, stats.gpu_ms, stats.draw_calls, stats.rock_groups_drawn, stats.visible_asteroids,
+        stats.triangles / 1e6, app.high ? "HIGH" : "BASELINE", app.belt_light_map ? "on" : "off",
+        app.belt_extinction ? "on" : "off",
+        app.anti_aliasing == 0   ? "off"
+        : app.anti_aliasing == 1 ? "temporal"
+                                 : "temporal+fxaa",
+        splat_radii[app.splat_mode] > 0 ? std::format("< {:.1f} px", splat_radii[app.splat_mode]) : "off",
+        app.splat_light_twice ? "2x" : "1x",
+        app.tone_curve == 0   ? "ACES"
+        : app.tone_curve == 1 ? "AgX"
+                              : "Neutral"));
 }
 
 struct FrameTimes {
@@ -286,6 +294,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.high = options.high;
     app.anti_aliasing = options.aa;
     app.splat_mode = options.splat;
+    app.tone_curve = options.tone;
     app.overlay = !options.no_hud;
     app.exposure = options.exposure;
     app.auto_exposure = options.fixed_time < 0;
@@ -351,7 +360,8 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .belt_extinction = app.belt_extinction,
                                              .anti_aliasing = app.anti_aliasing,
                                              .billboard_radius = splat_radii[app.splat_mode],
-                                             .splat_light_twice = app.splat_light_twice};
+                                             .splat_light_twice = app.splat_light_twice,
+                                             .tone_curve = app.tone_curve};
         if (renderer.draw(frame_input)) {
             frames++;
             const auto stats = renderer.stats();

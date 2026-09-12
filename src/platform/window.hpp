@@ -30,6 +30,7 @@ enum class Key : std::uint16_t {
     f5,
     f6,
     f7,
+    f8,
     f12,
 };
 

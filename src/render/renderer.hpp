@@ -31,6 +31,7 @@ struct FrameInput {
     unsigned anti_aliasing = 2;     // 0 off, 1 temporal, 2 temporal plus FXAA (F5)
     float billboard_radius = 2.5f;  // rocks below this projected radius in pixels draw as disc splats; 0 never (F6)
     bool splat_light_twice = false; // light splats in the count pass too, for comparison (F7)
+    unsigned tone_curve = 0;        // 0 ACES filmic, 1 AgX, 2 Khronos PBR Neutral (F8)
 };
 
 // Startup choices that are not part of the scene description.

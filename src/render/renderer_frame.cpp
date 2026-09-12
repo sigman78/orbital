@@ -245,7 +245,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
         frame.bodies[i] = f4(input.bodies[i].position - camera.position, float(input.bodies[i].radius));
     frame.scene = {float(body_count), float(giant_index), input.belt_light_map ? 1.f : 0.f,
                    input.belt_extinction ? 1.f : 0.f};
-    frame.quality = {float(input.anti_aliasing), 0, 0, 0};
+    frame.quality = {float(input.anti_aliasing), float(input.tone_curve), 0, 0};
 
     // Sun position in screen space for the lens flare, hidden when a body covers it.
     const Vec3d sun_direction = normalized(system.star.position - camera.position);
