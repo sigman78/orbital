@@ -68,7 +68,7 @@ core       log, panic, file, math, types, small_vec            depends on nothin
 
 ### Backends
 
-- One directory per operating system, `platform/win32/` today, each implementing every interface
+- One directory per operating system, `platform/win32/` and `platform/linux/`, each implementing every interface
   header in full. A backend is a CMake target (`orbital_platform`) and is the only target that links
   OS libraries; the demo executable links the target, not `user32` or `gdi32`.
 - Backend code follows the same rules as the rest of the tree (panics, settings, RAII wrappers such
@@ -93,8 +93,7 @@ has a portable fallback. A `_WIN32`, `_MSC_VER` or `<windows.h>` anywhere else i
   through `tools/check-gcc.ps1`. That script links the C++ runtime statically on purpose: a
   dynamically linked test picks up whichever `libstdc++-6.dll` is first on PATH, and a stale one
   fails at load time with an entry-point dialog per executable.
-- The desktop demo itself is Windows-only until a second backend exists; the layering is what makes
-  that a contained job rather than a rewrite.
+- The desktop demo builds on Windows and Linux; each platform implements the same four interfaces.
 
 ## Containers
 

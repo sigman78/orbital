@@ -10,13 +10,13 @@ drove it, is in [DECISIONS.md](DECISIONS.md); the graphics backend and shader AB
 core       logging, panic, file I/O, math, small containers
 scene      seeded system description, orbital evaluation, sphere and rock geometry
 assets     PNG I/O, SIMD pixel kernels, material mip chains
-platform   window, input, process, text overlay, Dear ImGui overlay input   (win32/ implements them)
+platform   window, input, process, text overlay, Dear ImGui overlay input   (win32/ and linux/ implement them)
 render     the NoGraphicsAPI renderer: resources, materials, per-frame passes
 app        options, camera, HUD, control panel, frame loop
 ```
 
-Everything below `platform` builds and tests with GCC on Linux in CI. Only `platform/win32` and the demo
-executable need MSVC. The renderer never sees an OS type; the application never sees a Vulkan type.
+The complete demo builds with MSVC on Windows and GCC on Linux. The Linux backend uses SDL2 for
+Wayland/X11 windows and input, and Fontconfig/FreeType for HUD text. The renderer never sees an OS type; the application never sees a Vulkan type.
 
 ## Scene
 

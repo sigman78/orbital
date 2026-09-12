@@ -1,6 +1,6 @@
 # ORBITAL
 
-Native Windows C++20 space demo on a compatibility fork of [NoGraphicsAPI](https://github.com/sebbbi/NoGraphicsAPI): an Earth-like world, a gas giant with a half-million-rock asteroid belt, a rocky moon, a desert world with two moonlets. Sourced material maps, atmospheric scattering, shadows, HDR with exposure adaptation and bloom, temporal plus SMAA anti-aliasing, three tone curves and a Dear ImGui control panel.
+Native Windows and Linux C++20 space demo on a compatibility fork of [NoGraphicsAPI](https://github.com/sebbbi/NoGraphicsAPI): an Earth-like world, a gas giant with a half-million-rock asteroid belt, a rocky moon, a desert world with two moonlets. Sourced material maps, atmospheric scattering, shadows, HDR with exposure adaptation and bloom, temporal plus SMAA anti-aliasing, three tone curves and a Dear ImGui control panel.
 
 ![Earth with the gas giant and its belt behind it](docs/images/earth.jpg)
 
@@ -14,7 +14,7 @@ Native Windows C++20 space demo on a compatibility fork of [NoGraphicsAPI](https
 
 ## Build
 
-Requires Windows x64, MSVC C++ tools, CMake 3.24+, Ninja and Vulkan headers/loader import library (normally Vulkan SDK). NoGraphicsAPI is vendored under `third_party/NoGraphicsAPI`.
+Windows requires x64, MSVC C++ tools, CMake 3.25+, Ninja and Vulkan headers/loader import library (normally Vulkan SDK). NoGraphicsAPI is vendored under `third_party/NoGraphicsAPI`.
 
 ```powershell
 ./tools/bootstrap.ps1
@@ -26,6 +26,8 @@ ctest --preset release
 Bootstrap downloads pinned shader tools; it does not install a GPU driver or full Vulkan SDK. Material textures are tracked in git as PNG; `tools/import-assets.ps1` records and reproduces their derivation from the upstream sources. Machine-specific overrides (for example an existing Vulkan loader library) go in an ignored `CMakeUserPresets.json`; in an MSVC developer shell, `cmake --preset <your-preset>` then `cmake --build --preset release`.
 
 Shaders are Slang, compiled offline, with a shared C++/shader layout header. See [docs/FOUNDATION.md](docs/FOUNDATION.md) for the compatibility backend.
+
+For Linux setup, build presets, validation and SSH launch instructions, see [Linux](docs/LINUX.md).
 
 ## Explore
 
@@ -47,7 +49,7 @@ F12 opens the control panel (`--ui` opens it at start), which holds frame statis
 | Path | Contents |
 | --- | --- |
 | `src/core` | Logging, panic, file I/O and vector/matrix math shared by everything else |
-| `src/platform` | OS-neutral window, input, process, text-overlay and ImGui-overlay interfaces; `win32/` implements them |
+| `src/platform` | OS-neutral window, input, process, text-overlay and ImGui-overlay interfaces; `win32/` and `linux/` implement them |
 | `src/app` | Options, camera, HUD, control panel and the frame loop; no OS calls |
 | `src/scene` | Deterministic system generation, rock population and mesh geometry |
 | `src/assets` | PNG image I/O (Wuffs decode, stb write), SIMD pixel kernels and material mip-chain generation |

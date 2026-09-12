@@ -71,6 +71,83 @@ Append dated decisions with evidence and implications when these questions are r
 - Pixel-sized post effects are tuned in a reference frame (the 1600x900 default window) and keep their pixel size in any other window: the chromatic fringe takes its radius from the reference aspect and converts its shift through the reference resolution, so a 3440x1440 borderless window no longer shows stars split into separate red, green and blue dots at the corners (the old uv-space cubic grew with both the resolution and the ultrawide corner radius, 15 pixels of fringe against 3 in the default window); the bloom tap spacing scales with the frame height instead, so the halo keeps its size relative to the picture. Angular effects (vignette, lens flare) already work in normalised coordinates; grain stays per pixel.
 - Dear ImGui (1.91.9b, vendored under third_party/imgui) provides a control panel docked to the right edge, F12 to show it and --ui to start with it: frame statistics with a frame-time plot and the GPU pass breakdown, and every toggle the hotkeys reach, grouped as quality, anti-aliasing, belt, tone, camera and overlay; the capture key moves to F10. Layering: the ImGui core is platform-agnostic and lives with the application (src/app/ui.cpp builds the panel from AppState, now in app/app_state.hpp); the Win32 backend is compiled into the platform layer behind platform/overlay.hpp, which attaches it through a platform-internal message hook on the window (platform/win32/window_access.hpp) that also consumes clicks, wheel and typed keys while the panel wants them, so no OS type reaches the application; the draw lists are rendered by the renderer's own backend (shaders/ui.slang) into the swapchain pass after the present triangle, from a 4 MiB overlay region at the end of the dynamic heap, with ImDrawVert repacked into 32-byte records so the pointer layout is unambiguous and the font atlas in texture slot 36. Captures do not include the panel, since they read the frame before presentation.
 - Belt dust as a scattering medium (F11, --dust): a view-ray march through the same analytic belt density the rock extinction uses (rings, gap, flared height), so the fine matter between the rocks glows where they are dense and thins at the edges; each sample takes sunlight through the belt, the planets' shadows and the rock transmittance map, and scatters it with a forward-peaked Henyey-Greenstein phase (g 0.55) mixed with an isotropic share (0.35) for multiple scattering and back-scatter; what lies behind is attenuated by the view transmittance (premultiplied blend after the atmospheres). The dust's own extinction is 0.08 of the rock coefficient: the rock extinction caps its sun path at one belt width, the view ray does not, and at the full coefficient an in-plane chord was opaque grey. Seen from outside the belt the column through the thin medium vanishes, so the density rises with the camera's distance from the slab (times 30 at six slab half-heights out), which turns the belt into a faint disc with the giant's shadow cut through it, the distant counterpart the user asked for, without a second code path. The march runs at half resolution (16 view samples, 2 sun samples, jittered per pixel and frame) into its own target and is composited with a depth-aware four-tap upsample, so the haze does not bleed across rock silhouettes; the temporal pass settles the jitter (frame-to-frame flicker is lower with the dust than without, since it fills the black between rocks). Cost at 1080p, 520k rocks: 0.8 ms in the belt, 0.3 ms in the far view (the full-resolution first cut was 3.9 ms). Brightness: the belt view gains 11% mean luminance, the far belt band 1.7 to 2x.
+
+## Linux desktop port (2026-09-12)
+
+Implemented in `5a757ae` on `linux-port`. The starting point built only the CPU layers on Linux;
+CMake rejected the desktop demo, and NoGraphicsAPI rejected non-Windows presentation. The complete
+demo now builds and renders on the Linux PC. Setup and repeatable commands are in [LINUX.md](LINUX.md).
+
+### Platform and build
+
+- Added `src/platform/linux/` implementations of all four platform interfaces. SDL2 handles Wayland
+  or X11 windows, event polling, relative mouse look, key presses, focus, minimize, maximize and
+  borderless fullscreen. The native handle passed through the renderer is an `SDL_Window*` on Linux.
+- Vendored the SDL2 Dear ImGui backend from the same 1.91.9b tag as the existing core. SDL events feed
+  ImGui before application input; mouse and keyboard capture prevent panel input from also driving
+  the camera. Fontconfig selects regular/bold sans-serif fonts and FreeType rasterizes UTF-8 HUD text
+  into the existing RGBA overlay format. Linux locates assets relative to `/proc/self/exe`.
+- CMake selects the platform implementation and its dependencies. Added `linux-release`,
+  `linux-debug` and `linux-cpu` presets, and `tools/bootstrap.sh`, which verifies the SHA-256 of the
+  pinned Slang 2026.14.1 Linux archive before installing it under ignored `.tools/slang`.
+  `spirv-val` validates generated shaders when installed. System Vulkan, SDL2, FreeType and Fontconfig
+  development packages are documented separately from shader bootstrap.
+- The NoGraphicsAPI package configuration also resolves SDL2 on Linux. Regenerated
+  `third_party/NoGraphicsAPI-compat.patch` against upstream `8e414bd0a8010b9f721d06d470860e27aa69c071`
+  and checked that applying it reproduces all four modified upstream files.
+
+### Vulkan presentation and device compatibility
+
+| Problem found on the Linux PC | Implemented change | Result |
+| --- | --- | --- |
+| Presentation was guarded by `_WIN32`. | Obtain instance extensions from SDL, create the SDL Vulkan surface, and enable swapchain/maintenance extensions on Linux. | The existing renderer presents through native Wayland or XWayland. |
+| Wayland reports `UINT_MAX` for the application-selected surface extent. | Query SDL's drawable size, clamp it to surface limits, and use that result for swapchain creation, resize detection and drawable-size queries. | Startup, resize and fullscreen work with compositor-selected pixel dimensions. A requested 960x540 window measured 961x540 on this desktop. |
+| Mesa exposed 81 surface formats, exceeding the backend's fixed limit of 64. | Raise the format enumeration capacity to 256. | Device initialization reaches swapchain creation on this driver. |
+| Device selection required 64-bit timestamps; this Intel queue reports 36 valid bits. | Accept queues with nonzero timestamp precision and expose `DeviceCaps::timestamp_valid_bits`. | The GPU is accepted and the renderer can account for counter wrap. |
+| Intel lacks `shaderStorageImageReadWithoutFormat`, which Orbital's shaders do not use. | Make it optional for the conventional backend; enable it only when supported and expose `storage_image_read_without_format` in the device capabilities. | Device creation succeeds without claiming unsupported shader functionality. The experimental backend retains its requirement. |
+
+### Renderer and shader corrections
+
+- GPU pass timings now use `core/timing.hpp::timestamp_ticks` to mask timestamp differences to the
+  device's valid counter width before converting ticks to milliseconds. This covers total GPU time
+  and shadow, surface, atmosphere and post timings. Compile-time tests cover ordinary intervals,
+  36-bit wrap, 64-bit wrap and a zero-width counter.
+- Khronos validation reported calls to `vkCmdDrawIndexedIndirectCount` without the Vulkan 1.2
+  `drawIndirectCount` feature enabled. Device selection now checks it, and device creation enables
+  it. This is the existing compacted asteroid multi-draw path.
+- Validation also reported Slang-generated `DemoteToHelperInvocation` capabilities without the
+  matching Vulkan 1.3 feature. Device selection and creation now check and enable
+  `shaderDemoteToHelperInvocation` for those fragment shaders.
+- The shader texture arrays had 40 entries while the CPU's `Slot::count` was 38. Validation reported
+  uninitialized descriptors starting at slot 38. `ORBITAL_TEXTURE_COUNT` in `scene_shared.h` now
+  supplies the array size to `common.slang`, `cull.slang`, `ui.slang` and the CPU slot count. The
+  existing fallback-binding loop consequently initializes reserved slots 38 and 39 as well.
+- Explicitly initialized the pixel containers in two renderer image constructions to remove GCC
+  missing-field warnings. The scene's lighting, atmospheric scattering, asteroid population,
+  material model, tone mapping and anti-aliasing algorithms retain their existing behavior; the
+  rendering changes above concern valid resource bindings, enabled features and timing accuracy.
+
+### Verification and remaining limits
+
+- Tested over SSH on CachyOS with GCC 16.2.1, Intel Graphics ADL GT2, Mesa 26.2.2, device Vulkan
+  1.4.354 and Vulkan headers/loader 1.4.357. Release and Debug builds compile the full demo and all
+  shaders. Seven application tests pass in Release; all 13 application/backend tests pass in Debug,
+  including the command-context and placed-texture GPU tests, with no skips.
+- Added `tools/smoke-linux.sh`: bounded 40-frame runs cover Earth twice, the 520k-rock high-quality
+  belt, HUD/UI, maximize and fullscreen. It checks successful completion, captures and validation
+  logs and writes a belt benchmark CSV. Debug runs passed on native Wayland and XWayland without
+  validation messages; Release also passed the Wayland smoke sequence.
+- Inspected an in-engine capture showing Earth, atmosphere, Jupiter and its belt, and an actual
+  desktop-window capture showing the FreeType HUD and ImGui panel. Engine PNG captures intentionally
+  omit ImGui because the panel is drawn during presentation, after the captured image.
+- Two fixed-time 961x540 Earth captures differed by at most one 8-bit channel value, with mean
+  per-pixel maximum-channel difference 0.000146 and no pixels differing by more than 1/255.
+  The smoke script retains both captures and reports differences; it does not assert bitwise
+  determinism or establish cross-platform image equivalence.
+- Captures and logs are local artifacts under ignored `captures/`; they are not embedded in the
+  source commit. Formatting and shell syntax checks passed. The Windows demo has not been rebuilt
+  or rendered in this porting session, and interactive keyboard/mouse behavior still merits manual
+  testing. The tested X11 path is XWayland, not a separate native Xorg desktop.
 - The belt has two representations blended by the camera's distance: full detail inside and near it (the rock meshes and splats, the half-resolution dust march), and a baked disc once the camera is out (fade from 0.5 to 2 belt widths past the slab, smoothstep, scaled by the panel's far-belt fade distance). The disc is two maps over the belt plane in an orthographic frame: the sunlight reaching the plane through the belt and the planets' shadows (1024 texels, baked every 16 frames while the far tier is in use), and the rocks' coverage times albedo, splatted from the rock records every 32 frames (256 texels so each texel averages many rocks; rocks above 0.06 world radius stay out of it and keep their splats and meshes, since they are rare and dominated their texel as bright blotches). The far tier is not a plane lookup, which breaks down edge-on, but a 12-sample march through the slab's thickness: the analytic density for the dust, the vertical profile applied to the baked rock coverage, the baked sunlight for both, sampled with at least a 3x3 box and wider with minification. The near paths carry the complementary weight (splat coverage and the dust march scale by one minus the weight), so the crossfade never pops. The distance-scaled density hack of the earlier dust pass is gone; in its place an explicit legibility boost ramps in with the weight (25x for the dust, 8x for the rock map, times the far-belt brightness slider), because at true scale the far belt is faint: the dust is thin and the rocks cover a fraction of a percent of the plane. Measured at 1080p, 520k rocks: far Jupiter view 5.55 ms against 5.32 with the old hack, the Earth view unchanged at 5.38, inside the belt unchanged.
 - The far-belt disc and the near dust march now share one distance ramp (dustFarScale in belt.slang: density times up to 30 over six slab half-heights, times the far-belt brightness slider), and the crossfade sits past its saturation (one to two ramp lengths out, scaled by the fade-distance slider). The first cut removed the ramp from the near march when the disc LOD was on and gave the disc its own boosts (25x dust, 8x rocks) keyed to belt widths: just outside the belt the dust went nearly invisible, then brightened suddenly as the disc came in, brighter than the old look. With the shared ramp and no separate boosts the disc-on and disc-off images agree within 3 to 12 percent in the far views, so switching the LOD changes only the integration (noise-free, with the small-rock texture) and not the belt's brightness or shading; disc off reproduces the pre-LOD frames exactly.
 - The far-belt disc is composited in the same pass as the near dust march, mixed by the LOD weight before one premultiplied blend. Stacked as two weighted layers, the belt's opacity mid-fade was the product of two partial opacities (an opaque belt dropped to 75 percent at the halfway point and recovered), which read as a translucency dip at a fixed distance. The sunlight bake now stores two transmittances, the dust's thin medium and the rocks' extinction, so each layer of the disc is shaded as its near counterpart is (the dust march and the splats), which removed a 26 percent brightness drop at the far end of the fade. Verified by sweeping the blend weight at a fixed far camera through --lod-scale: the belt band goes from 0.0053 to 0.0052 in even steps across the fade, and the Earth view with the disc matches the full-detail render (0.0256 against 0.0257).

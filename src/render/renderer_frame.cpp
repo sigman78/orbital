@@ -1,6 +1,7 @@
 #include "render/renderer_impl.hpp"
 
 #include "core/log.hpp"
+#include "core/timing.hpp"
 
 #include "core/panic.hpp"
 #include "imgui.h"
@@ -183,12 +184,16 @@ void Renderer::Impl::read_gpu_timings() {
     if (!frame_index)
         return;
     const auto* t = reinterpret_cast<const std::uint64_t*>(timestamps.range.cpu);
-    const float scale = float(gpu::get_device_caps(device).timestamp_period_ns * 1e-6);
-    stats.gpu_ms = float(t[4] - t[0]) * scale;
-    stats.shadow_ms = float(t[1] - t[0]) * scale;
-    stats.surface_ms = float(t[2] - t[1]) * scale;
-    stats.atmosphere_ms = float(t[3] - t[2]) * scale;
-    stats.post_ms = float(t[4] - t[3]) * scale;
+    const auto caps = gpu::get_device_caps(device);
+    const float scale = float(caps.timestamp_period_ns * 1e-6);
+    const auto elapsed = [&](unsigned begin, unsigned end) {
+        return float(timestamp_ticks(t[begin], t[end], caps.timestamp_valid_bits)) * scale;
+    };
+    stats.gpu_ms = elapsed(0, 4);
+    stats.shadow_ms = elapsed(0, 1);
+    stats.surface_ms = elapsed(1, 2);
+    stats.atmosphere_ms = elapsed(2, 3);
+    stats.post_ms = elapsed(3, 4);
 }
 
 void Renderer::Impl::apply_metering() {
@@ -459,7 +464,7 @@ void Renderer::Impl::record_belt_light_pass(gpu::CommandBuffer* cmd, const CullR
 // rocks' coverage splatted every few dozen frames, both only while the far
 // tier is in use (and once before it first shows).
 void Renderer::Impl::record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root,
-                                            unsigned rock_count, float far_weight) {
+                                            unsigned rock_limit, float far_weight) {
     if (far_weight <= 0)
         return;
     const bool bake_light = !belt_disc_baked || frame_index % targets::belt_disc_light_interval == 0;
@@ -473,7 +478,7 @@ void Renderer::Impl::record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullR
             .render_view = belt_disc_rocks.view, .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
         gpu::begin_render_pass(cmd, {.colors = {&attachment, 1}});
         gpu::bind_pso(cmd, pso.belt_disc_splat);
-        gpu::draw(cmd, cull_root, 6, rock_count);
+        gpu::draw(cmd, cull_root, 6, rock_limit);
         stats.draw_calls++;
         gpu::end_render_pass(cmd);
         gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,

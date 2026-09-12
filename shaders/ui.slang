@@ -3,7 +3,8 @@
 // records); colours arrive sRGB-encoded and are decoded here because the
 // swapchain is an sRGB target. The font atlas sits in a fixed texture slot.
 
-[[vk::binding(0, 0)]] Texture2D<float4> textures[40];
+#include "scene_shared.h"
+[[vk::binding(0, 0)]] Texture2D<float4> textures[ORBITAL_TEXTURE_COUNT];
 [[vk::binding(1, 0)]] SamplerState samplers[4];
 
 struct UiVertex {

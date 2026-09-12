@@ -21,7 +21,7 @@ namespace space::render {
 
 // --- Fixed layout shared with the shaders -------------------------------------
 
-// Sampled texture descriptor slots (shaders/common.slang binds 32).
+// Sampled texture descriptor slots; initialize the entire shader array, including reserved slots.
 enum class Slot : unsigned {
     hdr = 0,
     bloom_a = 1,
@@ -63,7 +63,7 @@ enum class Slot : unsigned {
     belt_dust = 37,       // half-resolution belt dust march, composited with a depth-aware upsample
     belt_disc_light = 38, // far-belt map: sunlight reaching the belt plane, baked every few frames
     belt_disc_rocks = 39, // far-belt map: rock coverage times albedo, splatted every few dozen frames
-    count = 40,
+    count = ORBITAL_TEXTURE_COUNT,
 };
 
 // Sampler descriptor slots (shaders/common.slang binds 4).
@@ -259,7 +259,7 @@ struct Renderer::Impl {
     bool ui_overflow_logged = false;
     bool belt_disc_baked = false;          // the far-belt maps hold data (baked once the far tier is first needed)
     gpu::SwapchainInfo logged_swapchain{}; // last presentation mode and image count reported to the log
-    void record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root, unsigned rock_count,
+    void record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root, unsigned rock_limit,
                                 float far_weight);
 
     // Per-frame scratch, cleared and reused: the body instances only, rocks

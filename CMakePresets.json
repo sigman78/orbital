@@ -1,10 +1,23 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
   "configurePresets": [
     { "name": "release", "generator": "Ninja", "binaryDir": "${sourceDir}/build/release", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "CMAKE_CXX_COMPILER": "cl", "BUILD_TESTING": "ON" } },
-    { "name": "debug", "inherits": "release", "binaryDir": "${sourceDir}/build/debug", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } }
+    { "name": "debug", "inherits": "release", "binaryDir": "${sourceDir}/build/debug", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
+    { "name": "linux-release", "generator": "Ninja", "binaryDir": "${sourceDir}/build/linux-release", "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }, "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "BUILD_TESTING": "ON" } },
+    { "name": "linux-debug", "inherits": "linux-release", "binaryDir": "${sourceDir}/build/linux-debug", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
+    { "name": "linux-cpu", "inherits": "linux-release", "binaryDir": "${sourceDir}/build/linux-cpu", "cacheVariables": { "ORBITAL_BUILD_DEMO": "OFF" } }
   ],
-  "buildPresets": [ { "name": "release", "configurePreset": "release" }, { "name": "debug", "configurePreset": "debug" } ],
-  "testPresets": [ { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } }, { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } } ]
+  "buildPresets": [
+    { "name": "release", "configurePreset": "release" }, { "name": "debug", "configurePreset": "debug" },
+    { "name": "linux-release", "configurePreset": "linux-release" }, { "name": "linux-debug", "configurePreset": "linux-debug" },
+    { "name": "linux-cpu", "configurePreset": "linux-cpu" }
+  ],
+  "testPresets": [
+    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
+    { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
+    { "name": "linux-release", "configurePreset": "linux-release", "output": { "outputOnFailure": true } },
+    { "name": "linux-debug", "configurePreset": "linux-debug", "output": { "outputOnFailure": true } },
+    { "name": "linux-cpu", "configurePreset": "linux-cpu", "output": { "outputOnFailure": true } }
+  ]
 }
