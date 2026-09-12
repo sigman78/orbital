@@ -53,11 +53,11 @@ constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
     "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..4\n"
     "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --rocks N\n"
-    "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --splat 0..3 --tone 0|1|2\n"
+    "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --splat 0..3 --tone 0|1|2 --maximize-at N --fullscreen-at N\n"
     "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F free;\n"
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
     "F5 temporal AA; F6 rock splat cut-off; F7 splat lighting in both cull passes; F8 tone curve;\n"
-    "F9 spatial AA (off, FXAA, SMAA);\n"
+    "F9 spatial AA (off, FXAA, SMAA); Alt+Enter borderless fullscreen;\n"
     "F12 capture; Esc exit.";
 
 // Projected rock radius, in pixels, below which rocks draw as disc splats; 0 means never (F6 cycles).
@@ -78,6 +78,7 @@ struct Options {
     unsigned tone = 2;        // initial tone curve (PBR Neutral)
     float pan = 0;            // lateral drift as a fraction of the flight speed, stepped at a fixed 60 Hz for captures
     unsigned maximize_at = 0; // > 0 maximizes the window after this many frames, to test resizing in captures
+    unsigned fullscreen_at = 0; // > 0 enters borderless fullscreen after this many frames
     bool tour = false, high = false, no_hud = false, help = false;
     std::filesystem::path capture, benchmark;
 };
@@ -139,6 +140,8 @@ std::optional<Options> parse_options(int argc, char** argv) {
             ok = parse_number(value(), options.pan);
         else if (arg == "--maximize-at")
             ok = parse_number(value(), options.maximize_at);
+        else if (arg == "--fullscreen-at")
+            ok = parse_number(value(), options.fullscreen_at);
         else if (arg == "--tone")
             ok = parse_number(value(), options.tone) && options.tone <= 2;
         else if (arg == "--splat")
@@ -344,8 +347,12 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
     double simulation_time = 0, elapsed = 0, title_clock = 0;
     unsigned frames = 0;
     while (app.running && window.pump_events()) {
-        for (const Key key : window.key_presses())
-            handle_key(app, key);
+        for (const Key key : window.key_presses()) {
+            if (key == Key::alt_enter)
+                window.toggle_fullscreen();
+            else
+                handle_key(app, key);
+        }
         if (!app.running)
             break;
         if (window.minimized()) {
@@ -383,6 +390,8 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
             frames++;
             if (options.maximize_at && frames == options.maximize_at)
                 window.maximize();
+            if (options.fullscreen_at && frames == options.fullscreen_at)
+                window.toggle_fullscreen();
             const auto stats = renderer.stats();
             times.cpu_ms.push_back(stats.frame_ms);
             times.gpu_ms.push_back(stats.gpu_ms);

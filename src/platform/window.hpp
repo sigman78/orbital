@@ -33,6 +33,7 @@ enum class Key : std::uint16_t {
     f8,
     f9,
     f12,
+    alt_enter, // borderless fullscreen toggle
 };
 
 constexpr Key letter_key(char letter) {
@@ -80,7 +81,9 @@ public:
     bool minimized() const;
     void wait_for_events() const; // blocks until the next event, for a minimized window
     void set_title(std::string_view utf8);
-    void maximize(); // as the maximize button would; the drawable size changes on the next pump
+    void maximize();          // as the maximize button would; the drawable size changes on the next pump
+    void toggle_fullscreen(); // borderless window over the monitor, and back to the previous placement
+    bool fullscreen() const;
 
     struct Impl;
 

@@ -535,6 +535,9 @@ bool Renderer::draw(const FrameInput& input) {
     const auto swap = gpu::acquire(s.device);
     if (!swap.render_view)
         return false;
+    if (swap.extent.x != s.extent.width || swap.extent.y != s.extent.height)
+        log::warn("Swapchain {}x{} does not match the frame targets {}x{}", swap.extent.x, swap.extent.y,
+                  s.extent.width, s.extent.height);
     const auto prepare_start = std::chrono::steady_clock::now();
 
     const unsigned history_write = s.frame_index % 2;

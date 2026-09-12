@@ -77,6 +77,10 @@ struct Window::Impl {
     POINT previous_cursor{};
     MouseDelta delta;
     SmallVec<Key, inline_press_count> presses;
+    bool fullscreen = false; // borderless fullscreen (Alt+Enter); the placement below restores the window
+    LONG saved_style = 0;
+    RECT saved_rect{};
+    bool saved_maximized = false;
 
     ~Impl() {
         if (handle)
@@ -111,6 +115,18 @@ struct Window::Impl {
                 if (const Key key = key_from_virtual(w); key != Key::none)
                     presses.try_push_back(key); // beyond capacity, extra presses are dropped
             return 0;
+        case WM_SYSKEYDOWN:
+            // Alt+Enter arrives as a system key; everything else (Alt+F4, menu keys) stays default.
+            if (w == VK_RETURN && (l & (1 << 29))) {
+                if (!(l & key_repeat_bit))
+                    presses.try_push_back(Key::alt_enter);
+                return 0;
+            }
+            break;
+        case WM_SYSCHAR:
+            if (w == VK_RETURN)
+                return 0; // no beep for Alt+Enter
+            break;
         }
         return DefWindowProcW(handle, message, w, l);
     }
@@ -202,6 +218,35 @@ void Window::set_title(std::string_view utf8) {
 
 void Window::maximize() {
     ShowWindow(impl_->handle, SW_MAXIMIZE);
+}
+
+void Window::toggle_fullscreen() {
+    auto& i = *impl_;
+    const HWND handle = i.handle;
+    if (!i.fullscreen) {
+        i.saved_style = GetWindowLongW(handle, GWL_STYLE);
+        i.saved_maximized = IsZoomed(handle) != 0;
+        GetWindowRect(handle, &i.saved_rect);
+        MONITORINFO monitor{.cbSize = sizeof monitor};
+        GetMonitorInfoW(MonitorFromWindow(handle, MONITOR_DEFAULTTONEAREST), &monitor);
+        const RECT& m = monitor.rcMonitor;
+        SetWindowLongW(handle, GWL_STYLE, (i.saved_style & ~LONG(WS_OVERLAPPEDWINDOW)) | WS_POPUP | WS_VISIBLE);
+        SetWindowPos(handle, HWND_TOP, m.left, m.top, m.right - m.left, m.bottom - m.top,
+                     SWP_FRAMECHANGED | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+        i.fullscreen = true;
+    } else {
+        SetWindowLongW(handle, GWL_STYLE, i.saved_style);
+        const RECT& r = i.saved_rect;
+        SetWindowPos(handle, nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                     SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+        if (i.saved_maximized)
+            ShowWindow(handle, SW_MAXIMIZE);
+        i.fullscreen = false;
+    }
+}
+
+bool Window::fullscreen() const {
+    return impl_->fullscreen;
 }
 
 } // namespace space::platform
