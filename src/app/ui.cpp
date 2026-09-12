@@ -124,6 +124,13 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::Checkbox("Transmittance map (F3)", &app.belt_light_map);
         ImGui::Checkbox("Dust extinction (F4)", &app.belt_extinction);
         ImGui::Checkbox("Dust scattering (F11)", &app.belt_dust);
+        ImGui::BeginDisabled(!app.belt_dust);
+        ImGui::SliderFloat("Dust density", &app.dust_density, .1f, 8.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Dust brightness", &app.dust_brightness, .1f, 8.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Dust far-view scale", &app.dust_far, .1f, 8.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
+        if (ImGui::SmallButton("Reset dust"))
+            app.dust_density = app.dust_brightness = app.dust_far = 1;
+        ImGui::EndDisabled();
         static constexpr const char* cutoffs[] = {"Off", "1.2 px", "2.5 px", "4 px"};
         combo("Splat cut-off (F6)", app.splat_mode, cutoffs);
         ImGui::Checkbox("Light splats in both cull passes (F7)", &app.splat_light_twice);

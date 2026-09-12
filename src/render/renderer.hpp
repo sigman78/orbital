@@ -28,9 +28,11 @@ struct FrameInput {
     bool high_quality = false;
     bool overlay = true;
     bool auto_exposure = true;
-    bool belt_light_map = true;     // rock-on-rock transmittance map (F3)
-    bool belt_extinction = true;    // analytic belt dust extinction (F4)
-    bool belt_dust = true;          // volumetric belt dust scattering (F11)
+    bool belt_light_map = true;  // rock-on-rock transmittance map (F3)
+    bool belt_extinction = true; // analytic belt dust extinction (F4)
+    bool belt_dust = true;       // volumetric belt dust scattering (F11)
+    float dust_density = 1, dust_brightness = 1,
+          dust_far = 1;             // multipliers on the dust shader's extinction, albedo and far-view scale
     bool temporal_aa = true;        // temporal anti-aliasing (F5)
     unsigned spatial_aa = 2;        // spatial pass over the tone-mapped image: 0 off, 1 FXAA, 2 SMAA (F9)
     float billboard_radius = 2.5f;  // rocks below this projected radius in pixels draw as disc splats; 0 never (F6)

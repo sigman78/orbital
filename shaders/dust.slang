@@ -106,7 +106,7 @@ float4 march(float2 fullResPixel, int2 depthPixel)
     t1 = min(t1, sceneDepthAt(depthPixel) / max(dot(rd, frame->forward_exposure.xyz), 1e-4));
     if (t1 <= t0) return float4(0.0, 0.0, 0.0, 0.0);
     float outside = max(max(abs(hn) - halfHeight, 0.0), max(length(qp) - outer, 0.0)) / (halfHeight * DUST_FAR_DISTANCE);
-    float farScale = lerp(1.0, DUST_FAR_SCALE, saturate(outside));
+    float farScale = lerp(1.0, DUST_FAR_SCALE * frame->dust.z, saturate(outside));
 
     float jitter = hash(float3(fullResPixel, frac(frame->camera_time.w * 13.0) * 100.0 + frame->jitter.x * 37.0));
     float ds = (t1 - t0) / float(DUST_STEPS);
@@ -119,11 +119,11 @@ float4 march(float2 fullResPixel, int2 depthPixel)
         float3 q = p - giant;
         float density = beltDensity(q, ring, n) * ring.z * farScale;
         if (density < 1e-5) continue;
-        float sigma = density * BELT_EXTINCTION * DUST_DENSITY; // extinction per unit length
+        float sigma = density * BELT_EXTINCTION * DUST_DENSITY * frame->dust.x; // extinction per unit length
         float3 light = normalize(frame->sun.xyz - p);
         float sunlight = frame->sun.w * sunTransmittance(q, light, ring, n) * solarVisibility(frame, p, -1)
                        * beltRockTransmittance(frame, p);
-        float3 inscatter = DUST_COLOUR * DUST_ALBEDO * sigma * phase(dot(light, rd)) * sunlight;
+        float3 inscatter = DUST_COLOUR * DUST_ALBEDO * frame->dust.y * sigma * phase(dot(light, rd)) * sunlight;
         // Analytic integral of the in-scatter over the step under constant density.
         float stepTransmittance = exp(-sigma * ds);
         radiance += transmittance * inscatter * (1.0 - stepTransmittance) / sigma;

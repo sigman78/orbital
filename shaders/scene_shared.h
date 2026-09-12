@@ -30,6 +30,7 @@ struct Frame {
     SHADER_MATRIX4 belt_light_projection; // orthographic box over the whole belt from the sun
     SHADER_FLOAT4 belt_light;  // box half width, half height, map texels, half span of the slice range along the light
     SHADER_FLOAT4 quality;     // temporal anti-aliasing on, tone curve (0 ACES filmic, 1 AgX, 2 PBR Neutral), belt dust on, unused
+    SHADER_FLOAT4 dust;        // belt dust multipliers: density (extinction), brightness (albedo), far-view scale, unused
 };
 struct Root {
 #ifdef __cplusplus
