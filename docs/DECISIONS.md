@@ -74,19 +74,77 @@ Append dated decisions with evidence and implications when these questions are r
 
 ## Linux desktop port (2026-09-12)
 
-- Add an SDL2 Linux backend for Wayland/X11 windowing, relative mouse input and Dear ImGui events;
-  Fontconfig selects the HUD font and FreeType rasterizes UTF-8 text. Keep the application interfaces
-  and Windows platform backend unchanged.
-- Extend NoGraphicsAPI presentation through SDL Vulkan surfaces. Query SDL drawable dimensions when
-  the surface leaves its extent to the application (Wayland), and allow 256 surface formats: this
-  Mesa driver reports 81, exceeding the old 64-format bound.
-- Accept nonzero timestamp widths and expose the queue width to the renderer. Mask differences so
-  Intel's 36-bit counter wraps correctly; compile-time tests cover 36-bit and 64-bit wraparound.
-  Formatless storage-image reads are optional on the conventional backend and exposed as a capability.
-- Enable the drawIndirectCount and shaderDemoteToHelperInvocation features already used by the demo.
-  Share the 40-entry texture array size between CPU and shaders so slots 38 and 39 receive fallback
-  descriptors. These issues were found with Khronos validation enabled on Intel ADL GT2.
-- Verified on CachyOS, GCC 16.2.1, Mesa 26.2.2: all 13 CPU/backend tests pass; native Wayland and XWayland
-  pass Earth, high-quality belt, UI, maximize and fullscreen smoke runs without validation messages.
-  Repeated fixed-time 961x540 Earth captures differ by at most one 8-bit channel value, with mean
-  maximum-channel difference 0.000146. The desktop capture also confirms HUD and control-panel rendering.
+Implemented in `5a757ae` on `linux-port`. The starting point built only the CPU layers on Linux;
+CMake rejected the desktop demo, and NoGraphicsAPI rejected non-Windows presentation. The complete
+demo now builds and renders on the Linux PC. Setup and repeatable commands are in [LINUX.md](LINUX.md).
+
+### Platform and build
+
+- Added `src/platform/linux/` implementations of all four platform interfaces. SDL2 handles Wayland
+  or X11 windows, event polling, relative mouse look, key presses, focus, minimize, maximize and
+  borderless fullscreen. The native handle passed through the renderer is an `SDL_Window*` on Linux.
+- Vendored the SDL2 Dear ImGui backend from the same 1.91.9b tag as the existing core. SDL events feed
+  ImGui before application input; mouse and keyboard capture prevent panel input from also driving
+  the camera. Fontconfig selects regular/bold sans-serif fonts and FreeType rasterizes UTF-8 HUD text
+  into the existing RGBA overlay format. Linux locates assets relative to `/proc/self/exe`.
+- CMake selects the platform implementation and its dependencies. Added `linux-release`,
+  `linux-debug` and `linux-cpu` presets, and `tools/bootstrap.sh`, which verifies the SHA-256 of the
+  pinned Slang 2026.14.1 Linux archive before installing it under ignored `.tools/slang`.
+  `spirv-val` validates generated shaders when installed. System Vulkan, SDL2, FreeType and Fontconfig
+  development packages are documented separately from shader bootstrap.
+- The NoGraphicsAPI package configuration also resolves SDL2 on Linux. Regenerated
+  `third_party/NoGraphicsAPI-compat.patch` against upstream `8e414bd0a8010b9f721d06d470860e27aa69c071`
+  and checked that applying it reproduces all four modified upstream files.
+
+### Vulkan presentation and device compatibility
+
+| Problem found on the Linux PC | Implemented change | Result |
+| --- | --- | --- |
+| Presentation was guarded by `_WIN32`. | Obtain instance extensions from SDL, create the SDL Vulkan surface, and enable swapchain/maintenance extensions on Linux. | The existing renderer presents through native Wayland or XWayland. |
+| Wayland reports `UINT_MAX` for the application-selected surface extent. | Query SDL's drawable size, clamp it to surface limits, and use that result for swapchain creation, resize detection and drawable-size queries. | Startup, resize and fullscreen work with compositor-selected pixel dimensions. A requested 960x540 window measured 961x540 on this desktop. |
+| Mesa exposed 81 surface formats, exceeding the backend's fixed limit of 64. | Raise the format enumeration capacity to 256. | Device initialization reaches swapchain creation on this driver. |
+| Device selection required 64-bit timestamps; this Intel queue reports 36 valid bits. | Accept queues with nonzero timestamp precision and expose `DeviceCaps::timestamp_valid_bits`. | The GPU is accepted and the renderer can account for counter wrap. |
+| Intel lacks `shaderStorageImageReadWithoutFormat`, which Orbital's shaders do not use. | Make it optional for the conventional backend; enable it only when supported and expose `storage_image_read_without_format` in the device capabilities. | Device creation succeeds without claiming unsupported shader functionality. The experimental backend retains its requirement. |
+
+### Renderer and shader corrections
+
+- GPU pass timings now use `core/timing.hpp::timestamp_ticks` to mask timestamp differences to the
+  device's valid counter width before converting ticks to milliseconds. This covers total GPU time
+  and shadow, surface, atmosphere and post timings. Compile-time tests cover ordinary intervals,
+  36-bit wrap, 64-bit wrap and a zero-width counter.
+- Khronos validation reported calls to `vkCmdDrawIndexedIndirectCount` without the Vulkan 1.2
+  `drawIndirectCount` feature enabled. Device selection now checks it, and device creation enables
+  it. This is the existing compacted asteroid multi-draw path.
+- Validation also reported Slang-generated `DemoteToHelperInvocation` capabilities without the
+  matching Vulkan 1.3 feature. Device selection and creation now check and enable
+  `shaderDemoteToHelperInvocation` for those fragment shaders.
+- The shader texture arrays had 40 entries while the CPU's `Slot::count` was 38. Validation reported
+  uninitialized descriptors starting at slot 38. `ORBITAL_TEXTURE_COUNT` in `scene_shared.h` now
+  supplies the array size to `common.slang`, `cull.slang`, `ui.slang` and the CPU slot count. The
+  existing fallback-binding loop consequently initializes reserved slots 38 and 39 as well.
+- Explicitly initialized the pixel containers in two renderer image constructions to remove GCC
+  missing-field warnings. The scene's lighting, atmospheric scattering, asteroid population,
+  material model, tone mapping and anti-aliasing algorithms retain their existing behavior; the
+  rendering changes above concern valid resource bindings, enabled features and timing accuracy.
+
+### Verification and remaining limits
+
+- Tested over SSH on CachyOS with GCC 16.2.1, Intel Graphics ADL GT2, Mesa 26.2.2, device Vulkan
+  1.4.354 and Vulkan headers/loader 1.4.357. Release and Debug builds compile the full demo and all
+  shaders. Seven application tests pass in Release; all 13 application/backend tests pass in Debug,
+  including the command-context and placed-texture GPU tests, with no skips.
+- Added `tools/smoke-linux.sh`: bounded 40-frame runs cover Earth twice, the 520k-rock high-quality
+  belt, HUD/UI, maximize and fullscreen. It checks successful completion, captures and validation
+  logs and writes a belt benchmark CSV. Debug runs passed on native Wayland and XWayland without
+  validation messages; Release also passed the Wayland smoke sequence.
+- Inspected an in-engine capture showing Earth, atmosphere, Jupiter and its belt, and an actual
+  desktop-window capture showing the FreeType HUD and ImGui panel. Engine PNG captures intentionally
+  omit ImGui because the panel is drawn during presentation, after the captured image.
+- Two fixed-time 961x540 Earth captures differed by at most one 8-bit channel value, with mean
+  per-pixel maximum-channel difference 0.000146 and no pixels differing by more than 1/255.
+  The smoke script retains both captures and reports differences; it does not assert bitwise
+  determinism or establish cross-platform image equivalence.
+- Captures and logs are local artifacts under ignored `captures/`; they are not embedded in the
+  source commit. Formatting and shell syntax checks passed. The Windows demo has not been rebuilt
+  or rendered in this porting session, and interactive keyboard/mouse behavior still merits manual
+  testing. The tested X11 path is XWayland, not a separate native Xorg desktop.
