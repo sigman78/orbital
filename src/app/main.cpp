@@ -7,6 +7,7 @@
 #include "render/renderer.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <chrono>
 #include <cmath>
@@ -54,7 +55,7 @@ constexpr std::string_view usage =
     "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --rocks N --aa 0|1|2\n"
     "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F free;\n"
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
-    "F5 anti-aliasing mode;\n"
+    "F5 anti-aliasing mode; F6 rock splat cut-off;\n"
     "F12 capture; Esc exit.";
 
 struct Options {
@@ -155,12 +156,16 @@ std::optional<Options> parse_options(int argc, char** argv) {
 }
 
 // Interactive state that key presses and the frame loop share.
+// Projected rock radius, in pixels, below which rocks draw as disc splats; 0 means never (F6 cycles).
+constexpr std::array<float, 4> splat_radii{0.f, 1.2f, 2.5f, 4.f};
+
 struct AppState {
     Camera camera;
     BodyStates bodies;
     bool running = true, paused = false, high = false, overlay = true, auto_exposure = true;
     bool belt_light_map = true, belt_extinction = true; // development toggles for the belt shading
     unsigned anti_aliasing = 2;                         // 0 off, 1 temporal, 2 temporal plus FXAA
+    unsigned splat_mode = 2;                            // index into splat_radii
     float exposure = 1.0f;
     unsigned selected_body = 0;
     std::filesystem::path capture_request;
@@ -175,6 +180,7 @@ void handle_key(AppState& app, Key key) {
     case Key::f3: app.belt_light_map = !app.belt_light_map; break;
     case Key::f4: app.belt_extinction = !app.belt_extinction; break;
     case Key::f5: app.anti_aliasing = (app.anti_aliasing + 1) % 3; break;
+    case Key::f6: app.splat_mode = (app.splat_mode + 1) % splat_radii.size(); break;
     case Key::f12: app.capture_request = hotkey_capture_path; break;
     case Key::plus: app.exposure = exposure_keys::range.clamp(app.exposure * exposure_keys::step); break;
     case Key::minus: app.exposure = exposure_keys::range.clamp(app.exposure / exposure_keys::step); break;
@@ -232,13 +238,14 @@ void update_title(platform::Window& window, const render::Stats& stats, const Ap
     const int fps = int(1000 / std::max(stats.frame_ms, 0.1f));
     window.set_title(
         std::format("ORBITAL  |  {} FPS  |  {:.1f} ms (p95 {:.1f})  |  GPU {:.1f} ms  |  {} draws ({} rock groups)  |  "
-                    "{} rocks  |  {:.2f} M tris  |  {}  |  belt map {} ext {}  |  AA {}",
+                    "{} rocks  |  {:.2f} M tris  |  {}  |  belt map {} ext {}  |  AA {}  |  splats {}",
                     fps, stats.frame_ms, p95_ms, stats.gpu_ms, stats.draw_calls, stats.rock_groups_drawn,
                     stats.visible_asteroids, stats.triangles / 1e6, app.high ? "HIGH" : "BASELINE",
                     app.belt_light_map ? "on" : "off", app.belt_extinction ? "on" : "off",
                     app.anti_aliasing == 0   ? "off"
                     : app.anti_aliasing == 1 ? "temporal"
-                                             : "temporal+fxaa"));
+                                             : "temporal+fxaa",
+                    splat_radii[app.splat_mode] > 0 ? std::format("< {:.1f} px", splat_radii[app.splat_mode]) : "off"));
 }
 
 struct FrameTimes {
@@ -333,7 +340,8 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .auto_exposure = app.auto_exposure,
                                              .belt_light_map = app.belt_light_map,
                                              .belt_extinction = app.belt_extinction,
-                                             .anti_aliasing = app.anti_aliasing};
+                                             .anti_aliasing = app.anti_aliasing,
+                                             .billboard_radius = splat_radii[app.splat_mode]};
         if (renderer.draw(frame_input)) {
             frames++;
             const auto stats = renderer.stats();

@@ -55,8 +55,6 @@ inline constexpr float shear_exponent =
     0.35f; // orbital rate falls with radius as r^-0.35: a hint of Kepler shear, not the real 1.5
 namespace billboard {
 inline constexpr float min_pixels = 0.06f; // smaller rocks are dropped
-inline constexpr float pixel_radius =
-    2.5f; // rocks below this become analytic disc splats: meshes this small only alias
 } // namespace billboard
 } // namespace belt_culling
 
@@ -305,8 +303,7 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
         p.band_spin[band] = {transform.cos_spin[band], transform.sin_spin[band], 0, 0};
     p.levels = {geometry::rock_level_thresholds[0], geometry::rock_level_thresholds[1],
                 geometry::rock_level_thresholds[2], geometry::rock_level_thresholds[3]};
-    p.billboard = {geometry::rock_level_thresholds[4], belt_culling::billboard::pixel_radius,
-                   belt_culling::billboard::min_pixels, 0};
+    p.billboard = {geometry::rock_level_thresholds[4], input.billboard_radius, belt_culling::billboard::min_pixels, 0};
     const unsigned tier_count = (input.high_quality ? high_quality : baseline_quality).belt_count;
     p.rock_limit = std::min(rock_count, belt_count_override ? belt_count_override : tier_count);
     p.body_count = body_count;
