@@ -225,14 +225,10 @@ gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
     const auto vertex = read_spirv(directory / "shaders" / std::format("{}.vertex.spv", desc.vertex_shader));
     const auto fragment = read_spirv(directory / "shaders" / std::format("{}.fragment.spv", desc.fragment_shader));
     gpu::BlendState blending{};
-    if (desc.blend == Blend::alpha)
+    if (desc.alpha_blend)
         blending = {.enabled = true,
                     .color = {gpu::BlendFactor::source_alpha, gpu::BlendFactor::one_minus_source_alpha},
                     .alpha = {gpu::BlendFactor::one, gpu::BlendFactor::one_minus_source_alpha}};
-    else if (desc.blend == Blend::multiply)
-        blending = {.enabled = true,
-                    .color = {gpu::BlendFactor::zero, gpu::BlendFactor::source_color},
-                    .alpha = {gpu::BlendFactor::zero, gpu::BlendFactor::one}};
     const gpu::ColorTargetDesc target{.format = desc.color_format, .blend = blending};
     auto* pipeline = gpu::create_graphics_pso(
         device, {.vertex_spirv = vertex,
@@ -381,18 +377,17 @@ void Renderer::Impl::load_materials() {
 void Renderer::Impl::create_pipelines() {
     using gpu::Format;
     const auto make = [&](const char* vertex, const char* fragment, Format format, bool depth_test = false,
-                          Blend blend = Blend::none) {
+                          bool alpha_blend = false) {
         return create_pipeline({.vertex_shader = vertex,
                                 .fragment_shader = fragment,
                                 .color_format = format,
                                 .depth_test = depth_test,
-                                .blend = blend});
+                                .alpha_blend = alpha_blend});
     };
     pso.opaque = make("surface", "surface", Format::rgba16_float, true);
-    pso.cloud = make("surface", "surface", Format::rgba16_float, true, Blend::alpha);
+    pso.cloud = make("surface", "surface", Format::rgba16_float, true, true);
     pso.background = make("fullscreen", "background", Format::rgba16_float, true);
-    pso.atmosphere = make("fullscreen", "atmosphere", Format::rgba16_float, false, Blend::alpha);
-    pso.contact = make("fullscreen", "contact", Format::rgba16_float, false, Blend::multiply);
+    pso.atmosphere = make("fullscreen", "atmosphere", Format::rgba16_float, false, true);
     pso.bloom = make("fullscreen", "post", Format::rgba16_float);
     pso.post = make("fullscreen", "post", Format::rgba8_srgb);
     pso.present = make("fullscreen", "post", Format::bgra8_srgb);

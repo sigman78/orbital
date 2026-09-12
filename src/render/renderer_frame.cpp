@@ -478,11 +478,9 @@ bool Renderer::draw(const FrameInput& input) {
     // The atmosphere passes and the temporal pass read the scene depth.
     gpu::barrier(cmd, gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_write, gpu::Stage::fragment,
                  gpu::Access::shader_read);
-    // Contact shadows between close rocks, multiplied onto the lit surfaces.
-    root.mode = 0;
-    s.fullscreen_pass(cmd, s.hdr, s.pso.contact, root, true);
     // Atmosphere is composited per body; the depth clamp orders them against
     // geometry, and Earth's goes last so it stays on top where shells overlap.
+    root.mode = 0;
     for (unsigned body : {s.giant_index, s.mars_index, s.earth_index}) {
         root.base = body;
         s.fullscreen_pass(cmd, s.hdr, s.pso.atmosphere, root, true);
