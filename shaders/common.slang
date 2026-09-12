@@ -73,9 +73,14 @@ float localShadow(float3 point, float3 normal)
 // geometry::belt_ring_density so the shadow shows the same rings and gap.
 float beltRingDensity(float t)
 {
-    float bands = .5 + .5 * cos(2.0 * PI * (t * 3.0 + .15));
+    const float innerEdge = .04, outerTail = .14;
+    if (t <= -innerEdge) return 0.0;
+    float bands = .5 + .5 * cos(2.0 * PI * (saturate(t) * 3.0 + .15));
     float gap = (t - .58) / .035;
-    return (.5 + .5 * bands) * (1.0 - .7 * exp(-gap * gap));
+    float core = (.5 + .5 * bands) * (1.0 - .7 * exp(-gap * gap));
+    float edgeIn = smoothstep(-innerEdge, innerEdge, t);
+    float edgeOut = t > 1.0 ? exp(-(t - 1.0) / outerTail) : 1.0;
+    return core * edgeIn * edgeOut;
 }
 
 // Belt as a translucent slab: relative rock and dust density at a point given
@@ -87,11 +92,11 @@ float beltDensity(float3 q, float4 ring, float3 n)
 {
     float h = dot(q, n);
     float r = length(q - n * h);
-    float half = ring.w * .5;
-    float vertical = 1.0 - smoothstep(half * .6, half * 1.3, abs(h));
-    float feather = (ring.y - ring.x) * .08;
-    float inside = smoothstep(ring.x - feather, ring.x + feather, r) * (1.0 - smoothstep(ring.y - feather, ring.y + feather, r));
-    return vertical * inside * beltRingDensity(saturate((r - ring.x) / (ring.y - ring.x)));
+    float t = (r - ring.x) / (ring.y - ring.x);
+    // Gaussian in height with the scale height flaring outward, as the population does.
+    float scaleHeight = ring.w * .5 * lerp(.6, 1.4, saturate(t));
+    float vertical = exp(-h * h / (2.0 * scaleHeight * scaleHeight));
+    return vertical * beltRingDensity(t);
 }
 
 // Sunlight left after crossing the belt to reach a point inside it: the
@@ -157,11 +162,9 @@ float beltShadow(float3 point)
     if (t <= 0.0) return 1.0;
     float3 q = point + light * t - centre;
     float r = length(q);
-    float feather = (ring.y - ring.x) * .12;
-    float inside = smoothstep(ring.x - feather, ring.x + feather, r) * (1.0 - smoothstep(ring.y - feather, ring.y + feather, r));
-    float density = beltRingDensity(saturate((r - ring.x) / (ring.y - ring.x)));
+    float density = beltRingDensity((r - ring.x) / (ring.y - ring.x)); // the profile carries the edge tapers
     float grain = .8 + .2 * noise(q * .5);
-    return 1.0 - ring.z * .585 * inside * density * grain;
+    return 1.0 - ring.z * .585 * density * grain;
 }
 
 float3x3 rotation(float3 a)

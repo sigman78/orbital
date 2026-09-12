@@ -71,10 +71,13 @@ std::uint32_t select_rock_level(float projected_radius_pixels);
 std::vector<AsteroidInstance> generate_belt(const BeltParams& params);
 
 // Relative rock density across the belt, t = 0 at the inner edge and 1 at the
-// outer: three soft rings and one thin gap, so the belt reads as rings rather
-// than a uniform disc. Always within (0, 1]. The gas giant's belt shadow in
-// common.slang mirrors this profile.
+// outer edge, defined for any t: three soft rings and one thin gap inside,
+// a sharp resonance-cleared inner edge and an exponential outer tail that
+// reaches to about t = 1.5, so the belt fades into nothing instead of
+// stopping. Within [0, 1]. The shaders' beltRingDensity mirrors it.
 float belt_ring_density(float t);
+// Radial fraction the outer tail extends to; generation and the light box use it.
+constexpr float belt_outer_tail = 1.5f;
 
 // Picks a LOD from the projected radius, keeping the previous level inside a
 // 15% hysteresis band around each transition.

@@ -291,32 +291,64 @@ float belt_ring_density(float t) {
         float count = 3.f, phase = .15f;            // ring pattern across the belt width
         float gap_center = .58f, gap_width = .035f; // one thin sparse lane
         float floor = .5f, gap_depth = .7f;         // density never drops below floor * (1 - gap_depth)
+        float inner_edge = .04f;                    // width of the sharp inner cut-off, in belt widths
+        float outer_tail = .14f;                    // e-folding length of the outer tail, in belt widths
     };
     constexpr Rings rings{};
-    const float bands = .5f + .5f * std::cos(2 * pi<float> * (t * rings.count + rings.phase));
+    if (t <= -rings.inner_edge)
+        return 0.f;
+    const float bands = .5f + .5f * std::cos(2 * pi<float> * (std::clamp(t, 0.f, 1.f) * rings.count + rings.phase));
     const float gap = (t - rings.gap_center) / rings.gap_width;
-    return (rings.floor + (1 - rings.floor) * bands) * (1 - rings.gap_depth * std::exp(-gap * gap));
+    const float core = (rings.floor + (1 - rings.floor) * bands) * (1 - rings.gap_depth * std::exp(-gap * gap));
+    const float inner = std::clamp((t + rings.inner_edge) / (2 * rings.inner_edge), 0.f, 1.f);
+    const float edge_in = inner * inner * (3 - 2 * inner);
+    const float edge_out = t > 1 ? std::exp(-(t - 1) / rings.outer_tail) : 1.f;
+    return core * edge_in * edge_out;
 }
 
 std::vector<AsteroidInstance> generate_belt(const BeltParams& params) {
     const float inner = std::max(0.0f, params.inner_radius);
     const float outer = std::max(inner, params.outer_radius);
     const float thickness = std::max(0.0f, params.thickness);
-    constexpr unsigned ring_attempts = 16; // rejection sampling against belt_ring_density
+    // Shape of the population: sampled uniformly in area over the annulus plus
+    // its outer tail and thinned by the radial profile; heights are Gaussian
+    // with a scale height that flares outward, as inclinations do; sizes follow
+    // a collisional power law (Dohnanyi's differential exponent is 3.5; 3 here).
+    struct Population {
+        float inner_margin = .05f;                   // sampling starts this many belt widths inside the inner edge
+        float flare_inner = .6f, flare_outer = 1.4f; // scale height in half thicknesses at t = 0 and t = 1
+        float size_min = .5f, size_max = 12.f;       // instance scale range; 1 is the reference rock
+        float size_exponent = 3.f; // gentler than the collisional 3.5 so the belt stays visible at demo scale
+        unsigned attempts = 24;    // rejection sampling bound
+    };
+    constexpr Population population{};
+    const float width = std::max(outer - inner, 1e-6f);
+    const float sample_inner = std::max(0.f, inner - width * population.inner_margin);
+    const float sample_outer = inner + width * belt_outer_tail;
     std::vector<AsteroidInstance> result;
     result.reserve(params.count);
     std::uint64_t state = params.seed;
     for (std::uint32_t i = 0; i < params.count; ++i) {
-        // Uniform in area over the annulus, thinned into rings, then a random height in the slab.
-        float r = inner;
-        for (unsigned attempt = 0; attempt < ring_attempts; ++attempt) {
-            r = std::sqrt(inner * inner + unit(state) * (outer * outer - inner * inner));
-            if (unit(state) <= belt_ring_density((r - inner) / std::max(outer - inner, 1e-6f)))
+        float r = inner, t = 0;
+        for (unsigned attempt = 0; attempt < population.attempts; ++attempt) {
+            r = std::sqrt(sample_inner * sample_inner +
+                          unit(state) * (sample_outer * sample_outer - sample_inner * sample_inner));
+            t = (r - inner) / width;
+            if (unit(state) <= belt_ring_density(t))
                 break;
         }
         const float angle = 2.0f * pi<float> * unit(state);
-        const float y = signed_unit(state) * thickness * 0.5f;
-        const float s = 0.35f + 0.9f * unit(state);
+        // Box-Muller Gaussian height, flared with distance.
+        const float u1 = std::max(unit(state), 1e-7f), u2 = unit(state);
+        const float gaussian = std::sqrt(-2.f * std::log(u1)) * std::cos(2 * pi<float> * u2);
+        const float scale_height = thickness * .5f *
+                                   (population.flare_inner + (population.flare_outer - population.flare_inner) *
+                                                                 std::clamp(t, 0.f, belt_outer_tail));
+        const float y = std::clamp(gaussian, -3.f, 3.f) * scale_height;
+        // Inverse-transform sample of the power law between the size bounds.
+        const float exponent = 1 - population.size_exponent;
+        const float ratio = std::pow(population.size_max / population.size_min, exponent);
+        const float s = population.size_min * std::pow(1 - unit(state) * (1 - ratio), 1 / exponent);
         AsteroidInstance instance;
         instance.position = {r * std::cos(angle), y, r * std::sin(angle)};
         instance.scale = {s * (0.75f + 0.5f * unit(state)), s * (0.75f + 0.5f * unit(state)),

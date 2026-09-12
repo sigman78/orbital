@@ -89,15 +89,33 @@ int main() {
     assert(belt_a.size() == 100 && belt_a[37].position.x == belt_b[37].position.x);
     for (const auto& i : belt_a) {
         const float r = std::sqrt(i.position.x * i.position.x + i.position.z * i.position.z);
-        assert(r >= 10.0f && r <= 20.0f && std::abs(i.position.y) <= 2.0f);
+        // Inside the belt or its tapered edges, and within three flared scale heights.
+        assert(r >= 9.5f && r <= 10.0f + 10.0f * belt_outer_tail &&
+               std::abs(i.position.y) <=
+                   2.0f * 1.8f * 3.0f); // three scale heights, flared to 1.8 half thicknesses at the tail
         assert(std::abs(i.spin.y) >= 0.4f && std::abs(i.spin.y) <= 1.6f);
+        assert(i.scale.x > 0.0f && i.scale.x <= 12.0f * 1.25f);
     }
     for (int step = 0; step <= 20; ++step) {
         const float density = belt_ring_density(float(step) / 20.f);
         assert(density > 0.0f && density <= 1.0f);
     }
     assert(belt_ring_density(.58f) < belt_ring_density(.15f)); // the gap is sparser than the rings
-    assert(select_lod(220, 3) == 3);                           // hysteresis while shrinking
+    assert(belt_ring_density(-.1f) == 0.0f &&
+           belt_ring_density(1.3f) < belt_ring_density(1.0f) * .2f); // sharp inner edge, fading tail
+    {
+        // Most rocks stay inside the nominal belt and most are small.
+        const auto big_belt = generate_belt(
+            {.seed = 7, .count = 20000, .inner_radius = 10, .outer_radius = 20, .thickness = 1});
+        unsigned outside = 0, large = 0;
+        for (const auto& i : big_belt) {
+            const float r = std::sqrt(i.position.x * i.position.x + i.position.z * i.position.z);
+            outside += r > 20.0f ? 1 : 0;
+            large += i.scale.x > 2.0f ? 1 : 0;
+        }
+        assert(outside < big_belt.size() / 5 && large < big_belt.size() / 10);
+    }
+    assert(select_lod(220, 3) == 3); // hysteresis while shrinking
     assert(select_lod(1, 3) == 0);
     Frustum f{{{{1, 0, 0}, 0}, {{-1, 0, 0}, 10}, {{0, 1, 0}, 0}, {{0, -1, 0}, 10}, {{0, 0, 1}, 0}, {{0, 0, -1}, 10}}};
     assert(sphere_in_frustum(f, {5, 5, 5}, 1));

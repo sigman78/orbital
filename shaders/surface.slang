@@ -304,12 +304,16 @@ Material rockMaterial(SurfaceVaryings input, Instance inst, float3x3 rotate, flo
     float3x3 toObject = transpose(rotate);
     float3 p = mul(toObject, input.worldPosition - inst.center_radius.xyz) / max(inst.center_radius.w, 1e-6);
     float3 n = normalize(mul(toObject, N));
-    float seed = inst.tint.w;
+    // Composition class in the integer part, material seed in the fraction (see cull.slang).
+    int composition = int(inst.tint.w);
+    float seed = frac(inst.tint.w);
     float closeness = 1.0 - smoothstep(ROCK_NEAR, ROCK_FAR, length(fwidth(p)));
     float3 weights = pow(abs(n), 5.0);
     weights /= weights.x + weights.y + weights.z;
     int dominant = weights.x > weights.y ? (weights.x > weights.z ? 0 : 2) : (weights.y > weights.z ? 1 : 2);
-    int primary = int(seed * 3.0) % 3, secondary = (primary + 1 + int(seed * 7.0) % 2) % 3;
+    // Silicate rocks use the worn and dusty boulder scans, carbonaceous ones the dark rock face.
+    int primary = composition == 1 ? 1 : (seed < .5 ? 0 : 2);
+    int secondary = composition == 1 ? (seed < .5 ? 0 : 2) : 1;
     float2 uvShift = float2(seed * 5.3, seed * 2.9);
 
     // Parallax on the dominant plane, fading in as the rock fills the screen.

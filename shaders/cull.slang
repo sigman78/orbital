@@ -21,9 +21,31 @@ struct Placement {
     Instance instance;
 };
 
-// Per-rock albedo variation and material seed from the stable id.
-float4 rockTint(uint id, float w) { return float4(.8 + float(id % 7) * .05, .84, .78, w); }
-float rockMaterialSeed(uint id) { return float(((id * 2654435761u) >> 16) & 0xffffu) / 65536.0; }
+// Composition classes, chosen by radius and chance like the main belt's
+// taxonomic gradient: bright reddish silicate (S) rocks dominate inside,
+// dark neutral carbonaceous (C) rocks outside, with a few grey metallic (M).
+// The class rides in the integer part of Instance.tint.w, the material seed
+// in its fraction; billboards carry their coverage there instead.
+static const uint CLASS_S = 0, CLASS_C = 1, CLASS_M = 2;
+static const float METAL_FRACTION = .03;
+
+float hashId(uint x) { x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16; return float(x & 0xffffffu) / 16777216.0; }
+float rockMaterialSeed(uint id) { return hashId(id * 2654435761u + 17u); }
+
+uint rockClass(uint id, float radial)
+{
+    float carbon = lerp(.12, .85, smoothstep(0.0, 1.0, radial));
+    float h = hashId(id * 747796405u + 5u);
+    if (h < METAL_FRACTION) return CLASS_M;
+    return h < METAL_FRACTION + carbon * (1.0 - METAL_FRACTION) ? CLASS_C : CLASS_S;
+}
+
+float3 rockColour(uint rockClass, uint id)
+{
+    float3 base = rockClass == CLASS_S ? float3(.92, .78, .62) : rockClass == CLASS_C ? float3(.42, .40, .38) : float3(.74, .76, .80);
+    float variation = .8 + .4 * hashId(id * 2891336453u + 3u);
+    return base * variation;
+}
 
 // True when the rock's sphere lies entirely behind one of the bodies.
 bool occludedByBodies(float3 target, float targetRadius)
@@ -75,6 +97,10 @@ Placement placeRock(uint id)
     if (occludedByBodies(position, radius)) return result;
 
     result.visible = true;
+    float4 ring = root.frame->belt_ring;
+    float radial = (length(v.xz) - ring.x) / (ring.y - ring.x);
+    uint composition = rockClass(id, radial);
+    float3 colour = rockColour(composition, id);
     if (pixelRadius < p->billboard.y)
     {
         // Sub-pixel rocks become fixed-size billboards whose coverage fades in with their true size.
@@ -83,7 +109,7 @@ Placement placeRock(uint id)
         result.group = BILLBOARD_GROUP;
         result.instance.center_radius = float4(position, radius * p->billboard.y / pixelRadius);
         result.instance.rotation_kind = float4(0.0, 0.0, 0.0, KIND_ROCK);
-        result.instance.tint = rockTint(id, coverage);
+        result.instance.tint = float4(colour, coverage);
         return result;
     }
     uint level = 0;
@@ -96,7 +122,7 @@ Placement placeRock(uint id)
     float3 rotation = rock.rotation_seed.xyz + rock.spin_group.xyz * p->view.w;
     result.instance.center_radius = float4(position, radius);
     result.instance.rotation_kind = float4(rotation, KIND_ROCK);
-    result.instance.tint = rockTint(id, rockMaterialSeed(id));
+    result.instance.tint = float4(colour, float(composition) + rockMaterialSeed(id));
     return result;
 }
 

@@ -122,6 +122,7 @@ LightFrame body_light_frame(Vec3d centre, Vec3d sun, float half_size) {
 // outer wide and outer * cos(tilt) tall.
 LightFrame belt_light_frame(Vec3d giant, Vec3d sun, const BeltDescription& belt) {
     constexpr double margin = 2.0; // world units of slack around the belt's extent
+    const double reach = belt.inner_radius + (belt.outer_radius - belt.inner_radius) * geometry::belt_outer_tail;
     const Vec3d forward = normalized(giant - sun);
     const Vec3d normal = to_double(belt_plane_normal);
     const double tilt = dot(normal, forward);
@@ -129,13 +130,13 @@ LightFrame belt_light_frame(Vec3d giant, Vec3d sun, const BeltDescription& belt)
     if (dot(up, up) < 1e-8)
         up = Vec3d{0, 1, 0} - forward * forward.y;
     up = normalized(up);
-    const double extent = belt.outer_radius + belt.thickness + margin;
+    const double extent = reach + belt.thickness + margin;
     return {.centre = to_float(giant),
             .forward = to_float(forward),
             .right = to_float(cross(up, forward)),
             .up = to_float(up),
             .half_x = float(extent),
-            .half_y = float(belt.outer_radius * std::abs(tilt) + belt.thickness + margin),
+            .half_y = float(reach * std::abs(tilt) + belt.thickness * 3 + margin),
             .half_depth = float(extent)};
 }
 
@@ -234,7 +235,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     const LightFrame belt_box = belt_light_frame(giant_relative, sun_relative, ring);
     write_light_projection(frame.belt_light_projection, belt_box);
     const double light_tilt = std::abs(dot(to_double(belt_box.forward), to_double(belt_plane_normal)));
-    constexpr double slice_slack = 1.3; // the slices reach a little past the slab's nominal thickness
+    constexpr double slice_slack = 3.0; // the slices reach three half thicknesses: the flared Gaussian tails
     frame.belt_light = {belt_box.half_x, belt_box.half_y, float(targets::belt_light_map_size),
                         float(slice_slack * ring.thickness * .5 / std::max(light_tilt, .1))};
     frame.belt_ring = {float(ring.inner_radius), float(ring.outer_radius), float(ring.density), float(ring.thickness)};

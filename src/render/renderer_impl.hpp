@@ -127,11 +127,6 @@ inline constexpr unsigned radial_bands = 8;        // cluster bins across the be
 inline constexpr float map_caster_min_radius =
     .03f; // only the size-tail rocks (about 5%) splat into the transmittance map
 
-// A sparse large-body tail exposes the fractured silhouettes between the much
-// more numerous small rocks. Stable IDs keep quality tiers nested.
-constexpr float size_tail(unsigned id) {
-    return id % 137 == 0 ? 9.f : (id % 23 == 0 ? 4.f : 1.f);
-}
 } // namespace belt
 
 // --- GPU-side records ---------------------------------------------------------

@@ -329,7 +329,7 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
             belt::radial_bands - 1,
             unsigned(std::clamp((radial - inner) / std::max(outer - inner, 1e-4f), 0.f, .999999f) *
                      belt::radial_bands));
-        const float radius = rock.scale.x * belt::rock_radius_scale * belt::size_tail(id);
+        const float radius = rock.scale.x * belt::rock_radius_scale;
         records.push_back(
             {.position_radius = {rock.position.x, rock.position.y, rock.position.z, radius},
              .rotation_seed = {rock.rotation.x, rock.rotation.y, rock.rotation.z, 0},
