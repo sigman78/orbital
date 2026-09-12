@@ -65,6 +65,8 @@ struct FrameInput {
     float aberration = 1.f;       // chromatic aberration scale
     float vignette = .17f;        // corner darkening
     float grain = .010f;          // film grain amplitude in display space
+    bool motion_streaks = true;   // dust motes streaking past the moving camera
+    float motion_streak_intensity = 1.f;
     // Gas giant (panel): flow-map advection of the cloud deck.
     bool gas_flow = true;           // off falls back to the noise warp
     float gas_time_scale = 1500.f;  // wind speed, times real

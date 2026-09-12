@@ -422,6 +422,8 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .aberration = app.aberration,
                                              .vignette = app.vignette,
                                              .grain = app.grain,
+                                             .motion_streaks = app.motion_streaks,
+                                             .motion_streak_intensity = app.motion_streak_intensity,
                                              .gas_flow = app.gas_flow,
                                              .gas_time_scale = app.gas_time_scale,
                                              .gas_cycle = app.gas_cycle,

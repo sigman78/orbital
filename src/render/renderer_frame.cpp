@@ -246,6 +246,17 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
         dot(camera.forward(), previous_forward) < history::min_forward_dot)
         frame.previous_camera_delta.w = 0;
     frame.camera_time = {0, 0, 0, float(input.time)};
+    {
+        // Motion streaks: the mote lattice is fixed in space, so the camera's cell and its offset within it are
+        // what the shader needs to place the motes camera-relative.
+        const double cell = targets::mote_cell_size_units;
+        const Vec3d index{std::floor(camera.position.x / cell), std::floor(camera.position.y / cell),
+                          std::floor(camera.position.z / cell)};
+        frame.camera_lattice = {float(camera.position.x - index.x * cell), float(camera.position.y - index.y * cell),
+                                float(camera.position.z - index.z * cell), float(cell)};
+        frame.camera_cell = {float(index.x), float(index.y), float(index.z),
+                             input.motion_streaks ? input.motion_streak_intensity : 0.f};
+    }
     frame.forward_exposure.w = input.exposure * (input.auto_exposure ? adapted_exposure : 1) * tone_curves::base_gain *
                                tone_curves::exposure_trim[std::min(input.tone_curve, 2u)];
     frame.sun = f4(system.star.position - camera.position, sun_flare::disc_radius);
@@ -806,6 +817,24 @@ bool Renderer::draw(const FrameInput& input) {
     if (near_dust || frame.belt_disc.y > 0) {
         root.mode = 1;
         s.fullscreen_pass(cmd, s.hdr, s.pso.belt_dust_blend, root, true);
+    // Motion streaks: world-fixed motes streak past by their own screen motion, depth tested against the scene.
+    if (input.motion_streaks && input.motion_streak_intensity > 0) {
+        gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,
+                     gpu::Access::depth_stencil_read);
+        gpu::ColorAttachment color{.render_view = s.hdr.view, .load = gpu::LoadOp::load};
+        gpu::begin_render_pass(
+            cmd, {.colors = {&color, 1}, .depth = {.render_view = s.depth.view, .load = gpu::LoadOp::load}});
+        gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
+        gpu::bind_pso(cmd, s.pso.motes);
+        root.mode = 0;
+        gpu::draw(cmd, root, 6, targets::mote_count);
+        s.stats.draw_calls++;
+        gpu::end_render_pass(cmd);
+        gpu::barrier(cmd, gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_read, gpu::Stage::fragment,
+                     gpu::Access::shader_read);
+        gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
+                     gpu::Access::shader_read);
+    }
     }
     if (input.temporal_aa) {
         gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,

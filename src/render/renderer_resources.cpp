@@ -451,6 +451,7 @@ void Renderer::Impl::create_pipelines() {
     pso.belt_dust_blend = make("fullscreen", "dust", Format::rgba16_float, false, Blend::premultiplied);
     pso.belt_disc = make("fullscreen", "disc", Format::rgba16_float);
     pso.belt_disc_splat = make("discsplat", "discsplat", Format::rgba16_float, false, Blend::additive);
+    pso.motes = make("motes", "motes", Format::rgba16_float, true, Blend::additive);
     pso.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
     panic_if(!pso.cull, "compute pipeline creation failed: cull");
     pipelines.push_back(pso.cull);

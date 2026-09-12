@@ -152,8 +152,10 @@ inline constexpr unsigned belt_light_map_size = 2048;    // the whole belt in li
 inline constexpr unsigned belt_disc_map_size = 1024;     // the whole belt over its plane, for the far tier: sunlight
 inline constexpr unsigned belt_disc_rock_map_size = 256; // rock coverage, coarse so each texel averages many rocks
 inline constexpr unsigned belt_disc_light_interval = 16, belt_disc_rock_interval = 32; // frames between bakes
-inline constexpr unsigned meter_size = 16;     // luminance meter edge, texels of rgba32f
-inline constexpr unsigned timestamp_count = 5; // frame start, after shadow, surface, atmosphere, post
+inline constexpr unsigned meter_size = 16;             // luminance meter edge, texels of rgba32f
+inline constexpr unsigned mote_cell_size_units = 5;    // motion streak lattice cell, scene units
+inline constexpr unsigned mote_count = 4 * 4 * 4 * 16; // MOTE_CELLS^3 * MOTES_PER_CELL in motes.slang
+inline constexpr unsigned timestamp_count = 5;         // frame start, after shadow, surface, atmosphere, post
 } // namespace targets
 
 // What FrameInput::high_quality selects between.
@@ -248,7 +250,7 @@ struct Renderer::Impl {
                  *meter = nullptr, *temporal = nullptr, *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr,
                  *fxaa = nullptr, *splat_mask = nullptr, *smaa_edges = nullptr, *smaa_weights = nullptr,
                  *smaa_blend = nullptr, *ui = nullptr, *belt_dust = nullptr, *belt_dust_blend = nullptr,
-                 *belt_disc = nullptr, *belt_disc_splat = nullptr;
+                 *belt_disc = nullptr, *belt_disc_splat = nullptr, *motes = nullptr;
     } pso;
     gpu::PSO* surface_pso(SurfaceKind kind) const {
         switch (kind) {

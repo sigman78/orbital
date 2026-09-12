@@ -235,6 +235,10 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::SliderFloat("Aberration", &app.aberration, 0.f, 4.f, "%.2f x");
         ImGui::SliderFloat("Vignette", &app.vignette, 0.f, .5f, "%.2f");
         ImGui::SliderFloat("Grain", &app.grain, 0.f, .05f, "%.3f");
+        ImGui::Checkbox("Motion streaks", &app.motion_streaks); // dust motes streaking past the moving camera
+        ImGui::BeginDisabled(!app.motion_streaks);
+        ImGui::SliderFloat("Streak intensity", &app.motion_streak_intensity, 0.f, 4.f, "%.2f x");
+        ImGui::EndDisabled();
         if (ImGui::SmallButton("Reset post")) {
             app.bloom = true;
             app.bloom_intensity = .24f;
@@ -243,6 +247,8 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
             app.aberration = 1.f;
             app.vignette = .17f;
             app.grain = .010f;
+            app.motion_streaks = true;
+            app.motion_streak_intensity = 1.f;
         }
         ImGui::PopID();
     }

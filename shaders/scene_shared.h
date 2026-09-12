@@ -60,6 +60,8 @@ struct Frame {
     SHADER_FLOAT4 giant_more;            // limb haze optical depth, terminator wrap, cloud relief exaggeration, polar cap opacity
     SHADER_FLOAT4 giant_night;           // lightning flashes per second, lightning brightness, polar cap size (0 off), polar cap blend width
     SHADER_FLOAT4 giant_layers;          // upper deck lift (texture units at 45 degrees), upper deck shadow, unused x2
+    SHADER_FLOAT4 camera_lattice;        // the camera's offset within its mote cell, cell size
+    SHADER_FLOAT4 camera_cell;           // the camera's mote cell index, motion streak intensity (0 off)
 };
 struct Root {
 #ifdef __cplusplus

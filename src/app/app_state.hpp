@@ -52,6 +52,8 @@ struct AppState {
     bool bloom = true; // Post FX panel
     float bloom_intensity = .24f, bloom_threshold = .85f, bloom_knee = .5f;
     float aberration = 1.f, vignette = .17f, grain = .010f;
+    bool motion_streaks = true;
+    float motion_streak_intensity = 1.f;
     bool gas_flow = true; // Gas giant panel
     float gas_time_scale = 1500.f, gas_cycle = 12.f, gas_turbulence = 1.f;
     float gas_haze = .08f, gas_terminator = .08f, gas_relief = 6.f;
