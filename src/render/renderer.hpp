@@ -28,7 +28,8 @@ struct FrameInput {
     bool auto_exposure = true;
     bool belt_light_map = true;     // rock-on-rock transmittance map (F3)
     bool belt_extinction = true;    // analytic belt dust extinction (F4)
-    unsigned anti_aliasing = 2;     // 0 off, 1 temporal, 2 temporal plus FXAA (F5)
+    bool temporal_aa = true;        // temporal anti-aliasing (F5)
+    unsigned spatial_aa = 2;        // spatial pass over the tone-mapped image: 0 off, 1 FXAA, 2 SMAA (F9)
     float billboard_radius = 2.5f;  // rocks below this projected radius in pixels draw as disc splats; 0 never (F6)
     bool splat_light_twice = false; // light splats in the count pass too, for comparison (F7)
     unsigned tone_curve = 2;        // 0 ACES filmic, 1 AgX, 2 Khronos PBR Neutral (F8)

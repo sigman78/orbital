@@ -9,7 +9,7 @@
 //   pass 1  prefix   one thread turns counts into bases and draw arguments
 //   pass 2  scatter  each visible rock claims a slot and writes its instance
 
-[[vk::binding(0, 0)]] Texture2D<float4> textures[32];
+[[vk::binding(0, 0)]] Texture2D<float4> textures[40];
 [[vk::binding(1, 0)]] SamplerState samplers[4];
 [[vk::push_constant]] ConstantBuffer<CullRoot> root;
 

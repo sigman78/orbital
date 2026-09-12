@@ -55,7 +55,11 @@ enum class Slot : unsigned {
     belt_light_blur = 29, // scratch between the two blur directions
     ldr = 30,             // tone-mapped image before FXAA
     splat_mask = 31,      // pixels covered by rock splats, whose history the temporal pass keeps unclipped
-    count = 32,
+    smaa_area = 32,       // SMAA area lookup, 160x560
+    smaa_search = 33,     // SMAA search lookup, 64x16
+    smaa_edges = 34,      // SMAA edges of the tone-mapped image
+    smaa_weights = 35,    // SMAA blending weights
+    count = 36,
 };
 
 // Sampler descriptor slots (shaders/common.slang binds 4).
@@ -198,12 +202,13 @@ struct Renderer::Impl {
     std::vector<GpuImage> material_images;
     std::vector<gpu::PSO*> pipelines;
     GpuImage hdr{}, depth{}, bloom_a{}, bloom_b{}, final_image{}, ldr{}, shadow_map{}, luminance{}, history[2]{};
-    GpuImage splat_mask{};
+    GpuImage splat_mask{}, smaa_edges{}, smaa_weights{};
     GpuImage belt_light{}, belt_light_blur{};
     struct {
         gpu::PSO *opaque = nullptr, *cloud = nullptr, *background = nullptr, *atmosphere = nullptr, *bloom = nullptr,
                  *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr,
-                 *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr, *fxaa = nullptr, *splat_mask = nullptr;
+                 *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr, *fxaa = nullptr, *splat_mask = nullptr,
+                 *smaa_edges = nullptr, *smaa_weights = nullptr, *smaa_blend = nullptr;
     } pso;
     std::array<GpuMesh, geometry::lod_count> spheres{};
     std::array<GpuMesh, rock_group_count> rocks{}; // the rock library, indexed by rock_group; slices of rock_pool
@@ -272,7 +277,7 @@ struct Renderer::Impl {
     void record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, std::uint64_t args_address);
     void record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input, const FrameData& frame,
                            std::uint64_t args_address);
-    void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view, bool spatial_aa);
+    void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view, unsigned spatial_aa);
     void fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, gpu::PSO* pipeline, Root root,
                          bool preserve = false);
     void draw_mesh(gpu::CommandBuffer* cmd, Root& root, const GpuMesh& mesh, unsigned base, unsigned instance_count);

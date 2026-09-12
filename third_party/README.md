@@ -34,3 +34,9 @@ memory-safe, SIMD-accelerated decoder and is what loads every texture.
 `stb/stb_image_write.h` (v1.16) from [nothings/stb](https://github.com/nothings/stb) at commit
 `2c980bb59875b0d32144a71867fbdebb2f77cd20`, public domain / MIT (`stb/LICENSE`), encodes PNG
 screenshots. Wuffs has no PNG encoder, so this is kept for export only.
+
+## SMAA
+
+`smaa/LICENSE.txt` covers the SMAA lookup tables in `src/render/smaa/` (`AreaTex.h`, `SearchTex.h`) and the
+port of `SMAA.hlsl` in `shaders/smaa.slang`, from [iryoku/smaa](https://github.com/iryoku/smaa) (Jimenez et al.,
+MIT-style licence).

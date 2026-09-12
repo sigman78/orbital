@@ -44,7 +44,7 @@ constexpr VkPresentModeKHR swapchain_present_mode = VK_PRESENT_MODE_FIFO_KHR;
 constexpr uint32 gpu_allocation_alignment = 16;
 constexpr uint32 max_surface_formats = 64;
 constexpr uint32 format_count = static_cast<uint32>(Format::undefined);
-constexpr uint32 conventional_texture_descriptor_count = 32;
+constexpr uint32 conventional_texture_descriptor_count = 40;
 
 [[nodiscard]] Error error_from_vk(VkResult result) noexcept
 {

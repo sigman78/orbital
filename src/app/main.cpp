@@ -52,12 +52,12 @@ constexpr std::string_view window_title = "ORBITAL  /  Procedural worlds";
 constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
     "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..4\n"
-    "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --rocks N --aa 0|1|2 "
-    "--splat "
-    "0..3 --tone 0|1|2\n"
+    "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --rocks N\n"
+    "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --splat 0..3 --tone 0|1|2\n"
     "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F free;\n"
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
-    "F5 anti-aliasing mode; F6 rock splat cut-off; F7 splat lighting in both cull passes; F8 tone curve;\n"
+    "F5 temporal AA; F6 rock splat cut-off; F7 splat lighting in both cull passes; F8 tone curve;\n"
+    "F9 spatial AA (off, FXAA, SMAA);\n"
     "F12 capture; Esc exit.";
 
 // Projected rock radius, in pixels, below which rocks draw as disc splats; 0 means never (F6 cycles).
@@ -71,11 +71,12 @@ struct Options {
     double duration = 0;    // > 0 exits after this many wall-clock seconds
     int bookmark = -1;
     float exposure = 1;
-    unsigned rocks = 0; // belt override for benchmarks; 0 keeps the quality tiers
-    unsigned aa = 2;    // initial anti-aliasing mode
-    unsigned splat = 2; // initial splat cut-off mode, an index into splat_radii
-    unsigned tone = 2;  // initial tone curve (PBR Neutral)
-    float pan = 0;      // lateral drift as a fraction of the flight speed, stepped at a fixed 60 Hz for captures
+    unsigned rocks = 0;   // belt override for benchmarks; 0 keeps the quality tiers
+    unsigned taa = 1;     // temporal anti-aliasing on
+    unsigned spatial = 2; // spatial pass: 0 off, 1 FXAA, 2 SMAA
+    unsigned splat = 2;   // initial splat cut-off mode, an index into splat_radii
+    unsigned tone = 2;    // initial tone curve (PBR Neutral)
+    float pan = 0;        // lateral drift as a fraction of the flight speed, stepped at a fixed 60 Hz for captures
     bool tour = false, high = false, no_hud = false, help = false;
     std::filesystem::path capture, benchmark;
 };
@@ -129,8 +130,10 @@ std::optional<Options> parse_options(int argc, char** argv) {
             ok = parse_number(value(), options.frame_limit);
         else if (arg == "--rocks")
             ok = parse_number(value(), options.rocks);
-        else if (arg == "--aa")
-            ok = parse_number(value(), options.aa) && options.aa <= 2;
+        else if (arg == "--taa")
+            ok = parse_number(value(), options.taa) && options.taa <= 1;
+        else if (arg == "--spatial")
+            ok = parse_number(value(), options.spatial) && options.spatial <= 2;
         else if (arg == "--pan")
             ok = parse_number(value(), options.pan);
         else if (arg == "--tone")
@@ -176,7 +179,8 @@ struct AppState {
     BodyStates bodies;
     bool running = true, paused = false, high = false, overlay = true, auto_exposure = true;
     bool belt_light_map = true, belt_extinction = true; // development toggles for the belt shading
-    unsigned anti_aliasing = 2;                         // 0 off, 1 temporal, 2 temporal plus FXAA
+    bool temporal_aa = true;                            // F5
+    unsigned spatial_aa = 2;                            // 0 off, 1 FXAA, 2 SMAA (F9)
     unsigned splat_mode = 2;                            // index into splat_radii
     bool splat_light_twice = false;                     // light splats in the count pass too
     unsigned tone_curve = 2;                            // 0 ACES filmic, 1 AgX, 2 PBR Neutral
@@ -194,7 +198,8 @@ void handle_key(AppState& app, Key key) {
     case Key::f2: app.high = !app.high; break;
     case Key::f3: app.belt_light_map = !app.belt_light_map; break;
     case Key::f4: app.belt_extinction = !app.belt_extinction; break;
-    case Key::f5: app.anti_aliasing = (app.anti_aliasing + 1) % 3; break;
+    case Key::f5: app.temporal_aa = !app.temporal_aa; break;
+    case Key::f9: app.spatial_aa = (app.spatial_aa + 1) % 3; break;
     case Key::f6: app.splat_mode = (app.splat_mode + 1) % splat_radii.size(); break;
     case Key::f7: app.splat_light_twice = !app.splat_light_twice; break;
     case Key::f8: app.tone_curve = (app.tone_curve + 1) % 3; break;
@@ -255,13 +260,13 @@ void update_title(platform::Window& window, const render::Stats& stats, const Ap
     const int fps = int(1000 / std::max(stats.frame_ms, 0.1f));
     window.set_title(std::format(
         "ORBITAL  |  {} FPS  |  {:.1f} ms (p95 {:.1f})  |  GPU {:.1f} ms  |  {} draws ({} rock groups)  |  "
-        "{} rocks  |  {:.2f} M tris  |  {}  |  belt map {} ext {}  |  AA {}  |  splats {} lit {}  |  tone {}",
+        "{} rocks  |  {:.2f} M tris  |  {}  |  belt map {} ext {}  |  TAA {} + {}  |  splats {} lit {}  |  tone {}",
         fps, stats.frame_ms, p95_ms, stats.gpu_ms, stats.draw_calls, stats.rock_groups_drawn, stats.visible_asteroids,
         stats.triangles / 1e6, app.high ? "HIGH" : "BASELINE", app.belt_light_map ? "on" : "off",
-        app.belt_extinction ? "on" : "off",
-        app.anti_aliasing == 0   ? "off"
-        : app.anti_aliasing == 1 ? "temporal"
-                                 : "temporal+fxaa",
+        app.belt_extinction ? "on" : "off", app.temporal_aa ? "on" : "off",
+        app.spatial_aa == 0   ? "none"
+        : app.spatial_aa == 1 ? "FXAA"
+                              : "SMAA",
         splat_radii[app.splat_mode] > 0 ? std::format("< {:.1f} px", splat_radii[app.splat_mode]) : "off",
         app.splat_light_twice ? "2x" : "1x",
         app.tone_curve == 0   ? "ACES"
@@ -297,7 +302,8 @@ void write_benchmark(const std::filesystem::path& path, const FrameTimes& times)
 AppState initial_state(const Options& options, const SystemDescription& system) {
     AppState app;
     app.high = options.high;
-    app.anti_aliasing = options.aa;
+    app.temporal_aa = options.taa != 0;
+    app.spatial_aa = options.spatial;
     app.splat_mode = options.splat;
     app.tone_curve = options.tone;
     app.pan = options.pan;
@@ -365,7 +371,8 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .auto_exposure = app.auto_exposure,
                                              .belt_light_map = app.belt_light_map,
                                              .belt_extinction = app.belt_extinction,
-                                             .anti_aliasing = app.anti_aliasing,
+                                             .temporal_aa = app.temporal_aa,
+                                             .spatial_aa = app.spatial_aa,
                                              .billboard_radius = splat_radii[app.splat_mode],
                                              .splat_light_twice = app.splat_light_twice,
                                              .tone_curve = app.tone_curve};

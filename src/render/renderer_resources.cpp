@@ -1,4 +1,6 @@
 #include "render/renderer_impl.hpp"
+#include "render/smaa/AreaTex.h"
+#include "render/smaa/SearchTex.h"
 
 #include "app/hud.hpp"
 #include "assets/kernels.hpp"
@@ -77,7 +79,7 @@ Renderer::Impl::~Impl() {
     for (auto& image : material_images)
         destroy(image);
     for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &shadow_map, &luminance, &history[0],
-                        &history[1], &belt_light, &belt_light_blur, &splat_mask})
+                        &history[1], &belt_light, &belt_light_blur, &splat_mask, &smaa_edges, &smaa_weights})
         destroy(*image);
     for (auto* heap : {&data, &texture_descriptors, &sampler_descriptors, &luminance_readback, &timestamps})
         gpu::destroy_gpu_heap(*heap);
@@ -408,6 +410,9 @@ void Renderer::Impl::create_pipelines() {
     pso.meter = make("fullscreen", "post", Format::rgba32_float);
     pso.temporal = make("fullscreen", "temporal", Format::rgba16_float);
     pso.splat_mask = make("surface", "surface", Format::r8_unorm, true);
+    pso.smaa_edges = make("fullscreen", "smaa", Format::rg8_unorm);
+    pso.smaa_weights = make("fullscreen", "smaa", Format::rgba8_unorm);
+    pso.smaa_blend = make("fullscreen", "smaa", Format::rgba8_srgb);
     pso.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
     panic_if(!pso.cull, "compute pipeline creation failed: cull");
     pipelines.push_back(pso.cull);
@@ -465,6 +470,23 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     hud.back().mips.push_back(assets::make_hud());
     hud.back().slot = Slot::hud;
     upload_images(hud);
+    // SMAA lookup tables, shipped as byte arrays and widened to RGBA8.
+    const auto widen = [](const unsigned char* bytes, unsigned width, unsigned height, unsigned channels) {
+        assets::Image image{.extent = {width, height}};
+        image.pixels.resize(std::size_t(width) * height * 4);
+        for (std::size_t i = 0; i < std::size_t(width) * height; i++)
+            for (unsigned c = 0; c < channels; c++)
+                image.pixels[i * 4 + c] = bytes[i * channels + c];
+        return image;
+    };
+    Uploads smaa;
+    smaa.emplace_back();
+    smaa.back().mips.push_back(widen(areaTexBytes, AREATEX_WIDTH, AREATEX_HEIGHT, 2));
+    smaa.back().slot = Slot::smaa_area;
+    smaa.emplace_back();
+    smaa.back().mips.push_back(widen(searchTexBytes, SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT, 1));
+    smaa.back().slot = Slot::smaa_search;
+    upload_images(smaa);
     create_pipelines();
     create_fixed_targets();
 }
@@ -473,7 +495,8 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     if (extent == new_extent)
         return;
     gpu::wait_idle(device);
-    for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &history[0], &history[1], &splat_mask})
+    for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &history[0], &history[1], &splat_mask,
+                        &smaa_edges, &smaa_weights})
         destroy(*image);
     extent = new_extent;
     history_valid = false;
@@ -494,6 +517,8 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     for (auto& image : history)
         image = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
     splat_mask = create_image({.extent = extent, .format = gpu::Format::r8_unorm, .usage = color_usage});
+    smaa_edges = create_image({.extent = extent, .format = gpu::Format::rg8_unorm, .usage = color_usage});
+    smaa_weights = create_image({.extent = extent, .format = gpu::Format::rgba8_unorm, .usage = color_usage});
     bind(Slot::hdr, hdr);
     bind(Slot::bloom_a, bloom_a);
     bind(Slot::bloom_b, bloom_b);
@@ -501,6 +526,8 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     bind(Slot::ldr, ldr);
     bind(Slot::depth, depth);
     bind(Slot::splat_mask, splat_mask);
+    bind(Slot::smaa_edges, smaa_edges);
+    bind(Slot::smaa_weights, smaa_weights);
 }
 
 Renderer::Renderer(void* window, const SystemDescription& system, const std::filesystem::path& directory,

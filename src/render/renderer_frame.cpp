@@ -257,7 +257,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
         frame.bodies[i] = f4(input.bodies[i].position - camera.position, float(input.bodies[i].radius));
     frame.scene = {float(body_count), float(giant_index), input.belt_light_map ? 1.f : 0.f,
                    input.belt_extinction ? 1.f : 0.f};
-    frame.quality = {float(input.anti_aliasing), float(input.tone_curve), 0, 0};
+    frame.quality = {input.temporal_aa ? 1.f : 0.f, float(input.tone_curve), 0, 0};
 
     // Sun position in screen space for the lens flare, hidden when a body covers it.
     const Vec3d sun_direction = normalized(system.star.position - camera.position);
@@ -481,7 +481,7 @@ void Renderer::Impl::record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, 
 }
 
 void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view,
-                                        bool spatial_aa) {
+                                        unsigned spatial_aa) {
     const unsigned history_write = frame_index % 2;
     root.mode = std::uint32_t(PostMode::tonemap);
     fullscreen_pass(cmd, history[history_write], pso.temporal, root);
@@ -489,12 +489,20 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
     fullscreen_pass(cmd, bloom_a, pso.bloom, root);
     root.mode = std::uint32_t(PostMode::bloom_b);
     fullscreen_pass(cmd, bloom_b, pso.bloom, root);
-    // Tone map into the final image, or through an intermediate when FXAA follows.
+    // Tone map into the final image, or through an intermediate when a spatial pass follows.
     root.mode = std::uint32_t(PostMode::tonemap);
     fullscreen_pass(cmd, spatial_aa ? ldr : final_image, pso.post, root);
-    if (spatial_aa) {
+    if (spatial_aa == 1) {
         root.mode = std::uint32_t(PostMode::fxaa);
         fullscreen_pass(cmd, final_image, pso.fxaa, root);
+    } else if (spatial_aa == 2) {
+        // SMAA: edges, blending weights, neighbourhood blend (modes 0, 1, 2 of smaa.slang).
+        root.mode = 0;
+        fullscreen_pass(cmd, smaa_edges, pso.smaa_edges, root);
+        root.mode = 1;
+        fullscreen_pass(cmd, smaa_weights, pso.smaa_weights, root);
+        root.mode = 2;
+        fullscreen_pass(cmd, final_image, pso.smaa_blend, root);
     }
     if (frame_index % exposure_meter::interval == 0) {
         root.mode = std::uint32_t(PostMode::meter);
@@ -600,7 +608,7 @@ bool Renderer::draw(const FrameInput& input) {
         root.base = body;
         s.fullscreen_pass(cmd, s.hdr, s.pso.atmosphere, root, true);
     }
-    if (input.anti_aliasing > 0) {
+    if (input.temporal_aa) {
         gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,
                      gpu::Access::depth_stencil_write);
         s.record_splat_mask_pass(cmd, root, args_address);
@@ -610,7 +618,7 @@ bool Renderer::draw(const FrameInput& input) {
                      gpu::Access::shader_read);
     }
     stamp(3);
-    s.record_post_passes(cmd, root, swap.render_view, input.anti_aliasing >= 2);
+    s.record_post_passes(cmd, root, swap.render_view, input.spatial_aa);
     stamp(4);
     s.stats.prepare_ms =
         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - prepare_start).count();

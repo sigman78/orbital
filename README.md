@@ -26,14 +26,14 @@ Slang is the default shader language, with offline compilation and a shared C++/
 
 ## Explore
 
-RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. Keys 1–6 select Earth, Jupiter, Moon, Mars, dawn and belt views. T starts/stops the tour, O orbits, F returns to free flight. Space pauses the system; +/- changes exposure, X toggles adaptation. F1 toggles help, F2 quality, F3 the belt transmittance map, F4 the belt extinction, F5 cycles anti-aliasing (off, temporal, temporal plus FXAA), F6 cycles the rock splat cut-off (off, 1.2, 2.5, 4 px), F7 lights the splats in both culling passes instead of the scatter pass only, F8 cycles the tone curve (Khronos PBR Neutral by default, AgX, ACES filmic), F12 saves a capture, Esc exits.
+RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. Keys 1–6 select Earth, Jupiter, Moon, Mars, dawn and belt views. T starts/stops the tour, O orbits, F returns to free flight. Space pauses the system; +/- changes exposure, X toggles adaptation. F1 toggles help, F2 quality, F3 the belt transmittance map, F4 the belt extinction, F5 toggles temporal anti-aliasing, F9 cycles the spatial pass (off, FXAA, SMAA), F6 cycles the rock splat cut-off (off, 1.2, 2.5, 4 px), F7 lights the splats in both culling passes instead of the scatter pass only, F8 cycles the tone curve (Khronos PBR Neutral by default, AgX, ACES filmic), F12 saves a capture, Esc exits.
 
 ```powershell
 ./build/release/orbital.exe --width 1920 --height 1080 --tour
 ./build/release/orbital.exe --bookmark 5 --time 0 --frames 300 --high --rocks 650000 --benchmark belt.csv
 ./build/release/orbital.exe --bookmark 4 --time 0 --frames 124 --no-hud --capture captures/belt.png
 ./build/release/orbital.exe --duration 60 --tour --benchmark captures/tour.csv
-./build/release/orbital.exe --bookmark 5 --time 0 --frames 40 --pan 3 --aa 1 --capture captures/pan.png
+./build/release/orbital.exe --bookmark 5 --time 0 --frames 40 --pan 3 --spatial 0 --capture captures/pan.png
 ```
 
 `--help` lists options. `--time` freezes simulation and exposure adaptation for reproducible captures; `--pan` strafes the camera at a fixed rate, to compare anti-aliasing modes in motion.
