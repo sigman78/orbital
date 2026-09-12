@@ -44,6 +44,13 @@ struct FrameInput {
     bool splat_light_twice = false; // light splats in the count pass too, for comparison (F7)
     unsigned tone_curve = 2;        // 0 ACES filmic, 1 AgX, 2 Khronos PBR Neutral (F8)
     const ImDrawData* ui = nullptr; // Dear ImGui draw lists, drawn over the presented frame
+    // Earth look (panel): sea state and cloud shadows.
+    float ocean_roughness = .18f;       // GGX roughness of the sea; Cox-Munk moderate wind
+    float glint_intensity = 1.f;        // multiplies the sea's specular
+    float sea_patchiness = .5f;         // wind-field modulation of the roughness, 0 even
+    float cloud_shadow = .6f;           // how dark clouds shade the ground
+    float cloud_shadow_softness = 1.5f; // mips of extra blur on the shadow
+    float cloud_opacity = .88f;         // the cloud layer's peak alpha
 };
 
 // Startup choices that are not part of the scene description.

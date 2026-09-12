@@ -403,7 +403,13 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .billboard_radius = splat_radii[app.splat_mode],
                                              .splat_light_twice = app.splat_light_twice,
                                              .tone_curve = app.tone_curve,
-                                             .ui = ui_draw};
+                                             .ui = ui_draw,
+                                             .ocean_roughness = app.ocean_roughness,
+                                             .glint_intensity = app.glint_intensity,
+                                             .sea_patchiness = app.sea_patchiness,
+                                             .cloud_shadow = app.cloud_shadow,
+                                             .cloud_shadow_softness = app.cloud_shadow_softness,
+                                             .cloud_opacity = app.cloud_opacity};
         renderer.set_vsync(app.vsync);
         if (renderer.draw(frame_input)) {
             frames++;

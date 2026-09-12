@@ -82,11 +82,19 @@ float cloudDensity(float2 uv, float t, float detail)
     return pow(saturate(density), 1.3);
 }
 
+// Cloud coverage as the ground sees it: read at a coarser mip for the
+// penumbra the sun's disc and in-cloud scattering give, without the fine
+// structure, so shadows are softer than the clouds that cast them.
+float cloudShadowDensity(float2 uv, float softness)
+{
+    return pow(saturate(sampleSphereBias(textures[5], uv, softness).a), 1.3);
+}
+
 float4 shadeClouds(SurfaceVaryings input, float3 N, float3 L, float visibility, float nl)
 {
     float t = root.frame->camera_time.w;
     float2 uv = sphereUV(normalize(input.localNormal));
-    float alpha = cloudDensity(cloudUV(uv, t), t, magnification(uv, EARTH_TEXELS)) * .88;
+    float alpha = cloudDensity(cloudUV(uv, t), t, magnification(uv, EARTH_TEXELS)) * root.frame->earth_more.y;
     float3 cloudLight = float3(.002, .004, .008) + float3(1.0, .99, .97) * pow(nl, .8) * visibility * root.frame->sun.w / PI * .8;
     return float4(cloudLight, alpha);
 }
@@ -156,7 +164,11 @@ Material earthMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     m.water = sampleSphere(textures[8], uv).r;
     // Land grain where the 4K map is magnified; the sea stays smooth.
     m.albedo *= 1.0 + (fbm2(uv * float2(8192, 4096), 3) - .5) * .3 * detail * (1.0 - m.water * .7);
-    m.rough = lerp(.85, .085, m.water);
+    // Sea state: the panel's roughness, patchy with a slow wind field so the glint
+    // breaks into brighter and calmer stretches instead of one even highlight.
+    float4 earth = root.frame->earth;
+    float wind = 1.0 + (fbm2(uv * float2(48, 24) + t * .0004, 2) - .5) * root.frame->earth_more.x;
+    m.rough = lerp(.85, max(earth.x * wind, .03), m.water);
     float3 T, B;
     tangentFrame(localN, rotate, N, T, B);
     float3 mapN = sampleSphere(textures[7], uv).xyz * 2.0 - 1.0;
@@ -165,8 +177,8 @@ Material earthMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     // Cloud shadow: the cloud above this point along the sun direction.
     float3 localL = mul(transpose(rotate), L);
     float3 towardSun = normalize(localN + localL * (CLOUD_HEIGHT / max(dot(localN, localL), .25)));
-    float shadowCloud = cloudDensity(cloudUV(sphereUV(towardSun), t), t, detail);
-    m.visibility = visibility * (1.0 - shadowCloud * .6);
+    float shadowCloud = cloudShadowDensity(cloudUV(sphereUV(towardSun), t), earth.w);
+    m.visibility = visibility * (1.0 - shadowCloud * earth.z);
     return m;
 }
 
@@ -420,6 +432,7 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     float3 F0 = float3(lerp(.04, .02, m.water));
     float3 F = F0 + (1 - F0) * pow(1 - vh, 5);
     float3 spec = F * D * G / max(4 * nv * nl, .001);
+    spec *= lerp(1.0, root.frame->earth.y, m.water); // the panel's glint intensity, sea only
     float3 light = float3(1.0, .99, .97) * root.frame->sun.w;
     float3 diffuse = m.albedo * lerp(1.0, .22, m.water) * (1 - F0) / PI;
     float3 color = (diffuse + spec) * light * nl * m.visibility + m.albedo * float3(.003, .004, .008);

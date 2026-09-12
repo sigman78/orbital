@@ -151,6 +151,23 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::EndDisabled();
         ImGui::PopID();
     }
+    if (section("Earth")) {
+        ImGui::SliderFloat("Ocean roughness", &app.ocean_roughness, .03f, .6f, "%.3f", ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Glint intensity", &app.glint_intensity, .1f, 4.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Sea patchiness", &app.sea_patchiness, 0.f, 1.f, "%.2f");
+        ImGui::SliderFloat("Cloud shadow", &app.cloud_shadow, 0.f, 1.f, "%.2f");
+        ImGui::SliderFloat("Cloud shadow softness", &app.cloud_shadow_softness, 0.f, 4.f, "%.1f mips");
+        ImGui::SliderFloat("Cloud opacity", &app.cloud_opacity, 0.f, 1.f, "%.2f");
+        if (ImGui::SmallButton("Reset Earth")) {
+            app.ocean_roughness = .18f;
+            app.glint_intensity = 1.f;
+            app.sea_patchiness = .5f;
+            app.cloud_shadow = .6f;
+            app.cloud_shadow_softness = 1.5f;
+            app.cloud_opacity = .88f;
+        }
+        ImGui::PopID();
+    }
     if (section("Tone")) {
         static constexpr const char* curves[] = {"ACES filmic", "AgX", "PBR Neutral"};
         combo("Curve (F8)", app.tone_curve, curves);

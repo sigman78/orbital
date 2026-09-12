@@ -89,6 +89,14 @@ float4 sampleSphere(Texture2D<float4> tex, float2 uv)
     dx.x -= round(dx.x); dy.x -= round(dy.x);
     return tex.SampleGrad(samplers[1], uv, dx, dy);
 }
+// The same with the footprint widened by 2^bias mips: a softer, coarser read.
+float4 sampleSphereBias(Texture2D<float4> tex, float2 uv, float bias)
+{
+    float2 dx = ddx(uv), dy = ddy(uv);
+    dx.x -= round(dx.x); dy.x -= round(dy.x);
+    float widen = exp2(bias);
+    return tex.SampleGrad(samplers[1], uv, dx * widen, dy * widen);
+}
 float hash(float3 p) { p=frac(p*.1031); p+=dot(p,p.yzx+33.33); return frac((p.x+p.y)*p.z); }
 float noise(float3 p)
 {

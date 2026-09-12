@@ -37,6 +37,8 @@ struct Frame {
     SHADER_FLOAT4 belt_disc_right;       // disc frame right axis, w = half extent
     SHADER_FLOAT4 belt_disc_up;          // disc frame up axis, w = half extent
     SHADER_FLOAT4 belt_disc;             // sunlight map texels, far-tier blend weight (0 near paths, 1 baked disc), rock map texels, disc LOD enabled
+    SHADER_FLOAT4 earth;                 // ocean roughness, glint intensity, cloud shadow strength, cloud shadow softness (mip bias)
+    SHADER_FLOAT4 earth_more;            // sea wind patchiness, cloud opacity, unused x2
 };
 struct Root {
 #ifdef __cplusplus
