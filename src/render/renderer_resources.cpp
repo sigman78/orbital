@@ -337,6 +337,13 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
     }
     rock_data = upload_static(bytes_of(records));
     rock_count = unsigned(records.size());
+    std::vector<RockData> tail;
+    for (unsigned id = 0; id < records.size(); ++id)
+        if (records[id].position_radius.w >= belt::map_caster_min_radius) {
+            tail.push_back(records[id]);
+            rock_tail_ids.push_back(id);
+        }
+    rock_tail_data = tail.empty() ? rock_data : upload_static(bytes_of(tail));
 }
 
 // Decodes and mip-filters every material on a bounded worker pool, then

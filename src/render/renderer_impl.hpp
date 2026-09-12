@@ -124,6 +124,8 @@ inline constexpr QualityTier high_quality{.belt_count = 520000};
 namespace belt {
 inline constexpr float rock_radius_scale = 0.025f; // instance scale to world radius
 inline constexpr unsigned radial_bands = 8;        // cluster bins across the belt width; each orbits at its own rate
+inline constexpr float map_caster_min_radius =
+    .03f; // only the size-tail rocks (about 5%) splat into the transmittance map
 
 // A sparse large-body tail exposes the fractured silhouettes between the much
 // more numerous small rocks. Stable IDs keep quality tiers nested.
@@ -211,7 +213,9 @@ struct Renderer::Impl {
     std::array<GpuMesh, max_body_count> moonlet_meshes{}; // per body index; only moonlets are filled
     std::uint64_t rock_data = 0;                          // static heap address of the RockData records
     unsigned rock_count = 0;
-    unsigned belt_count_override = 0; // RendererConfig::belt_count
+    std::uint64_t rock_tail_data = 0;    // the size-tail rocks again, compacted for the transmittance splat
+    std::vector<unsigned> rock_tail_ids; // their ids, ascending
+    unsigned belt_count_override = 0;    // RendererConfig::belt_count
     SystemDescription system;
     std::filesystem::path directory;
     // The bodies occupy instance slots 0..body_count-1 in system order. The

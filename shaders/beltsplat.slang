@@ -25,7 +25,7 @@ SplatVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_In
     CullParams* p = &root.scratch->params;
     output.disk = corners[vertexIndex];
     output.weightSlice = float2(0.0, 0.0);
-    if (instanceId >= p->rock_limit || root.rocks[instanceId].position_radius.w < p->billboard.w)
+    if (instanceId >= root.pass) // pass carries the caster count for this draw
     {
         output.position = float4(0.0, 0.0, -2.0, 1.0); // clipped away
         return output;

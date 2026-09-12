@@ -68,7 +68,7 @@ struct CullParams {
     SHADER_FLOAT4 belt_tilt;            // y scale, y from z, z scale, unused
     SHADER_FLOAT4 band_spin[ORBITAL_BELT_BANDS]; // cos and sin of each radial band's spin angle
     SHADER_FLOAT4 levels;               // projected-radius thresholds of levels 1 to 4, in pixels
-    SHADER_FLOAT4 billboard;            // level 5 threshold, billboard radius, minimum radius, smallest radius splatted into the belt map
+    SHADER_FLOAT4 billboard;            // level 5 threshold, billboard radius, minimum radius, unused
     SHADER_UINT rock_limit, body_count, unused0, unused1;
     // Each rock group's slice of the pooled rock mesh.
     SHADER_UINT index_counts[ORBITAL_ROCK_GROUPS];
@@ -92,6 +92,8 @@ struct CullScratch {
     DrawArgs args[ORBITAL_ROCK_GROUPS + 1];   // the billboard entry stays at index ORBITAL_ROCK_GROUPS
 };
 
+// The belt splat pass reuses this root with rocks pointing at the size-tail
+// records and pass holding their count.
 struct CullRoot {
 #ifdef __cplusplus
     SHADER_ADDRESS frame, rocks, scratch;

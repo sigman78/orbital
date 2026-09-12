@@ -53,8 +53,6 @@ namespace belt_culling {
 inline constexpr double spin_rate = 0.0012, rock_spin_rate = 0.02; // radians per simulation second, barely visible
 inline constexpr float shear_exponent =
     0.35f; // orbital rate falls with radius as r^-0.35: a hint of Kepler shear, not the real 1.5
-inline constexpr float map_min_radius =
-    .015f; // smaller rocks cover under a fifth of a belt-map texel and are not splatted
 namespace billboard {
 inline constexpr float min_pixels = 0.06f;  // smaller rocks are dropped
 inline constexpr float pixel_radius = 1.2f; // rocks below this become fixed-size billboards
@@ -305,7 +303,7 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
     p.levels = {geometry::rock_level_thresholds[0], geometry::rock_level_thresholds[1],
                 geometry::rock_level_thresholds[2], geometry::rock_level_thresholds[3]};
     p.billboard = {geometry::rock_level_thresholds[4], belt_culling::billboard::pixel_radius,
-                   belt_culling::billboard::min_pixels, belt_culling::map_min_radius};
+                   belt_culling::billboard::min_pixels, 0};
     const unsigned tier_count = (input.high_quality ? high_quality : baseline_quality).belt_count;
     p.rock_limit = std::min(rock_count, belt_count_override ? belt_count_override : tier_count);
     p.body_count = body_count;
@@ -535,8 +533,17 @@ bool Renderer::draw(const FrameInput& input) {
                  gpu::Access::color_write | gpu::Access::depth_stencil_write | gpu::Access::shader_read);
     s.record_cull_passes(cmd, cull_root);
     s.record_shadow_pass(cmd, root);
-    if (input.belt_light_map)
-        s.record_belt_light_pass(cmd, cull_root, root, scratch->params.rock_limit);
+    if (input.belt_light_map) {
+        // Only the size-tail rocks splat; their ids are sorted, so the tier limit is a prefix.
+        const auto tail_end = std::upper_bound(s.rock_tail_ids.begin(), s.rock_tail_ids.end(),
+                                               scratch->params.rock_limit - 1);
+        const CullRoot splat_root{.frame = frame_address,
+                                  .rocks = s.rock_tail_data,
+                                  .scratch = cull_root.scratch,
+                                  .pass = unsigned(tail_end - s.rock_tail_ids.begin()),
+                                  .unused = 0};
+        s.record_belt_light_pass(cmd, splat_root, root, splat_root.pass);
+    }
     stamp(1);
     s.record_scene_pass(cmd, root, input, frame, args_address);
     stamp(2);
