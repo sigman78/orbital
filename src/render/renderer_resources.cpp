@@ -480,7 +480,7 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     upload_images(hud);
     // SMAA lookup tables, shipped as byte arrays and widened to RGBA8.
     const auto widen = [](const unsigned char* bytes, unsigned width, unsigned height, unsigned channels) {
-        assets::Image image{.extent = {width, height}};
+        assets::Image image{.extent = {width, height}, .pixels = {}};
         image.pixels.resize(std::size_t(width) * height * 4);
         for (std::size_t i = 0; i < std::size_t(width) * height; i++)
             for (unsigned c = 0; c < channels; c++)
@@ -559,7 +559,7 @@ Stats Renderer::stats() const {
 void Renderer::set_ui_font(const std::uint8_t* rgba, unsigned width, unsigned height) {
     Uploads upload;
     upload.emplace_back();
-    assets::Image image{.extent = {width, height}};
+    assets::Image image{.extent = {width, height}, .pixels = {}};
     image.pixels.assign(rgba, rgba + std::size_t(width) * height * 4);
     upload.back().mips.push_back(std::move(image));
     upload.back().slot = Slot::ui_font;

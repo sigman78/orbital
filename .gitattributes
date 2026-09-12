@@ -1,8 +1,9 @@
 # Normalize text files to LF in the repository; check out with the platform default.
 * text=auto
+*.sh text eol=lf
 
 # Patches must round-trip byte-for-byte.
-*.patch -text
+*.patch -text -whitespace
 
 # Binary assets
 *.jpg binary

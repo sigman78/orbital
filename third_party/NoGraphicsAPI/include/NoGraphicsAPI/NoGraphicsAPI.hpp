@@ -433,6 +433,7 @@ struct DeviceCaps
     uint64 texture_descriptor_size = 0; // Bytes per descriptor slot.
     uint64 sampler_descriptor_size = 0; // Bytes per descriptor slot.
     float timestamp_period_ns = 0.0f; // Nanoseconds per timestamp tick.
+    uint32 timestamp_valid_bits = 0; // Mask timestamp differences to this width to handle counter wrap.
     uint32 sub_texel_precision_bits = 0; // Fractional filtering precision, for conservative sampled-field bounds.
     bool texture_compression_bc = false;
     bool texture_compression_astc = false;
@@ -441,13 +442,14 @@ struct DeviceCaps
     // Shaders declare sampled images at set 0/binding 0 and samplers at set 0/binding 1.
     bool conventional_descriptor_backend = false;
     bool mesh_shaders = false;
+    bool storage_image_read_without_format = false;
 };
 
 // A windowed device and every call using it must remain on the native
 // window's message-pump thread. The window must outlive the device.
 struct DeviceDesc
 {
-    void* window = nullptr;
+    void* window = nullptr; // HWND on Windows; SDL_Window* on Linux; null for a device without presentation.
     Format swapchain_format = Format::undefined;
     uint32 desired_swapchain_image_count = 2; // 1..8 presentation contexts.
     uint32 timestamp_query_count = 256; // Per command buffer; zero disables timestamps.

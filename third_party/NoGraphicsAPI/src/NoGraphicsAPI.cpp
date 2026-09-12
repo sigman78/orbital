@@ -12,6 +12,10 @@
 #endif
 
 #include <vulkan/vulkan.h>
+#if defined(NOGRAPHICSAPI_SDL2)
+#include <SDL.h>
+#include <SDL_vulkan.h>
+#endif
 
 #include <NoGraphicsAPI/bit.hpp>
 #include <assert.h>
@@ -42,7 +46,7 @@ constexpr uint32 initial_command_context_count = 2;
 constexpr uint32 max_swapchain_images = 8;
 constexpr VkPresentModeKHR swapchain_present_mode = VK_PRESENT_MODE_FIFO_KHR;
 constexpr uint32 gpu_allocation_alignment = 16;
-constexpr uint32 max_surface_formats = 64;
+constexpr uint32 max_surface_formats = 256;
 constexpr uint32 format_count = static_cast<uint32>(Format::undefined);
 constexpr uint32 conventional_texture_descriptor_count = 40;
 
@@ -650,6 +654,7 @@ struct Device
     VkDevice device = VK_NULL_HANDLE;
     VkQueue queue = VK_NULL_HANDLE;
     VkSurfaceKHR surface = VK_NULL_HANDLE;
+    void* window = nullptr;
     uint32 queue_family = 0;
     uint32 timestamp_query_count = 0;
     VkPhysicalDeviceMemoryProperties memory_properties{};
@@ -1601,6 +1606,7 @@ struct Candidate
 {
     VkPhysicalDevice physical_device = VK_NULL_HANDLE;
     uint32 queue_family = 0;
+    uint32 timestamp_valid_bits = 0;
     VkPhysicalDeviceProperties properties{};
     VkPhysicalDeviceMemoryProperties memory_properties{};
     bool unified_image_layouts = false;
@@ -1611,6 +1617,7 @@ struct Candidate
     bool storage_input_output16 = false;
     bool khr_swapchain_maintenance1 = false;
     bool conventional = false;
+    bool storage_image_read_without_format = false;
     VkPhysicalDeviceDescriptorHeapPropertiesEXT heap_properties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT};
     VkPhysicalDeviceVulkan12Properties vulkan12_properties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
 };
@@ -1693,7 +1700,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface, 
         features.core.features.independentBlend == VK_TRUE &&
         features.core.features.fragmentStoresAndAtomics == VK_TRUE &&
         features.core.features.vertexPipelineStoresAndAtomics == VK_TRUE &&
-        features.core.features.shaderStorageImageReadWithoutFormat == VK_TRUE &&
+        (result.conventional || features.core.features.shaderStorageImageReadWithoutFormat == VK_TRUE) &&
         features.core.features.shaderStorageImageWriteWithoutFormat == VK_TRUE &&
         features.core.features.multiDrawIndirect == VK_TRUE &&
         features.core.features.drawIndirectFirstInstance == VK_TRUE &&
@@ -1704,9 +1711,11 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface, 
         features.vulkan12.scalarBlockLayout == VK_TRUE &&
         features.vulkan12.bufferDeviceAddress == VK_TRUE &&
         features.vulkan12.timelineSemaphore == VK_TRUE &&
+        features.vulkan12.drawIndirectCount == VK_TRUE &&
         features.vulkan13.synchronization2 == VK_TRUE &&
         features.vulkan13.dynamicRendering == VK_TRUE &&
         features.vulkan13.maintenance4 == VK_TRUE &&
+        features.vulkan13.shaderDemoteToHelperInvocation == VK_TRUE &&
         features.vulkan14.maintenance5 == VK_TRUE &&
         (result.conventional || (features.descriptor_heap.descriptorHeap == VK_TRUE &&
         features.address_commands.deviceAddressCommands == VK_TRUE &&
@@ -1723,6 +1732,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface, 
     result.texture_compression_astc = features.core.features.textureCompressionASTC_LDR == VK_TRUE;
     result.texture_compression_etc2 = features.core.features.textureCompressionETC2 == VK_TRUE;
     result.storage_input_output16 = features.vulkan11.storageInputOutput16 == VK_TRUE;
+    result.storage_image_read_without_format = features.core.features.shaderStorageImageReadWithoutFormat == VK_TRUE;
     result.khr_swapchain_maintenance1 = khr_swapchain_maintenance1;
 
     uint32 available_queue_count = 0;
@@ -1736,7 +1746,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface, 
     constexpr VkQueueFlags required_queue_flags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
     for (uint32 index = 0; index < queue_count; ++index)
     {
-        if (queues[index].queueCount == 0 || queues[index].timestampValidBits != 64 ||
+        if (queues[index].queueCount == 0 || queues[index].timestampValidBits == 0 ||
             (queues[index].queueFlags & required_queue_flags) != required_queue_flags)
             continue;
         VkBool32 presentation_supported = VK_TRUE;
@@ -1756,6 +1766,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface, 
         return Error::unsupported;
 
     result.queue_family = queue_family;
+    result.timestamp_valid_bits = queues[queue_family].timestampValidBits;
     output = result;
     return Error::none;
 }
@@ -1784,7 +1795,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     const bool presentation = desc.window != nullptr;
     assert(desc.desired_swapchain_image_count != 0 && desc.desired_swapchain_image_count <= max_swapchain_images &&
            "swapchain image count must fit the wrapper's presentation context array");
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(NOGRAPHICSAPI_SDL2)
     if (presentation)
         return {.error = Error::unsupported};
 #endif
@@ -1797,6 +1808,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         return { .error = Error::unsupported };
 
     Device* state = new Device;
+    state->window = desc.window;
     state->timestamp_query_count = desc.timestamp_query_count;
     state->present_context_count = presentation ? desc.desired_swapchain_image_count : 0;
     VkExtensionProperties instance_extensions[max_instance_extensions]{};
@@ -1804,7 +1816,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     error = enumerate_instance_extensions({instance_extensions, max_instance_extensions}, instance_extension_count);
     if (error != Error::none)
         return fail_device_creation(state, error);
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(NOGRAPHICSAPI_SDL2)
     const bool khr_surface_maintenance1 = presentation && has_name(
         {instance_extensions, instance_extension_count},
         VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
@@ -1814,8 +1826,10 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     if (presentation &&
         (!has_name({instance_extensions, instance_extension_count},
                    VK_KHR_SURFACE_EXTENSION_NAME) ||
+#if defined(_WIN32)
          !has_name({instance_extensions, instance_extension_count},
                    VK_KHR_WIN32_SURFACE_EXTENSION_NAME) ||
+#endif
          !has_name({instance_extensions, instance_extension_count},
                    VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME) ||
          (!khr_surface_maintenance1 && !ext_surface_maintenance1)))
@@ -1836,7 +1850,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     const bool validation_available = has_name({layers, layer_count}, "VK_LAYER_KHRONOS_validation");
 #endif
 
-    const char* enabled_instance_extensions[6]{};
+    const char* enabled_instance_extensions[16]{};
     uint32 enabled_instance_extension_count = 0;
     const char* enabled_layers[1]{};
     uint32 enabled_layer_count = 0;
@@ -1844,11 +1858,22 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     if (debug_utils_available) enabled_instance_extensions[enabled_instance_extension_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
     if (validation_available) enabled_layers[enabled_layer_count++] = "VK_LAYER_KHRONOS_validation";
 #endif
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(NOGRAPHICSAPI_SDL2)
     if (presentation)
     {
+#if defined(_WIN32)
         enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_SURFACE_EXTENSION_NAME;
         enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
+#else
+        unsigned int sdl_extension_count = 0;
+        if (!SDL_Vulkan_GetInstanceExtensions(static_cast<SDL_Window*>(desc.window), &sdl_extension_count, nullptr) ||
+            sdl_extension_count > 12)
+            return fail_device_creation(state, Error::unsupported);
+        if (!SDL_Vulkan_GetInstanceExtensions(static_cast<SDL_Window*>(desc.window), &sdl_extension_count,
+                                             enabled_instance_extensions + enabled_instance_extension_count))
+            return fail_device_creation(state, Error::unsupported);
+        enabled_instance_extension_count += sdl_extension_count;
+#endif
         enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME;
         if (khr_surface_maintenance1)
             enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
@@ -1912,6 +1937,11 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     }
 #endif
 
+#if defined(NOGRAPHICSAPI_SDL2)
+    if (presentation && !SDL_Vulkan_CreateSurface(static_cast<SDL_Window*>(desc.window), state->instance, &state->surface))
+        return fail_device_creation(state, Error::driver_error);
+#endif
+
     VkPhysicalDevice physical_devices[max_physical_devices]{};
     uint32 physical_device_count = 0;
     error = enumerate_physical_devices(state->instance, {physical_devices, max_physical_devices}, physical_device_count);
@@ -1970,7 +2000,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     enabled_features.core.features.textureCompressionETC2 = selected.texture_compression_etc2;
     enabled_features.core.features.fragmentStoresAndAtomics = VK_TRUE;
     enabled_features.core.features.vertexPipelineStoresAndAtomics = VK_TRUE;
-    enabled_features.core.features.shaderStorageImageReadWithoutFormat = VK_TRUE;
+    enabled_features.core.features.shaderStorageImageReadWithoutFormat = selected.storage_image_read_without_format;
     enabled_features.core.features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
     enabled_features.core.features.multiDrawIndirect = VK_TRUE;
     enabled_features.core.features.drawIndirectFirstInstance = VK_TRUE;
@@ -1981,10 +2011,12 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     enabled_features.vulkan12.shaderFloat16 = selected.conventional ? VK_FALSE : VK_TRUE;
     enabled_features.vulkan12.scalarBlockLayout = VK_TRUE;
     enabled_features.vulkan12.timelineSemaphore = VK_TRUE;
+    enabled_features.vulkan12.drawIndirectCount = VK_TRUE;
     enabled_features.vulkan12.bufferDeviceAddress = VK_TRUE;
     enabled_features.vulkan13.synchronization2 = VK_TRUE;
     enabled_features.vulkan13.dynamicRendering = VK_TRUE;
     enabled_features.vulkan13.maintenance4 = VK_TRUE;
+    enabled_features.vulkan13.shaderDemoteToHelperInvocation = VK_TRUE;
     enabled_features.vulkan14.maintenance5 = VK_TRUE;
     enabled_features.descriptor_heap.descriptorHeap = selected.conventional ? VK_FALSE : VK_TRUE;
     enabled_features.address_commands.deviceAddressCommands = selected.conventional ? VK_FALSE : VK_TRUE;
@@ -2013,7 +2045,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         enabled_device_extensions[enabled_device_extension_count++] = VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME;
     }
     if (!selected.conventional) enabled_device_extensions[enabled_device_extension_count++] = VK_EXT_MESH_SHADER_EXTENSION_NAME;
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(NOGRAPHICSAPI_SDL2)
     if (presentation)
     {
         enabled_device_extensions[enabled_device_extension_count++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
@@ -2100,12 +2132,14 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         .texture_descriptor_size = selected.conventional ? uint64(sizeof(void*) * 4) : state->heap_properties.imageDescriptorSize,
         .sampler_descriptor_size = selected.conventional ? uint64(64) : state->heap_properties.samplerDescriptorSize,
         .timestamp_period_ns = selected.properties.limits.timestampPeriod,
+        .timestamp_valid_bits = selected.timestamp_valid_bits,
         .sub_texel_precision_bits = selected.properties.limits.subTexelPrecisionBits,
         .texture_compression_bc = selected.texture_compression_bc,
         .texture_compression_astc = selected.texture_compression_astc,
         .storage_input_output16 = selected.storage_input_output16,
         .conventional_descriptor_backend = selected.conventional,
         .mesh_shaders = !selected.conventional,
+        .storage_image_read_without_format = selected.storage_image_read_without_format,
     };
     if (presentation)
     {
@@ -2301,13 +2335,38 @@ VkCompositeAlphaFlagBitsKHR choose_composite_alpha(VkCompositeAlphaFlagsKHR supp
     abort();
 }
 
+VkExtent2D drawable_extent(const Device& device, const VkSurfaceCapabilitiesKHR& capabilities) noexcept
+{
+    if (capabilities.currentExtent.width != UINT_MAX)
+        return capabilities.currentExtent;
+#if defined(NOGRAPHICSAPI_SDL2)
+    int width = 0, height = 0;
+    SDL_Vulkan_GetDrawableSize(static_cast<SDL_Window*>(device.window), &width, &height);
+    if (width <= 0 || height <= 0 || (SDL_GetWindowFlags(static_cast<SDL_Window*>(device.window)) & SDL_WINDOW_MINIMIZED))
+        return {};
+    uint32 drawable_width = static_cast<uint32>(width);
+    uint32 drawable_height = static_cast<uint32>(height);
+    if (drawable_width < capabilities.minImageExtent.width) drawable_width = capabilities.minImageExtent.width;
+    if (drawable_width > capabilities.maxImageExtent.width) drawable_width = capabilities.maxImageExtent.width;
+    if (drawable_height < capabilities.minImageExtent.height) drawable_height = capabilities.minImageExtent.height;
+    if (drawable_height > capabilities.maxImageExtent.height) drawable_height = capabilities.maxImageExtent.height;
+    return {
+        .width = drawable_width,
+        .height = drawable_height,
+    };
+#else
+    (void)device;
+    return capabilities.currentExtent;
+#endif
+}
+
 [[nodiscard]] bool swapchain_surface_configuration_changed(const Swapchain& swapchain) noexcept
 {
     VkSurfaceCapabilitiesKHR capabilities{};
     const Error error = error_from_vk(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(swapchain.state->physical_device, swapchain.state->surface, &capabilities));
     require_error(error);
 
-    const VkExtent2D extent = capabilities.currentExtent;
+    const VkExtent2D extent = drawable_extent(*swapchain.state, capabilities);
     const uint32 variable_extent = UINT_MAX;
     return extent.width == variable_extent ||
            extent.height == variable_extent ||
@@ -2338,7 +2397,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
         return error;
     const VkSurfaceCapabilitiesKHR& capabilities = capabilities_info.surfaceCapabilities;
 
-    const VkExtent2D extent = capabilities.currentExtent;
+    const VkExtent2D extent = drawable_extent(device, capabilities);
     if (extent.width == UINT_MAX)
         return Error::unsupported;
     if (extent.width == 0 || extent.height == 0)
@@ -2496,7 +2555,7 @@ uint32x2 get_drawable_extent(Device* device) noexcept
     VkSurfaceCapabilitiesKHR capabilities{};
     const Error error = error_from_vk(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device->physical_device, device->surface, &capabilities));
     require_error(error);
-    const VkExtent2D extent = capabilities.currentExtent;
+    const VkExtent2D extent = drawable_extent(*device, capabilities);
     if (extent.width == UINT_MAX || extent.height == UINT_MAX)
     {
         require_error(Error::unsupported);

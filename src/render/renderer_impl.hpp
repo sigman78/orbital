@@ -21,7 +21,7 @@ namespace space::render {
 
 // --- Fixed layout shared with the shaders -------------------------------------
 
-// Sampled texture descriptor slots (shaders/common.slang binds 32).
+// Sampled texture descriptor slots; initialize the entire shader array, including reserved slots.
 enum class Slot : unsigned {
     hdr = 0,
     bloom_a = 1,
@@ -61,7 +61,7 @@ enum class Slot : unsigned {
     smaa_weights = 35,    // SMAA blending weights
     ui_font = 36,         // Dear ImGui font atlas
     belt_dust = 37,       // half-resolution belt dust march, composited with a depth-aware upsample
-    count = 38,
+    count = ORBITAL_TEXTURE_COUNT,
 };
 
 // Sampler descriptor slots (shaders/common.slang binds 4).

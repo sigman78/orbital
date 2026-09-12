@@ -44,5 +44,5 @@ MIT-style licence).
 ## Dear ImGui
 
 `imgui/` is [ocornut/imgui](https://github.com/ocornut/imgui) 1.91.9b (MIT, see `imgui/LICENSE.txt`): the core sources and the Win32
-backend. The core is platform-agnostic and used by the application; the Win32 backend is compiled into the
+and SDL2 backends. Both backends are from the same 1.91.9b tag. The core is platform-agnostic and used by the application; the selected backend is compiled into the
 platform layer, and the draw lists are rendered by the demo's own NoGraphicsAPI backend.

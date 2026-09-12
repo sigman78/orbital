@@ -1,6 +1,7 @@
 #include "core/file.hpp"
 #include "core/math.hpp"
 #include "core/small_vec.hpp"
+#include "core/timing.hpp"
 #include "core/types.hpp"
 #include <algorithm>
 #include <cassert>
@@ -14,6 +15,11 @@
 namespace {
 
 using namespace space;
+
+static_assert(timestamp_ticks(100, 125, 36) == 25);
+static_assert(timestamp_ticks((std::uint64_t{1} << 36) - 10, 15, 36) == 25);
+static_assert(timestamp_ticks(~std::uint64_t{0} - 9, 15, 64) == 25);
+static_assert(timestamp_ticks(0, 0, 0) == 0);
 
 bool near(float a, float b) {
     return std::abs(a - b) < 1e-5f;

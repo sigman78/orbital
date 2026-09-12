@@ -43,8 +43,8 @@ if(BUILD_TESTING)
 endif()
 
 if(ORBITAL_BUILD_DEMO)
-  if(NOT WIN32)
-    message(FATAL_ERROR "The desktop demo currently requires Windows. CPU tools can use ORBITAL_BUILD_DEMO=OFF.")
+  if(NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "The desktop demo supports Windows and Linux. CPU tools can use ORBITAL_BUILD_DEMO=OFF.")
   endif()
   set(NOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND ON CACHE BOOL "Use the demo's conventional descriptor-set shader ABI")
   add_subdirectory(third_party/NoGraphicsAPI EXCLUDE_FROM_ALL)
@@ -62,7 +62,7 @@ if(ORBITAL_BUILD_DEMO)
   list(APPEND ORBITAL_SHADER_OUTPUTS "${CMAKE_BINARY_DIR}/shaders/cull.compute.spv")
   add_custom_target(orbital_shaders DEPENDS ${ORBITAL_SHADER_OUTPUTS})
 
-  # Dear ImGui core (vendored, MIT); its Win32 backend is compiled into the platform layer.
+  # Dear ImGui core (vendored, MIT); its OS backend is compiled into the platform layer.
   add_library(imgui STATIC third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp third_party/imgui/imgui_tables.cpp
                            third_party/imgui/imgui_widgets.cpp third_party/imgui/imgui_demo.cpp)
   target_include_directories(imgui PUBLIC third_party/imgui)
@@ -70,10 +70,19 @@ if(ORBITAL_BUILD_DEMO)
   target_compile_features(imgui PUBLIC cxx_std_17)
 
   # Platform layer: the only code that talks to the OS windowing, input and font APIs.
-  add_library(orbital_platform STATIC src/platform/win32/window.cpp src/platform/win32/process.cpp src/platform/win32/text.cpp
-                                      src/platform/win32/overlay.cpp third_party/imgui/backends/imgui_impl_win32.cpp)
-  target_link_libraries(orbital_platform PUBLIC orbital_core imgui PRIVATE user32 gdi32 dwmapi imm32)
-  target_compile_definitions(orbital_platform PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+  if(WIN32)
+    add_library(orbital_platform STATIC src/platform/win32/window.cpp src/platform/win32/process.cpp src/platform/win32/text.cpp
+                                        src/platform/win32/overlay.cpp third_party/imgui/backends/imgui_impl_win32.cpp)
+    target_link_libraries(orbital_platform PUBLIC orbital_core imgui PRIVATE user32 gdi32 dwmapi imm32)
+    target_compile_definitions(orbital_platform PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+  else()
+    find_package(SDL2 REQUIRED CONFIG)
+    find_package(Freetype REQUIRED)
+    find_package(Fontconfig REQUIRED)
+    add_library(orbital_platform STATIC src/platform/linux/window.cpp src/platform/linux/process.cpp
+      src/platform/linux/text.cpp src/platform/linux/overlay.cpp third_party/imgui/backends/imgui_impl_sdl2.cpp)
+    target_link_libraries(orbital_platform PUBLIC orbital_core imgui PRIVATE SDL2::SDL2 Freetype::Freetype Fontconfig::Fontconfig)
+  endif()
   target_compile_options(orbital_platform PRIVATE ${ORBITAL_WARNINGS})
 
   add_executable(orbital src/app/main.cpp src/app/hud.cpp src/app/ui.cpp src/render/renderer_resources.cpp src/render/renderer_frame.cpp)

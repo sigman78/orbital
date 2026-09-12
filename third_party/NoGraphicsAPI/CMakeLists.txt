@@ -55,6 +55,11 @@ target_link_libraries(NoGraphicsAPI
     PRIVATE Vulkan::Vulkan
 )
 NoGraphicsAPI_disable_exceptions(NoGraphicsAPI)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(SDL2 REQUIRED CONFIG)
+    target_link_libraries(NoGraphicsAPI PRIVATE SDL2::SDL2)
+    target_compile_definitions(NoGraphicsAPI PRIVATE NOGRAPHICSAPI_SDL2=1)
+endif()
 if(NOGRAPHICSAPI_ENABLE_CONVENTIONAL_BACKEND)
     target_compile_definitions(NoGraphicsAPI PRIVATE NOGRAPHICSAPI_ENABLE_CONVENTIONAL_BACKEND=1)
 endif()
