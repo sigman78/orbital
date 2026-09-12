@@ -150,12 +150,14 @@ struct ImageDesc {
     unsigned mips = 1;
 };
 
+enum class Blend { none, alpha, multiply }; // multiply: destination scaled by the fragment colour
+
 struct PipelineDesc {
     const char* vertex_shader;   // shaders/<name>.vertex.spv
     const char* fragment_shader; // shaders/<name>.fragment.spv
     gpu::Format color_format;
     bool depth_test = false;
-    bool alpha_blend = false;
+    Blend blend = Blend::none;
 };
 
 struct Upload {
@@ -191,7 +193,7 @@ struct Renderer::Impl {
     struct {
         gpu::PSO *opaque = nullptr, *cloud = nullptr, *background = nullptr, *atmosphere = nullptr, *bloom = nullptr,
                  *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr,
-                 *cull = nullptr;
+                 *cull = nullptr, *contact = nullptr;
     } pso;
     std::array<GpuMesh, geometry::lod_count> spheres{};
     std::array<GpuMesh, rock_group_count> rocks{}; // the rock library, indexed by rock_group; slices of rock_pool
