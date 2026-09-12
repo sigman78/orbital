@@ -760,15 +760,16 @@ bool Renderer::draw(const FrameInput& input) {
         s.fullscreen_pass(cmd, s.hdr, s.pso.atmosphere, root, true);
     }
     // Belt dust scatters over everything the belt lies in front of, after the atmospheres.
-    if (input.belt_dust && frame.belt_disc.y < 1) {
-        root.mode = 0; // march at half resolution
+    // Belt dust and the far-belt disc: the near march at half resolution, then
+    // one composite that mixes it with the far tier by the LOD weight.
+    const bool near_dust = input.belt_dust && frame.belt_disc.y < 1;
+    if (near_dust) {
+        root.mode = 0;
         s.fullscreen_pass(cmd, s.belt_dust, s.pso.belt_dust, root);
-        root.mode = 1; // depth-aware composite over the frame
-        s.fullscreen_pass(cmd, s.hdr, s.pso.belt_dust_blend, root, true);
     }
-    if (frame.belt_disc.y > 0) {
-        root.mode = 1; // the baked far belt, weighted in
-        s.fullscreen_pass(cmd, s.hdr, s.pso.belt_disc_blend, root, true);
+    if (near_dust || frame.belt_disc.y > 0) {
+        root.mode = 1;
+        s.fullscreen_pass(cmd, s.hdr, s.pso.belt_dust_blend, root, true);
     }
     if (input.temporal_aa) {
         gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,

@@ -229,8 +229,7 @@ struct Renderer::Impl {
                  *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr,
                  *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr, *fxaa = nullptr, *splat_mask = nullptr,
                  *smaa_edges = nullptr, *smaa_weights = nullptr, *smaa_blend = nullptr, *ui = nullptr,
-                 *belt_dust = nullptr, *belt_dust_blend = nullptr, *belt_disc = nullptr, *belt_disc_blend = nullptr,
-                 *belt_disc_splat = nullptr;
+                 *belt_dust = nullptr, *belt_dust_blend = nullptr, *belt_disc = nullptr, *belt_disc_splat = nullptr;
     } pso;
     std::array<GpuMesh, geometry::lod_count> spheres{};
     std::array<GpuMesh, rock_group_count> rocks{}; // the rock library, indexed by rock_group; slices of rock_pool
