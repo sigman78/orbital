@@ -675,6 +675,16 @@ bool Renderer::draw(const FrameInput& input) {
     const auto swap = gpu::acquire(s.device);
     if (!swap.render_view)
         return false;
+    // The presentation mode the driver granted, once per change: what a frame-rate cap is made of.
+    if (const auto info = gpu::get_swapchain_info(s.device);
+        info.present_mode != s.logged_swapchain.present_mode || info.image_count != s.logged_swapchain.image_count) {
+        s.logged_swapchain = info;
+        log::info("Presentation: {} with {} swapchain images",
+                  info.present_mode == gpu::PresentMode::fifo      ? "FIFO (vsync)"
+                  : info.present_mode == gpu::PresentMode::mailbox ? "mailbox"
+                                                                   : "immediate",
+                  info.image_count);
+    }
     if (swap.extent.x != s.extent.width || swap.extent.y != s.extent.height)
         log::warn("Swapchain {}x{} does not match the frame targets {}x{}", swap.extent.x, swap.extent.y,
                   s.extent.width, s.extent.height);

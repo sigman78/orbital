@@ -2319,7 +2319,8 @@ VkCompositeAlphaFlagBitsKHR choose_composite_alpha(VkCompositeAlphaFlagsKHR supp
            choose_composite_alpha(capabilities.supportedCompositeAlpha) != swapchain.composite_alpha;
 }
 
-// FIFO when vsync is wanted; otherwise mailbox where the surface offers it, else immediate.
+// FIFO when vsync is wanted; otherwise immediate where the surface offers it (mailbox can still be
+// throttled to the display by the desktop compositor in a window), else mailbox.
 VkPresentModeKHR choose_present_mode(const Device& device, bool vsync) noexcept
 {
     if (vsync)
@@ -2335,7 +2336,7 @@ VkPresentModeKHR choose_present_mode(const Device& device, bool vsync) noexcept
         mailbox |= modes[i] == VK_PRESENT_MODE_MAILBOX_KHR;
         immediate |= modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR;
     }
-    return mailbox ? VK_PRESENT_MODE_MAILBOX_KHR : immediate ? VK_PRESENT_MODE_IMMEDIATE_KHR : VK_PRESENT_MODE_FIFO_KHR;
+    return immediate ? VK_PRESENT_MODE_IMMEDIATE_KHR : mailbox ? VK_PRESENT_MODE_MAILBOX_KHR : VK_PRESENT_MODE_FIFO_KHR;
 }
 
 Error recreate_swapchain(Swapchain& swapchain) noexcept
@@ -2513,6 +2514,19 @@ void set_vsync(Device* device, bool vsync) noexcept
         return;
     device->swapchain->vsync = vsync;
     device->swapchain->recreate_required = true;
+}
+
+SwapchainInfo get_swapchain_info(const Device* device) noexcept
+{
+    SwapchainInfo info{};
+    if (!device || !device->swapchain)
+        return info;
+    const Swapchain& swapchain = *device->swapchain;
+    info.present_mode = swapchain.present_mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? PresentMode::immediate
+                      : swapchain.present_mode == VK_PRESENT_MODE_MAILBOX_KHR ? PresentMode::mailbox
+                                                                               : PresentMode::fifo;
+    info.image_count = swapchain.image_count;
+    return info;
 }
 
 uint32x2 get_drawable_extent(Device* device) noexcept

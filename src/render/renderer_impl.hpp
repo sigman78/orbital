@@ -257,7 +257,8 @@ struct Renderer::Impl {
     Vec3d previous_camera{};
     bool history_valid = false;
     bool ui_overflow_logged = false;
-    bool belt_disc_baked = false; // the far-belt maps hold data (baked once the far tier is first needed)
+    bool belt_disc_baked = false;          // the far-belt maps hold data (baked once the far tier is first needed)
+    gpu::SwapchainInfo logged_swapchain{}; // last presentation mode and image count reported to the log
     void record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root, unsigned rock_count,
                                 float far_weight);
 

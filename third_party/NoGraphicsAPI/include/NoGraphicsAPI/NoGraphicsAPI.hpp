@@ -655,6 +655,14 @@ void destroy_device(Device* device) noexcept;
 [[nodiscard]] uint32x2 get_drawable_extent(Device* device) noexcept;
 // Switches between FIFO and unsynchronized presentation; the swapchain is recreated on the next acquire.
 void set_vsync(Device* device, bool vsync) noexcept;
+enum class PresentMode : uint8 { fifo, mailbox, immediate };
+struct SwapchainInfo
+{
+    PresentMode present_mode = PresentMode::fifo;
+    uint32 image_count = 0;
+};
+// What the driver granted at the last (re)creation.
+[[nodiscard]] SwapchainInfo get_swapchain_info(const Device* device) noexcept;
 
 [[nodiscard]] TimelineSemaphore* create_timeline_semaphore(Device* device, uint64 initial_value = 0) noexcept;
 void destroy_timeline_semaphore(TimelineSemaphore* semaphore) noexcept;
