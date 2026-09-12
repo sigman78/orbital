@@ -135,12 +135,15 @@ Placement placeRock(uint id)
                        : seed < .5 ? textures[11].SampleLevel(samplers[1], float2(.5, .5), 10.0).rgb
                                    : textures[25].SampleLevel(samplers[1], float2(.5, .5), 10.0).rgb;
         float3 albedo = average * colour * (.8 + .4 * frac(seed * 5.1));
-        float sunlight = frame->sun.w / 3.141592653589793 * (lambertSpherePhase(phase) + SPLAT_RIM * (1.0 - cos(phase)) * .5)
-                       * solarVisibility(frame, position, -1) * beltExtinction(frame, position) * beltRockTransmittance(frame, position);
+        // Everything but the cosine term is per rock. Discs are shaded as sphere
+        // impostors in the fragment (cosine per pixel), points take the disc average.
+        float rim = SPLAT_RIM * (1.0 - cos(phase)) * .5;
+        float shadowing = solarVisibility(frame, position, -1) * beltExtinction(frame, position) * beltRockTransmittance(frame, position);
+        float irradiance = frame->sun.w / 3.141592653589793 * shadowing;
         result.group = BILLBOARD_GROUP;
         result.instance.center_radius = float4(position, radius * splatPixels / pixelRadius);
-        result.instance.rotation_kind = float4(disc ? 1.0 : 0.0, 0.0, 0.0, KIND_ROCK);
-        result.instance.tint = float4(albedo * (sunlight + SPLAT_AMBIENT), coverage);
+        result.instance.rotation_kind = float4(disc ? 1.0 : 0.0, rim, SPLAT_AMBIENT / max(irradiance, 1e-6), KIND_ROCK);
+        result.instance.tint = float4(albedo * irradiance * (disc ? 1.0 : lambertSpherePhase(phase) + rim + SPLAT_AMBIENT / max(irradiance, 1e-6)), coverage);
         return result;
     }
     uint level = 0;

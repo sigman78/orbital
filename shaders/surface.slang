@@ -351,20 +351,27 @@ Material rockMaterial(SurfaceVaryings input, Instance inst, float3x3 rotate, flo
     return m;
 }
 
-// Splats are lit once per rock in the culling pass (tint holds the radiance,
-// tint.w the covered fraction of the footprint); here only the Gaussian
-// footprint is shaped, normalised so the alpha sums to the true covered area.
+// Splats are lit once per rock in the culling pass (tint.w is the covered
+// fraction of the footprint). Discs are sphere impostors: tint holds albedo
+// times irradiance and the Lambert cosine is taken per pixel from the sphere
+// normal the disc coordinate implies, so a few-pixel rock shows a lit side and
+// a dark limb; rotation_kind.y and .z carry the per-rock rim and ambient
+// fractions. Points hold their final radiance and only shape the footprint.
 float4 shadeBillboard(SurfaceVaryings input, Instance inst)
 {
-    float rr = dot(input.localNormal.xy, input.localNormal.xy);
-    float footprint;
+    float2 q = input.localNormal.xy;
+    float rr = dot(q, q);
     if (inst.rotation_kind.x > .5)
     {
         float edge = fwidth(rr); // a soft-edged disc of the rock's true size
-        footprint = 1.0 - smoothstep(1.0 - edge, 1.0 + edge, rr);
+        float footprint = 1.0 - smoothstep(1.0 - edge, 1.0 + edge, rr);
+        float3 n = normalize(root.frame->right_tan.xyz * q.x + root.frame->up_aspect.xyz * q.y
+                             - root.frame->forward_exposure.xyz * sqrt(max(0.0, 1.0 - rr)));
+        float3 l = normalize(root.frame->sun.xyz - input.worldPosition);
+        float shading = max(dot(n, l), 0.0) + inst.rotation_kind.y + inst.rotation_kind.z;
+        return float4(inst.tint.xyz * shading, saturate(inst.tint.w * footprint));
     }
-    else
-        footprint = exp(-3.0 * rr) / .317; // Gaussian point; integral over the unit disc relative to its area
+    float footprint = exp(-3.0 * rr) / .317; // Gaussian point; integral over the unit disc relative to its area
     return float4(inst.tint.xyz, saturate(inst.tint.w * footprint));
 }
 
