@@ -39,6 +39,8 @@ struct Frame {
     SHADER_FLOAT4 belt_disc;             // sunlight map texels, far-tier blend weight (0 near paths, 1 baked disc), rock map texels, disc LOD enabled
     SHADER_FLOAT4 earth;                 // ocean roughness, glint intensity, cloud shadow strength, cloud shadow softness (mip bias)
     SHADER_FLOAT4 earth_more;            // sea wind patchiness, cloud opacity, unused x2
+    SHADER_FLOAT4 lens;                  // glare intensity, ghost strength, starburst strength, starburst blades
+    SHADER_FLOAT4 sun_disc;              // angular radius (radians), limb darkening, unused x2
 };
 struct Root {
 #ifdef __cplusplus

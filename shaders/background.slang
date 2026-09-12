@@ -33,10 +33,17 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float galactic = pow(max(0.0, 1.0 - abs(dot(rd, normalize(float3(.3, .8, .4))))), 24.0);
     float3 color = float3(.0005, .0007, .0012) + float3(.008, .009, .014) * galactic * (.4 + fbm(rd * 14.0));
     color += filteredStars(rd * 480.0);
+    // The solar disc: its edge softened to the pixel footprint so it does not
+    // alias from afar, and limb-darkened (I = 1 - u (1 - mu)); the brightness
+    // is normalised so the darkening does not change the disc's total light.
     float3 sunDir = normalize(root.frame.sun.xyz - root.frame.camera_time.xyz);
     float angle = acos(clamp(dot(rd, sunDir), -1.0, 1.0));
-    float disc = 1.0 - smoothstep(.006, .008, angle);
-    color += float3(1.0, .85, .59) * disc * 35.0;
+    float radius = root.frame.sun_disc.x, darkening = root.frame.sun_disc.y;
+    float edge = max(2.0 * root.frame.right_tan.w / root.frame.options.y, .0004);
+    float disc = 1.0 - smoothstep(radius - edge, radius + edge, angle);
+    float mu = sqrt(max(1.0 - (angle * angle) / (radius * radius), 0.0));
+    float limb = (1.0 - darkening * (1.0 - mu)) / (1.0 - darkening / 3.0);
+    color += float3(1.0, .85, .59) * disc * limb * 35.0;
     color += float3(1.0, .57, .25) * .06 * exp(-angle * 34.0);
     return float4(color, 1.0);
 }

@@ -315,6 +315,9 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.dust_tint = {input.dust_tint[0], input.dust_tint[1], input.dust_tint[2], 0};
     frame.earth = {input.ocean_roughness, input.glint_intensity, input.cloud_shadow, input.cloud_shadow_softness};
     frame.earth_more = {input.sea_patchiness, input.cloud_opacity, 0, 0};
+    frame.lens = {input.glare_intensity, input.ghost_strength, input.starburst_strength,
+                  float(std::min(input.starburst_blades, 12u))};
+    frame.sun_disc = {input.sun_disc_radius, input.sun_limb_darkening, 0, 0};
 
     // Sun position in screen space for the lens flare, hidden when a body covers it.
     const Vec3d sun_direction = normalized(system.star.position - camera.position);

@@ -51,6 +51,13 @@ struct FrameInput {
     float cloud_shadow = .6f;           // how dark clouds shade the ground
     float cloud_shadow_softness = 1.5f; // mips of extra blur on the shadow
     float cloud_opacity = .88f;         // the cloud layer's peak alpha
+    // Sun and lens (panel).
+    float glare_intensity = 1.f;    // the glow around the sun
+    float ghost_strength = 1.f;     // ghost images down the lens axis
+    float starburst_strength = 1.f; // aperture streaks through the sun
+    unsigned starburst_blades = 6;  // streak count, 0 for none
+    float sun_disc_radius = .007f;  // angular radius of the solar disc, radians
+    float sun_limb_darkening = .6f; // edge darkening of the disc, 0 flat
 };
 
 // Startup choices that are not part of the scene description.

@@ -168,6 +168,21 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         }
         ImGui::PopID();
     }
+    if (section("Sun & lens")) {
+        ImGui::SliderFloat("Glare", &app.glare_intensity, 0.f, 4.f, "%.2f x");
+        ImGui::SliderFloat("Ghosts", &app.ghost_strength, 0.f, 4.f, "%.2f x");
+        ImGui::SliderFloat("Starburst", &app.starburst_strength, 0.f, 4.f, "%.2f x");
+        ImGui::SliderInt("Starburst blades", &app.starburst_blades, 0, 12);
+        ImGui::SliderFloat("Disc radius", &app.sun_disc_radius, .003f, .02f, "%.4f rad");
+        ImGui::SliderFloat("Limb darkening", &app.sun_limb_darkening, 0.f, 1.f, "%.2f");
+        if (ImGui::SmallButton("Reset sun")) {
+            app.glare_intensity = app.ghost_strength = app.starburst_strength = 1.f;
+            app.starburst_blades = 6;
+            app.sun_disc_radius = .007f;
+            app.sun_limb_darkening = .6f;
+        }
+        ImGui::PopID();
+    }
     if (section("Tone")) {
         static constexpr const char* curves[] = {"ACES filmic", "AgX", "PBR Neutral"};
         combo("Curve (F8)", app.tone_curve, curves);

@@ -409,7 +409,13 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .sea_patchiness = app.sea_patchiness,
                                              .cloud_shadow = app.cloud_shadow,
                                              .cloud_shadow_softness = app.cloud_shadow_softness,
-                                             .cloud_opacity = app.cloud_opacity};
+                                             .cloud_opacity = app.cloud_opacity,
+                                             .glare_intensity = app.glare_intensity,
+                                             .ghost_strength = app.ghost_strength,
+                                             .starburst_strength = app.starburst_strength,
+                                             .starburst_blades = unsigned(std::max(app.starburst_blades, 0)),
+                                             .sun_disc_radius = app.sun_disc_radius,
+                                             .sun_limb_darkening = app.sun_limb_darkening};
         renderer.set_vsync(app.vsync);
         if (renderer.draw(frame_input)) {
             frames++;

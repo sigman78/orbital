@@ -46,6 +46,9 @@ struct AppState {
     bool vsync = true;              // presentation waits for the display (--vsync); off for measurements
     float ocean_roughness = .18f, glint_intensity = 1.f, sea_patchiness = .5f;    // Earth panel: sea state
     float cloud_shadow = .6f, cloud_shadow_softness = 1.5f, cloud_opacity = .88f; // Earth panel: clouds
+    float glare_intensity = 1.f, ghost_strength = 1.f, starburst_strength = 1.f;  // Sun & lens panel
+    int starburst_blades = 6;
+    float sun_disc_radius = .007f, sun_limb_darkening = .6f;
     float pan = 0; // lateral drift added to the move axis (--pan)
     float exposure = 1.0f;
     unsigned selected_body = 0;
