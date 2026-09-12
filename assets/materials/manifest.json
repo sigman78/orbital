@@ -258,6 +258,16 @@
       "source_height": 2048
     },
     {
+      "file": "gas_detail.png",
+      "width": 4096,
+      "height": 2048,
+      "color_space": "linear-data",
+      "license": "CC-BY-4.0",
+      "attribution": "Baked by tools/bake-flow-map.py alongside gas_flow.png: noise integrated along the wind flow (line integral convolution)",
+      "source": "gas_flow.png",
+      "layout": "grayscale flow-aligned detail, 0.5 + value / 6 with the value in standard deviations"
+    },
+    {
       "file": "gas_flow.png",
       "width": 1024,
       "height": 512,

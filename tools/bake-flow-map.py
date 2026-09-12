@@ -35,6 +35,14 @@ flow, encoded 0.5 + v * FLOW_SCALE / 2, in texture units per second at real
 wind speed; B holds the turbulence weight the shader uses to place its fine
 detail; A is 255. The shader decodes with GAS_FLOW_UNIT = 1 / FLOW_SCALE.
 
+With --detail-output, a second map: flow-aligned fine detail for close-ups,
+where the 2K albedo goes soft. Three octaves of noise are integrated along
+the flow's streamlines (line integral convolution), so the fine structure is
+filaments that run with the wind, as cloud detail does, instead of the
+isotropic noise the shader used to add. Grayscale, 0.5 + value / 6 with the
+value in standard deviations; the shader multiplies it into the albedo at
+magnification, advected on the same flow.
+
 Requires Python 3 with numpy and Pillow.
 """
 import argparse
@@ -108,6 +116,70 @@ def gradient_wrapped(field, spacing_y, spacing_x):
     return dy[:, 1:-1], dx[:, 1:-1]
 
 
+def sample_bilinear(field, x, y):
+    """Bilinear read of a field at pixel positions, periodic across the width, clamped at the poles."""
+    height, width = field.shape
+    x = np.mod(x, width)
+    y = np.clip(y, 0.0, height - 1.001)
+    x0 = np.floor(x).astype(np.int32)
+    y0 = np.floor(y).astype(np.int32)
+    fx = (x - x0).astype(np.float32)
+    fy = (y - y0).astype(np.float32)
+    x1 = np.mod(x0 + 1, width)
+    y1 = np.minimum(y0 + 1, height - 1)
+    return ((field[y0, x0] * (1.0 - fx) + field[y0, x1] * fx) * (1.0 - fy)
+            + (field[y1, x0] * (1.0 - fx) + field[y1, x1] * fx) * fy)
+
+
+def lic(direction_u, direction_v, noise, length):
+    """Line integral convolution: each pixel averages the noise along its streamline, both ways, Hann-weighted."""
+    height, width = noise.shape
+    ys, xs = np.mgrid[0:height, 0:width].astype(np.float32)
+    total = noise.copy()
+    weight_sum = np.ones_like(noise)
+    for sign in (1.0, -1.0):
+        x, y = xs.copy(), ys.copy()
+        for step in range(1, length + 1):
+            du = sample_bilinear(direction_u, x, y)
+            dv = sample_bilinear(direction_v, x, y)
+            x += sign * du * width
+            y += sign * dv * height
+            w = np.float32(.5 * (1.0 + math.cos(math.pi * step / (length + 1))))
+            total += sample_bilinear(noise, x, y) * w
+            weight_sum += w
+    return total / weight_sum
+
+
+def bake_detail(flow_u, flow_v, detail_width, rng):
+    """Flow-aligned filament detail: three octaves of LIC noise, each at the resolution its scale needs."""
+    speed = np.sqrt(flow_u ** 2 + flow_v ** 2)
+    unit_u = (flow_u / np.maximum(speed, 1e-20)).astype(np.float32)
+    unit_v = (flow_v / np.maximum(speed, 1e-20)).astype(np.float32)
+    # Unit direction in texture units per pixel step of a map with the given width: one pixel along the streamline.
+    def direction_for(width):
+        height = width // 2
+        du = np.asarray(Image.fromarray(unit_u, mode="F").resize((width, height), Image.BILINEAR), dtype=np.float32)
+        dv = np.asarray(Image.fromarray(unit_v, mode="F").resize((width, height), Image.BILINEAR), dtype=np.float32)
+        norm = np.maximum(np.sqrt((du * width) ** 2 + (dv * height) ** 2), 1e-9)
+        return du / norm, dv / norm
+
+    result = np.zeros((detail_width // 2, detail_width), dtype=np.float32)
+    # (resolution divisor, noise blur sigma in pixels, streamline half-length in pixels, weight)
+    for divisor, sigma, length, weight in ((1, .7, 14, .45), (2, 1.6, 30, .35), (4, 3.0, 60, .20)):
+        width = detail_width // divisor
+        height = width // 2
+        noise = rng.standard_normal((height, width)).astype(np.float32)
+        noise = blur(noise, sigma).astype(np.float32)
+        du, dv = direction_for(width)
+        streaks = lic(du, dv, noise, length)
+        streaks = (streaks - streaks.mean()) / max(float(streaks.std()), 1e-9)
+        if divisor > 1:
+            streaks = np.asarray(Image.fromarray(streaks, mode="F").resize((detail_width, detail_width // 2), Image.BICUBIC), dtype=np.float32)
+        result += streaks * weight
+    result /= max(float(result.std()), 1e-9)
+    return np.clip(np.rint((0.5 + result / 6.0) * 255.0), 0, 255).astype(np.uint8)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--albedo", required=True, help="the imported gas giant albedo")
@@ -115,6 +187,8 @@ def main():
     parser.add_argument("--width", type=int, default=1024)
     parser.add_argument("--turbulence", type=float, default=8.0, help="rms cross-contour speed, m/s, where the weight is 1")
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--detail-output", help="also bake the flow-aligned detail map here")
+    parser.add_argument("--detail-width", type=int, default=4096)
     args = parser.parse_args()
 
     width, height = args.width, args.width // 2
@@ -219,10 +293,17 @@ def main():
     encoded[..., 3] = 255
     Image.fromarray(encoded, mode="RGBA").save(args.output, optimize=True)
 
+    detail_size = None
+    if args.detail_output:
+        detail = bake_detail(flow_u, flow_v, args.detail_width, rng)
+        Image.fromarray(detail, mode="L").save(args.detail_output, optimize=True)
+        detail_size = detail.shape[::-1]
+
     speed_ms = np.sqrt((flow_u * 2.0 * math.pi * RADIUS_EQUATORIAL_M * cos_lat) ** 2
                        + (flow_v * math.pi * RADIUS_POLAR_M) ** 2)
     print(json.dumps({
         "width": width, "height": height,
+        "detail_width": detail_size[0] if detail_size else 0, "detail_height": detail_size[1] if detail_size else 0,
         "max_speed_ms": round(float(speed_ms.max()), 1),
         "mean_speed_ms": round(float(speed_ms.mean()), 1),
         "aligned_fraction": round(float(np.mean(coherence)), 3),

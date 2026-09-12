@@ -198,15 +198,19 @@ Material giantWarpMaterial(SurfaceVaryings input, float3 N, float visibility)
     return m;
 }
 
-static const uint GAS_FLOW = 40;
+static const uint GAS_FLOW = 40, GAS_DETAIL = 41;
 // Texture units per second per unit of the flow map's signed channels, at real wind speed (FLOW_SCALE in tools/bake-flow-map.py).
 static const float GAS_FLOW_UNIT = 6.25e-7;
 
-// Fine turbulence once the 2K map is magnified so its softness never shows; rides the advected coordinate.
+// Fine structure once the 2K map is magnified so its softness never shows,
+// riding the advected coordinate: baked filaments that run with the wind
+// (tools/bake-flow-map.py, in standard deviations), and the finest noise
+// beyond the 4K they hold.
 float giantDetail(float2 uv, float t, float fine)
 {
-    float detail = 1.0 + (fbm2(uv * float2(700, 350) + t * .004, 3) - .5) * .30 * fine;
-    return detail * (1.0 + (fbm2(uv * float2(2400, 480) - t * .003, 2) - .5) * .18 * fine);
+    float filaments = (sampleSphere(textures[GAS_DETAIL], uv).r - .5) * 6.0;
+    float detail = 1.0 + filaments * .11 * fine;
+    return detail * (1.0 + (fbm2(uv * float2(2400, 480) - t * .003, 2) - .5) * .12 * fine);
 }
 
 // The cloud deck advected along the baked wind map: bands shear past each

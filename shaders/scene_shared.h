@@ -1,5 +1,5 @@
 #pragma once
-#define ORBITAL_TEXTURE_COUNT 41
+#define ORBITAL_TEXTURE_COUNT 42
 #ifdef __cplusplus
 #include <cstdint>
 struct alignas(16) ShaderFloat4 { float x, y, z, w; };

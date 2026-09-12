@@ -67,7 +67,8 @@ constexpr MaterialSource material_sources[] = {
     {"rock_boulder_albedo.png", Slot::rock_boulder_albedo, {.encoding = MaterialEncoding::SRGB}},
     {"rock_boulder_normal.png", Slot::rock_boulder_normal, {.normal_map = true}},
     {"rock_boulder_roughness.png", Slot::rock_boulder_roughness, {}},
-    {"gas_flow.png", Slot::gas_flow, {}, true}, // baked from the gas albedo; neutral (no flow) when absent
+    {"gas_flow.png", Slot::gas_flow, {}, true},     // baked from the gas albedo; neutral (no flow) when absent
+    {"gas_detail.png", Slot::gas_detail, {}, true}, // baked alongside it; flat (no detail) when absent
 };
 constexpr std::size_t material_count = std::size(material_sources);
 static_assert(material_count <= inline_upload_count);

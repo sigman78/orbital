@@ -188,15 +188,29 @@ foreach ($asset in $assets) {
 # Derived maps, baked from imported textures rather than downloaded.
 $flowName = 'gas_flow'
 if ($Only.Count -gt 0 -and $Only -notcontains $flowName) {
-    $manifestEntries += ($existingManifest.assets | Where-Object { $_.file -eq ($flowName + '.png') })
+    $manifestEntries += ($existingManifest.assets | Where-Object { $_.file -eq ($flowName + '.png') -or $_.file -eq 'gas_detail.png' })
 } else {
     $flowScript = Join-Path $PSScriptRoot 'bake-flow-map.py'
     $flowOutput = Join-Path $OutputDirectory ($flowName + '.png')
-    $json = & python $flowScript --albedo (Join-Path $OutputDirectory 'gas_albedo.png') --output $flowOutput
+    $detailOutput = Join-Path $OutputDirectory 'gas_detail.png'
+    $json = & python $flowScript --albedo (Join-Path $OutputDirectory 'gas_albedo.png') --output $flowOutput `
+        --detail-output $detailOutput
     if ($LASTEXITCODE -ne 0) { throw "bake-flow-map.py failed" }
     $flow = $json | ConvertFrom-Json
     Write-Host ("{0,-20} {1}x{2} ({3:N1} MB)" -f ($flowName + '.png'), $flow.width, $flow.height,
         ((Get-Item -LiteralPath $flowOutput).Length / 1MB))
+    Write-Host ("{0,-20} {1}x{2} ({3:N1} MB)" -f 'gas_detail.png', $flow.detail_width, $flow.detail_height,
+        ((Get-Item -LiteralPath $detailOutput).Length / 1MB))
+    $manifestEntries += [pscustomobject][ordered]@{
+        file = 'gas_detail.png'
+        width = $flow.detail_width
+        height = $flow.detail_height
+        color_space = 'linear-data'
+        license = 'CC-BY-4.0'
+        attribution = 'Baked by tools/bake-flow-map.py alongside gas_flow.png: noise integrated along the wind flow (line integral convolution)'
+        source = 'gas_flow.png'
+        layout = 'grayscale flow-aligned detail, 0.5 + value / 6 with the value in standard deviations'
+    }
     $manifestEntries += [pscustomobject][ordered]@{
         file = $flowName + '.png'
         width = $flow.width
