@@ -4,10 +4,8 @@
 static const uint MODE_TONEMAP = 0, MODE_BLOOM_A = 1, MODE_BLOOM_B = 2, MODE_PRESENT = 3, MODE_METER = 4, MODE_FXAA = 5;
 
 // Small finishing effects on top of exposure, bloom and the ACES curve.
-static const float VIGNETTE = .17;             // darkening at the frame corners
-static const float ABERRATION = .00025;        // lateral colour fringe at the edges, in uv per cubic radius of a REFERENCE_FRAME
+static const float ABERRATION = .00025;        // lateral colour fringe at the edges, in uv per cubic radius of a REFERENCE_FRAME, at the panel's 1x
 static const float2 REFERENCE_FRAME = float2(1600.0, 900.0); // the default window; pixel-sized effects are tuned here and keep their pixel size elsewhere
-static const float GRAIN = .010;               // film grain amplitude in display space
 static const float METER_CENTRE_WEIGHT = .6;   // how much the metering favours the frame centre
 
 float3 sampleHDR(float2 uv) { return textures[16].Sample(samplers[0], uv).rgb; }
@@ -93,7 +91,7 @@ float4 fxaa(float2 uv, float2 texel)
 float3 sampleAberrated(float2 uv, float2 p, float2 resolution)
 {
     float2 radial = p * float2(REFERENCE_FRAME.x / REFERENCE_FRAME.y, 1.0);
-    float2 shift = radial * dot(radial, radial) * ABERRATION * REFERENCE_FRAME / resolution;
+    float2 shift = radial * dot(radial, radial) * ABERRATION * root.frame.post.w * REFERENCE_FRAME / resolution;
     return float3(sampleHDR(uv + shift).r, sampleHDR(uv).g, sampleHDR(uv - shift).b);
 }
 // --- Tone mapping curves, selected by Frame.quality.y ---------------------------
@@ -233,6 +231,21 @@ float3 starburst(float2 p, float2 sun, float vis, float2 aspect, int blades, flo
     return color * vis * .012 * strength;
 }
 
+// Bloom prefilter: the fraction of a pixel that blooms. Above the threshold
+// plus the knee it is everything over the threshold, as the hard clip was;
+// across the knee the curve bends smoothly to zero, so a source crossing the
+// threshold fades its halo in over a band of brightness rather than popping
+// it on. Weighted by the brightest channel so the halo keeps the source's hue
+// instead of drifting toward its saturated channel.
+float bloomWeight(float3 c)
+{
+    float threshold = root.frame.post.y, knee = max(root.frame.post.z, .0001);
+    float brightness = max(c.r, max(c.g, c.b));
+    float soft = clamp(brightness - threshold + knee, 0.0, 2.0 * knee);
+    soft = soft * soft / (4.0 * knee);
+    return max(soft, brightness - threshold) / max(brightness, .0001);
+}
+
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
@@ -258,7 +271,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
             // Tap spacing scales with the frame height, so the halo keeps its size relative to the picture.
             float2 delta = (root.mode == MODE_BLOOM_A ? float2(float(i), 0.0) : float2(0.0, float(i))) * 4.0 * (resolution.y / REFERENCE_FRAME.y) / resolution;
             float3 c = root.mode == MODE_BLOOM_A ? sampleHDR(uv + delta) : textures[1].Sample(samplers[0], uv + delta).rgb;
-            if (root.mode == MODE_BLOOM_A) c = max(c - float3(.85, .85, .85), float3(0.0, 0.0, 0.0));
+            if (root.mode == MODE_BLOOM_A) c *= bloomWeight(c);
             sum += c * exp(-float(i * i) / 8.0);
         }
         return float4(sum / 4.898, 1.0);
@@ -266,7 +279,8 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float2 uv = position.xy / resolution;
     float2 p = uv * 2.0 - 1.0;
     float2 aspect = float2(resolution.x / resolution.y, 1.0);
-    float3 color = sampleAberrated(uv, p, resolution) + textures[2].Sample(samplers[0], uv).rgb * .24;
+    float3 color = sampleAberrated(uv, p, resolution);
+    if (root.frame.post.x > 0.0) color += textures[2].Sample(samplers[0], uv).rgb * root.frame.post.x;
     float2 sun = root.frame.screen_sun.xy;
     float4 lens = root.frame.lens;
     float vis = root.frame.screen_sun.z * sunDepthVisibility(sun, aspect);
@@ -275,11 +289,11 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     color += lensGhosts(p, sun, vis, aspect, int(lens.w + .5)) * lens.y;
     color += starburst(p, sun, vis, aspect, int(lens.w + .5), lens.z);
     color = toneMap(color * root.frame.forward_exposure.w);
-    color *= 1.0 - VIGNETTE * pow(length(p * .65), 2.0);
+    color *= 1.0 - root.frame.post_more.x * pow(length(p * .65), 2.0);
     // Dither and grain in display-code space; linear-space noise is far too
     // bright in black space. Grain is strongest in the midtones.
     float luminance = dot(color, float3(.2126, .7152, .0722));
-    float grain = (hash(float3(position.xy, frac(root.frame.camera_time.w * 7.0) * 100.0)) - .5) * GRAIN
+    float grain = (hash(float3(position.xy, frac(root.frame.camera_time.w * 7.0) * 100.0)) - .5) * root.frame.post_more.y
                   * (4.0 * luminance * (1.0 - luminance));
     float dither = (hash(float3(position.xy, 0.0)) - .5) / 255.0 + grain;
     if (root.frame.options.w > .5) {

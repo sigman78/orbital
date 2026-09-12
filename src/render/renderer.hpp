@@ -58,6 +58,13 @@ struct FrameInput {
     unsigned starburst_blades = 6;  // streak count, 0 for none
     float sun_disc_radius = .007f;  // angular radius of the solar disc, radians
     float sun_limb_darkening = .6f; // edge darkening of the disc, 0 flat
+    // Post effects (panel).
+    float bloom_intensity = .24f; // halo added back, 0 skips the bloom passes
+    float bloom_threshold = .85f; // linear brightness where the halo starts
+    float bloom_knee = .5f;       // width of the soft threshold band
+    float aberration = 1.f;       // chromatic aberration scale
+    float vignette = .17f;        // corner darkening
+    float grain = .010f;          // film grain amplitude in display space
 };
 
 // Startup choices that are not part of the scene description.

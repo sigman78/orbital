@@ -41,6 +41,8 @@ struct Frame {
     SHADER_FLOAT4 earth_more;            // sea wind patchiness, cloud opacity, unused x2
     SHADER_FLOAT4 lens;                  // glare intensity, ghost strength, starburst strength, starburst blades
     SHADER_FLOAT4 sun_disc;              // angular radius (radians), limb darkening, unused x2
+    SHADER_FLOAT4 post;                  // bloom intensity (0 off), bloom threshold, bloom knee, chromatic aberration scale
+    SHADER_FLOAT4 post_more;             // vignette, film grain, unused x2
 };
 struct Root {
 #ifdef __cplusplus

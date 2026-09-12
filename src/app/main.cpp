@@ -415,7 +415,13 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .starburst_strength = app.starburst_strength,
                                              .starburst_blades = unsigned(std::max(app.starburst_blades, 0)),
                                              .sun_disc_radius = app.sun_disc_radius,
-                                             .sun_limb_darkening = app.sun_limb_darkening};
+                                             .sun_limb_darkening = app.sun_limb_darkening,
+                                             .bloom_intensity = app.bloom ? app.bloom_intensity : 0.f,
+                                             .bloom_threshold = app.bloom_threshold,
+                                             .bloom_knee = app.bloom_knee,
+                                             .aberration = app.aberration,
+                                             .vignette = app.vignette,
+                                             .grain = app.grain};
         renderer.set_vsync(app.vsync);
         if (renderer.draw(frame_input)) {
             frames++;

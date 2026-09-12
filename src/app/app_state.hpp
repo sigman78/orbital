@@ -49,6 +49,9 @@ struct AppState {
     float glare_intensity = 1.f, ghost_strength = 1.f, starburst_strength = 1.f;  // Sun & lens panel
     int starburst_blades = 6;
     float sun_disc_radius = .007f, sun_limb_darkening = .6f;
+    bool bloom = true; // Post FX panel
+    float bloom_intensity = .24f, bloom_threshold = .85f, bloom_knee = .5f;
+    float aberration = 1.f, vignette = .17f, grain = .010f;
     float pan = 0; // lateral drift added to the move axis (--pan)
     float exposure = 1.0f;
     unsigned selected_body = 0;

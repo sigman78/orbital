@@ -183,6 +183,25 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         }
         ImGui::PopID();
     }
+    if (section("Post FX")) {
+        ImGui::Checkbox("Bloom", &app.bloom);
+        ImGui::SliderFloat("Bloom intensity", &app.bloom_intensity, 0.f, 1.f, "%.2f");
+        ImGui::SliderFloat("Bloom threshold", &app.bloom_threshold, 0.f, 3.f, "%.2f");
+        ImGui::SliderFloat("Bloom knee", &app.bloom_knee, 0.f, 1.f, "%.2f");
+        ImGui::SliderFloat("Aberration", &app.aberration, 0.f, 4.f, "%.2f x");
+        ImGui::SliderFloat("Vignette", &app.vignette, 0.f, .5f, "%.2f");
+        ImGui::SliderFloat("Grain", &app.grain, 0.f, .05f, "%.3f");
+        if (ImGui::SmallButton("Reset post")) {
+            app.bloom = true;
+            app.bloom_intensity = .24f;
+            app.bloom_threshold = .85f;
+            app.bloom_knee = .5f;
+            app.aberration = 1.f;
+            app.vignette = .17f;
+            app.grain = .010f;
+        }
+        ImGui::PopID();
+    }
     if (section("Tone")) {
         static constexpr const char* curves[] = {"ACES filmic", "AgX", "PBR Neutral"};
         combo("Curve (F8)", app.tone_curve, curves);
