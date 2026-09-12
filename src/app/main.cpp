@@ -43,7 +43,8 @@ constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
     "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..5\n"
     "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --rocks N\n"
-    "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --disc 0|1 --lod-scale X --splat 0..3 --tone 0|1|2 "
+    "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --disc 0|1 --lod-scale X --vsync 0|1 --splat 0..3 --tone "
+    "0|1|2 "
     "--maximize-at N "
     "--fullscreen-at "
     "N\n"
@@ -62,6 +63,7 @@ struct Options {
     int bookmark = -1;
     float exposure = 1;
     unsigned rocks = 0;       // belt override for benchmarks; 0 keeps the quality tiers
+    int vsync = -1;           // -1 default: on, except off for benchmarks
     unsigned taa = 1;         // temporal anti-aliasing on
     unsigned dust = 1;        // volumetric belt dust
     unsigned disc = 1;        // far-belt disc LOD
@@ -134,6 +136,8 @@ std::optional<Options> parse_options(int argc, char** argv) {
             ok = parse_number(value(), options.disc) && options.disc <= 1;
         else if (arg == "--dust")
             ok = parse_number(value(), options.dust) && options.dust <= 1;
+        else if (arg == "--vsync")
+            ok = parse_number(value(), options.vsync) && options.vsync >= 0 && options.vsync <= 1;
         else if (arg == "--taa")
             ok = parse_number(value(), options.taa) && options.taa <= 1;
         else if (arg == "--spatial")
@@ -308,6 +312,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.belt_dust = options.dust != 0;
     app.belt_disc = options.disc != 0;
     app.belt_lod_scale = options.lod_scale;
+    app.vsync = options.vsync < 0 ? options.benchmark.empty() : options.vsync != 0;
     app.exposure = options.exposure;
     app.auto_exposure = options.fixed_time < 0;
     app.bodies = evaluate_system(system, std::max(0.0, options.fixed_time));
@@ -399,6 +404,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .splat_light_twice = app.splat_light_twice,
                                              .tone_curve = app.tone_curve,
                                              .ui = ui_draw};
+        renderer.set_vsync(app.vsync);
         if (renderer.draw(frame_input)) {
             frames++;
             if (options.maximize_at && frames == options.maximize_at)

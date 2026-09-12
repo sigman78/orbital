@@ -796,6 +796,10 @@ bool Renderer::draw(const FrameInput& input) {
     return true;
 }
 
+void Renderer::set_vsync(bool vsync) {
+    gpu::set_vsync(impl_->device, vsync);
+}
+
 bool Renderer::capture(const std::filesystem::path& path) {
     auto& s = *impl_;
     if (s.extent.empty())

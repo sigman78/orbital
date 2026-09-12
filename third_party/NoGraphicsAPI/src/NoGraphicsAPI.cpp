@@ -40,7 +40,6 @@ constexpr uint32 max_color_attachments = 8;
 constexpr uint32 image_barrier_batch_size = 64;
 constexpr uint32 initial_command_context_count = 2;
 constexpr uint32 max_swapchain_images = 8;
-constexpr VkPresentModeKHR swapchain_present_mode = VK_PRESENT_MODE_FIFO_KHR;
 constexpr uint32 gpu_allocation_alignment = 16;
 constexpr uint32 max_surface_formats = 64;
 constexpr uint32 format_count = static_cast<uint32>(Format::undefined);
@@ -1499,6 +1498,8 @@ struct Swapchain
     CommandBuffer* transition_commands = nullptr;
     bool acquired = false;
     bool recreate_required = false;
+    bool vsync = true;
+    VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR; // chosen at (re)creation from vsync and the surface's modes
 
     Swapchain() = default;
     Swapchain(const Swapchain&) = delete;
@@ -2112,6 +2113,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         state->swapchain = new Swapchain;
         state->swapchain->state = state;
         state->swapchain->format = desc.swapchain_format;
+        state->swapchain->vsync = desc.vsync;
         error = recreate_swapchain(*state->swapchain);
         if (error != Error::none)
             return fail_device_creation(state, error);
@@ -2317,13 +2319,33 @@ VkCompositeAlphaFlagBitsKHR choose_composite_alpha(VkCompositeAlphaFlagsKHR supp
            choose_composite_alpha(capabilities.supportedCompositeAlpha) != swapchain.composite_alpha;
 }
 
+// FIFO when vsync is wanted; otherwise mailbox where the surface offers it, else immediate.
+VkPresentModeKHR choose_present_mode(const Device& device, bool vsync) noexcept
+{
+    if (vsync)
+        return VK_PRESENT_MODE_FIFO_KHR;
+    uint32 count = 0;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(device.physical_device, device.surface, &count, nullptr);
+    VkPresentModeKHR modes[16]{};
+    if (count > 16) count = 16;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(device.physical_device, device.surface, &count, modes);
+    bool mailbox = false, immediate = false;
+    for (uint32 i = 0; i < count; i++)
+    {
+        mailbox |= modes[i] == VK_PRESENT_MODE_MAILBOX_KHR;
+        immediate |= modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR;
+    }
+    return mailbox ? VK_PRESENT_MODE_MAILBOX_KHR : immediate ? VK_PRESENT_MODE_IMMEDIATE_KHR : VK_PRESENT_MODE_FIFO_KHR;
+}
+
 Error recreate_swapchain(Swapchain& swapchain) noexcept
 {
     Device& device = *swapchain.state;
     assert(!swapchain.acquired && !device.acquired_swapchain && device.active_command_buffers == 0);
+    swapchain.present_mode = choose_present_mode(device, swapchain.vsync);
     const VkSurfacePresentModeKHR present_mode_info{
         .sType = VK_STRUCTURE_TYPE_SURFACE_PRESENT_MODE_KHR,
-        .presentMode = swapchain_present_mode,
+        .presentMode = swapchain.present_mode,
     };
     const VkPhysicalDeviceSurfaceInfo2KHR surface_info{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR,
@@ -2389,7 +2411,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
     const VkSwapchainPresentModesCreateInfoKHR present_modes_info{
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_KHR,
         .presentModeCount = 1,
-        .pPresentModes = &swapchain_present_mode,
+        .pPresentModes = &swapchain.present_mode,
     };
     const VkSwapchainCreateInfoKHR create_info{
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -2404,7 +2426,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .preTransform = capabilities.currentTransform,
         .compositeAlpha = composite_alpha,
-        .presentMode = swapchain_present_mode,
+        .presentMode = swapchain.present_mode,
         .clipped = VK_TRUE,
         .oldSwapchain = old_handle,
     };
@@ -2483,6 +2505,15 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
 }
 
 } // namespace
+
+void set_vsync(Device* device, bool vsync) noexcept
+{
+    assert(device && "set_vsync called with a null device");
+    if (!device->swapchain || device->swapchain->vsync == vsync)
+        return;
+    device->swapchain->vsync = vsync;
+    device->swapchain->recreate_required = true;
+}
 
 uint32x2 get_drawable_extent(Device* device) noexcept
 {

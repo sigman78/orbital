@@ -63,6 +63,8 @@ public:
     bool draw(const FrameInput& input);
     // Saves the last rendered frame as PNG; false (after logging) if it could not be written.
     bool capture(const std::filesystem::path& path);
+    // FIFO presentation on, or unsynchronized (mailbox where available) off; measurements want it off.
+    void set_vsync(bool vsync);
     Stats stats() const;
     // The Dear ImGui font atlas, RGBA8; uploaded once, before the first frame that draws the overlay.
     void set_ui_font(const std::uint8_t* rgba, unsigned width, unsigned height);

@@ -104,6 +104,9 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::Text("atmosphere %.2f   post %.2f", stats.atmosphere_ms, stats.post_ms);
         ImGui::Unindent();
         ImGui::Text("CPU prepare %.2f ms", stats.prepare_ms);
+        ImGui::Checkbox("VSync", &app.vsync);
+        ImGui::SameLine();
+        ImGui::TextDisabled("off for timings: a vsynced GPU idles and clocks down");
         ImGui::Text("%u draws, %u rock groups", stats.draw_calls, stats.rock_groups_drawn);
         ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
         ImGui::PopID();
