@@ -67,6 +67,9 @@ struct FrameInput {
     float grain = .010f;          // film grain amplitude in display space
     bool motion_streaks = true;   // dust motes streaking past the moving camera
     float motion_streak_intensity = 1.f;
+    bool catalogue_stars = true; // the Bright Star Catalogue as points; off keeps the procedural sky
+    float star_brightness = 2.f; // gain on the catalogue fluxes; the display cannot hold the eye's range
+    float star_saturation = .5f; // share of the blackbody chroma shown; the eye sees stars nearly white
     // Gas giant (panel): flow-map advection of the cloud deck.
     bool gas_flow = true;           // off holds the cloud deck still
     float gas_time_scale = 1500.f;  // wind speed, times real

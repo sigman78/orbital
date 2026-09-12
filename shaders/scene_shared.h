@@ -62,6 +62,7 @@ struct Frame {
     SHADER_FLOAT4 giant_layers;          // upper deck lift (texture units at 45 degrees), upper deck shadow, close-range streak strength (0 off), unused
     SHADER_FLOAT4 camera_lattice;        // the camera's offset within its mote cell, cell size
     SHADER_FLOAT4 camera_cell;           // the camera's mote cell index, motion streak intensity (0 off)
+    SHADER_FLOAT4 stars;                 // catalogue stars loaded and on, star brightness (0 off), star colour saturation, unused
 };
 struct Root {
 #ifdef __cplusplus

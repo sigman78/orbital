@@ -413,6 +413,34 @@ void Renderer::Impl::load_materials() {
                                                                                start);
     log::info("Loaded {} materials in {} ms on {} workers ({})", material_count, elapsed.count(), workers,
               assets::kernels::backend());
+    load_stars();
+}
+
+// The Bright Star Catalogue baked by tools/bake-stars.py: a 16-byte header
+// ("STAR", count, record size, reserved) and 32-byte records the star pass
+// reads as vertices. Optional: without it the sky keeps its procedural stars.
+void Renderer::Impl::load_stars() {
+    const auto path = directory / "assets/materials/stars_bsc5.bin";
+    const auto bytes = file::read(path);
+    if (!bytes) {
+        log::warn("stars_bsc5.bin is missing; run tools/import-assets.ps1 to bake it (the sky stays procedural)");
+        return;
+    }
+    constexpr std::size_t header = 16, record = 32;
+    if (bytes->size() < header || std::memcmp(bytes->data(), "STAR", 4) != 0) {
+        log::warn("stars_bsc5.bin is not a star record file; ignored");
+        return;
+    }
+    std::uint32_t count = 0, size = 0;
+    std::memcpy(&count, bytes->data() + 4, 4);
+    std::memcpy(&size, bytes->data() + 8, 4);
+    if (size != record || bytes->size() < header + std::size_t(count) * record) {
+        log::warn("stars_bsc5.bin has an unexpected layout; ignored");
+        return;
+    }
+    star_data = upload_static(ByteView(bytes->data() + header, std::size_t(count) * record));
+    star_count = count;
+    log::info("Loaded {} catalogue stars", count);
 }
 
 void Renderer::Impl::create_pipelines() {
@@ -452,6 +480,7 @@ void Renderer::Impl::create_pipelines() {
     pso.belt_disc = make("fullscreen", "disc", Format::rgba16_float);
     pso.belt_disc_splat = make("discsplat", "discsplat", Format::rgba16_float, false, Blend::additive);
     pso.motes = make("motes", "motes", Format::rgba16_float, true, Blend::additive);
+    pso.stars = make("stars", "stars", Format::rgba16_float, false, Blend::additive);
     pso.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
     panic_if(!pso.cull, "compute pipeline creation failed: cull");
     pipelines.push_back(pso.cull);

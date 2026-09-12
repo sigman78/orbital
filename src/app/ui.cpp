@@ -233,6 +233,20 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         }
         ImGui::PopID();
     }
+    if (section("Sky")) {
+        ImGui::Checkbox("Catalogue stars",
+                        &app.catalogue_stars); // the Bright Star Catalogue; off keeps the procedural sky
+        ImGui::BeginDisabled(!app.catalogue_stars);
+        ImGui::SliderFloat("Star brightness", &app.star_brightness, 0.f, 4.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Star colour", &app.star_saturation, 0.f, 1.f, "%.2f");
+        ImGui::EndDisabled();
+        if (ImGui::SmallButton("Reset sky")) {
+            app.catalogue_stars = true;
+            app.star_brightness = 2.f;
+            app.star_saturation = .5f;
+        }
+        ImGui::PopID();
+    }
     if (section("Post FX")) {
         ImGui::Checkbox("Bloom", &app.bloom);
         ImGui::SliderFloat("Bloom intensity", &app.bloom_intensity, 0.f, 1.f, "%.2f");

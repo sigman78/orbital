@@ -271,6 +271,31 @@ if ($Only.Count -gt 0 -and $Only -notcontains $flowName) {
     }
 }
 
+# The Bright Star Catalogue, baked into star records by tools/bake-stars.py.
+$starsAsset = @{ Name = 'stars_bsc5'; Source = 'bsc5.dat.gz'; Url = 'http://tdc-www.harvard.edu/catalogs/'; Hash = '0471CED07FC241E625613BAA689B2FA5F4B59FD733F731003E57D2D436036CDB' }
+if ($Only.Count -gt 0 -and $Only -notcontains $starsAsset.Name) {
+    $manifestEntries += ($existingManifest.assets | Where-Object { $_.file -eq 'stars_bsc5.bin' })
+} else {
+    $starsSource = Get-Source $starsAsset
+    $starsScript = Join-Path $PSScriptRoot 'bake-stars.py'
+    $starsOutput = Join-Path $OutputDirectory 'stars_bsc5.bin'
+    $json = & python $starsScript --source $starsSource --output $starsOutput
+    if ($LASTEXITCODE -ne 0) { throw "bake-stars.py failed" }
+    $stars = $json | ConvertFrom-Json
+    Write-Host ("{0,-20} {1} stars ({2:N1} KB)" -f 'stars_bsc5.bin', $stars.count, ((Get-Item -LiteralPath $starsOutput).Length / 1KB))
+    $manifestEntries += [pscustomobject][ordered]@{
+        file = 'stars_bsc5.bin'
+        stars = $stars.count
+        license = 'Public-Domain'
+        attribution = 'Yale Bright Star Catalogue, 5th revised edition (Hoffleit and Warren 1991), as served by the Harvard-Smithsonian Telescope Data Center; baked by tools/bake-stars.py'
+        source = $starsAsset.Url + $starsAsset.Source
+        source_sha256 = $starsAsset.Hash
+        layout = '16-byte header (STAR, count, record size 32, reserved), then per star float4 direction xyz + flux relative to magnitude 0, float4 linear RGB at unit luminance + V magnitude'
+        brightest_magnitude = $stars.brightest_magnitude
+        faintest_magnitude = $stars.faintest_magnitude
+    }
+}
+
 $manifest = [ordered]@{
     version = 2
     note = 'PNG textures derived from the listed sources by tools/import-assets.ps1 (downscaled to at most 4096 px wide). Keep attribution when redistributing.'
@@ -280,6 +305,7 @@ $manifest = [ordered]@{
         'NASA CGI Moon Kit' = 'https://svs.gsfc.nasa.gov/4720'
         'NASA MOLA MEGDR' = 'https://pds-geosciences.wustl.edu/missions/mgs/megdr.html'
         'NASA Photojournal' = 'https://www.jpl.nasa.gov/jpl-image-use-policy/'
+        'Yale Bright Star Catalogue' = 'http://tdc-www.harvard.edu/catalogs/bsc5.html'
     }
     assets = $manifestEntries
 }

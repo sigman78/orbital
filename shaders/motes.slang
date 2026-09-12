@@ -1,7 +1,8 @@
 // Motion cue: dust motes fixed in space around the camera, each drawn as a
-// soft streak from where it was on screen last frame to where it is now. The
-// streak is the mote's own screen motion, so it points along the movement,
-// grows with speed and vanishes when the camera rests; the parallax is real,
+// soft streak from where it was last frame to where it is now, both seen
+// through this frame's view, so the streak is the mote's motion from the
+// camera's translation alone: it points along the movement, grows with speed,
+// and vanishes when the camera rests or only turns; the parallax is real,
 // since the motes are world-fixed points in a lattice that repeats around the
 // camera. Depth tested, so bodies occlude them; drawn into the HDR image
 // before the temporal pass, which reprojects them like any static point.
@@ -39,7 +40,7 @@ MoteVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_Ins
     float3 relative = (float3(offset) + h) * lattice.w - lattice.xyz; // camera-relative, as the scene is
     float3 previous = relative + root.frame->previous_camera_delta.xyz;
     float4 now = mul(root.frame->view_projection, float4(relative, 1.0));
-    float4 before = mul(root.frame->previous_projection, float4(previous, 1.0));
+    float4 before = mul(root.frame->view_projection, float4(previous, 1.0)); // this frame's view: translation only
     if (now.w <= NEAR_Z || before.w <= NEAR_Z) return o;
 
     float2 resolution = root.frame->options.xy;

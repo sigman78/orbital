@@ -6,7 +6,8 @@
     "Poly Haven": "https://polyhaven.com/license",
     "NASA CGI Moon Kit": "https://svs.gsfc.nasa.gov/4720",
     "NASA MOLA MEGDR": "https://pds-geosciences.wustl.edu/missions/mgs/megdr.html",
-    "NASA Photojournal": "https://www.jpl.nasa.gov/jpl-image-use-policy/"
+    "NASA Photojournal": "https://www.jpl.nasa.gov/jpl-image-use-policy/",
+    "Yale Bright Star Catalogue": "http://tdc-www.harvard.edu/catalogs/bsc5.html"
   },
   "assets": [
     {
@@ -314,6 +315,17 @@
       "source": "gas_albedo.png",
       "layout": "R east and G south flow, 0.5 + v * 1.6e6 / 2 in texture units per second at real speed; B turbulence weight",
       "max_speed_ms": 201.0
+    },
+    {
+      "file": "stars_bsc5.bin",
+      "stars": 9096,
+      "license": "Public-Domain",
+      "attribution": "Yale Bright Star Catalogue, 5th revised edition (Hoffleit and Warren 1991), as served by the Harvard-Smithsonian Telescope Data Center; baked by tools/bake-stars.py",
+      "source": "http://tdc-www.harvard.edu/catalogs/bsc5.dat.gz",
+      "source_sha256": "0471CED07FC241E625613BAA689B2FA5F4B59FD733F731003E57D2D436036CDB",
+      "layout": "16-byte header (STAR, count, record size 32, reserved), then per star float4 direction xyz + flux relative to magnitude 0, float4 linear RGB at unit luminance + V magnitude",
+      "brightest_magnitude": -1.46,
+      "faintest_magnitude": 7.96
     }
   ]
 }

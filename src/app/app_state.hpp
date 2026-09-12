@@ -54,6 +54,8 @@ struct AppState {
     float aberration = 1.f, vignette = .17f, grain = .010f;
     bool motion_streaks = true;
     float motion_streak_intensity = 1.f;
+    bool catalogue_stars = true; // Sky panel
+    float star_brightness = 2.f, star_saturation = .5f;
     bool gas_flow = true; // Gas giant panel
     float gas_time_scale = 1500.f, gas_cycle = 12.f, gas_turbulence = 1.f;
     float gas_haze = .08f, gas_terminator = .08f, gas_relief = 6.f;

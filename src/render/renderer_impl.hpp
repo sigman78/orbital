@@ -250,7 +250,7 @@ struct Renderer::Impl {
                  *meter = nullptr, *temporal = nullptr, *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr,
                  *fxaa = nullptr, *splat_mask = nullptr, *smaa_edges = nullptr, *smaa_weights = nullptr,
                  *smaa_blend = nullptr, *ui = nullptr, *belt_dust = nullptr, *belt_dust_blend = nullptr,
-                 *belt_disc = nullptr, *belt_disc_splat = nullptr, *motes = nullptr;
+                 *belt_disc = nullptr, *belt_disc_splat = nullptr, *motes = nullptr, *stars = nullptr;
     } pso;
     gpu::PSO* surface_pso(SurfaceKind kind) const {
         switch (kind) {
@@ -276,7 +276,9 @@ struct Renderer::Impl {
     // The bodies occupy instance slots 0..body_count-1 in system order. The
     // three anchors carry atmospheres and shadow maps.
     unsigned body_count = 0, earth_index = 0, giant_index = 0, mars_index = 0;
-    bool polar_caps = true; // the gas giant's polar cap atlas loaded; the blend is skipped without it
+    bool polar_caps = true;      // the gas giant's polar cap atlas loaded; the blend is skipped without it
+    std::uint64_t star_data = 0; // static heap address of the Bright Star Catalogue records, 0 when absent
+    unsigned star_count = 0;
 
     // Frame state.
     Extent2D extent{};
@@ -308,6 +310,7 @@ struct Renderer::Impl {
     void create_meshes();
     void build_belt(const BeltDescription& description);
     void load_materials();
+    void load_stars();
     void create_pipelines();
     void create_fixed_targets();
     void resize(Extent2D new_extent);

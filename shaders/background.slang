@@ -21,16 +21,27 @@ float3 filteredStars(float3 p)
         // preventing a residual Gaussian tail from popping at cell boundaries.
         float kernel = exp(-dot(delta, delta) / (2.0 * variance)) * (1.0 - smoothstep(.72, .95, r));
         float3 tint = lerp(float3(.65, .78, 1.0), float3(1.0, .83, .62), hash(cell + 7.0));
-        result += tint * kernel * step(.992, id);
+        // With the catalogue drawing the naked-eye stars, these stand for the fainter
+        // ones, magnitudes 6.5 to 9, on the same law the catalogue follows (counts
+        // growing 2.5 times per magnitude, so most sit at the faint end); flux and
+        // peak match the star pass's scale, which puts a magnitude 6.5 star near .007.
+        float peak = 2.2;
+        if (root.frame.stars.x > .5)
+        {
+            float magnitude = log(385.0 + hash(cell + 3.0) * 3430.0) / log(2.5);
+            peak = 3.0 * pow(10.0, -.4 * magnitude) * root.frame.stars.y;
+        }
+        result += tint * kernel * step(.992, id) * peak;
     }
-    return result * energyScale * 2.2;
+    return result * energyScale;
 }
 
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
     float3 rd = rayDirection(position.xy);
-    float galactic = pow(max(0.0, 1.0 - abs(dot(rd, normalize(float3(.3, .8, .4))))), 24.0);
+    // The band lies on the real galactic plane: the pole at RA 192.86, Dec +27.13 in the sky frame the catalogue uses.
+    float galactic = pow(max(0.0, 1.0 - abs(dot(rd, float3(-.868, .456, -.198)))), 24.0);
     float3 color = float3(.0005, .0007, .0012) + float3(.008, .009, .014) * galactic * (.4 + fbm(rd * 14.0));
     color += filteredStars(rd * 480.0);
     // The solar disc: its edge softened to the pixel footprint so it does not
