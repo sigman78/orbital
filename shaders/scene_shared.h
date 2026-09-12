@@ -32,6 +32,10 @@ struct Frame {
     SHADER_FLOAT4 quality;     // temporal anti-aliasing on, tone curve (0 ACES filmic, 1 AgX, 2 PBR Neutral), belt dust on, unused
     SHADER_FLOAT4 dust;        // belt dust multipliers: density (extinction), brightness (albedo), far-view scale, saturation
     SHADER_FLOAT4 dust_tint;   // multiplies the dust colour, w unused
+    SHADER_MATRIX4 belt_disc_projection; // orthographic box over the belt plane, for the far-belt maps
+    SHADER_FLOAT4 belt_disc_right;       // disc frame right axis, w = half extent
+    SHADER_FLOAT4 belt_disc_up;          // disc frame up axis, w = half extent
+    SHADER_FLOAT4 belt_disc;             // sunlight map texels, far-tier blend weight (0 near paths, 1 baked disc), rock map texels, unused
 };
 struct Root {
 #ifdef __cplusplus
@@ -71,7 +75,7 @@ struct CullParams {
     SHADER_FLOAT4 belt_tilt;            // y scale, y from z, z scale, unused
     SHADER_FLOAT4 band_spin[ORBITAL_BELT_BANDS]; // cos and sin of each radial band's spin angle
     SHADER_FLOAT4 levels;               // projected-radius thresholds of levels 1 to 4, in pixels
-    SHADER_FLOAT4 billboard;            // level 5 threshold, billboard radius, minimum radius, unused
+    SHADER_FLOAT4 billboard;            // level 5 threshold, billboard radius, minimum radius, far-tier blend weight (splats fade out by it)
     SHADER_UINT rock_limit, body_count, light_in_count_pass, unused; // light_in_count_pass: splats lit in both passes (development comparison)
     // Each rock group's slice of the pooled rock mesh.
     SHADER_UINT index_counts[ORBITAL_ROCK_GROUPS];

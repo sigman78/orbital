@@ -381,6 +381,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .dust_far = app.dust_far,
                                              .dust_saturation = app.dust_saturation,
                                              .dust_tint = {app.dust_tint[0], app.dust_tint[1], app.dust_tint[2]},
+                                             .belt_lod_scale = app.belt_lod_scale,
                                              .temporal_aa = app.temporal_aa,
                                              .spatial_aa = app.spatial_aa,
                                              .billboard_radius = splat_radii[app.splat_mode],

@@ -35,6 +35,7 @@ struct AppState {
     float dust_density = 1, dust_brightness = 1, dust_far = 1; // panel multipliers on the dust
     float dust_saturation = 1;
     float dust_tint[3] = {1, 1, 1};
+    float belt_lod_scale = 1;       // distance scale of the fade to the baked far belt
     bool temporal_aa = true;        // F5
     unsigned spatial_aa = 2;        // 0 off, 1 FXAA, 2 SMAA (F9)
     unsigned splat_mode = 2;        // index into splat_radii

@@ -25,12 +25,6 @@ static const float DUST_ALBEDO = .5;     // single-scattering albedo of the medi
 static const float3 DUST_COLOUR = float3(.62, .56, .48); // the belt's greyish-brown regolith, finer
 static const float DUST_FORWARD = .55;   // Henyey-Greenstein g: fine dust scatters forward
 static const float DUST_ISOTROPIC = .35; // share of an isotropic lobe, standing in for multiple scattering and back-scatter
-// Seen from outside the belt, each pixel's column through the thin medium is
-// short and the belt would vanish; the density rises with the camera's distance
-// from the slab (in slab half-heights) so the belt keeps reading as a faint
-// disc, the distant counterpart of the volumetric haze.
-static const float DUST_FAR_SCALE = 30.0;
-static const float DUST_FAR_DISTANCE = 6.0;
 static const float DUST_SLAB = 3.5;      // slab half-height in flared scale heights; the Gaussian is negligible beyond
 static const float UPSAMPLE_DEPTH_TOLERANCE = .05; // relative depth difference at which a tap loses half its weight
 
@@ -105,8 +99,6 @@ float4 march(float2 fullResPixel, int2 depthPixel)
     t0 = max(t0, 0.0);
     t1 = min(t1, sceneDepthAt(depthPixel) / max(dot(rd, frame->forward_exposure.xyz), 1e-4));
     if (t1 <= t0) return float4(0.0, 0.0, 0.0, 0.0);
-    float outside = max(max(abs(hn) - halfHeight, 0.0), max(length(qp) - outer, 0.0)) / (halfHeight * DUST_FAR_DISTANCE);
-    float farScale = lerp(1.0, DUST_FAR_SCALE * frame->dust.z, saturate(outside));
 
     // Tint and saturation from the panel: the tinted colour pulled toward or past its luminance.
     float3 tinted = DUST_COLOUR * frame->dust_tint.xyz;
@@ -120,7 +112,7 @@ float4 march(float2 fullResPixel, int2 depthPixel)
         float t = t0 + (float(i) + jitter) * ds;
         float3 p = rd * t;
         float3 q = p - giant;
-        float density = beltDensity(q, ring, n) * ring.z * farScale;
+        float density = beltDensity(q, ring, n) * ring.z;
         if (density < 1e-5) continue;
         float sigma = density * BELT_EXTINCTION * DUST_DENSITY * frame->dust.x; // extinction per unit length
         float3 light = normalize(frame->sun.xyz - p);
@@ -133,7 +125,7 @@ float4 march(float2 fullResPixel, int2 depthPixel)
         transmittance *= stepTransmittance;
         if (transmittance < .005) break;
     }
-    return float4(radiance, 1.0 - transmittance);
+    return float4(radiance, 1.0 - transmittance) * (1.0 - frame->belt_disc.y); // the far disc carries the rest
 }
 
 // Depth-aware upsample: the four half-resolution taps around the pixel,
@@ -169,7 +161,7 @@ float4 composite(float2 position)
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
     Frame* frame = root.frame;
-    if (frame->belt_ring.z <= 0.0 || frame->quality.z < .5) return float4(0.0, 0.0, 0.0, 0.0);
+    if (frame->belt_ring.z <= 0.0 || frame->quality.z < .5 || frame->belt_disc.y >= 1.0) return float4(0.0, 0.0, 0.0, 0.0);
     if (root.mode == MODE_COMPOSITE) return composite(position.xy);
     int2 depthPixel = int2(position.xy) * 2;
     return march(float2(depthPixel) + .5, depthPixel);

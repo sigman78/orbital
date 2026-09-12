@@ -33,6 +33,14 @@ inline constexpr float base_gain = 1.5f;
 inline constexpr float exposure_trim[3] = {1.f, .37f, .75f}; // ACES filmic, AgX, Khronos PBR Neutral
 } // namespace tone_curves
 
+// The belt fades from its near paths (dust march, splats) to the baked disc
+// between these distances outside the belt, in belt widths; the slab half
+// height matches DUST_SLAB in dust.slang.
+namespace belt_lod {
+inline constexpr double fade_start = .5, fade_end = 2.0;
+inline constexpr double slab_half_heights = 3.5;
+} // namespace belt_lod
+
 namespace exposure_meter {
 inline constexpr unsigned interval = 16;                               // frames between readbacks
 inline constexpr float min_luminance = 0.004f;                         // darker texels (space) do not vote
@@ -252,6 +260,41 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.belt_light = {belt_box.half_x, belt_box.half_y, float(targets::belt_light_map_size),
                         float(slice_slack * ring.thickness * .5 / std::max(light_tilt, .1))};
     frame.belt_ring = {float(ring.inner_radius), float(ring.outer_radius), float(ring.density), float(ring.thickness)};
+    // The far-belt maps' frame: an orthographic box over the belt plane, and
+    // the weight that fades the near paths (dust march, splats) into the baked
+    // disc as the camera leaves the belt, measured in belt widths past the slab.
+    {
+        const Vec3d normal = to_double(belt_plane_normal);
+        Vec3d right = cross(normal, Vec3d{0, 0, 1});
+        if (dot(right, right) < 1e-8)
+            right = cross(normal, Vec3d{1, 0, 0});
+        right = normalized(right);
+        const Vec3d up = cross(normal, right);
+        const double reach = ring.inner_radius + (ring.outer_radius - ring.inner_radius) * geometry::belt_outer_tail;
+        const double half_extent = reach + 1.0;
+        const LightFrame disc_box{.centre = to_float(giant_relative),
+                                  .forward = to_float(normal * -1.0),
+                                  .right = to_float(right),
+                                  .up = to_float(up),
+                                  .half_x = float(half_extent),
+                                  .half_y = float(half_extent),
+                                  .half_depth = float(ring.thickness * 4 + 1.0)};
+        write_light_projection(frame.belt_disc_projection, disc_box);
+        frame.belt_disc_right = f4(to_float(right), float(half_extent));
+        frame.belt_disc_up = f4(to_float(up), float(half_extent));
+        const Vec3d q = giant_relative * -1.0; // the camera in the giant's frame
+        const double h = dot(q, normal);
+        const double r = length(q - normal * h);
+        const double slab = ring.thickness * .5 * 1.4 * belt_lod::slab_half_heights;
+        const double width = ring.outer_radius - ring.inner_radius;
+        const double outside = std::max(std::max(std::abs(h) - slab, r - reach), 0.0) / width;
+        const double scale = std::max(double(input.belt_lod_scale), .05);
+        const double u = std::clamp(
+            (outside / scale - belt_lod::fade_start) / (belt_lod::fade_end - belt_lod::fade_start), 0.0, 1.0);
+        const float weight = float(u * u * (3 - 2 * u));
+        frame.belt_disc = {float(targets::belt_disc_map_size), weight, float(targets::belt_disc_rock_map_size), 0};
+        stats.belt_lod = weight;
+    }
     frame.belt_normal = f4(belt_plane_normal);
     frame.options = {float(extent.width), float(extent.height), input.high_quality ? 1.f : 0.f,
                      input.overlay ? 1.f : 0.f};
@@ -319,7 +362,8 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
         p.band_spin[band] = {transform.cos_spin[band], transform.sin_spin[band], 0, 0};
     p.levels = {geometry::rock_level_thresholds[0], geometry::rock_level_thresholds[1],
                 geometry::rock_level_thresholds[2], geometry::rock_level_thresholds[3]};
-    p.billboard = {geometry::rock_level_thresholds[4], input.billboard_radius, belt_culling::billboard::min_pixels, 0};
+    p.billboard = {geometry::rock_level_thresholds[4], input.billboard_radius, belt_culling::billboard::min_pixels,
+                   frame.belt_disc.y};
     const unsigned tier_count = (input.high_quality ? high_quality : baseline_quality).belt_count;
     p.rock_limit = std::min(rock_count, belt_count_override ? belt_count_override : tier_count);
     p.body_count = body_count;
@@ -406,6 +450,33 @@ void Renderer::Impl::record_belt_light_pass(gpu::CommandBuffer* cmd, const CullR
     fullscreen_pass(cmd, belt_light_blur, pso.belt_blur, root);
     root.mode = 1;
     fullscreen_pass(cmd, belt_light, pso.belt_blur, root);
+}
+
+// Far-belt maps: the sunlight over the belt plane every few frames, and the
+// rocks' coverage splatted every few dozen frames, both only while the far
+// tier is in use (and once before it first shows).
+void Renderer::Impl::record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root,
+                                            unsigned rock_count, float far_weight) {
+    if (far_weight <= 0)
+        return;
+    const bool bake_light = !belt_disc_baked || frame_index % targets::belt_disc_light_interval == 0;
+    const bool bake_rocks = !belt_disc_baked || frame_index % targets::belt_disc_rock_interval == 0;
+    if (bake_light) {
+        root.mode = 0;
+        fullscreen_pass(cmd, belt_disc_light, pso.belt_disc, root);
+    }
+    if (bake_rocks) {
+        gpu::ColorAttachment attachment{
+            .render_view = belt_disc_rocks.view, .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
+        gpu::begin_render_pass(cmd, {.colors = {&attachment, 1}});
+        gpu::bind_pso(cmd, pso.belt_disc_splat);
+        gpu::draw(cmd, cull_root, 6, rock_count);
+        stats.draw_calls++;
+        gpu::end_render_pass(cmd);
+        gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
+                     gpu::Access::shader_read);
+    }
+    belt_disc_baked = true;
 }
 
 void Renderer::Impl::record_shadow_pass(gpu::CommandBuffer* cmd, Root root) {
@@ -662,6 +733,14 @@ bool Renderer::draw(const FrameInput& input) {
                                   .unused = 0};
         s.record_belt_light_pass(cmd, splat_root, root, splat_root.pass);
     }
+    {
+        const CullRoot bake_root{.frame = frame_address,
+                                 .rocks = s.rock_data,
+                                 .scratch = cull_root.scratch,
+                                 .pass = scratch->params.rock_limit,
+                                 .unused = 0};
+        s.record_belt_disc_bakes(cmd, bake_root, root, scratch->params.rock_limit, frame.belt_disc.y);
+    }
     stamp(1);
     s.record_scene_pass(cmd, root, input, frame, args_address);
     stamp(2);
@@ -678,11 +757,15 @@ bool Renderer::draw(const FrameInput& input) {
         s.fullscreen_pass(cmd, s.hdr, s.pso.atmosphere, root, true);
     }
     // Belt dust scatters over everything the belt lies in front of, after the atmospheres.
-    if (input.belt_dust) {
+    if (input.belt_dust && frame.belt_disc.y < 1) {
         root.mode = 0; // march at half resolution
         s.fullscreen_pass(cmd, s.belt_dust, s.pso.belt_dust, root);
         root.mode = 1; // depth-aware composite over the frame
         s.fullscreen_pass(cmd, s.hdr, s.pso.belt_dust_blend, root, true);
+    }
+    if (frame.belt_disc.y > 0) {
+        root.mode = 1; // the baked far belt, weighted in
+        s.fullscreen_pass(cmd, s.hdr, s.pso.belt_disc_blend, root, true);
     }
     if (input.temporal_aa) {
         gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,

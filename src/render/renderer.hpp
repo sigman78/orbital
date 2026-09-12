@@ -17,6 +17,7 @@ struct Stats {
              rock_triangles = 0;    // rock figures are from the previous frame's culling
     unsigned draw_calls = 0;        // API draw calls submitted this frame (an indirect multi-draw counts once)
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
+    float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc
 };
 
 // Everything the renderer needs for one frame; owned by the caller.
@@ -35,6 +36,7 @@ struct FrameInput {
           dust_far = 1;             // multipliers on the dust shader's extinction, albedo and far-view scale
     float dust_saturation = 1;      // 0 grey, 1 the tinted colour, above exaggerates it
     float dust_tint[3] = {1, 1, 1}; // multiplies the dust colour
+    float belt_lod_scale = 1;       // multiplies the distance at which the belt fades to its baked disc
     bool temporal_aa = true;        // temporal anti-aliasing (F5)
     unsigned spatial_aa = 2;        // spatial pass over the tone-mapped image: 0 off, 1 FXAA, 2 SMAA (F9)
     float billboard_radius = 2.5f;  // rocks below this projected radius in pixels draw as disc splats; 0 never (F6)
