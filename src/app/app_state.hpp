@@ -58,6 +58,8 @@ struct AppState {
     float gas_lightning_rate = 4.f, gas_lightning = 1.f;
     bool gas_polar = true;
     float gas_cap_size = 1.5f, gas_cap_blend = .5f, gas_cap_opacity = 1.f;
+    bool gas_layers = false;
+    float gas_layer_lift = .0015f, gas_layer_shadow = .3f;
     float pan = 0; // lateral drift added to the move axis (--pan)
     float exposure = 1.0f;
     unsigned selected_body = 0;

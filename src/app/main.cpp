@@ -434,7 +434,10 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .gas_polar = app.gas_polar,
                                              .gas_cap_size = app.gas_cap_size,
                                              .gas_cap_blend = app.gas_cap_blend,
-                                             .gas_cap_opacity = app.gas_cap_opacity};
+                                             .gas_cap_opacity = app.gas_cap_opacity,
+                                             .gas_layers = app.gas_layers,
+                                             .gas_layer_lift = app.gas_layer_lift,
+                                             .gas_layer_shadow = app.gas_layer_shadow};
         renderer.set_vsync(app.vsync);
         if (renderer.draw(frame_input)) {
             frames++;

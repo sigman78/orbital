@@ -255,7 +255,24 @@ float giantDetail(float2 uv, float t, float fine)
 // which shows only where the sun is low. The height in its alpha is not traced
 // for shadows: on a height field this smooth the trace's discrete steps drew
 // coherent contour bands along the terminator, worst seen from a low angle.
-Material giantMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility)
+// Two decks: the zones' high ammonia clouds ride above the belts' deeper cloud.
+// The upper deck is the albedo displaced toward the viewer by a lift that grows
+// with the view's obliquity, masked by the baked relief height, so at oblique
+// views the zones slide over the belts; and it shades the deck below it, one
+// tap up-sun, so at a low sun the belts darken along the zone edges.
+float upperDeck(float2 uv) { return smoothstep(.3, .7, sampleSphere(textures[GAS_RELIEF], uv).a); }
+
+float3 layeredDeck(float2 uv, float2 lift, float2 cast, float2 layers, float t, float fine)
+{
+    float3 lower = sampleSphere(textures[4], uv).rgb * giantDetail(uv, t, fine);
+    if (layers.x <= 0.0) return lower;
+    float3 upper = sampleSphere(textures[4], uv + lift).rgb * giantDetail(uv + lift, t, fine);
+    float upperHere = upperDeck(uv + lift);
+    float shade = 1.0 - layers.y * upperDeck(uv + cast) * (1.0 - upperHere);
+    return lerp(lower * shade, upper, upperHere);
+}
+
+Material giantMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float3 V, float visibility)
 {
     float4 giant = root.frame->giant;
     if (giant.w < .5) return giantWarpMaterial(input, N, visibility);
@@ -270,8 +287,15 @@ Material giantMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     float w0 = 1.0 - abs(2.0 * p0 - 1.0);
     float2 uv0 = uv - flow * (p0 - .5) * cycle, uv1 = uv - flow * (p1 - .5) * cycle;
     float fine = magnification(uv, GAS_TEXELS) * giant.z * (.5 + flowMap.b);
-    float3 c0 = sampleSphere(textures[4], uv0).rgb * giantDetail(uv0, t, fine);
-    float3 c1 = sampleSphere(textures[4], uv1).rgb * giantDetail(uv1, t, fine);
+    float3 T, B;
+    tangentFrame(localN, rotate, N, T, B);
+    float2 layers = root.frame->giant_layers.xy;
+    float3 viewTS = float3(dot(V, T), dot(V, B), max(dot(V, N), .15));
+    float3 lightTS = float3(dot(L, T), dot(L, B), max(dot(L, N), .2));
+    float2 lift = viewTS.xy / viewTS.z * layers.x;  // toward the viewer, in texture units
+    float2 cast = lightTS.xy / lightTS.z * layers.x; // toward the sun
+    float3 c0 = layeredDeck(uv0, lift, cast, layers, t, fine);
+    float3 c1 = layeredDeck(uv1, lift, cast, layers, t, fine);
     Material m;
     m.albedo = lerp(c1, c0, w0);
     // Over the outer part of the cap's radius the map gives way to the baked polar caps.
@@ -292,8 +316,6 @@ Material giantMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     float strength = root.frame->giant_more.z * lerp(.15, 1.0, grazing) * (1.0 - polar);
     float2 encoded = lerp(sampleSphere(textures[GAS_RELIEF], uv1).xy, sampleSphere(textures[GAS_RELIEF], uv0).xy, w0) * 2.0 - 1.0;
     float2 slope = encoded * abs(encoded) * GAS_SLOPE_MAX * strength;
-    float3 T, B;
-    tangentFrame(localN, rotate, N, T, B);
     m.N = normalize(N - T * slope.x - B * slope.y);
     return m;
 }
@@ -619,7 +641,7 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     float3x3 rotate = rotation(inst.rotation_kind.xyz);
     Material m;
     if (kind == KIND_EARTH) m = earthMaterial(input, rotate, N, L, visibility);
-    else if (kind == KIND_GIANT) m = giantMaterial(input, rotate, N, L, visibility);
+    else if (kind == KIND_GIANT) m = giantMaterial(input, rotate, N, L, V, visibility);
     else if (kind == KIND_MOON) m = moonMaterial(input, rotate, N, L, visibility);
     else if (kind == KIND_MARS) m = marsMaterial(input, rotate, N, L, visibility);
     else m = rockMaterial(input, inst, rotate, N, V, visibility);

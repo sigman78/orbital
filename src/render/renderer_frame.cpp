@@ -325,6 +325,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.giant_more = {input.gas_haze, input.gas_terminator, input.gas_relief, input.gas_cap_opacity};
     frame.giant_night = {input.gas_lightning_rate, input.gas_lightning,
                          input.gas_polar && polar_caps ? input.gas_cap_size : 0.f, input.gas_cap_blend};
+    frame.giant_layers = {input.gas_layers ? input.gas_layer_lift : 0.f, input.gas_layer_shadow, 0, 0};
 
     // Sun position in screen space for the lens flare, hidden when a body covers it.
     const Vec3d sun_direction = normalized(system.star.position - camera.position);

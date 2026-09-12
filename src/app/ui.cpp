@@ -170,6 +170,11 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::SliderFloat("Cap blend", &app.gas_cap_blend, .05f, 1.f, "%.2f");
         ImGui::SliderFloat("Cap opacity", &app.gas_cap_opacity, 0.f, 1.f, "%.2f");
         ImGui::EndDisabled();
+        ImGui::Checkbox("Two decks", &app.gas_layers);
+        ImGui::BeginDisabled(!app.gas_layers);
+        ImGui::SliderFloat("Deck lift", &app.gas_layer_lift, 0.f, .006f, "%.4f");
+        ImGui::SliderFloat("Deck shadow", &app.gas_layer_shadow, 0.f, 1.f, "%.2f");
+        ImGui::EndDisabled();
         if (ImGui::SmallButton("Reset giant")) {
             app.gas_flow = true;
             app.gas_time_scale = 1500.f;
@@ -184,6 +189,9 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
             app.gas_cap_size = 1.5f;
             app.gas_cap_blend = .5f;
             app.gas_cap_opacity = 1.f;
+            app.gas_layers = false;
+            app.gas_layer_lift = .0015f;
+            app.gas_layer_shadow = .3f;
         }
         ImGui::PopID();
     }

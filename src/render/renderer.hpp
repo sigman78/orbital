@@ -79,6 +79,9 @@ struct FrameInput {
     float gas_cap_size = 1.5f;      // scale of the caps on the sphere; 1 is Juno's measured size
     float gas_cap_blend = .5f;      // crossfade into the map, as a fraction of the cap's radius
     float gas_cap_opacity = 1.f;    // how fully the cap replaces the map
+    bool gas_layers = false;        // the zones' upper deck drawn with parallax over the belts
+    float gas_layer_lift = .0015f;  // parallax lift of the zones' upper deck, texture units at a 45 degree view
+    float gas_layer_shadow = .3f;   // how much the upper deck shades the belts below it
 };
 
 // Startup choices that are not part of the scene description.
