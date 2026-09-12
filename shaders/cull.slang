@@ -9,7 +9,14 @@
 //   pass 1  prefix   one thread turns counts into bases and draw arguments
 //   pass 2  scatter  each visible rock claims a slot and writes its instance
 
+[[vk::binding(0, 0)]] Texture2D<float4> textures[32];
+[[vk::binding(1, 0)]] SamplerState samplers[4];
 [[vk::push_constant]] ConstantBuffer<CullRoot> root;
+
+#include "belt.slang"
+
+static const float SPLAT_MIN_PIXELS = .8; // a splat is never narrower than this radius: the pixel filter's footprint
+static const float SPLAT_AMBIENT = .004;
 
 static const uint BILLBOARD_GROUP = ORBITAL_ROCK_GROUPS;
 static const float KIND_ROCK = 3.0; // SurfaceKind::rock, also SurfaceMode::billboard
@@ -104,13 +111,23 @@ Placement placeRock(uint id)
     float3 colour = rockColour(composition, id);
     if (pixelRadius < p->billboard.y)
     {
-        // Sub-pixel rocks become fixed-size billboards whose coverage fades in with their true size.
-        float coverage = pixelRadius * pixelRadius / (p->billboard.y * p->billboard.y);
+        // Sub-pixel rocks become splats lit here, once per rock: a Lambert sphere
+        // at its phase angle, shadowed by bodies, belt dust and the belt map. The
+        // splat is a pixel-filter footprint whose coverage matches the rock's
+        // true covered area, so small rocks stay small and dim.
+        Frame* frame = root.frame;
+        float splatPixels = max(pixelRadius, SPLAT_MIN_PIXELS);
+        float coverage = pixelRadius * pixelRadius / (splatPixels * splatPixels);
         coverage *= saturate((pixelRadius - p->billboard.z) / p->billboard.z);
+        float3 light = normalize(frame->sun.xyz - position);
+        float phase = acos(clamp(dot(light, normalize(-position)), -1.0, 1.0));
+        float3 albedo = textures[11].SampleLevel(samplers[1], float2(.5, .5), 10.0).rgb * colour;
+        float sunlight = frame->sun.w / 3.141592653589793 * lambertSpherePhase(phase)
+                       * solarVisibility(frame, position, -1) * beltExtinction(frame, position) * beltRockTransmittance(frame, position);
         result.group = BILLBOARD_GROUP;
-        result.instance.center_radius = float4(position, radius * p->billboard.y / pixelRadius);
+        result.instance.center_radius = float4(position, radius * splatPixels / pixelRadius);
         result.instance.rotation_kind = float4(0.0, 0.0, 0.0, KIND_ROCK);
-        result.instance.tint = float4(colour, coverage);
+        result.instance.tint = float4(albedo * (sunlight + SPLAT_AMBIENT), coverage);
         return result;
     }
     uint level = 0;

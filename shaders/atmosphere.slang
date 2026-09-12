@@ -10,7 +10,7 @@ float miePhase(float mu, float g) {
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
-    int bodyIndex = clamp(int(root.base), 0, MAX_BODIES - 1);
+    int bodyIndex = clamp(int(root.base), 0, BELT_MAX_BODIES - 1);
     Instance body = root.instances[bodyIndex];
     float3 centre = body.center_radius.xyz;
     float radius = max(body.center_radius.w, 1e-4);
@@ -30,7 +30,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         end = min(end, nearGround);
     }
     int bodyCount = int(root.frame.scene.x);
-    for (int i = 0; i < MAX_BODIES; ++i) if (i < bodyCount && i != bodyIndex) {
+    for (int i = 0; i < BELT_MAX_BODIES; ++i) if (i < bodyCount && i != bodyIndex) {
         float4 other = root.frame.bodies[i];
         float2 hit = sphereHit(ro, rd, other.xyz, other.w);
         if (hit.x > 0.0) end = min(end, hit.x);

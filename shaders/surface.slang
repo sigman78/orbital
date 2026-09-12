@@ -351,18 +351,14 @@ Material rockMaterial(SurfaceVaryings input, Instance inst, float3x3 rotate, flo
     return m;
 }
 
+// Splats are lit once per rock in the culling pass (tint holds the radiance,
+// tint.w the covered fraction of the footprint); here only the Gaussian
+// footprint is shaped, normalised so the alpha sums to the true covered area.
 float4 shadeBillboard(SurfaceVaryings input, Instance inst)
 {
-    float2 q = input.localNormal.xy;
-    float rr = dot(q, q);
-    float coverage = 1.0 - smoothstep(1.0 - fwidth(rr), 1.0 + fwidth(rr), rr);
-    float3 n = normalize(root.frame->right_tan.xyz * q.x + root.frame->up_aspect.xyz * q.y - root.frame->forward_exposure.xyz * sqrt(max(0, 1 - rr)));
-    float3 l = normalize(root.frame->sun.xyz - input.worldPosition);
-    float3 averageRock = textures[11].SampleLevel(samplers[1], float2(.5), 10).rgb;
-    float3 radiance = averageRock * inst.tint.xyz * root.frame->sun.w / PI * max(dot(n, l), .025)
-                    * solarVisibility(input.worldPosition, -1) * beltExtinction(input.worldPosition)
-                    * beltRockTransmittance(input.worldPosition);
-    return float4(radiance, coverage * inst.tint.w);
+    float rr = dot(input.localNormal.xy, input.localNormal.xy);
+    float footprint = exp(-3.0 * rr) / .317; // integral over the unit disc relative to its area
+    return float4(inst.tint.xyz, saturate(inst.tint.w * footprint));
 }
 
 [shader("fragment")]

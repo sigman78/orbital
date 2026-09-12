@@ -17,6 +17,7 @@ function(orbital_compile_slang output source entry stage)
         ${validation}
         DEPENDS "${source_absolute}"
                 "${CMAKE_SOURCE_DIR}/shaders/common.slang"
+                "${CMAKE_SOURCE_DIR}/shaders/belt.slang"
                 "${CMAKE_SOURCE_DIR}/shaders/scene_shared.h"
         VERBATIM
         COMMENT "Compiling Slang ${entry} (${stage})"

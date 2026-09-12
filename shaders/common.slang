@@ -7,7 +7,12 @@
 static const float PI = 3.141592653589793;
 static const float NEAR_Z = .02;
 static const float FAR_Z = 2000.0;
-static const int MAX_BODIES = 8; // Frame.bodies capacity; scene.x holds the live count
+#include "belt.slang"
+
+// Frame-bound forms of the shared belt lighting.
+float solarVisibility(float3 point, int skip) { return solarVisibility(root.frame, point, skip); }
+float beltExtinction(float3 point) { return beltExtinction(root.frame, point); }
+float beltRockTransmittance(float3 point) { return beltRockTransmittance(root.frame, point); }
 
 float3 rayDirection(float2 pixel)
 {
@@ -35,25 +40,6 @@ float sceneDistance(float2 pixel, float3 rd)
     return linearViewDepth(d) / max(dot(rd, root.frame->forward_exposure.xyz), 1e-4);
 }
 
-float solarVisibility(float3 point, int skip)
-{
-    float3 light = normalize(root.frame->sun.xyz - point);
-    float visibility = 1.0;
-    int bodyCount = int(root.frame->scene.x);
-    for (int i = 0; i < MAX_BODIES; ++i) if (i < bodyCount && i != skip)
-    {
-        float3 q = root.frame->bodies[i].xyz - point;
-        float t = dot(q, light);
-        if (t > 0.0)
-        {
-            float distanceToRay = length(q - light * t), radius = root.frame->bodies[i].w;
-            float penumbra = max(t * 0.007, 0.015);
-            visibility *= smoothstep(radius - penumbra, radius + penumbra, distanceToRay);
-        }
-    }
-    return visibility;
-}
-
 float localShadow(float3 point, float3 normal)
 {
     float4 light = mul(root.frame->light_projection, float4(point + normal * 0.015, 1.0));
@@ -67,83 +53,6 @@ float localShadow(float3 point, float3 normal)
     for (int y = -1; y <= 1; ++y) for (int x = -1; x <= 1; ++x)
         result += textures[15].SampleLevel(samplers[0], uv + float2(x, y) * texel, 0.0).r >= coord.z - 0.0003 ? 1.0 : 0.0;
     return result / 9.0;
-}
-
-// Relative rock density across the belt (0 inner edge, 1 outer edge); mirrors
-// geometry::belt_ring_density so the shadow shows the same rings and gap.
-float beltRingDensity(float t)
-{
-    const float innerEdge = .04, outerTail = .14;
-    if (t <= -innerEdge) return 0.0;
-    float bands = .5 + .5 * cos(2.0 * PI * (saturate(t) * 3.0 + .15));
-    float gap = (t - .58) / .035;
-    float core = (.5 + .5 * bands) * (1.0 - .7 * exp(-gap * gap));
-    float edgeIn = smoothstep(-innerEdge, innerEdge, t);
-    float edgeOut = t > 1.0 ? exp(-(t - 1.0) / outerTail) : 1.0;
-    return core * edgeIn * edgeOut;
-}
-
-// Belt as a translucent slab: relative rock and dust density at a point given
-// in the giant's frame (height above the belt plane, distance from the axis).
-static const float BELT_EXTINCTION = .4;     // optical depth per unit path at density 1; the far side of a full-thickness path loses about half its light
-static const int BELT_EXTINCTION_STEPS = 8;
-
-float beltDensity(float3 q, float4 ring, float3 n)
-{
-    float h = dot(q, n);
-    float r = length(q - n * h);
-    float t = (r - ring.x) / (ring.y - ring.x);
-    // Gaussian in height with the scale height flaring outward, as the population does.
-    float scaleHeight = ring.w * .5 * lerp(.6, 1.4, saturate(t));
-    float vertical = exp(-h * h / (2.0 * scaleHeight * scaleHeight));
-    return vertical * beltRingDensity(t);
-}
-
-// Sunlight left after crossing the belt to reach a point inside it: the
-// density is integrated along the sun ray until the ray leaves the slab.
-// Rocks on the sunward rim stay bright, rocks buried deep or on the far side
-// sit in a smooth dusk. No texels, so nothing shimmers.
-float beltExtinction(float3 point)
-{
-    float4 ring = root.frame->belt_ring;
-    if (ring.z <= 0.0 || root.frame->scene.w < .5) return 1.0;
-    float3 n = root.frame->belt_normal.xyz;
-    float3 q = point - root.frame->bodies[int(root.frame->scene.y)].xyz;
-    float3 light = normalize(root.frame->sun.xyz - point);
-    // Distance until the ray has left the slab's height band, capped for the near-grazing case.
-    float climb = max(abs(dot(light, n)), .08);
-    float length = min((ring.w * .5 * 1.3 + abs(dot(q, n))) / climb, ring.y - ring.x);
-    float ds = length / float(BELT_EXTINCTION_STEPS);
-    float tau = 0.0;
-    for (int i = 0; i < BELT_EXTINCTION_STEPS; ++i)
-        tau += beltDensity(q + light * ((float(i) + .5) * ds), ring, n) * ds;
-    return exp(-tau * ring.z * BELT_EXTINCTION);
-}
-
-// Sunlight left after the rocks between a belt point and the sun: the
-// transmittance map holds per-texel coverage in four slices along the sun ray
-// (see beltsplat.slang); the slices on the sun side of the point attenuate it.
-static const float BELT_MAP_OPACITY = 1.0; // optical depth per unit of texel coverage
-static const float BELT_MAP_SLICES = 4.0;
-
-float beltRockTransmittance(float3 point)
-{
-    if (root.frame->scene.z < .5) return 1.0;
-    float4 clip = mul(root.frame->belt_light_projection, float4(point, 1.0));
-    float2 uv = clip.xy * .5 + .5;
-    if (any(uv < 0.0) || any(uv > 1.0)) return 1.0;
-    float4 coverage = textures[28].SampleLevel(samplers[0], uv, 0.0);
-    float3 n = root.frame->belt_normal.xyz;
-    float3 q = point - root.frame->bodies[int(root.frame->scene.y)].xyz;
-    float3 light = normalize(root.frame->sun.xyz - point);
-    float along = dot(q, n) / (dot(light, n) + 1e-6);
-    float c = clamp((along / root.frame->belt_light.w * .5 + .5) * BELT_MAP_SLICES, 0.0, BELT_MAP_SLICES);
-    // Only slices wholly on the sun side count: the receiver's own slice holds
-    // its own splat, which must not shadow it.
-    float sum = 0.0;
-    for (int slice = 0; slice < 4; ++slice)
-        sum += coverage[slice] * (float(slice) >= c ? 1.0 : 0.0);
-    return exp(-sum * BELT_MAP_OPACITY);
 }
 
 // Shadow the asteroid belt casts on the gas giant: the sun ray from a surface
