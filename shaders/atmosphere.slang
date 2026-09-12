@@ -1,4 +1,5 @@
 #include "common.slang"
+#include "clouds.slang"
 
 float airDensity(float altitude, float scaleHeight) { return exp(-max(altitude, 0.0) / scaleHeight); }
 float miePhase(float mu, float g) {
@@ -52,6 +53,22 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float3 scatterM = gas ? float3(1.0, .72, .43) : desert ? float3(1.0, .66, .40) : float3(1.0, .93, .82);
     float scaleR = gas ? .0015 : desert ? .004 : .0025;
     float scaleM = desert ? .003 : .001;
+    // Earth: the air below the cloud layer is shadowed by it, so cloud shadows
+    // read over the sea as darker haze the way they do from orbit. Shadows are
+    // broad next to the low path a ray takes under the clouds, so one read at
+    // the ray's lowest point stands for the whole of it.
+    float lowShadow = 1.0;
+    if (kind == 0 && root.frame.earth.z > 0.0) {
+        float3x3 rotate = rotation(body.rotation_kind.xyz);
+        float3 localLight = mul(transpose(rotate), sunDirection);
+        float lowest = groundHit.y > 0.0 && groundHit.x > 0.0 ? groundHit.x : clamp(dot(centre - ro, rd), begin, end);
+        float3 low = ro + rd * lowest;
+        float altitude = max(length(low - centre) / radius - 1.0, 0.0);
+        float3 localDirection = mul(transpose(rotate), normalize(low - centre));
+        float2 shellUV = sphereUV(cloudShellDirection(localDirection, min(altitude, CLOUD_HEIGHT), localLight));
+        float density = cloudShadowDensityLevel(cloudUV(shellUV, root.frame.camera_time.w), 2.0 + root.frame.earth.w);
+        lowShadow = 1.0 - density * root.frame.earth.z;
+    }
     int viewSteps = root.frame.options.z > .5 ? 20 : 12;
     int lightSteps = root.frame.options.z > .5 ? 6 : 4;
     float segment = (end - begin) / float(viewSteps);
@@ -70,6 +87,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         float visibility = solarVisibility(p, bodyIndex);
         float2 ownHit = sphereHit(p + sunDirection * radius * 1e-5, sunDirection, centre, radius);
         if (ownHit.x > 0.0 && ownHit.y > ownHit.x) visibility = 0.0;
+        if (altitude < CLOUD_HEIGHT) visibility *= lowShadow;
 
         float3 lightOpticalDepth = float3(0.0, 0.0, 0.0);
         float2 lightHit = sphereHit(p, sunDirection, centre, shellRadius);

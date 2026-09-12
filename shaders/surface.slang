@@ -1,12 +1,11 @@
 #include "common.slang"
+#include "clouds.slang"
 
 // Root.mode values (SurfaceMode on the C++ side).
 static const uint MODE_OPAQUE = 0, MODE_CLOUD = 1, MODE_SHADOW = 2, MODE_BILLBOARD = 3, MODE_SPLAT_MASK = 4;
 // Instance kinds (rotation_kind.w); SurfaceKind on the C++ side.
 static const int KIND_EARTH = 0, KIND_GIANT = 1, KIND_MOON = 2, KIND_ROCK = 3, KIND_MARS = 4;
 
-static const float CLOUD_DRIFT = .00012;      // uv per second; Earth itself turns 1/1600 of a revolution per second
-static const float CLOUD_HEIGHT = .009;       // cloud shell above the surface, in radii (matches the 1.009 mesh scale)
 static const float EARTH_NORMAL_Y = 1.0;      // the sourced map is DirectX-style (green = south), matching B below
 static const float2 EARTH_TEXELS = float2(4096.0, 2048.0);
 static const float2 GAS_TEXELS = float2(2048.0, 1024.0);
@@ -63,16 +62,7 @@ void tangentFrame(float3 localN, float3x3 rotate, float3 N, out float3 T, out fl
     B = normalize(cross(N, T));
 }
 
-// --- Earth clouds ---------------------------------------------------------------
-
-// Cloud coordinate: a slow drift plus a slower, larger swirl that follows it.
-float2 cloudUV(float2 uv, float t)
-{
-    uv.x += t * CLOUD_DRIFT;
-    float2 swirl = float2(fbm2(uv * float2(6, 12) + t * .003, 3),
-                          fbm2(uv * float2(6, 12) + float2(11.3, 4.7) - t * .002, 3)) - .5;
-    return uv + swirl * float2(.006, .004);
-}
+// --- Earth clouds (the layer's coordinate and shadow helpers are in clouds.slang) ---
 
 // Cloud coverage with fine structure added where the 4K mask is magnified.
 float cloudDensity(float2 uv, float t, float detail)
@@ -82,13 +72,6 @@ float cloudDensity(float2 uv, float t, float detail)
     return pow(saturate(density), 1.3);
 }
 
-// Cloud coverage as the ground sees it: read at a coarser mip for the
-// penumbra the sun's disc and in-cloud scattering give, without the fine
-// structure, so shadows are softer than the clouds that cast them.
-float cloudShadowDensity(float2 uv, float softness)
-{
-    return pow(saturate(sampleSphereBias(textures[5], uv, softness).a), 1.3);
-}
 
 float4 shadeClouds(SurfaceVaryings input, float3 N, float3 L, float visibility, float nl)
 {
@@ -176,7 +159,7 @@ Material earthMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     m.N = normalize(T * mapN.x * .55 + B * mapN.y * .55 + N * max(mapN.z, .2));
     // Cloud shadow: the cloud above this point along the sun direction.
     float3 localL = mul(transpose(rotate), L);
-    float3 towardSun = normalize(localN + localL * (CLOUD_HEIGHT / max(dot(localN, localL), .25)));
+    float3 towardSun = cloudShellDirection(localN, 0.0, localL);
     float shadowCloud = cloudShadowDensity(cloudUV(sphereUV(towardSun), t), earth.w);
     m.visibility = visibility * (1.0 - shadowCloud * earth.z);
     return m;
