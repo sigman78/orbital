@@ -5,6 +5,8 @@
 #include <memory>
 #include <span>
 
+struct ImDrawData;
+
 namespace space::render {
 
 struct Stats {
@@ -33,6 +35,7 @@ struct FrameInput {
     float billboard_radius = 2.5f;  // rocks below this projected radius in pixels draw as disc splats; 0 never (F6)
     bool splat_light_twice = false; // light splats in the count pass too, for comparison (F7)
     unsigned tone_curve = 2;        // 0 ACES filmic, 1 AgX, 2 Khronos PBR Neutral (F8)
+    const ImDrawData* ui = nullptr; // Dear ImGui draw lists, drawn over the presented frame
 };
 
 // Startup choices that are not part of the scene description.
@@ -53,6 +56,8 @@ public:
     // Saves the last rendered frame as PNG; false (after logging) if it could not be written.
     bool capture(const std::filesystem::path& path);
     Stats stats() const;
+    // The Dear ImGui font atlas, RGBA8; uploaded once, before the first frame that draws the overlay.
+    void set_ui_font(const std::uint8_t* rgba, unsigned width, unsigned height);
 
 private:
     struct Impl;

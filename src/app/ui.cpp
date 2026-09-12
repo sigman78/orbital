@@ -1,0 +1,157 @@
+#include "app/ui.hpp"
+
+#include "platform/overlay.hpp"
+#include "platform/window.hpp"
+
+#include <algorithm>
+#include <vector>
+
+#include "imgui.h"
+
+namespace space::app {
+
+namespace {
+
+constexpr float panel_width = 360;
+constexpr const char* bookmark_names[] = {"Earth", "Jupiter", "Moon", "Mars", "Dawn", "Belt"};
+static_assert(std::size(bookmark_names) == bookmark_count);
+
+void combo(const char* label, unsigned& value, std::span<const char* const> items) {
+    int index = int(std::min<unsigned>(value, unsigned(items.size() - 1)));
+    if (ImGui::Combo(label, &index, items.data(), int(items.size())))
+        value = unsigned(index);
+}
+
+} // namespace
+
+Ui::Ui(platform::Window& window) : window_(window) {
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.IniFilename = nullptr; // no layout file next to the executable
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
+    io.BackendRendererName = "orbital NoGraphicsAPI";
+    ImGui::StyleColorsDark();
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding = 0;
+    style.Colors[ImGuiCol_WindowBg].w = .88f;
+    platform::attach_overlay(window);
+}
+
+Ui::~Ui() {
+    platform::detach_overlay(window_);
+    ImGui::DestroyContext();
+}
+
+Ui::FontAtlas Ui::font_atlas() const {
+    unsigned char* pixels = nullptr;
+    int width = 0, height = 0;
+    ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+    return {.rgba = pixels, .width = unsigned(width), .height = unsigned(height)};
+}
+
+void Ui::begin_frame() {
+    platform::overlay_new_frame();
+    ImGui::NewFrame();
+}
+
+const ImDrawData* Ui::end_frame() {
+    ImGui::Render();
+    return ImGui::GetDrawData();
+}
+
+bool Ui::wants_keyboard() const {
+    return ImGui::GetIO().WantCaptureKeyboard;
+}
+
+bool Ui::wants_mouse() const {
+    return ImGui::GetIO().WantCaptureMouse;
+}
+
+void draw_panel(AppState& app, const render::Stats& stats, std::span<const float> recent_frame_ms) {
+    const ImGuiIO& io = ImGui::GetIO();
+    ImGui::SetNextWindowPos({io.DisplaySize.x - panel_width, 0});
+    ImGui::SetNextWindowSize({panel_width, io.DisplaySize.y});
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+                                   ImGuiWindowFlags_NoSavedSettings;
+    if (!ImGui::Begin("ORBITAL", nullptr, flags)) {
+        ImGui::End();
+        return;
+    }
+    ImGui::PushItemWidth(150); // leaves room for the labels beside combos and sliders
+    if (ImGui::CollapsingHeader("Frame", ImGuiTreeNodeFlags_DefaultOpen)) {
+        std::vector<float> sorted(recent_frame_ms.begin(), recent_frame_ms.end());
+        std::sort(sorted.begin(), sorted.end());
+        const float p95 = sorted.empty()
+                              ? 0
+                              : sorted[std::min(sorted.size() - 1, std::size_t(double(sorted.size()) * .95))];
+        const float peak = sorted.empty() ? 1 : sorted.back();
+        ImGui::Text("%d FPS   %.1f ms (p95 %.1f)", int(1000 / std::max(stats.frame_ms, .1f)), stats.frame_ms, p95);
+        ImGui::PlotLines("##frame", recent_frame_ms.data(), int(recent_frame_ms.size()), 0, nullptr, 0, peak * 1.1f,
+                         {-1, 60});
+        ImGui::Text("GPU %.2f ms", stats.gpu_ms);
+        ImGui::Indent();
+        ImGui::Text("cull + shadow %.2f   surface %.2f", stats.shadow_ms, stats.surface_ms);
+        ImGui::Text("atmosphere %.2f   post %.2f", stats.atmosphere_ms, stats.post_ms);
+        ImGui::Unindent();
+        ImGui::Text("CPU prepare %.2f ms", stats.prepare_ms);
+        ImGui::Text("%u draws, %u rock groups", stats.draw_calls, stats.rock_groups_drawn);
+        ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
+    }
+    if (ImGui::CollapsingHeader("Quality", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Checkbox("High tier (F2)", &app.high);
+        ImGui::SameLine();
+        ImGui::TextDisabled(app.high ? "520k rocks" : "280k rocks");
+    }
+    if (ImGui::CollapsingHeader("Anti-aliasing", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Checkbox("Temporal (F5)", &app.temporal_aa);
+        static constexpr const char* spatial[] = {"Off", "FXAA", "SMAA"};
+        combo("Spatial (F9)", app.spatial_aa, spatial);
+    }
+    if (ImGui::CollapsingHeader("Belt", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Checkbox("Transmittance map (F3)", &app.belt_light_map);
+        ImGui::Checkbox("Dust extinction (F4)", &app.belt_extinction);
+        static constexpr const char* cutoffs[] = {"Off", "1.2 px", "2.5 px", "4 px"};
+        combo("Splat cut-off (F6)", app.splat_mode, cutoffs);
+        ImGui::Checkbox("Light splats in both cull passes (F7)", &app.splat_light_twice);
+    }
+    if (ImGui::CollapsingHeader("Tone", ImGuiTreeNodeFlags_DefaultOpen)) {
+        static constexpr const char* curves[] = {"ACES filmic", "AgX", "PBR Neutral"};
+        combo("Curve (F8)", app.tone_curve, curves);
+        ImGui::SliderFloat("Exposure (+/-)", &app.exposure, exposure_keys::range.min, exposure_keys::range.max, "%.2f",
+                           ImGuiSliderFlags_Logarithmic);
+        ImGui::Checkbox("Auto exposure (X)", &app.auto_exposure);
+    }
+    if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
+        for (std::size_t i = 0; i < bookmark_count; i++) {
+            if (i % 3)
+                ImGui::SameLine();
+            if (ImGui::Button(bookmark_names[i], {104, 0})) {
+                app.camera.set_bookmark(i, app.bodies);
+                app.selected_body = unsigned(std::min(Camera::bookmark_body(i), app.bodies.size() - 1));
+                app.camera.set_mode(CameraMode::Free);
+            }
+        }
+        if (ImGui::Button("Tour (T)", {104, 0}))
+            app.camera.toggle_tour();
+        ImGui::SameLine();
+        if (ImGui::Button("Orbit (O)", {104, 0}))
+            app.camera.set_orbit_target(app.selected_body,
+                                        app.bodies[app.selected_body].radius * control::orbit_zoom_radii);
+        ImGui::SameLine();
+        if (ImGui::Button("Free (F)", {104, 0}))
+            app.camera.set_mode(CameraMode::Free);
+        ImGui::Checkbox("Pause (Space)", &app.paused);
+    }
+    if (ImGui::CollapsingHeader("Overlay", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Checkbox("HUD (F1)", &app.overlay);
+        ImGui::SameLine();
+        if (ImGui::Button("Capture (F10)"))
+            app.capture_request = hotkey_capture_path;
+        ImGui::TextDisabled("F12 hides this panel");
+    }
+    ImGui::PopItemWidth();
+    ImGui::End();
+}
+
+} // namespace space::app

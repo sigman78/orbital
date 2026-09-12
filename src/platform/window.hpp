@@ -12,6 +12,10 @@
 // to the windowing system.
 namespace space::platform {
 
+namespace detail {
+struct WindowAccess;
+}
+
 // Keys the demo reacts to. Letters and digits use their ASCII codes so tables
 // and range checks stay readable; everything else is above the ASCII range.
 enum class Key : std::uint16_t {
@@ -32,6 +36,7 @@ enum class Key : std::uint16_t {
     f7,
     f8,
     f9,
+    f10,
     f12,
     alt_enter, // borderless fullscreen toggle
 };
@@ -88,6 +93,7 @@ public:
     struct Impl;
 
 private:
+    friend struct detail::WindowAccess; // platform-internal: raw messages for the overlay backend
     explicit Window(std::unique_ptr<Impl> impl);
     std::unique_ptr<Impl> impl_;
 };

@@ -1,4 +1,5 @@
 #include "platform/window.hpp"
+#include "platform/win32/window_access.hpp"
 
 #include "core/panic.hpp"
 #include "core/small_vec.hpp"
@@ -39,6 +40,7 @@ Key key_from_virtual(WPARAM code) {
     case VK_F7: return Key::f7;
     case VK_F8: return Key::f8;
     case VK_F9: return Key::f9;
+    case VK_F10: return Key::f10;
     case VK_F12: return Key::f12;
     default:
         if ((code >= 'A' && code <= 'Z') || (code >= '0' && code <= '9'))
@@ -63,6 +65,7 @@ int virtual_from_key(Key key) {
     case Key::f7: return VK_F7;
     case Key::f8: return VK_F8;
     case Key::f9: return VK_F9;
+    case Key::f10: return VK_F10;
     case Key::f12: return VK_F12;
     default: return int(key); // letters and digits
     }
@@ -77,6 +80,8 @@ struct Window::Impl {
     POINT previous_cursor{};
     MouseDelta delta;
     SmallVec<Key, inline_press_count> presses;
+    detail::MessageHook hook = nullptr; // the overlay backend sees every message first
+    void* hook_user = nullptr;
     bool fullscreen = false; // borderless fullscreen (Alt+Enter); the placement below restores the window
     LONG saved_style = 0;
     RECT saved_rect{};
@@ -88,6 +93,11 @@ struct Window::Impl {
     }
 
     LRESULT handle_message(UINT message, WPARAM w, LPARAM l) {
+        if (hook) {
+            std::intptr_t result = 0;
+            if (hook(hook_user, handle, message, std::uintptr_t(w), std::intptr_t(l), &result))
+                return LRESULT(result);
+        }
         switch (message) {
         case WM_CLOSE: closed = true; return 0;
         case WM_DESTROY: PostQuitMessage(0); return 0;
@@ -116,10 +126,15 @@ struct Window::Impl {
                     presses.try_push_back(key); // beyond capacity, extra presses are dropped
             return 0;
         case WM_SYSKEYDOWN:
-            // Alt+Enter arrives as a system key; everything else (Alt+F4, menu keys) stays default.
+            // Alt+Enter and F10 arrive as system keys; everything else (Alt+F4, menu keys) stays default.
             if (w == VK_RETURN && (l & (1 << 29))) {
                 if (!(l & key_repeat_bit))
                     presses.try_push_back(Key::alt_enter);
+                return 0;
+            }
+            if (w == VK_F10) {
+                if (!(l & key_repeat_bit))
+                    presses.try_push_back(Key::f10);
                 return 0;
             }
             break;
@@ -247,6 +262,11 @@ void Window::toggle_fullscreen() {
 
 bool Window::fullscreen() const {
     return impl_->fullscreen;
+}
+
+void detail::WindowAccess::set_message_hook(Window& window, detail::MessageHook hook, void* user) {
+    window.impl_->hook = hook;
+    window.impl_->hook_user = user;
 }
 
 } // namespace space::platform

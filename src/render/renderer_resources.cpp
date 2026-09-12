@@ -413,6 +413,7 @@ void Renderer::Impl::create_pipelines() {
     pso.smaa_edges = make("fullscreen", "smaa", Format::rg8_unorm);
     pso.smaa_weights = make("fullscreen", "smaa", Format::rgba8_unorm);
     pso.smaa_blend = make("fullscreen", "smaa", Format::rgba8_srgb);
+    pso.ui = make("ui", "ui", Format::bgra8_srgb, false, Blend::alpha);
     pso.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
     panic_if(!pso.cull, "compute pipeline creation failed: cull");
     pipelines.push_back(pso.cull);
@@ -542,6 +543,16 @@ Renderer::~Renderer() = default;
 
 Stats Renderer::stats() const {
     return impl_->stats;
+}
+
+void Renderer::set_ui_font(const std::uint8_t* rgba, unsigned width, unsigned height) {
+    Uploads upload;
+    upload.emplace_back();
+    assets::Image image{.extent = {width, height}};
+    image.pixels.assign(rgba, rgba + std::size_t(width) * height * 4);
+    upload.back().mips.push_back(std::move(image));
+    upload.back().slot = Slot::ui_font;
+    impl_->upload_images(upload);
 }
 
 } // namespace space::render

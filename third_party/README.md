@@ -40,3 +40,9 @@ screenshots. Wuffs has no PNG encoder, so this is kept for export only.
 `smaa/LICENSE.txt` covers the SMAA lookup tables in `src/render/smaa/` (`AreaTex.h`, `SearchTex.h`) and the
 port of `SMAA.hlsl` in `shaders/smaa.slang`, from [iryoku/smaa](https://github.com/iryoku/smaa) (Jimenez et al.,
 MIT-style licence).
+
+## Dear ImGui
+
+`imgui/` is [ocornut/imgui](https://github.com/ocornut/imgui) 1.91.9b (MIT, see `imgui/LICENSE.txt`): the core sources and the Win32
+backend. The core is platform-agnostic and used by the application; the Win32 backend is compiled into the
+platform layer, and the draw lists are rendered by the demo's own NoGraphicsAPI backend.

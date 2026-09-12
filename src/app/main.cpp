@@ -1,4 +1,5 @@
-#include "app/camera.hpp"
+#include "app/app_state.hpp"
+#include "app/ui.hpp"
 #include "core/file.hpp"
 #include "core/log.hpp"
 #include "core/math.hpp"
@@ -22,6 +23,7 @@
 namespace {
 
 using namespace space;
+using namespace space::app;
 using platform::Key;
 
 namespace window_limits {
@@ -30,23 +32,11 @@ inline constexpr Range<unsigned> width{320, 7680}, height{200, 4320};
 inline constexpr double title_refresh_seconds = 0.5;
 } // namespace window_limits
 
-namespace exposure_keys {
-inline constexpr Range<float> range{0.05f, 8.0f};
-inline constexpr float step = 1.1f; // per +/- key press
-} // namespace exposure_keys
-
-namespace control {
-inline constexpr double max_frame_seconds = 0.1; // a stall must not advance the simulation by more than this
-inline constexpr float fast_speed_scale = 4.0f;  // Shift
-inline constexpr double orbit_zoom_radii = 2.3;  // O key orbits at this many body radii
-} // namespace control
-
 namespace benchmark {
 inline constexpr std::size_t warmup_frames = 60;      // dropped before computing percentiles
 inline constexpr std::size_t expected_frames = 36000; // reserve for an open-ended run (10 minutes at 60 Hz)
 } // namespace benchmark
 
-constexpr std::string_view hotkey_capture_path = "captures/orbital.png";
 constexpr std::string_view window_title = "ORBITAL  /  Procedural worlds";
 
 constexpr std::string_view usage =
@@ -58,10 +48,7 @@ constexpr std::string_view usage =
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
     "F5 temporal AA; F6 rock splat cut-off; F7 splat lighting in both cull passes; F8 tone curve;\n"
     "F9 spatial AA (off, FXAA, SMAA); Alt+Enter borderless fullscreen;\n"
-    "F12 capture; Esc exit.";
-
-// Projected rock radius, in pixels, below which rocks draw as disc splats; 0 means never (F6 cycles).
-constexpr std::array<float, 4> splat_radii{0.f, 1.2f, 2.5f, 4.f};
+    "F10 capture; F12 control panel (--ui shows it at start); Esc exit.";
 
 struct Options {
     std::uint64_t seed = showcase_seed;
@@ -80,6 +67,7 @@ struct Options {
     unsigned maximize_at = 0; // > 0 maximizes the window after this many frames, to test resizing in captures
     unsigned fullscreen_at = 0; // > 0 enters borderless fullscreen after this many frames
     bool tour = false, high = false, no_hud = false, help = false;
+    bool ui = false; // start with the control panel shown
     std::filesystem::path capture, benchmark;
 };
 
@@ -122,6 +110,8 @@ std::optional<Options> parse_options(int argc, char** argv) {
             options.help = true;
         else if (arg == "--tour")
             options.tour = true;
+        else if (arg == "--ui")
+            options.ui = true;
         else if (arg == "--high")
             options.high = true;
         else if (arg == "--no-hud")
@@ -178,24 +168,6 @@ std::optional<Options> parse_options(int argc, char** argv) {
     return options;
 }
 
-// Interactive state that key presses and the frame loop share.
-
-struct AppState {
-    Camera camera;
-    BodyStates bodies;
-    bool running = true, paused = false, high = false, overlay = true, auto_exposure = true;
-    bool belt_light_map = true, belt_extinction = true; // development toggles for the belt shading
-    bool temporal_aa = true;                            // F5
-    unsigned spatial_aa = 2;                            // 0 off, 1 FXAA, 2 SMAA (F9)
-    unsigned splat_mode = 2;                            // index into splat_radii
-    bool splat_light_twice = false;                     // light splats in the count pass too
-    unsigned tone_curve = 2;                            // 0 ACES filmic, 1 AgX, 2 PBR Neutral
-    float pan = 0;                                      // lateral drift added to the move axis (--pan)
-    float exposure = 1.0f;
-    unsigned selected_body = 0;
-    std::filesystem::path capture_request;
-};
-
 void handle_key(AppState& app, Key key) {
     switch (key) {
     case Key::escape: app.running = false; break;
@@ -209,7 +181,8 @@ void handle_key(AppState& app, Key key) {
     case Key::f6: app.splat_mode = (app.splat_mode + 1) % splat_radii.size(); break;
     case Key::f7: app.splat_light_twice = !app.splat_light_twice; break;
     case Key::f8: app.tone_curve = (app.tone_curve + 1) % 3; break;
-    case Key::f12: app.capture_request = hotkey_capture_path; break;
+    case Key::f10: app.capture_request = hotkey_capture_path; break;
+    case Key::f12: app.show_ui = !app.show_ui; break;
     case Key::plus: app.exposure = exposure_keys::range.clamp(app.exposure * exposure_keys::step); break;
     case Key::minus: app.exposure = exposure_keys::range.clamp(app.exposure / exposure_keys::step); break;
     default: break;
@@ -231,15 +204,18 @@ void handle_key(AppState& app, Key key) {
     }
 }
 
-Input gather_input(platform::Window& window, AppState& app) {
+Input gather_input(platform::Window& window, AppState& app, bool keyboard_free) {
     const auto axis = [&](char positive, char negative) {
         return float(window.key_down(platform::letter_key(positive))) -
                float(window.key_down(platform::letter_key(negative)));
     };
     Input input;
-    input.move_forward = axis('W', 'S');
-    input.move_right = axis('D', 'A') + app.pan;
-    input.move_up = axis('E', 'Q');
+    if (keyboard_free) { // a focused text field in the panel keeps the flight keys idle
+        input.move_forward = axis('W', 'S');
+        input.move_right = axis('D', 'A');
+        input.move_up = axis('E', 'Q');
+    }
+    input.move_right += app.pan;
     input.speed_scale = window.key_down(Key::shift) ? control::fast_speed_scale : 1.0f;
     const platform::MouseDelta mouse = window.take_mouse_look_delta();
     input.mouse_dx = mouse.dx;
@@ -314,6 +290,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.tone_curve = options.tone;
     app.pan = options.pan;
     app.overlay = !options.no_hud;
+    app.show_ui = options.ui;
     app.exposure = options.exposure;
     app.auto_exposure = options.fixed_time < 0;
     app.bodies = evaluate_system(system, std::max(0.0, options.fixed_time));
@@ -335,6 +312,7 @@ struct Session {
     AppState& app;
     platform::Window& window;
     render::Renderer& renderer;
+    Ui& ui;
 };
 
 // Runs until the window closes or the frame/duration limit is reached; returns the frame count.
@@ -343,6 +321,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
     AppState& app = session.app;
     platform::Window& window = session.window;
     render::Renderer& renderer = session.renderer;
+    Ui& ui = session.ui;
     auto previous = std::chrono::steady_clock::now();
     double simulation_time = 0, elapsed = 0, title_clock = 0;
     unsigned frames = 0;
@@ -370,7 +349,15 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
             simulation_time = options.fixed_time;
         app.bodies = evaluate_system(session.system, simulation_time);
         // A panning capture steps the camera at a fixed rate so runs are comparable.
-        app.camera.step(app.pan != 0 ? 1.0 / 60 : dt, elapsed, gather_input(window, app), app.bodies);
+        app.camera.step(app.pan != 0 ? 1.0 / 60 : dt, elapsed, gather_input(window, app, !ui.wants_keyboard()),
+                        app.bodies);
+        // The overlay is built every frame so its input state stays current; the panel itself is optional.
+        ui.begin_frame();
+        if (app.show_ui) {
+            const std::size_t recent = std::min<std::size_t>(times.cpu_ms.size(), 240);
+            draw_panel(app, renderer.stats(), std::span<const float>(times.cpu_ms).last(recent));
+        }
+        const ImDrawData* ui_draw = ui.end_frame();
 
         const render::FrameInput frame_input{.camera = app.camera,
                                              .bodies = app.bodies,
@@ -385,7 +372,8 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .spatial_aa = app.spatial_aa,
                                              .billboard_radius = splat_radii[app.splat_mode],
                                              .splat_light_twice = app.splat_light_twice,
-                                             .tone_curve = app.tone_curve};
+                                             .tone_curve = app.tone_curve,
+                                             .ui = ui_draw};
         if (renderer.draw(frame_input)) {
             frames++;
             if (options.maximize_at && frames == options.maximize_at)
@@ -433,7 +421,11 @@ int run(const Options& options) {
     AppState app = initial_state(options, system);
     const auto window = platform::Window::create({.client_size = options.size, .title = window_title});
     render::Renderer renderer(window->native_handle(), system, directory, {.belt_count = options.rocks});
-    log::info("Ready. RMB + WASD: fly | 1-4: planets | T: tour | F2: quality | F12: capture | --help for all controls");
+    Ui ui(*window);
+    const auto atlas = ui.font_atlas();
+    renderer.set_ui_font(atlas.rgba, atlas.width, atlas.height);
+    log::info(
+        "Ready. RMB + WASD: fly | 1-6: views | T: tour | F12: control panel | F10: capture | --help for all controls");
     FrameTimes times;
     times.cpu_ms.reserve(options.frame_limit ? options.frame_limit : benchmark::expected_frames);
     times.gpu_ms.reserve(times.cpu_ms.capacity());
@@ -442,7 +434,8 @@ int run(const Options& options) {
                                         .directory = directory,
                                         .app = app,
                                         .window = *window,
-                                        .renderer = renderer},
+                                        .renderer = renderer,
+                                        .ui = ui},
                                        times);
     if (!options.benchmark.empty())
         write_benchmark(options.benchmark, times);

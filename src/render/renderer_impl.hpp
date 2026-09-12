@@ -59,7 +59,8 @@ enum class Slot : unsigned {
     smaa_search = 33,     // SMAA search lookup, 64x16
     smaa_edges = 34,      // SMAA edges of the tone-mapped image
     smaa_weights = 35,    // SMAA blending weights
-    count = 36,
+    ui_font = 36,         // Dear ImGui font atlas
+    count = 37,
 };
 
 // Sampler descriptor slots (shaders/common.slang binds 4).
@@ -100,15 +101,28 @@ struct HeapLayout {
     std::uint64_t cull_offset = 1024;           // FrameData, then the culling scratch, then the instances
     std::uint64_t instance_offset = 1024 + 8192;
     std::uint64_t staging_budget = 64ull << 20; // texture upload staging, see upload_images
+    std::uint64_t ui_bytes = 4ull << 20;        // overlay vertices and indices, at the end of the dynamic half
 
-    constexpr std::uint64_t instance_capacity() const {
-        return (static_heap - dynamic_offset - instance_offset) / sizeof(Instance);
-    }
+    constexpr std::uint64_t ui_offset() const { return static_heap - dynamic_offset - ui_bytes; }
+    constexpr std::uint64_t instance_capacity() const { return (ui_offset() - instance_offset) / sizeof(Instance); }
 };
 inline constexpr HeapLayout heap_layout{};
 static_assert(heap_layout.cull_offset >= sizeof(FrameData));
 static_assert(heap_layout.instance_offset >= heap_layout.cull_offset + sizeof(CullScratch));
 static_assert(heap_layout.dynamic_offset + heap_layout.instance_offset < heap_layout.static_heap);
+static_assert(heap_layout.instance_offset < heap_layout.ui_offset());
+
+// Overlay vertex and push constants, mirrored in ui.slang.
+struct UiVertex {
+    float position_uv[4];
+    std::uint32_t colour[4];
+};
+struct UiRoot {
+    float scale[2], translate[2];
+    std::uint64_t vertices;
+    std::uint32_t texture, unused;
+};
+static_assert(sizeof(UiVertex) == 32 && sizeof(UiRoot) == 32);
 
 // Sizes of the fixed GPU targets, created by the resources side and addressed by the frame side.
 namespace targets {
@@ -208,7 +222,7 @@ struct Renderer::Impl {
         gpu::PSO *opaque = nullptr, *cloud = nullptr, *background = nullptr, *atmosphere = nullptr, *bloom = nullptr,
                  *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr,
                  *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr, *fxaa = nullptr, *splat_mask = nullptr,
-                 *smaa_edges = nullptr, *smaa_weights = nullptr, *smaa_blend = nullptr;
+                 *smaa_edges = nullptr, *smaa_weights = nullptr, *smaa_blend = nullptr, *ui = nullptr;
     } pso;
     std::array<GpuMesh, geometry::lod_count> spheres{};
     std::array<GpuMesh, rock_group_count> rocks{}; // the rock library, indexed by rock_group; slices of rock_pool
@@ -235,6 +249,7 @@ struct Renderer::Impl {
     FrameData previous_frame{};
     Vec3d previous_camera{};
     bool history_valid = false;
+    bool ui_overflow_logged = false;
 
     // Per-frame scratch, cleared and reused: the body instances only, rocks
     // are placed by the GPU.
@@ -277,7 +292,9 @@ struct Renderer::Impl {
     void record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, std::uint64_t args_address);
     void record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input, const FrameData& frame,
                            std::uint64_t args_address);
-    void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view, unsigned spatial_aa);
+    void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view, unsigned spatial_aa,
+                            const ImDrawData* ui, std::uint8_t* ui_cpu, std::uint64_t ui_gpu);
+    void record_ui(gpu::CommandBuffer* cmd, const ImDrawData* ui, std::uint8_t* cpu, std::uint64_t gpu);
     void fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, gpu::PSO* pipeline, Root root,
                          bool preserve = false);
     void draw_mesh(gpu::CommandBuffer* cmd, Root& root, const GpuMesh& mesh, unsigned base, unsigned instance_count);
