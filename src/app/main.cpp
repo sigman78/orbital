@@ -52,11 +52,15 @@ constexpr std::string_view window_title = "ORBITAL  /  Procedural worlds";
 constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
     "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..4\n"
-    "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --rocks N --aa 0|1|2\n"
+    "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --rocks N --aa 0|1|2 --splat "
+    "0..3\n"
     "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F free;\n"
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
     "F5 anti-aliasing mode; F6 rock splat cut-off;\n"
     "F12 capture; Esc exit.";
+
+// Projected rock radius, in pixels, below which rocks draw as disc splats; 0 means never (F6 cycles).
+constexpr std::array<float, 4> splat_radii{0.f, 1.2f, 2.5f, 4.f};
 
 struct Options {
     std::uint64_t seed = showcase_seed;
@@ -68,6 +72,7 @@ struct Options {
     float exposure = 1;
     unsigned rocks = 0; // belt override for benchmarks; 0 keeps the quality tiers
     unsigned aa = 2;    // initial anti-aliasing mode
+    unsigned splat = 2; // initial splat cut-off mode, an index into splat_radii
     bool tour = false, high = false, no_hud = false, help = false;
     std::filesystem::path capture, benchmark;
 };
@@ -123,6 +128,8 @@ std::optional<Options> parse_options(int argc, char** argv) {
             ok = parse_number(value(), options.rocks);
         else if (arg == "--aa")
             ok = parse_number(value(), options.aa) && options.aa <= 2;
+        else if (arg == "--splat")
+            ok = parse_number(value(), options.splat) && options.splat < splat_radii.size();
         else if (arg == "--width")
             ok = parse_number(value(), options.size.width);
         else if (arg == "--height")
@@ -156,8 +163,6 @@ std::optional<Options> parse_options(int argc, char** argv) {
 }
 
 // Interactive state that key presses and the frame loop share.
-// Projected rock radius, in pixels, below which rocks draw as disc splats; 0 means never (F6 cycles).
-constexpr std::array<float, 4> splat_radii{0.f, 1.2f, 2.5f, 4.f};
 
 struct AppState {
     Camera camera;
@@ -277,6 +282,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     AppState app;
     app.high = options.high;
     app.anti_aliasing = options.aa;
+    app.splat_mode = options.splat;
     app.overlay = !options.no_hud;
     app.exposure = options.exposure;
     app.auto_exposure = options.fixed_time < 0;

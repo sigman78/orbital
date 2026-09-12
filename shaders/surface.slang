@@ -357,7 +357,14 @@ Material rockMaterial(SurfaceVaryings input, Instance inst, float3x3 rotate, flo
 float4 shadeBillboard(SurfaceVaryings input, Instance inst)
 {
     float rr = dot(input.localNormal.xy, input.localNormal.xy);
-    float footprint = exp(-3.0 * rr) / .317; // integral over the unit disc relative to its area
+    float footprint;
+    if (inst.rotation_kind.x > .5)
+    {
+        float edge = fwidth(rr); // a soft-edged disc of the rock's true size
+        footprint = 1.0 - smoothstep(1.0 - edge, 1.0 + edge, rr);
+    }
+    else
+        footprint = exp(-3.0 * rr) / .317; // Gaussian point; integral over the unit disc relative to its area
     return float4(inst.tint.xyz, saturate(inst.tint.w * footprint));
 }
 

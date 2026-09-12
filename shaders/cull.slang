@@ -15,8 +15,15 @@
 
 #include "belt.slang"
 
-static const float SPLAT_MIN_PIXELS = .8; // a splat is never narrower than this radius: the pixel filter's footprint
+// Two splat regimes: a soft-edged disc of the rock's true size once it spans
+// half a pixel or more, and below that a one-pixel Gaussian point whose peak
+// alpha stays under one, so a tiny rock never lights a whole pixel the way a
+// mesh only sometimes would.
+static const float SPLAT_DISC_PIXELS = .5;
+static const float SPLAT_POINT_PIXELS = 1.0;
 static const float SPLAT_AMBIENT = .004;
+static const float SPLAT_AREA = .80;      // the rock shapes' projected area relative to their bounding disc (calibrated against the meshes)
+static const float SPLAT_RIM = .12;       // forward-scatter rim the meshes' grazing specular gives at high phase angles
 
 static const uint BILLBOARD_GROUP = ORBITAL_ROCK_GROUPS;
 static const float KIND_ROCK = 3.0; // SurfaceKind::rock, also SurfaceMode::billboard
@@ -116,17 +123,23 @@ Placement placeRock(uint id)
         // splat is a pixel-filter footprint whose coverage matches the rock's
         // true covered area, so small rocks stay small and dim.
         Frame* frame = root.frame;
-        float splatPixels = max(pixelRadius, SPLAT_MIN_PIXELS);
-        float coverage = pixelRadius * pixelRadius / (splatPixels * splatPixels);
+        bool disc = pixelRadius >= SPLAT_DISC_PIXELS;
+        float splatPixels = disc ? pixelRadius * sqrt(SPLAT_AREA) : SPLAT_POINT_PIXELS;
+        float coverage = disc ? 1.0 : SPLAT_AREA * pixelRadius * pixelRadius / (SPLAT_POINT_PIXELS * SPLAT_POINT_PIXELS);
         coverage *= saturate((pixelRadius - p->billboard.z) / p->billboard.z);
         float3 light = normalize(frame->sun.xyz - position);
         float phase = acos(clamp(dot(light, normalize(-position)), -1.0, 1.0));
-        float3 albedo = textures[11].SampleLevel(samplers[1], float2(.5, .5), 10.0).rgb * colour;
-        float sunlight = frame->sun.w / 3.141592653589793 * lambertSpherePhase(phase)
+        // The same scanned set the mesh material would lead with, at its coarsest mip.
+        float seed = rockMaterialSeed(id);
+        float3 average = composition == CLASS_C ? textures[22].SampleLevel(samplers[1], float2(.5, .5), 10.0).rgb
+                       : seed < .5 ? textures[11].SampleLevel(samplers[1], float2(.5, .5), 10.0).rgb
+                                   : textures[25].SampleLevel(samplers[1], float2(.5, .5), 10.0).rgb;
+        float3 albedo = average * colour * (.8 + .4 * frac(seed * 5.1));
+        float sunlight = frame->sun.w / 3.141592653589793 * (lambertSpherePhase(phase) + SPLAT_RIM * (1.0 - cos(phase)) * .5)
                        * solarVisibility(frame, position, -1) * beltExtinction(frame, position) * beltRockTransmittance(frame, position);
         result.group = BILLBOARD_GROUP;
         result.instance.center_radius = float4(position, radius * splatPixels / pixelRadius);
-        result.instance.rotation_kind = float4(0.0, 0.0, 0.0, KIND_ROCK);
+        result.instance.rotation_kind = float4(disc ? 1.0 : 0.0, 0.0, 0.0, KIND_ROCK);
         result.instance.tint = float4(albedo * (sunlight + SPLAT_AMBIENT), coverage);
         return result;
     }
