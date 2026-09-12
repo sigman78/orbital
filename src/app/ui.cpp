@@ -16,6 +16,15 @@ constexpr float panel_width = 360;
 constexpr const char* bookmark_names[] = {"Earth", "Jupiter", "Moon", "Mars", "Dawn", "Belt"};
 static_assert(std::size(bookmark_names) == bookmark_count);
 
+// A collapsing section with its own ID scope: headers push none, so labels
+// could otherwise collide across sections (the "Belt" header and button did).
+bool section(const char* title) {
+    const bool open = ImGui::CollapsingHeader(title, ImGuiTreeNodeFlags_DefaultOpen);
+    if (open)
+        ImGui::PushID(title);
+    return open;
+}
+
 void combo(const char* label, unsigned& value, std::span<const char* const> items) {
     int index = int(std::min<unsigned>(value, unsigned(items.size() - 1)));
     if (ImGui::Combo(label, &index, items.data(), int(items.size())))
@@ -79,7 +88,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         return;
     }
     ImGui::PushItemWidth(150); // leaves room for the labels beside combos and sliders
-    if (ImGui::CollapsingHeader("Frame", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (section("Frame")) {
         std::vector<float> sorted(recent_frame_ms.begin(), recent_frame_ms.end());
         std::sort(sorted.begin(), sorted.end());
         const float p95 = sorted.empty()
@@ -97,32 +106,37 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::Text("CPU prepare %.2f ms", stats.prepare_ms);
         ImGui::Text("%u draws, %u rock groups", stats.draw_calls, stats.rock_groups_drawn);
         ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
+        ImGui::PopID();
     }
-    if (ImGui::CollapsingHeader("Quality", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (section("Quality")) {
         ImGui::Checkbox("High tier (F2)", &app.high);
         ImGui::SameLine();
         ImGui::TextDisabled(app.high ? "520k rocks" : "280k rocks");
+        ImGui::PopID();
     }
-    if (ImGui::CollapsingHeader("Anti-aliasing", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (section("Anti-aliasing")) {
         ImGui::Checkbox("Temporal (F5)", &app.temporal_aa);
         static constexpr const char* spatial[] = {"Off", "FXAA", "SMAA"};
         combo("Spatial (F9)", app.spatial_aa, spatial);
+        ImGui::PopID();
     }
-    if (ImGui::CollapsingHeader("Belt", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (section("Belt")) {
         ImGui::Checkbox("Transmittance map (F3)", &app.belt_light_map);
         ImGui::Checkbox("Dust extinction (F4)", &app.belt_extinction);
         static constexpr const char* cutoffs[] = {"Off", "1.2 px", "2.5 px", "4 px"};
         combo("Splat cut-off (F6)", app.splat_mode, cutoffs);
         ImGui::Checkbox("Light splats in both cull passes (F7)", &app.splat_light_twice);
+        ImGui::PopID();
     }
-    if (ImGui::CollapsingHeader("Tone", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (section("Tone")) {
         static constexpr const char* curves[] = {"ACES filmic", "AgX", "PBR Neutral"};
         combo("Curve (F8)", app.tone_curve, curves);
         ImGui::SliderFloat("Exposure (+/-)", &app.exposure, exposure_keys::range.min, exposure_keys::range.max, "%.2f",
                            ImGuiSliderFlags_Logarithmic);
         ImGui::Checkbox("Auto exposure (X)", &app.auto_exposure);
+        ImGui::PopID();
     }
-    if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (section("Camera")) {
         for (std::size_t i = 0; i < bookmark_count; i++) {
             if (i % 3)
                 ImGui::SameLine();
@@ -142,13 +156,15 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         if (ImGui::Button("Free (F)", {104, 0}))
             app.camera.set_mode(CameraMode::Free);
         ImGui::Checkbox("Pause (Space)", &app.paused);
+        ImGui::PopID();
     }
-    if (ImGui::CollapsingHeader("Overlay", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (section("Overlay")) {
         ImGui::Checkbox("HUD (F1)", &app.overlay);
         ImGui::SameLine();
         if (ImGui::Button("Capture (F10)"))
             app.capture_request = hotkey_capture_path;
         ImGui::TextDisabled("F12 hides this panel");
+        ImGui::PopID();
     }
     ImGui::PopItemWidth();
     ImGui::End();
