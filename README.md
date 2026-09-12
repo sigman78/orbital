@@ -12,8 +12,6 @@ Native Windows C++20 space demo on a compatibility fork of [NoGraphicsAPI](https
 
 280,000 rocks in baseline and 520,000 in high quality, placed with rings, a gap, tapered edges, flared height, a power-law size distribution and three composition classes. Rocks come from a library of 16 seeded shapes at 6 detail levels (20 to 20k triangles), with three scanned rock sets blended per rock and triplanar mapping with parallax up close. A compute pass culls the whole population every frame (frustum, planet occlusion, projected size) and writes indirect draws for one pooled multi-draw; rocks under a few pixels become lit sphere-impostor splats. Rocks lose sunlight to the belt's own density, to a transmittance map splatted by the largest rocks and to the planets' shadows, and the fine matter between them is a scattering medium marched at half resolution, which reads as haze inside the belt and as a shadowed disc from afar.
 
-![The control panel](docs/images/panel.jpg)
-
 ## Build
 
 Requires Windows x64, MSVC C++ tools, CMake 3.24+, Ninja and Vulkan headers/loader import library (normally Vulkan SDK). NoGraphicsAPI is vendored under `third_party/NoGraphicsAPI`.
