@@ -138,7 +138,8 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         static constexpr const char* cutoffs[] = {"Off", "1.2 px", "2.5 px", "4 px"};
         combo("Splat cut-off (F6)", app.splat_mode, cutoffs);
         ImGui::Checkbox("Light splats in both cull passes (F7)", &app.splat_light_twice);
-        ImGui::Checkbox("Far-belt disc LOD", &app.belt_disc);
+        ImGui::Checkbox("Far-belt disc LOD",
+                        &app.belt_disc); // off: the dust march and splats at every distance, as before the disc
         ImGui::SameLine();
         ImGui::TextDisabled("disc %.0f%%", stats.belt_lod * 100);
         ImGui::BeginDisabled(!app.belt_disc);

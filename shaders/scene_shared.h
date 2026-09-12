@@ -35,7 +35,7 @@ struct Frame {
     SHADER_MATRIX4 belt_disc_projection; // orthographic box over the belt plane, for the far-belt maps
     SHADER_FLOAT4 belt_disc_right;       // disc frame right axis, w = half extent
     SHADER_FLOAT4 belt_disc_up;          // disc frame up axis, w = half extent
-    SHADER_FLOAT4 belt_disc;             // sunlight map texels, far-tier blend weight (0 near paths, 1 baked disc), rock map texels, unused
+    SHADER_FLOAT4 belt_disc;             // sunlight map texels, far-tier blend weight (0 near paths, 1 baked disc), rock map texels, disc LOD enabled
 };
 struct Root {
 #ifdef __cplusplus

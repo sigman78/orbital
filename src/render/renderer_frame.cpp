@@ -292,7 +292,8 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
         const double u = std::clamp(
             (outside / scale - belt_lod::fade_start) / (belt_lod::fade_end - belt_lod::fade_start), 0.0, 1.0);
         const float weight = input.belt_disc ? float(u * u * (3 - 2 * u)) : 0.f;
-        frame.belt_disc = {float(targets::belt_disc_map_size), weight, float(targets::belt_disc_rock_map_size), 0};
+        frame.belt_disc = {float(targets::belt_disc_map_size), weight, float(targets::belt_disc_rock_map_size),
+                           input.belt_disc ? 1.f : 0.f};
         stats.belt_lod = weight;
     }
     frame.belt_normal = f4(belt_plane_normal);
