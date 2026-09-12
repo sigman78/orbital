@@ -307,6 +307,7 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
     const unsigned tier_count = (input.high_quality ? high_quality : baseline_quality).belt_count;
     p.rock_limit = std::min(rock_count, belt_count_override ? belt_count_override : tier_count);
     p.body_count = body_count;
+    p.light_in_count_pass = input.splat_light_twice ? 1u : 0u;
     for (unsigned group = 0; group < rock_group_count; group++) {
         p.index_counts[group] = rocks[group].index_count;
         p.first_indices[group] = rocks[group].first_index;

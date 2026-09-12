@@ -83,7 +83,7 @@ bool occludedByBodies(float3 target, float targetRadius)
     return false;
 }
 
-Placement placeRock(uint id)
+Placement placeRock(uint id, bool lightSplats)
 {
     Placement result;
     result.visible = false;
@@ -118,6 +118,8 @@ Placement placeRock(uint id)
     float3 colour = rockColour(composition, id);
     if (pixelRadius < p->billboard.y)
     {
+        result.group = BILLBOARD_GROUP;
+        if (!lightSplats) return result; // the count pass only needs the group
         // Sub-pixel rocks become splats lit here, once per rock: a Lambert sphere
         // at its phase angle, shadowed by bodies, belt dust and the belt map. The
         // splat is a pixel-filter footprint whose coverage matches the rock's
@@ -202,7 +204,7 @@ void computeMain(uint3 thread : SV_DispatchThreadID)
         return;
     }
     if (id >= scratch->params.rock_limit) return;
-    Placement placement = placeRock(id);
+    Placement placement = placeRock(id, root.pass != 0 || scratch->params.light_in_count_pass != 0);
     if (!placement.visible) return;
     if (root.pass == 0)
         scratch->counts[placement.group].add(1);

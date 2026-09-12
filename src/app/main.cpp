@@ -56,7 +56,7 @@ constexpr std::string_view usage =
     "0..3\n"
     "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F free;\n"
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
-    "F5 anti-aliasing mode; F6 rock splat cut-off;\n"
+    "F5 anti-aliasing mode; F6 rock splat cut-off; F7 splat lighting in both cull passes;\n"
     "F12 capture; Esc exit.";
 
 // Projected rock radius, in pixels, below which rocks draw as disc splats; 0 means never (F6 cycles).
@@ -171,6 +171,7 @@ struct AppState {
     bool belt_light_map = true, belt_extinction = true; // development toggles for the belt shading
     unsigned anti_aliasing = 2;                         // 0 off, 1 temporal, 2 temporal plus FXAA
     unsigned splat_mode = 2;                            // index into splat_radii
+    bool splat_light_twice = false;                     // light splats in the count pass too
     float exposure = 1.0f;
     unsigned selected_body = 0;
     std::filesystem::path capture_request;
@@ -186,6 +187,7 @@ void handle_key(AppState& app, Key key) {
     case Key::f4: app.belt_extinction = !app.belt_extinction; break;
     case Key::f5: app.anti_aliasing = (app.anti_aliasing + 1) % 3; break;
     case Key::f6: app.splat_mode = (app.splat_mode + 1) % splat_radii.size(); break;
+    case Key::f7: app.splat_light_twice = !app.splat_light_twice; break;
     case Key::f12: app.capture_request = hotkey_capture_path; break;
     case Key::plus: app.exposure = exposure_keys::range.clamp(app.exposure * exposure_keys::step); break;
     case Key::minus: app.exposure = exposure_keys::range.clamp(app.exposure / exposure_keys::step); break;
@@ -243,14 +245,15 @@ void update_title(platform::Window& window, const render::Stats& stats, const Ap
     const int fps = int(1000 / std::max(stats.frame_ms, 0.1f));
     window.set_title(
         std::format("ORBITAL  |  {} FPS  |  {:.1f} ms (p95 {:.1f})  |  GPU {:.1f} ms  |  {} draws ({} rock groups)  |  "
-                    "{} rocks  |  {:.2f} M tris  |  {}  |  belt map {} ext {}  |  AA {}  |  splats {}",
+                    "{} rocks  |  {:.2f} M tris  |  {}  |  belt map {} ext {}  |  AA {}  |  splats {} lit {}",
                     fps, stats.frame_ms, p95_ms, stats.gpu_ms, stats.draw_calls, stats.rock_groups_drawn,
                     stats.visible_asteroids, stats.triangles / 1e6, app.high ? "HIGH" : "BASELINE",
                     app.belt_light_map ? "on" : "off", app.belt_extinction ? "on" : "off",
                     app.anti_aliasing == 0   ? "off"
                     : app.anti_aliasing == 1 ? "temporal"
                                              : "temporal+fxaa",
-                    splat_radii[app.splat_mode] > 0 ? std::format("< {:.1f} px", splat_radii[app.splat_mode]) : "off"));
+                    splat_radii[app.splat_mode] > 0 ? std::format("< {:.1f} px", splat_radii[app.splat_mode]) : "off",
+                    app.splat_light_twice ? "2x" : "1x"));
 }
 
 struct FrameTimes {
@@ -347,7 +350,8 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .belt_light_map = app.belt_light_map,
                                              .belt_extinction = app.belt_extinction,
                                              .anti_aliasing = app.anti_aliasing,
-                                             .billboard_radius = splat_radii[app.splat_mode]};
+                                             .billboard_radius = splat_radii[app.splat_mode],
+                                             .splat_light_twice = app.splat_light_twice};
         if (renderer.draw(frame_input)) {
             frames++;
             const auto stats = renderer.stats();

@@ -70,7 +70,7 @@ struct CullParams {
     SHADER_FLOAT4 band_spin[ORBITAL_BELT_BANDS]; // cos and sin of each radial band's spin angle
     SHADER_FLOAT4 levels;               // projected-radius thresholds of levels 1 to 4, in pixels
     SHADER_FLOAT4 billboard;            // level 5 threshold, billboard radius, minimum radius, unused
-    SHADER_UINT rock_limit, body_count, unused0, unused1;
+    SHADER_UINT rock_limit, body_count, light_in_count_pass, unused; // light_in_count_pass: splats lit in both passes (development comparison)
     // Each rock group's slice of the pooled rock mesh.
     SHADER_UINT index_counts[ORBITAL_ROCK_GROUPS];
     SHADER_UINT first_indices[ORBITAL_ROCK_GROUPS];
