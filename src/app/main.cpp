@@ -7,9 +7,10 @@
 #include "platform/window.hpp"
 #include "render/renderer.hpp"
 
+#include <fast_float/fast_float.h>
+
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -83,7 +84,7 @@ template <class T> bool parse_number(std::optional<std::string_view> text, T& ou
     if (!text)
         return false;
     const char* end = text->data() + text->size();
-    const auto result = std::from_chars(text->data(), end, out);
+    const auto result = fast_float::from_chars(text->data(), end, out);
     return result.ec == std::errc{} && result.ptr == end;
 }
 

@@ -1,6 +1,6 @@
 # ORBITAL
 
-Native Windows and Linux C++20 space demo on a compatibility fork of [NoGraphicsAPI](https://github.com/sebbbi/NoGraphicsAPI): an Earth-like world, a gas giant with a half-million-rock asteroid belt, a rocky moon, a desert world with two moonlets. Sourced material maps, atmospheric scattering, shadows, HDR with exposure adaptation and bloom, temporal plus SMAA anti-aliasing, three tone curves and a Dear ImGui control panel.
+Native Windows, Linux and macOS C++20 space demo on a compatibility fork of [NoGraphicsAPI](https://github.com/sebbbi/NoGraphicsAPI): an Earth-like world, a gas giant with a half-million-rock asteroid belt, a rocky moon, a desert world with two moonlets. Sourced material maps, atmospheric scattering, shadows, HDR with exposure adaptation and bloom, temporal plus SMAA anti-aliasing, three tone curves and a Dear ImGui control panel.
 
 ![Earth with the gas giant and its belt behind it](docs/images/earth.jpg)
 
@@ -29,6 +29,8 @@ Shaders are Slang, compiled offline, with a shared C++/shader layout header. See
 
 For Linux setup, build presets, validation and SSH launch instructions, see [Linux](docs/LINUX.md).
 
+For native Apple Silicon builds using Vulkan/MoltenVK, see [macOS](docs/MACOS.md).
+
 ## Explore
 
 RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. Keys 1–6 select the Earth, Jupiter, Moon, Mars, dawn and belt views. T starts and stops the tour, O orbits the selected body, F returns to free flight. Space pauses the system; +/- changes exposure, X toggles adaptation.
@@ -49,7 +51,7 @@ F12 opens the control panel (`--ui` opens it at start), which holds frame statis
 | Path | Contents |
 | --- | --- |
 | `src/core` | Logging, panic, file I/O and vector/matrix math shared by everything else |
-| `src/platform` | OS-neutral window, input, process, text-overlay and ImGui-overlay interfaces; `win32/` and `linux/` implement them |
+| `src/platform` | OS-neutral interfaces; Win32 implementation, shared SDL/FreeType code for Linux/macOS, OS-specific executable discovery |
 | `src/app` | Options, camera, HUD, control panel and the frame loop; no OS calls |
 | `src/scene` | Deterministic system generation, rock population and mesh geometry |
 | `src/assets` | PNG image I/O (Wuffs decode, stb write), SIMD pixel kernels and material mip-chain generation |

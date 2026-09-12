@@ -5,10 +5,14 @@
 `NoGraphicsAPI/` is a vendored copy of [sebbbi/NoGraphicsAPI](https://github.com/sebbbi/NoGraphicsAPI)
 at upstream commit `8e414bd0a8010b9f721d06d470860e27aa69c071` (MIT, see `NoGraphicsAPI/LICENSE`).
 
-The copy carries local compatibility changes: an opt-in conventional Vulkan 1.3 descriptor backend
+The copy carries local compatibility changes: an opt-in conventional Vulkan 1.4 descriptor backend
 (`NOGRAPHICSAPI_ENABLE_CONVENTIONAL_BACKEND` / `NOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND`) for GPUs
 without the experimental descriptor and address-command extensions. The public C++ API and shader entry-point names are unchanged.
 See [docs/FOUNDATION.md](../docs/FOUNDATION.md) for the investigation.
+
+The current fork requires Vulkan 1.4. It supports ARM64, SDL surfaces on Linux/macOS, MoltenVK portability
+enumeration, and optional indirect draw counts (`DeviceCaps::draw_indirect_count`). The optional AVX2/FMA
+utility math library remains x86-64-only and is not used by Orbital.
 
 `NoGraphicsAPI-compat.patch` is the full diff against the upstream commit. To regenerate it after
 editing the fork:
@@ -46,3 +50,10 @@ MIT-style licence).
 `imgui/` is [ocornut/imgui](https://github.com/ocornut/imgui) 1.91.9b (MIT, see `imgui/LICENSE.txt`): the core sources and the Win32
 and SDL2 backends. Both backends are from the same 1.91.9b tag. The core is platform-agnostic and used by the application; the selected backend is compiled into the
 platform layer, and the draw lists are rendered by the demo's own NoGraphicsAPI backend.
+
+## fast_float
+
+`fast_float/include/` contains the headers from [fastfloat/fast_float](https://github.com/fastfloat/fast_float)
+v8.2.10, used under its MIT license (`fast_float/LICENSE-MIT`). It provides locale-independent,
+non-throwing command-line number parsing on macOS versions whose libc++ lacks floating-point
+`std::from_chars`. The same parser is used on every platform. The original headers are unmodified.

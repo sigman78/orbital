@@ -68,14 +68,15 @@ core       log, panic, file, math, types, small_vec            depends on nothin
 
 ### Backends
 
-- One directory per operating system, `platform/win32/` and `platform/linux/`, each implementing every interface
-  header in full. A backend is a CMake target (`orbital_platform`) and is the only target that links
+- `platform/win32/` implements the Windows interfaces. Linux and macOS share `platform/sdl/`
+  window/input/ImGui and `platform/freetype/` text, with OS-specific process implementations.
+  A backend is a CMake target (`orbital_platform`) and is the only target that links
   OS libraries; the demo executable links the target, not `user32` or `gdi32`.
 - Backend code follows the same rules as the rest of the tree (panics, settings, RAII wrappers such
   as `Canvas` and `SelectedFont`) and may use OS types freely inside its own `.cpp` files.
-- Adding a platform means adding `platform/<os>/` with the four implementation files, a CMake branch
-  selecting it, and a swapchain path for it in the graphics backend. Nothing in `app/` or `render/`
-  changes.
+- Adding a platform means selecting implementations of all four interfaces in CMake and a
+  swapchain path in the graphics backend. Reuse shared implementations where the APIs match;
+  keep OS conditionals out of `app/` and `render/`.
 
 ### Guarded exceptions
 
@@ -93,7 +94,7 @@ has a portable fallback. A `_WIN32`, `_MSC_VER` or `<windows.h>` anywhere else i
   through `tools/check-gcc.ps1`. That script links the C++ runtime statically on purpose: a
   dynamically linked test picks up whichever `libstdc++-6.dll` is first on PATH, and a stale one
   fails at load time with an entry-point dialog per executable.
-- The desktop demo builds on Windows and Linux; each platform implements the same four interfaces.
+- The desktop demo builds on Windows, Linux and macOS; each platform implements the same four interfaces.
 
 ## Containers
 

@@ -1,11 +1,12 @@
-diff --git i/CMakeLists.txt w/CMakeLists.txt
---- i/CMakeLists.txt
-+++ w/CMakeLists.txt
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 6aebbe7..69a92cb 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
 @@ -14,6 +14,8 @@ include(CMakePackageConfigHelpers)
  
  option(NOGRAPHICSAPI_BUILD_EXAMPLES "Build NoGraphicsAPI examples" OFF)
  option(NOGRAPHICSAPI_BUILD_TESTS "Build NoGraphicsAPI tests" OFF)
-+option(NOGRAPHICSAPI_ENABLE_CONVENTIONAL_BACKEND "Allow Vulkan 1.3 devices without the experimental descriptor/address-command extensions" ON)
++option(NOGRAPHICSAPI_ENABLE_CONVENTIONAL_BACKEND "Allow Vulkan 1.4 devices without the experimental descriptor/address-command extensions" ON)
 +option(NOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND "Use the conventional shader ABI even when experimental extensions exist" OFF)
  
  # CMake adds /EHsc to MSVC's default flags. Remove it before adding the explicit
@@ -14,7 +15,7 @@ diff --git i/CMakeLists.txt w/CMakeLists.txt
      PRIVATE Vulkan::Vulkan
  )
  NoGraphicsAPI_disable_exceptions(NoGraphicsAPI)
-+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
++if(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
 +    find_package(SDL2 REQUIRED CONFIG)
 +    target_link_libraries(NoGraphicsAPI PRIVATE SDL2::SDL2)
 +    target_compile_definitions(NoGraphicsAPI PRIVATE NOGRAPHICSAPI_SDL2=1)
@@ -28,23 +29,38 @@ diff --git i/CMakeLists.txt w/CMakeLists.txt
  
  if(MSVC)
      target_compile_options(NoGraphicsAPI PRIVATE /W4 /permissive-)
-diff --git i/cmake/NoGraphicsAPIConfig.cmake.in w/cmake/NoGraphicsAPIConfig.cmake.in
---- i/cmake/NoGraphicsAPIConfig.cmake.in
-+++ w/cmake/NoGraphicsAPIConfig.cmake.in
+diff --git a/README.md b/README.md
+index 3105b49..0eb9111 100644
+--- a/README.md
++++ b/README.md
+@@ -116,7 +116,7 @@ Requirements:
+ 
+ - CMake 3.24+, a C++20 compiler, and Vulkan SDK headers and development libraries version 1.4.357
+   or newer;
+-- a little-endian x86-64 target; the optional utility math target additionally requires AVX2 and FMA;
++- a little-endian x86-64 or ARM64 target; the optional utility math target remains x86-64-only and requires AVX2 and FMA;
+ - a Vulkan 1.4 loader and device exposing the required descriptor-heap, device-address-command,
+   untyped-pointer, and mesh extensions above, plus their required BDA, synchronization, and
+   16-bit/scalar-layout features;
+diff --git a/cmake/NoGraphicsAPIConfig.cmake.in b/cmake/NoGraphicsAPIConfig.cmake.in
+index e24d864..f7f5fa0 100644
+--- a/cmake/NoGraphicsAPIConfig.cmake.in
++++ b/cmake/NoGraphicsAPIConfig.cmake.in
 @@ -2,6 +2,9 @@
  
  include(CMakeFindDependencyMacro)
  find_dependency(Vulkan 1.4.357)
-+if("@CMAKE_SYSTEM_NAME@" STREQUAL "Linux")
++if("@CMAKE_SYSTEM_NAME@" STREQUAL "Linux" OR "@CMAKE_SYSTEM_NAME@" STREQUAL "Darwin")
 +    find_dependency(SDL2 CONFIG)
 +endif()
  
  include("${CMAKE_CURRENT_LIST_DIR}/NoGraphicsAPITargets.cmake")
  
-diff --git i/include/NoGraphicsAPI/NoGraphicsAPI.hpp w/include/NoGraphicsAPI/NoGraphicsAPI.hpp
---- i/include/NoGraphicsAPI/NoGraphicsAPI.hpp
-+++ w/include/NoGraphicsAPI/NoGraphicsAPI.hpp
-@@ -433,20 +433,27 @@ struct DeviceCaps
+diff --git a/include/NoGraphicsAPI/NoGraphicsAPI.hpp b/include/NoGraphicsAPI/NoGraphicsAPI.hpp
+index 5d9e398..5ec6d9c 100644
+--- a/include/NoGraphicsAPI/NoGraphicsAPI.hpp
++++ b/include/NoGraphicsAPI/NoGraphicsAPI.hpp
+@@ -433,20 +433,28 @@ struct DeviceCaps
      uint64 texture_descriptor_size = 0; // Bytes per descriptor slot.
      uint64 sampler_descriptor_size = 0; // Bytes per descriptor slot.
      float timestamp_period_ns = 0.0f; // Nanoseconds per timestamp tick.
@@ -56,6 +72,7 @@ diff --git i/include/NoGraphicsAPI/NoGraphicsAPI.hpp w/include/NoGraphicsAPI/NoG
 +    // Compatibility devices use ordinary Vulkan push constants and descriptor arrays.
 +    // Shaders declare sampled images at set 0/binding 0 and samplers at set 0/binding 1.
 +    bool conventional_descriptor_backend = false;
++    bool draw_indirect_count = false;
 +    bool mesh_shaders = false;
 +    bool storage_image_read_without_format = false;
  };
@@ -65,7 +82,7 @@ diff --git i/include/NoGraphicsAPI/NoGraphicsAPI.hpp w/include/NoGraphicsAPI/NoG
  struct DeviceDesc
  {
 -    void* window = nullptr;
-+    void* window = nullptr; // HWND on Windows; SDL_Window* on Linux; null for a device without presentation.
++    void* window = nullptr; // HWND on Windows; SDL_Window* on Linux/macOS; null for a device without presentation.
      Format swapchain_format = Format::undefined;
      uint32 desired_swapchain_image_count = 2; // 1..8 presentation contexts.
      uint32 timestamp_query_count = 256; // Per command buffer; zero disables timestamps.
@@ -73,7 +90,7 @@ diff --git i/include/NoGraphicsAPI/NoGraphicsAPI.hpp w/include/NoGraphicsAPI/NoG
  };
  
  struct DeviceInit
-@@ -648,6 +655,16 @@ void destroy_device(Device* device) noexcept;
+@@ -648,6 +656,16 @@ void destroy_device(Device* device) noexcept;
  [[nodiscard]] const DeviceCaps& get_device_caps(const Device* device) noexcept;
  [[nodiscard]] bool supports_texture_format(const Device* device, Format format, TextureUsage usage) noexcept;
  [[nodiscard]] uint32x2 get_drawable_extent(Device* device) noexcept;
@@ -90,20 +107,36 @@ diff --git i/include/NoGraphicsAPI/NoGraphicsAPI.hpp w/include/NoGraphicsAPI/NoG
  
  [[nodiscard]] TimelineSemaphore* create_timeline_semaphore(Device* device, uint64 initial_value = 0) noexcept;
  void destroy_timeline_semaphore(TimelineSemaphore* semaphore) noexcept;
-@@ -728,6 +745,10 @@ void draw_indexed(CommandBuffer* commands, ByteSpan root, GpuRange indices, Inde
+@@ -728,6 +746,10 @@ void draw_indexed(CommandBuffer* commands, ByteSpan root, GpuRange indices, Inde
  void draw_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments, uint32 draw_count = 1, uint32 stride = 0) noexcept;
  void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indices, IndexType type, GpuRange arguments, uint32 draw_count = 1,
                             uint32 stride = 0) noexcept;
 +// Multi-draw whose draw count is read from GPU memory (a uint32 at count.gpu), capped at max_draw_count.
-+// Implemented on the conventional backend only.
++// Requires the conventional backend and DeviceCaps::draw_indirect_count.
 +void draw_indexed_indirect_count(CommandBuffer* commands, ByteSpan root, GpuRange indices, IndexType type, GpuRange arguments, GpuRange count,
 +                                 uint32 max_draw_count, uint32 stride = 0) noexcept;
  void dispatch(CommandBuffer* commands, ByteSpan root, uint32x3 group_count) noexcept;
  void dispatch_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments) noexcept;
  void draw_meshlets(CommandBuffer* commands, ByteSpan root, uint32x3 group_count) noexcept;
-diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
---- i/src/NoGraphicsAPI.cpp
-+++ w/src/NoGraphicsAPI.cpp
+diff --git a/include/NoGraphicsAPI/types.h b/include/NoGraphicsAPI/types.h
+index 4305735..f8e6ec4 100644
+--- a/include/NoGraphicsAPI/types.h
++++ b/include/NoGraphicsAPI/types.h
+@@ -6,8 +6,8 @@
+ #if defined(__MINGW32__)
+ #error "NoGraphicsAPI does not support MinGW"
+ #endif
+-#if defined(_M_ARM64EC) || (!defined(_M_X64) && !defined(__x86_64__))
+-#error "NoGraphicsAPI requires an x86-64 target"
++#if defined(_M_ARM64EC) || (!defined(_M_X64) && !defined(__x86_64__) && !defined(__aarch64__) && !defined(_M_ARM64))
++#error "NoGraphicsAPI requires an x86-64 or ARM64 target"
+ #endif
+ 
+ typedef signed char int8;
+diff --git a/src/NoGraphicsAPI.cpp b/src/NoGraphicsAPI.cpp
+index fab3a6b..a40a263 100644
+--- a/src/NoGraphicsAPI.cpp
++++ b/src/NoGraphicsAPI.cpp
 @@ -12,6 +12,10 @@
  #endif
  
@@ -271,16 +304,18 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      VkPhysicalDeviceProperties properties{};
      VkPhysicalDeviceMemoryProperties memory_properties{};
      bool unified_image_layouts = false;
-@@ -1578,6 +1617,8 @@ struct Candidate
+@@ -1578,6 +1617,10 @@ struct Candidate
      bool texture_compression_etc2 = false;
      bool storage_input_output16 = false;
      bool khr_swapchain_maintenance1 = false;
++    bool portability_subset = false;
++    bool draw_indirect_count = false;
 +    bool conventional = false;
 +    bool storage_image_read_without_format = false;
      VkPhysicalDeviceDescriptorHeapPropertiesEXT heap_properties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT};
      VkPhysicalDeviceVulkan12Properties vulkan12_properties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
  };
-@@ -1599,11 +1640,18 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+@@ -1599,11 +1642,18 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
          VK_KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME,
          VK_EXT_MESH_SHADER_EXTENSION_NAME,
      };
@@ -300,15 +335,16 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const bool khr_swapchain_maintenance1 = khr_surface_maintenance1 &&
                                              has_name({extensions, extension_count}, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
      const bool ext_swapchain_maintenance1 = ext_surface_maintenance1 &&
-@@ -1617,6 +1665,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+@@ -1617,6 +1667,8 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
  
      Candidate result{
          .physical_device = physical_device,
++        .portability_subset = has_name({extensions, extension_count}, "VK_KHR_portability_subset"),
 +        .conventional = !experimental_extensions,
      };
      result.heap_properties.pNext = &result.vulkan12_properties;
      VkPhysicalDeviceProperties2 properties2{
-@@ -1643,7 +1692,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+@@ -1643,7 +1695,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
      }
      if (!cpu_visible_memory) return Error::unsupported;
  
@@ -317,7 +353,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      vkGetPhysicalDeviceFeatures2(physical_device, &features.core);
      const bool required_features =
          features.core.features.shaderInt16 == VK_TRUE &&
-@@ -1652,25 +1701,27 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+@@ -1652,25 +1704,26 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
          features.core.features.independentBlend == VK_TRUE &&
          features.core.features.fragmentStoresAndAtomics == VK_TRUE &&
          features.core.features.vertexPipelineStoresAndAtomics == VK_TRUE &&
@@ -334,7 +370,6 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          features.vulkan12.scalarBlockLayout == VK_TRUE &&
          features.vulkan12.bufferDeviceAddress == VK_TRUE &&
          features.vulkan12.timelineSemaphore == VK_TRUE &&
-+        features.vulkan12.drawIndirectCount == VK_TRUE &&
          features.vulkan13.synchronization2 == VK_TRUE &&
          features.vulkan13.dynamicRendering == VK_TRUE &&
          features.vulkan13.maintenance4 == VK_TRUE &&
@@ -349,7 +384,12 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          (features.core.features.textureCompressionBC == VK_TRUE ||
           features.core.features.textureCompressionASTC_LDR == VK_TRUE) &&
          (!surface || features.swapchain_maintenance1.swapchainMaintenance1 == VK_TRUE);
-@@ -1682,6 +1733,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+@@ -1678,10 +1731,12 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+         return Error::unsupported;
+     result.unified_image_layouts = unified_image_layouts_extension && features.unified_image_layouts.unifiedImageLayouts == VK_TRUE;
+     result.image_cube_array = features.core.features.imageCubeArray == VK_TRUE;
++    result.draw_indirect_count = features.vulkan12.drawIndirectCount == VK_TRUE;
+     result.texture_compression_bc = features.core.features.textureCompressionBC == VK_TRUE;
      result.texture_compression_astc = features.core.features.textureCompressionASTC_LDR == VK_TRUE;
      result.texture_compression_etc2 = features.core.features.textureCompressionETC2 == VK_TRUE;
      result.storage_input_output16 = features.vulkan11.storageInputOutput16 == VK_TRUE;
@@ -357,7 +397,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      result.khr_swapchain_maintenance1 = khr_swapchain_maintenance1;
  
      uint32 available_queue_count = 0;
-@@ -1695,7 +1747,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+@@ -1695,7 +1750,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
      constexpr VkQueueFlags required_queue_flags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
      for (uint32 index = 0; index < queue_count; ++index)
      {
@@ -366,7 +406,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
              (queues[index].queueFlags & required_queue_flags) != required_queue_flags)
              continue;
          VkBool32 presentation_supported = VK_TRUE;
-@@ -1715,6 +1767,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+@@ -1715,6 +1770,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
          return Error::unsupported;
  
      result.queue_family = queue_family;
@@ -374,7 +414,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      output = result;
      return Error::none;
  }
-@@ -1743,7 +1796,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1743,7 +1799,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      const bool presentation = desc.window != nullptr;
      assert(desc.desired_swapchain_image_count != 0 && desc.desired_swapchain_image_count <= max_swapchain_images &&
             "swapchain image count must fit the wrapper's presentation context array");
@@ -383,7 +423,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      if (presentation)
          return {.error = Error::unsupported};
  #endif
-@@ -1756,6 +1809,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1756,6 +1812,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
          return { .error = Error::unsupported };
  
      Device* state = new Device;
@@ -391,7 +431,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      state->timestamp_query_count = desc.timestamp_query_count;
      state->present_context_count = presentation ? desc.desired_swapchain_image_count : 0;
      VkExtensionProperties instance_extensions[max_instance_extensions]{};
-@@ -1763,7 +1817,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1763,7 +1820,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      error = enumerate_instance_extensions({instance_extensions, max_instance_extensions}, instance_extension_count);
      if (error != Error::none)
          return fail_device_creation(state, error);
@@ -400,7 +440,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const bool khr_surface_maintenance1 = presentation && has_name(
          {instance_extensions, instance_extension_count},
          VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
-@@ -1773,8 +1827,10 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1773,8 +1830,10 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      if (presentation &&
          (!has_name({instance_extensions, instance_extension_count},
                     VK_KHR_SURFACE_EXTENSION_NAME) ||
@@ -411,16 +451,19 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
           !has_name({instance_extensions, instance_extension_count},
                     VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME) ||
           (!khr_surface_maintenance1 && !ext_surface_maintenance1)))
-@@ -1795,7 +1851,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1795,19 +1854,33 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      const bool validation_available = has_name({layers, layer_count}, "VK_LAYER_KHRONOS_validation");
  #endif
  
 -    const char* enabled_instance_extensions[6]{};
-+    const char* enabled_instance_extensions[16]{};
++    const char* enabled_instance_extensions[18]{};
      uint32 enabled_instance_extension_count = 0;
++    const bool portability_enumeration = has_name({instance_extensions, instance_extension_count}, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
++    if (portability_enumeration)
++        enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
      const char* enabled_layers[1]{};
      uint32 enabled_layer_count = 0;
-@@ -1803,11 +1859,22 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+ #if !defined(NDEBUG)
      if (debug_utils_available) enabled_instance_extensions[enabled_instance_extension_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
      if (validation_available) enabled_layers[enabled_layer_count++] = "VK_LAYER_KHRONOS_validation";
  #endif
@@ -444,7 +487,15 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME;
          if (khr_surface_maintenance1)
              enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
-@@ -1871,6 +1938,11 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1826,6 +1899,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+     };
+     const VkInstanceCreateInfo instance_info{
+         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
++        .flags = portability_enumeration ? VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR : VkInstanceCreateFlags(0),
+         .pApplicationInfo = &app_info,
+         .enabledLayerCount = enabled_layer_count,
+         .ppEnabledLayerNames = enabled_layer_count ? enabled_layers : nullptr,
+@@ -1871,6 +1945,11 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      }
  #endif
  
@@ -456,7 +507,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      VkPhysicalDevice physical_devices[max_physical_devices]{};
      uint32 physical_device_count = 0;
      error = enumerate_physical_devices(state->instance, {physical_devices, max_physical_devices}, physical_device_count);
-@@ -1897,9 +1969,14 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1897,9 +1976,14 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
              break;
      }
      if (!has_selected)
@@ -471,7 +522,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      state->queue_family = selected.queue_family;
      state->physical_properties = selected.properties;
      state->heap_properties = selected.heap_properties;
-@@ -1912,7 +1989,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1912,7 +1996,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
              state->physical_device, static_cast<Format>(value));
      }
  
@@ -480,7 +531,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      state->texture_compression_etc2 = selected.texture_compression_etc2;
      enabled_features.core.features.imageCubeArray = selected.image_cube_array;
      enabled_features.core.features.samplerAnisotropy = VK_TRUE;
-@@ -1924,7 +2001,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1924,7 +2008,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      enabled_features.core.features.textureCompressionETC2 = selected.texture_compression_etc2;
      enabled_features.core.features.fragmentStoresAndAtomics = VK_TRUE;
      enabled_features.core.features.vertexPipelineStoresAndAtomics = VK_TRUE;
@@ -489,7 +540,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      enabled_features.core.features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
      enabled_features.core.features.multiDrawIndirect = VK_TRUE;
      enabled_features.core.features.drawIndirectFirstInstance = VK_TRUE;
-@@ -1932,19 +2009,21 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1932,19 +2016,21 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      enabled_features.vulkan11.storagePushConstant16 = VK_TRUE;
      enabled_features.vulkan11.storageInputOutput16 = selected.storage_input_output16;
      enabled_features.vulkan11.shaderDrawParameters = VK_TRUE;
@@ -497,7 +548,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
 +    enabled_features.vulkan12.shaderFloat16 = selected.conventional ? VK_FALSE : VK_TRUE;
      enabled_features.vulkan12.scalarBlockLayout = VK_TRUE;
      enabled_features.vulkan12.timelineSemaphore = VK_TRUE;
-+    enabled_features.vulkan12.drawIndirectCount = VK_TRUE;
++    enabled_features.vulkan12.drawIndirectCount = selected.draw_indirect_count;
      enabled_features.vulkan12.bufferDeviceAddress = VK_TRUE;
      enabled_features.vulkan13.synchronization2 = VK_TRUE;
      enabled_features.vulkan13.dynamicRendering = VK_TRUE;
@@ -516,13 +567,18 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      enabled_features.swapchain_maintenance1.swapchainMaintenance1 = VK_TRUE;
  
      constexpr float queue_priority = 1.0f;
-@@ -1956,15 +2035,18 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1954,17 +2040,22 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+         .queueCount = 1,
+         .pQueuePriorities = &queue_priority,
      };
-     const char* enabled_device_extensions[7]{};
+-    const char* enabled_device_extensions[7]{};
++    const char* enabled_device_extensions[8]{};
      uint32 enabled_device_extension_count = 0;
 -    enabled_device_extensions[enabled_device_extension_count++] = VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME;
 -    enabled_device_extensions[enabled_device_extension_count++] = VK_KHR_DEVICE_ADDRESS_COMMANDS_EXTENSION_NAME;
 -    enabled_device_extensions[enabled_device_extension_count++] = VK_KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME;
++    if (selected.portability_subset)
++        enabled_device_extensions[enabled_device_extension_count++] = "VK_KHR_portability_subset";
 +    if (!selected.conventional)
 +    {
 +        enabled_device_extensions[enabled_device_extension_count++] = VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME;
@@ -540,7 +596,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      if (presentation)
      {
          enabled_device_extensions[enabled_device_extension_count++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
-@@ -1985,6 +2067,25 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1985,6 +2076,25 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      if (error != Error::none)
          return fail_device_creation(state, error);
      vkGetDeviceQueue(state->device, state->queue_family, 0, &state->queue);
@@ -566,7 +622,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      if (!supports_gpu_heap_memory(*state) || !select_texture_memory_type(*state))
          return fail_device_creation(state, Error::unsupported);
  
-@@ -2004,13 +2105,13 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -2004,13 +2114,13 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      state->fn.cmd_copy_image_to_memory = load_device_proc<PFN_vkCmdCopyImageToMemoryKHR>(state->device, "vkCmdCopyImageToMemoryKHR");
      state->fn.cmd_copy_query_pool_results_to_memory =
          load_device_proc<PFN_vkCmdCopyQueryPoolResultsToMemoryKHR>(state->device, "vkCmdCopyQueryPoolResultsToMemoryKHR");
@@ -582,7 +638,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      {
          return fail_device_creation(state, Error::driver_error);
      }
-@@ -2027,21 +2128,26 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -2027,21 +2137,27 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
  
      state->caps = {
          .device_name = state->physical_properties.deviceName,
@@ -600,6 +656,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          .texture_compression_astc = selected.texture_compression_astc,
          .storage_input_output16 = selected.storage_input_output16,
 +        .conventional_descriptor_backend = selected.conventional,
++        .draw_indirect_count = selected.draw_indirect_count,
 +        .mesh_shaders = !selected.conventional,
 +        .storage_image_read_without_format = selected.storage_image_read_without_format,
      };
@@ -612,7 +669,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          error = recreate_swapchain(*state->swapchain);
          if (error != Error::none)
              return fail_device_creation(state, error);
-@@ -2127,6 +2233,9 @@ void destroy_gpu_heap(const GpuHeap& heap) noexcept
+@@ -2127,6 +2243,9 @@ void destroy_gpu_heap(const GpuHeap& heap) noexcept
      if (!heap.owner) return;
      assert(heap.owner->state);
      const VkDevice device = heap.owner->state->device;
@@ -622,7 +679,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const detail::BackingBuffer& backing = heap.owner->backing;
      if (backing.mapped) vkUnmapMemory(device, backing.memory);
      vkDestroyBuffer(device, backing.buffer, nullptr);
-@@ -2228,13 +2337,38 @@ VkCompositeAlphaFlagBitsKHR choose_composite_alpha(VkCompositeAlphaFlagsKHR supp
+@@ -2228,13 +2347,38 @@ VkCompositeAlphaFlagBitsKHR choose_composite_alpha(VkCompositeAlphaFlagsKHR supp
      abort();
  }
  
@@ -662,7 +719,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const uint32 variable_extent = UINT_MAX;
      return extent.width == variable_extent ||
             extent.height == variable_extent ||
-@@ -2244,13 +2378,34 @@ VkCompositeAlphaFlagBitsKHR choose_composite_alpha(VkCompositeAlphaFlagsKHR supp
+@@ -2244,13 +2388,34 @@ VkCompositeAlphaFlagBitsKHR choose_composite_alpha(VkCompositeAlphaFlagsKHR supp
             choose_composite_alpha(capabilities.supportedCompositeAlpha) != swapchain.composite_alpha;
  }
  
@@ -698,7 +755,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      };
      const VkPhysicalDeviceSurfaceInfo2KHR surface_info{
          .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR,
-@@ -2265,7 +2420,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
+@@ -2265,7 +2430,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
          return error;
      const VkSurfaceCapabilitiesKHR& capabilities = capabilities_info.surfaceCapabilities;
  
@@ -707,7 +764,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      if (extent.width == UINT_MAX)
          return Error::unsupported;
      if (extent.width == 0 || extent.height == 0)
-@@ -2316,7 +2471,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
+@@ -2316,7 +2481,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
      const VkSwapchainPresentModesCreateInfoKHR present_modes_info{
          .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_KHR,
          .presentModeCount = 1,
@@ -716,7 +773,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      };
      const VkSwapchainCreateInfoKHR create_info{
          .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-@@ -2331,7 +2486,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
+@@ -2331,7 +2496,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
          .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
          .preTransform = capabilities.currentTransform,
          .compositeAlpha = composite_alpha,
@@ -725,7 +782,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          .clipped = VK_TRUE,
          .oldSwapchain = old_handle,
      };
-@@ -2411,6 +2566,28 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
+@@ -2411,6 +2576,28 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
  
  } // namespace
  
@@ -754,7 +811,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
  uint32x2 get_drawable_extent(Device* device) noexcept
  {
      assert(device && "get_drawable_extent called with a null device");
-@@ -2423,7 +2600,7 @@ uint32x2 get_drawable_extent(Device* device) noexcept
+@@ -2423,7 +2610,7 @@ uint32x2 get_drawable_extent(Device* device) noexcept
      VkSurfaceCapabilitiesKHR capabilities{};
      const Error error = error_from_vk(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device->physical_device, device->surface, &capabilities));
      require_error(error);
@@ -763,7 +820,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      if (extent.width == UINT_MAX || extent.height == UINT_MAX)
      {
          require_error(Error::unsupported);
-@@ -2644,6 +2821,18 @@ Texture* create_texture(Device* device, const TextureDesc& desc, const TextureHe
+@@ -2644,6 +2831,18 @@ Texture* create_texture(Device* device, const TextureDesc& desc, const TextureHe
  
  void destroy_texture(Texture* texture) noexcept
  {
@@ -782,7 +839,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      delete texture;
  }
  
-@@ -2689,6 +2878,28 @@ void write_texture_descriptor(Device* device, void* cpu_destination, const Textu
+@@ -2689,6 +2888,28 @@ void write_texture_descriptor(Device* device, void* cpu_destination, const Textu
                                const TextureDescriptorDesc& desc) noexcept
  {
      assert(device && texture);
@@ -811,7 +868,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
  
      const VkImageUsageFlags descriptor_usage = static_cast<VkImageUsageFlags>(
          type == TextureDescriptorType::sampled ? VK_IMAGE_USAGE_SAMPLED_BIT : VK_IMAGE_USAGE_STORAGE_BIT);
-@@ -2758,6 +2969,22 @@ void write_sampler_descriptor(Device* device, void* cpu_destination, const Sampl
+@@ -2758,6 +2979,22 @@ void write_sampler_descriptor(Device* device, void* cpu_destination, const Sampl
          .compareOp = static_cast<VkCompareOp>(desc.compare),
          .maxLod = VK_LOD_CLAMP_NONE,
      };
@@ -834,7 +891,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkHostAddressRangeEXT destination{
          .address = cpu_destination,
          .size = static_cast<size_t>(device->heap_properties.samplerDescriptorSize),
-@@ -2881,11 +3108,11 @@ PSO* create_raster_pso(Device* device, Span<const uint32> first_stage_spirv, Spa
+@@ -2881,11 +3118,11 @@ PSO* create_raster_pso(Device* device, Span<const uint32> first_stage_spirv, Spa
      const VkPipelineCreateFlags2CreateInfo flags_info{
          .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO,
          .pNext = &rendering_info,
@@ -848,7 +905,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          .stageCount = fragment_spirv.size ? 2u : 1u,
          .pStages = stages,
          .pVertexInputState = mesh ? nullptr : &vertex_input,
-@@ -2896,6 +3123,7 @@ PSO* create_raster_pso(Device* device, Span<const uint32> first_stage_spirv, Spa
+@@ -2896,6 +3133,7 @@ PSO* create_raster_pso(Device* device, Span<const uint32> first_stage_spirv, Spa
          .pDepthStencilState = &depth_stencil,
          .pColorBlendState = &color_blend,
          .pDynamicState = &dynamic_state,
@@ -856,7 +913,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          .basePipelineIndex = -1,
      };
      PSO* result = new PSO{
-@@ -2920,6 +3148,16 @@ PSO* create_mesh_pso(Device* device, const MeshPSODesc& desc) noexcept
+@@ -2920,6 +3158,16 @@ PSO* create_mesh_pso(Device* device, const MeshPSODesc& desc) noexcept
                               desc.stencil_format, desc.rasterization, true);
  }
  
@@ -873,7 +930,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
  PSO* create_compute_pso(Device* device, Span<const uint32> compute_spirv) noexcept
  {
      assert(device && "create_compute_pso called with a null device");
-@@ -2941,8 +3179,9 @@ PSO* create_compute_pso(Device* device, Span<const uint32> compute_spirv) noexce
+@@ -2941,8 +3189,9 @@ PSO* create_compute_pso(Device* device, Span<const uint32> compute_spirv) noexce
      };
      const VkComputePipelineCreateInfo pso_info{
          .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
@@ -884,7 +941,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          .basePipelineIndex = -1,
      };
      PSO* result = new PSO{
-@@ -3053,6 +3292,20 @@ void submit_commands(Span<CommandBuffer* const> commands, Device* device, Timeli
+@@ -3053,6 +3302,20 @@ void submit_commands(Span<CommandBuffer* const> commands, Device* device, Timeli
          assert((current && current->state == device) && "command buffer batch contains an invalid handle");
          for (uint32 timestamp = 0; timestamp < current->timestamp_count; ++timestamp)
          {
@@ -905,7 +962,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
              const VkStridedDeviceAddressRangeKHR destination{
                  .address = current->timestamp_destinations[timestamp],
                  .size = sizeof(uint64),
-@@ -3278,6 +3531,9 @@ void bind_pso(CommandBuffer* commands, const PSO* pso) noexcept
+@@ -3278,6 +3541,9 @@ void bind_pso(CommandBuffer* commands, const PSO* pso) noexcept
  {
      assert(commands && pso);
      vkCmdBindPipeline(commands->command_buffer, pso->bind_point, pso->pso);
@@ -915,7 +972,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
  }
  
  VkDeviceMemoryImageCopyKHR make_texture_copy_region(const Texture& texture, const TextureCopyDesc& copy, GpuRange memory) noexcept
-@@ -3329,6 +3585,12 @@ void emit_root_data(CommandBuffer* commands, ByteSpan root) noexcept
+@@ -3329,6 +3595,12 @@ void emit_root_data(CommandBuffer* commands, ByteSpan root) noexcept
      if (root.size == 0)
          return;
      assert(commands->state);
@@ -928,7 +985,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkPushDataInfoEXT info{
          .sType = VK_STRUCTURE_TYPE_PUSH_DATA_INFO_EXT,
          .data = {
-@@ -3342,6 +3604,7 @@ void emit_root_data(CommandBuffer* commands, ByteSpan root) noexcept
+@@ -3342,6 +3614,7 @@ void emit_root_data(CommandBuffer* commands, ByteSpan root) noexcept
  void set_texture_descriptor_heap(CommandBuffer* commands, GpuRange heap) noexcept
  {
      assert(commands && commands->state);
@@ -936,7 +993,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkPhysicalDeviceDescriptorHeapPropertiesEXT& properties = commands->state->heap_properties;
      VkBindHeapInfoEXT bind_info{};
      make_heap_bind_info(
-@@ -3357,6 +3620,7 @@ void set_texture_descriptor_heap(CommandBuffer* commands, GpuRange heap) noexcep
+@@ -3357,6 +3630,7 @@ void set_texture_descriptor_heap(CommandBuffer* commands, GpuRange heap) noexcep
  void set_sampler_descriptor_heap(CommandBuffer* commands, GpuRange heap) noexcept
  {
      assert(commands && commands->state);
@@ -944,7 +1001,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkPhysicalDeviceDescriptorHeapPropertiesEXT& properties = commands->state->heap_properties;
      VkBindHeapInfoEXT bind_info{};
      make_heap_bind_info(heap, properties.samplerDescriptorAlignment, properties.minSamplerHeapReservedRange, bind_info);
-@@ -3499,6 +3763,16 @@ void draw_indexed(CommandBuffer* commands, ByteSpan root, GpuRange indices, Inde
+@@ -3499,6 +3773,16 @@ void draw_indexed(CommandBuffer* commands, ByteSpan root, GpuRange indices, Inde
  {
      assert(commands && commands->state);
      emit_root_data(commands, root);
@@ -961,7 +1018,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkBindIndexBuffer3InfoKHR bind_info{
          .sType = VK_STRUCTURE_TYPE_BIND_INDEX_BUFFER_3_INFO_KHR,
          .addressRange = {
-@@ -3516,6 +3790,13 @@ void draw_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments, u
+@@ -3516,6 +3800,13 @@ void draw_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments, u
  {
      assert(commands && commands->state);
      emit_root_data(commands, root);
@@ -975,7 +1032,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkDrawIndirect2InfoKHR info{
          .sType = VK_STRUCTURE_TYPE_DRAW_INDIRECT_2_INFO_KHR,
          .addressRange = {
-@@ -3534,6 +3815,17 @@ void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indi
+@@ -3534,6 +3825,17 @@ void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indi
  {
      assert(commands && commands->state);
      emit_root_data(commands, root);
@@ -993,7 +1050,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkBindIndexBuffer3InfoKHR bind_info{
          .sType = VK_STRUCTURE_TYPE_BIND_INDEX_BUFFER_3_INFO_KHR,
          .addressRange = {
-@@ -3557,6 +3849,23 @@ void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indi
+@@ -3557,6 +3859,24 @@ void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indi
      commands->state->fn.cmd_draw_indexed_indirect(commands->command_buffer, &info);
  }
  
@@ -1002,6 +1059,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
 +{
 +    assert(commands && commands->state);
 +    assert(commands->state->conventional_backend && "draw_indexed_indirect_count is implemented on the conventional backend only");
++    assert(commands->state->caps.draw_indirect_count && "draw_indexed_indirect_count requires drawIndirectCount support");
 +    emit_root_data(commands, root);
 +    GpuHeapOwner* index_heap = conventional_heap_for(commands->state, indices);
 +    GpuHeapOwner* argument_heap = conventional_heap_for(commands->state, arguments);
@@ -1017,7 +1075,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
  void dispatch(CommandBuffer* commands, ByteSpan root, uint32x3 group_count) noexcept
  {
      assert(commands);
-@@ -3606,6 +3915,20 @@ void draw_meshlets_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arg
+@@ -3606,6 +3926,20 @@ void draw_meshlets_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arg
  void copy_memory(CommandBuffer* commands, GpuRange source, GpuRange destination) noexcept
  {
      assert(commands && commands->state);
@@ -1038,7 +1096,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkDeviceMemoryCopyKHR region{
          .sType = VK_STRUCTURE_TYPE_DEVICE_MEMORY_COPY_KHR,
          .srcRange = {
-@@ -3630,6 +3953,23 @@ void copy_memory(CommandBuffer* commands, GpuRange source, GpuRange destination)
+@@ -3630,6 +3964,23 @@ void copy_memory(CommandBuffer* commands, GpuRange source, GpuRange destination)
  void copy_memory_to_texture(CommandBuffer* commands, GpuRange source, Texture* destination, const TextureCopyDesc& copy) noexcept
  {
      assert(commands && commands->state && destination);
@@ -1062,7 +1120,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkDeviceMemoryImageCopyKHR region = make_texture_copy_region(*destination, copy, source);
      const VkCopyDeviceMemoryImageInfoKHR info{
          .sType = VK_STRUCTURE_TYPE_COPY_DEVICE_MEMORY_IMAGE_INFO_KHR,
-@@ -3643,6 +3983,23 @@ void copy_memory_to_texture(CommandBuffer* commands, GpuRange source, Texture* d
+@@ -3643,6 +3994,23 @@ void copy_memory_to_texture(CommandBuffer* commands, GpuRange source, Texture* d
  void copy_texture_to_memory(CommandBuffer* commands, Texture* source, GpuRange destination, const TextureCopyDesc& copy) noexcept
  {
      assert(commands && commands->state && source);
@@ -1086,3 +1144,25 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkDeviceMemoryImageCopyKHR region = make_texture_copy_region(*source, copy, destination);
      const VkCopyDeviceMemoryImageInfoKHR info{
          .sType = VK_STRUCTURE_TYPE_COPY_DEVICE_MEMORY_IMAGE_INFO_KHR,
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index 828c34d..a2d42a4 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -3,10 +3,13 @@ NoGraphicsAPI_disable_exceptions(test_shader_types)
+ target_link_libraries(test_shader_types PRIVATE NoGraphicsAPIUtility::types)
+ add_test(NAME test_shader_types COMMAND test_shader_types)
+ 
+-add_executable(test_math math_test.cpp)
+-NoGraphicsAPI_disable_exceptions(test_math)
+-target_link_libraries(test_math PRIVATE NoGraphicsAPIUtility::math)
+-add_test(NAME test_math COMMAND test_math)
++# The optional utility math library remains AVX2/FMA-only; Orbital uses its own math.
++if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64)$")
++    add_executable(test_math math_test.cpp)
++    NoGraphicsAPI_disable_exceptions(test_math)
++    target_link_libraries(test_math PRIVATE NoGraphicsAPIUtility::math)
++    add_test(NAME test_math COMMAND test_math)
++endif()
+ 
+ add_executable(test_allocators ../utility/tests/allocator_test.cpp)
+ NoGraphicsAPI_disable_exceptions(test_allocators)

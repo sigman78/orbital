@@ -441,6 +441,7 @@ struct DeviceCaps
     // Compatibility devices use ordinary Vulkan push constants and descriptor arrays.
     // Shaders declare sampled images at set 0/binding 0 and samplers at set 0/binding 1.
     bool conventional_descriptor_backend = false;
+    bool draw_indirect_count = false;
     bool mesh_shaders = false;
     bool storage_image_read_without_format = false;
 };
@@ -449,7 +450,7 @@ struct DeviceCaps
 // window's message-pump thread. The window must outlive the device.
 struct DeviceDesc
 {
-    void* window = nullptr; // HWND on Windows; SDL_Window* on Linux; null for a device without presentation.
+    void* window = nullptr; // HWND on Windows; SDL_Window* on Linux/macOS; null for a device without presentation.
     Format swapchain_format = Format::undefined;
     uint32 desired_swapchain_image_count = 2; // 1..8 presentation contexts.
     uint32 timestamp_query_count = 256; // Per command buffer; zero disables timestamps.
@@ -746,7 +747,7 @@ void draw_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments, u
 void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indices, IndexType type, GpuRange arguments, uint32 draw_count = 1,
                            uint32 stride = 0) noexcept;
 // Multi-draw whose draw count is read from GPU memory (a uint32 at count.gpu), capped at max_draw_count.
-// Implemented on the conventional backend only.
+// Requires the conventional backend and DeviceCaps::draw_indirect_count.
 void draw_indexed_indirect_count(CommandBuffer* commands, ByteSpan root, GpuRange indices, IndexType type, GpuRange arguments, GpuRange count,
                                  uint32 max_draw_count, uint32 stride = 0) noexcept;
 void dispatch(CommandBuffer* commands, ByteSpan root, uint32x3 group_count) noexcept;

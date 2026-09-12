@@ -1,0 +1,20 @@
+# --help parses every argument but exits before creating a window or GPU device.
+function(check expected)
+  execute_process(COMMAND "${ORBITAL_EXECUTABLE}" --help ${ARGN}
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 10)
+  if(NOT result STREQUAL "${expected}")
+    message(FATAL_ERROR "Arguments '${ARGN}': expected ${expected}, got ${result}\n${output}${error}")
+  endif()
+endfunction()
+
+check(0 --time 1.25e2 --pan -0.5 --exposure 0.25 --seed 18446744073709551615 --frames 40)
+check(1 --exposure 1.25junk)
+check(1 --exposure " 1.25")
+check(1 --exposure +1.25)
+check(1 --exposure 0x1p2)
+check(1 --exposure 1e999)
+check(1 --time nan)
+check(1 --time inf)
+check(1 --seed 18446744073709551616)
+check(1 --frames -1)
+check(1 --time)

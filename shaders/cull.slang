@@ -184,6 +184,9 @@ void computeMain(uint3 thread : SV_DispatchThreadID)
             running += count;
         }
         scratch->draw_count = drawCount;
+        // Fixed-count indirect draws on portability devices must not replay stale groups.
+        for (uint g = drawCount; g < ORBITAL_ROCK_GROUPS; ++g)
+            scratch->args[g] = (DrawArgs)0;
         return;
     }
     if (id >= scratch->params.rock_limit) return;

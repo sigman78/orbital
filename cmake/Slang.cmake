@@ -1,4 +1,4 @@
-find_program(ORBITAL_SLANGC NAMES slangc HINTS "${CMAKE_SOURCE_DIR}/.tools/slang/bin" "$ENV{VULKAN_SDK}/Bin" REQUIRED)
+find_program(ORBITAL_SLANGC NAMES slangc HINTS "${CMAKE_SOURCE_DIR}/.tools/slang/bin" "$ENV{VULKAN_SDK}/bin" "$ENV{VULKAN_SDK}/Bin" REQUIRED)
 
 function(orbital_compile_slang output source entry stage)
     get_filename_component(source_absolute "${source}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")

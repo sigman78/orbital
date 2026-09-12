@@ -10,6 +10,8 @@ the Vulkan SDK). `tools/bootstrap.ps1` fetches pinned shader tools. See the [REA
 Linux developers can build the complete demo with GCC and SDL2; see [docs/LINUX.md](docs/LINUX.md)
 for dependencies, presets and GPU smoke checks.
 
+For Apple Clang and MoltenVK builds on macOS, see [docs/MACOS.md](docs/MACOS.md).
+
 Read [docs/CODE_STYLE.md](docs/CODE_STYLE.md) before changing C++: it covers the C++20 baseline, the
 panic/assert/optional error tiers, `std::format` logging, C stdio file wrappers, ownership rules, settings
 scopes and the module layering (`core` -> `scene`/`assets` -> `render` -> `app`).

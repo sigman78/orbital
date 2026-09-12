@@ -12,6 +12,12 @@ Pinned NoGraphicsAPI revision: `8e414bd0a8010b9f721d06d470860e27aa69c071` (upstr
 
 ## Compatibility ABI
 
+The current fork requires Vulkan 1.4, including maintenance5 and swapchain maintenance. macOS uses
+MoltenVK with portability enumeration/subset enabled. `DeviceCaps::draw_indirect_count` reports
+whether GPU-count multi-draw is available; the renderer falls back to a fixed array with zeroed
+unused commands when it is not. ARM64 is supported by the backend; its optional utility math remains
+x86-only. See [MACOS.md](MACOS.md) for tested versions, measurements and commands.
+
 Configure NoGraphicsAPI with `NOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND=ON`. `DeviceCaps::conventional_descriptor_backend` reports the active path. On this path:
 
 - Root bytes are ordinary Vulkan push constants, visible to all stages. The maximum is `DeviceCaps::max_push_data_size`.

@@ -14,7 +14,7 @@ include(CMakePackageConfigHelpers)
 
 option(NOGRAPHICSAPI_BUILD_EXAMPLES "Build NoGraphicsAPI examples" OFF)
 option(NOGRAPHICSAPI_BUILD_TESTS "Build NoGraphicsAPI tests" OFF)
-option(NOGRAPHICSAPI_ENABLE_CONVENTIONAL_BACKEND "Allow Vulkan 1.3 devices without the experimental descriptor/address-command extensions" ON)
+option(NOGRAPHICSAPI_ENABLE_CONVENTIONAL_BACKEND "Allow Vulkan 1.4 devices without the experimental descriptor/address-command extensions" ON)
 option(NOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND "Use the conventional shader ABI even when experimental extensions exist" OFF)
 
 # CMake adds /EHsc to MSVC's default flags. Remove it before adding the explicit
@@ -55,7 +55,7 @@ target_link_libraries(NoGraphicsAPI
     PRIVATE Vulkan::Vulkan
 )
 NoGraphicsAPI_disable_exceptions(NoGraphicsAPI)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(SDL2 REQUIRED CONFIG)
     target_link_libraries(NoGraphicsAPI PRIVATE SDL2::SDL2)
     target_compile_definitions(NoGraphicsAPI PRIVATE NOGRAPHICSAPI_SDL2=1)

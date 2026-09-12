@@ -1,5 +1,30 @@
 # Decisions and unresolved questions
 
+## macOS port (2026-09-12)
+
+- Review follow-up: ImGui scissors now convert logical clip coordinates to framebuffer pixels
+  before clamping, fixing the right-hand panel on Retina displays. A CPU regression test covers
+  1x/2x/fractional scale, viewport offsets, clamping and empty rectangles. The installed NoGraphicsAPI
+  package also discovers SDL2 on Darwin, matching its exported link dependency; the minimal
+  installed-package consumer now configures and builds without a separate SDL2 lookup.
+
+- Retained Vulkan through MoltenVK and the conventional GPU-pointer shader ABI. Native ARM64
+  builds run on M1 Max/macOS 15.7.4 with Apple Clang 17, Vulkan 1.4.357 and MoltenVK 1.4.2.
+- Shared the Linux SDL and FreeType implementations under `platform/sdl/` and `platform/freetype/`;
+  added macOS executable discovery and build/bootstrap presets. Vendored fast_float 8.2.10 preserves
+  locale-independent number parsing without requiring macOS 26's floating-point `std::from_chars`.
+- Made `drawIndirectCount` optional after the M1 Max reported it unsupported. The fallback submits
+  the 96-group indirect array; the prefix compute pass clears its unused compacted tail. This avoids
+  CPU count readback and leaves the supported-device compacted-count path intact.
+- All 13 applicable debug tests passed, including two GPU tests; all eight release CPU/CLI tests
+  passed. Validation smoke passed Earth/repeat, high belt, HUD/UI, maximize and fullscreen.
+  Repeated Earth captures differ by at most 1/255 per channel (mean absolute difference 0.000233
+  in 8-bit channel units). A 180-frame high-belt release run at 1920x1080, fixed time and vsync off,
+  excluding 60 warmup frames, measured medians of 10.86 ms CPU including GPU wait and 10.19 ms GPU.
+- Intel Macs and Windows/Linux regression runs remain unverified here. The optional vendored
+  AVX2/FMA math library remains x86-only; Orbital does not use it. Build instructions and limits
+  are in [MACOS.md](MACOS.md).
+
 ## Accepted direction
 
 | ID | Decision | Reason |

@@ -1,4 +1,5 @@
 #include "render/renderer_impl.hpp"
+#include "render/ui_scissor.hpp"
 
 #include "core/log.hpp"
 #include "core/timing.hpp"
@@ -521,12 +522,19 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
     // group's count, base and slice into the argument array.
     root.base = 0;
     root.vertices = rock_pool.vertices;
-    gpu::draw_indexed_indirect_count(
-        cmd, root, {reinterpret_cast<void*>(rock_pool.indices), std::uint64_t(rock_pool.index_count) * 4},
-        gpu::IndexType::uint32, {reinterpret_cast<void*>(args_address), sizeof(DrawArgs) * rock_group_count},
-        {reinterpret_cast<void*>(args_address - offsetof(CullScratch, args) + offsetof(CullScratch, draw_count)),
-         sizeof(std::uint32_t)},
-        rock_group_count, sizeof(DrawArgs));
+    if (gpu::get_device_caps(device).draw_indirect_count) {
+        gpu::draw_indexed_indirect_count(
+            cmd, root, {reinterpret_cast<void*>(rock_pool.indices), std::uint64_t(rock_pool.index_count) * 4},
+            gpu::IndexType::uint32, {reinterpret_cast<void*>(args_address), sizeof(DrawArgs) * rock_group_count},
+            {reinterpret_cast<void*>(args_address - offsetof(CullScratch, args) + offsetof(CullScratch, draw_count)),
+             sizeof(std::uint32_t)},
+            rock_group_count, sizeof(DrawArgs));
+    } else {
+        gpu::draw_indexed_indirect(
+            cmd, root, {reinterpret_cast<void*>(rock_pool.indices), std::uint64_t(rock_pool.index_count) * 4},
+            gpu::IndexType::uint32, {reinterpret_cast<void*>(args_address), sizeof(DrawArgs) * rock_group_count},
+            rock_group_count, sizeof(DrawArgs));
+    }
     stats.draw_calls++;
     stats.triangles += stats.rock_triangles;
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
@@ -643,16 +651,10 @@ void Renderer::Impl::record_ui(gpu::CommandBuffer* cmd, const ImDrawData* ui, st
         for (const ImDrawCmd& draw : list->CmdBuffer) {
             if (draw.UserCallback || draw.ElemCount == 0)
                 continue;
-            const float x0 = std::max(draw.ClipRect.x - ui->DisplayPos.x, 0.f);
-            const float y0 = std::max(draw.ClipRect.y - ui->DisplayPos.y, 0.f);
-            const float x1 = std::min(draw.ClipRect.z - ui->DisplayPos.x, float(extent.width));
-            const float y1 = std::min(draw.ClipRect.w - ui->DisplayPos.y, float(extent.height));
-            if (x1 <= x0 || y1 <= y0)
+            const auto scissor = ui_scissor(draw.ClipRect, ui->DisplayPos, ui->FramebufferScale, extent);
+            if (!scissor)
                 continue;
-            gpu::set_scissor(cmd, {.x = std::int32_t(x0),
-                                   .y = std::int32_t(y0),
-                                   .width = std::uint32_t(x1 - x0),
-                                   .height = std::uint32_t(y1 - y0)});
+            gpu::set_scissor(cmd, *scissor);
             ui_root.vertices = gpu + std::uint64_t(vertex_base + draw.VtxOffset) * sizeof(UiVertex);
             gpu::draw_indexed(cmd, gpu::ByteSpan(&ui_root, sizeof ui_root),
                               {reinterpret_cast<void*>(index_address +

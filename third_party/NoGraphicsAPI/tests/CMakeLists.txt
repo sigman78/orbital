@@ -3,10 +3,13 @@ NoGraphicsAPI_disable_exceptions(test_shader_types)
 target_link_libraries(test_shader_types PRIVATE NoGraphicsAPIUtility::types)
 add_test(NAME test_shader_types COMMAND test_shader_types)
 
-add_executable(test_math math_test.cpp)
-NoGraphicsAPI_disable_exceptions(test_math)
-target_link_libraries(test_math PRIVATE NoGraphicsAPIUtility::math)
-add_test(NAME test_math COMMAND test_math)
+# The optional utility math library remains AVX2/FMA-only; Orbital uses its own math.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64)$")
+    add_executable(test_math math_test.cpp)
+    NoGraphicsAPI_disable_exceptions(test_math)
+    target_link_libraries(test_math PRIVATE NoGraphicsAPIUtility::math)
+    add_test(NAME test_math COMMAND test_math)
+endif()
 
 add_executable(test_allocators ../utility/tests/allocator_test.cpp)
 NoGraphicsAPI_disable_exceptions(test_allocators)

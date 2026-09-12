@@ -10,13 +10,15 @@ drove it, is in [DECISIONS.md](DECISIONS.md); the graphics backend and shader AB
 core       logging, panic, file I/O, math, small containers
 scene      seeded system description, orbital evaluation, sphere and rock geometry
 assets     PNG I/O, SIMD pixel kernels, material mip chains
-platform   window, input, process, text overlay, Dear ImGui overlay input   (win32/ and linux/ implement them)
+platform   window, input, process, text overlay, Dear ImGui overlay input   (Win32 or SDL/FreeType)
 render     the NoGraphicsAPI renderer: resources, materials, per-frame passes
 app        options, camera, HUD, control panel, frame loop
 ```
 
-The complete demo builds with MSVC on Windows and GCC on Linux. The Linux backend uses SDL2 for
-Wayland/X11 windows and input, and Fontconfig/FreeType for HUD text. The renderer never sees an OS type; the application never sees a Vulkan type.
+The complete demo builds with MSVC on Windows, GCC on Linux and Apple Clang on macOS. Linux and macOS
+share `platform/sdl/` window/input/ImGui code and `platform/freetype/` HUD text; executable discovery
+is OS-specific. macOS runs the conventional Vulkan backend through MoltenVK. The renderer never sees
+an OS type; the application never sees a Vulkan type.
 
 ## Scene
 
@@ -44,6 +46,10 @@ draw arguments per group, so the meshes are one multi-draw and the splats one dr
 from three sources: an analytic extinction through the belt's own density along the sun ray, a
 transmittance map splatted by the largest rocks from the sun's direction, and the planets' shadows.
 Between the rocks a half-resolution march through the same density field scatters sunlight as dust.
+
+When `drawIndirectCount` is unavailable, the renderer submits all 96 compacted argument slots.
+Compute zeros the unused tail so stale draws cannot survive between frames. Supported devices
+continue to read the compacted draw count from GPU memory.
 
 ## Frame
 

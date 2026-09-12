@@ -258,6 +258,7 @@ void Renderer::Impl::create_device(void* window) {
     panic_if(!device, "Vulkan device creation failed; check the console for missing features or driver errors");
     const auto& caps = gpu::get_device_caps(device);
     log::info("GPU: {} | conventional NoGraphicsAPI backend", caps.device_name);
+    log::info("Belt draws: {}", caps.draw_indirect_count ? "GPU count" : "fixed count, empty groups disabled");
     panic_if(!caps.conventional_descriptor_backend,
              "the demo's shaders require the conventional descriptor backend build option");
     timeline = gpu::create_timeline_semaphore(device);

@@ -30,6 +30,22 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  macos-build:
+    name: Desktop build and CPU tests (Apple Clang, macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install cmake ninja sdl2 freetype fontconfig vulkan-headers vulkan-loader spirv-tools
+      - name: Bootstrap shader compiler
+        run: bash tools/bootstrap.sh
+      - name: Configure
+        run: cmake --preset macos-release
+      - name: Build
+        run: cmake --build --preset macos-release --parallel 4
+      - name: Test (no GPU required)
+        run: ctest --preset macos-release
+
   cpu-tests:
     name: CPU libraries and tests (MSVC, no GPU)
     runs-on: windows-latest

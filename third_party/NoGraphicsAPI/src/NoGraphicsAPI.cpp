@@ -1617,6 +1617,8 @@ struct Candidate
     bool texture_compression_etc2 = false;
     bool storage_input_output16 = false;
     bool khr_swapchain_maintenance1 = false;
+    bool portability_subset = false;
+    bool draw_indirect_count = false;
     bool conventional = false;
     bool storage_image_read_without_format = false;
     VkPhysicalDeviceDescriptorHeapPropertiesEXT heap_properties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT};
@@ -1665,6 +1667,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface, 
 
     Candidate result{
         .physical_device = physical_device,
+        .portability_subset = has_name({extensions, extension_count}, "VK_KHR_portability_subset"),
         .conventional = !experimental_extensions,
     };
     result.heap_properties.pNext = &result.vulkan12_properties;
@@ -1712,7 +1715,6 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface, 
         features.vulkan12.scalarBlockLayout == VK_TRUE &&
         features.vulkan12.bufferDeviceAddress == VK_TRUE &&
         features.vulkan12.timelineSemaphore == VK_TRUE &&
-        features.vulkan12.drawIndirectCount == VK_TRUE &&
         features.vulkan13.synchronization2 == VK_TRUE &&
         features.vulkan13.dynamicRendering == VK_TRUE &&
         features.vulkan13.maintenance4 == VK_TRUE &&
@@ -1729,6 +1731,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface, 
         return Error::unsupported;
     result.unified_image_layouts = unified_image_layouts_extension && features.unified_image_layouts.unifiedImageLayouts == VK_TRUE;
     result.image_cube_array = features.core.features.imageCubeArray == VK_TRUE;
+    result.draw_indirect_count = features.vulkan12.drawIndirectCount == VK_TRUE;
     result.texture_compression_bc = features.core.features.textureCompressionBC == VK_TRUE;
     result.texture_compression_astc = features.core.features.textureCompressionASTC_LDR == VK_TRUE;
     result.texture_compression_etc2 = features.core.features.textureCompressionETC2 == VK_TRUE;
@@ -1851,8 +1854,11 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     const bool validation_available = has_name({layers, layer_count}, "VK_LAYER_KHRONOS_validation");
 #endif
 
-    const char* enabled_instance_extensions[16]{};
+    const char* enabled_instance_extensions[18]{};
     uint32 enabled_instance_extension_count = 0;
+    const bool portability_enumeration = has_name({instance_extensions, instance_extension_count}, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    if (portability_enumeration)
+        enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
     const char* enabled_layers[1]{};
     uint32 enabled_layer_count = 0;
 #if !defined(NDEBUG)
@@ -1893,6 +1899,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     };
     const VkInstanceCreateInfo instance_info{
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .flags = portability_enumeration ? VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR : VkInstanceCreateFlags(0),
         .pApplicationInfo = &app_info,
         .enabledLayerCount = enabled_layer_count,
         .ppEnabledLayerNames = enabled_layer_count ? enabled_layers : nullptr,
@@ -2012,7 +2019,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     enabled_features.vulkan12.shaderFloat16 = selected.conventional ? VK_FALSE : VK_TRUE;
     enabled_features.vulkan12.scalarBlockLayout = VK_TRUE;
     enabled_features.vulkan12.timelineSemaphore = VK_TRUE;
-    enabled_features.vulkan12.drawIndirectCount = VK_TRUE;
+    enabled_features.vulkan12.drawIndirectCount = selected.draw_indirect_count;
     enabled_features.vulkan12.bufferDeviceAddress = VK_TRUE;
     enabled_features.vulkan13.synchronization2 = VK_TRUE;
     enabled_features.vulkan13.dynamicRendering = VK_TRUE;
@@ -2033,8 +2040,10 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         .queueCount = 1,
         .pQueuePriorities = &queue_priority,
     };
-    const char* enabled_device_extensions[7]{};
+    const char* enabled_device_extensions[8]{};
     uint32 enabled_device_extension_count = 0;
+    if (selected.portability_subset)
+        enabled_device_extensions[enabled_device_extension_count++] = "VK_KHR_portability_subset";
     if (!selected.conventional)
     {
         enabled_device_extensions[enabled_device_extension_count++] = VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME;
@@ -2139,6 +2148,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         .texture_compression_astc = selected.texture_compression_astc,
         .storage_input_output16 = selected.storage_input_output16,
         .conventional_descriptor_backend = selected.conventional,
+        .draw_indirect_count = selected.draw_indirect_count,
         .mesh_shaders = !selected.conventional,
         .storage_image_read_without_format = selected.storage_image_read_without_format,
     };
@@ -3854,6 +3864,7 @@ void draw_indexed_indirect_count(CommandBuffer* commands, ByteSpan root, GpuRang
 {
     assert(commands && commands->state);
     assert(commands->state->conventional_backend && "draw_indexed_indirect_count is implemented on the conventional backend only");
+    assert(commands->state->caps.draw_indirect_count && "draw_indexed_indirect_count requires drawIndirectCount support");
     emit_root_data(commands, root);
     GpuHeapOwner* index_heap = conventional_heap_for(commands->state, indices);
     GpuHeapOwner* argument_heap = conventional_heap_for(commands->state, arguments);

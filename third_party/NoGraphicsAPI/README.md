@@ -116,7 +116,7 @@ Requirements:
 
 - CMake 3.24+, a C++20 compiler, and Vulkan SDK headers and development libraries version 1.4.357
   or newer;
-- a little-endian x86-64 target; the optional utility math target additionally requires AVX2 and FMA;
+- a little-endian x86-64 or ARM64 target; the optional utility math target remains x86-64-only and requires AVX2 and FMA;
 - a Vulkan 1.4 loader and device exposing the required descriptor-heap, device-address-command,
   untyped-pointer, and mesh extensions above, plus their required BDA, synchronization, and
   16-bit/scalar-layout features;
