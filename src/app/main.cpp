@@ -425,7 +425,10 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .gas_flow = app.gas_flow,
                                              .gas_time_scale = app.gas_time_scale,
                                              .gas_cycle = app.gas_cycle,
-                                             .gas_turbulence = app.gas_turbulence};
+                                             .gas_turbulence = app.gas_turbulence,
+                                             .gas_haze = app.gas_haze,
+                                             .gas_terminator = app.gas_terminator,
+                                             .gas_relief = app.gas_relief};
         renderer.set_vsync(app.vsync);
         if (renderer.draw(frame_input)) {
             frames++;

@@ -54,6 +54,7 @@ struct AppState {
     float aberration = 1.f, vignette = .17f, grain = .010f;
     bool gas_flow = true; // Gas giant panel
     float gas_time_scale = 1500.f, gas_cycle = 12.f, gas_turbulence = 1.f;
+    float gas_haze = .08f, gas_terminator = .08f, gas_relief = 6.f;
     float pan = 0; // lateral drift added to the move axis (--pan)
     float exposure = 1.0f;
     unsigned selected_body = 0;

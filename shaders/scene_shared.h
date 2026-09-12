@@ -1,5 +1,5 @@
 #pragma once
-#define ORBITAL_TEXTURE_COUNT 42
+#define ORBITAL_TEXTURE_COUNT 43
 #ifdef __cplusplus
 #include <cstdint>
 struct alignas(16) ShaderFloat4 { float x, y, z, w; };
@@ -44,6 +44,7 @@ struct Frame {
     SHADER_FLOAT4 post;                  // bloom intensity (0 off), bloom threshold, bloom knee, chromatic aberration scale
     SHADER_FLOAT4 post_more;             // vignette, film grain, unused x2
     SHADER_FLOAT4 giant;                 // flow time scale (x real), advection cycle (seconds), turbulence, flow map on
+    SHADER_FLOAT4 giant_more;            // limb haze optical depth, terminator wrap, cloud relief exaggeration, unused
 };
 struct Root {
 #ifdef __cplusplus

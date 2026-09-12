@@ -44,6 +44,21 @@ isotropic noise the shader used to add. Grayscale, 0.5 + value / 6 with the
 value in standard deviations; the shader multiplies it into the albedo at
 magnification, advected on the same flow.
 
+With --relief-output, a third map: the cloud deck's relief as its slopes
+(red east, green south, the renderer's tangent convention) with the height in
+alpha, for shading along the terminator. No height map of Jupiter's clouds
+exists to source, so the height is modelled from what is known: zones are
+high ammonia cloud and belts are clearings into deeper cloud, with the cloud
+tops varying over some 30 km (Galileo NIMS, PIA00489), and the anticyclones
+stand proud, the Great Red Spot by about 8 km. Bright is taken as high at the
+band scale, storms and swirls ride on that at a smaller amplitude, the
+vortices from the list above are added as flat-topped domes, and the
+filament detail adds the finest ridges. The slopes are physical, the shader
+exaggerates them; they are stored square-root encoded (0.5 + sign * sqrt(|s| /
+RELIEF_SLOPE_MAX) / 2) rather than as a normal, because the slopes that matter
+are a few thousandths and at grazing light an 8-bit normal's quantisation
+draws the texel rows as stripes; the encoding gives them ten times the levels.
+
 Requires Python 3 with numpy and Pillow.
 """
 import argparse
@@ -181,7 +196,90 @@ def bake_detail(flow_u, flow_v, detail_width, rng):
             streaks = np.asarray(Image.fromarray(streaks, mode="F").resize((detail_width, detail_width // 2), Image.BICUBIC), dtype=np.float32)
         result += streaks * weight
     result /= max(float(result.std()), 1e-9)
-    return np.clip(np.rint((0.5 + result / 6.0) * 255.0), 0, 255).astype(np.uint8)
+    return result
+
+
+def encode_detail(detail):
+    return np.clip(np.rint((0.5 + detail / 6.0) * 255.0), 0, 255).astype(np.uint8)
+
+
+# Cloud-top relief amplitudes, km. The band term spans the zone-to-belt step,
+# the swirl term the storms and streaks within a band, the vortex domes are
+# the anticyclones (the Spot at its measured 8 km, the ovals assumed at half),
+# and the filaments the finest ridges.
+RELIEF_BAND_KM = 6.0      # per standard deviation of the band-scale brightness
+RELIEF_SWIRL_KM = 2.5     # per standard deviation of the within-band brightness
+RELIEF_FILAMENT_KM = .7   # per standard deviation of the filament detail
+RELIEF_SPOT_KM = 8.0
+RELIEF_OVAL_KM = 4.0
+
+
+RELIEF_SLOPE_MAX = .1  # slope at the encoding's full scale; the physical slopes peak near .05
+
+
+def bake_relief(albedo_path, detail, width):
+    """Slope+height map of the cloud deck: bright is high at the band scale, vortices are domes, filaments ridges."""
+    height_px = width // 2
+    albedo = Image.open(albedo_path).convert("RGB").resize((width, height_px), Image.LANCZOS)
+    luminance = np.asarray(albedo, dtype=np.float64) @ np.array([.2126, .7152, .0722]) / 255.0
+
+    def standardised(field):
+        return np.clip((field - field.mean()) / max(float(field.std()), 1e-9), -2.5, 2.5)
+
+    band_sigma = width / 400.0  # about 900 km at the equator
+    band = blur(luminance, band_sigma)
+    swirl = blur(luminance, band_sigma / 5.0) - band
+    heights = RELIEF_BAND_KM * standardised(band) + RELIEF_SWIRL_KM * standardised(swirl)
+
+    u = (np.arange(width) + .5) / width
+    v = (np.arange(height_px) + .5) / height_px
+    uu, vv = np.meshgrid(u, v)
+    lat = (0.5 - vv) * 180.0
+    lon = (uu - 0.5) * 360.0
+    for vortex in VORTICES:
+        centre_lat = (0.5 - vortex["v"]) * 180.0
+        centre_lon = (vortex["u"] - 0.5) * 360.0
+        dlon = (lon - centre_lon + 180.0) % 360.0 - 180.0
+        dlat = lat - centre_lat
+        r = np.sqrt((dlon / vortex["a"]) ** 2 + (dlat / vortex["b"]) ** 2)
+        top = RELIEF_SPOT_KM if vortex["a"] > 5.0 else RELIEF_OVAL_KM
+        heights += top * np.exp(-r ** 4)  # flat top, edge at the rim
+
+    fine = np.asarray(Image.fromarray(detail.astype(np.float32), mode="F").resize((width, height_px), Image.BILINEAR),
+                      dtype=np.float64)
+    heights += RELIEF_FILAMENT_KM * fine
+    heights *= 1000.0  # metres
+
+    # Central differences, wrapping in longitude and clamping at the poles; slopes in radii per radii.
+    east = np.roll(heights, -1, axis=1) - np.roll(heights, 1, axis=1)
+    south = np.empty_like(heights)
+    south[1:-1] = heights[2:] - heights[:-2]
+    south[0] = heights[1] - heights[0]
+    south[-1] = heights[-1] - heights[-2]
+    latitude = np.radians((0.5 - (np.arange(height_px) + 0.5) / height_px) * 180.0)
+    texel_east = 2.0 * math.pi * RADIUS_EQUATORIAL_M * np.maximum(np.cos(latitude), 0.02) / width
+    texel_south = math.pi * RADIUS_POLAR_M / height_px
+    slope_east = east / (2.0 * texel_east[:, None])
+    slope_south = south / (2.0 * texel_south)
+    # The map is oblique Cassini data above 80 degrees and the east texel shrinks to nothing: fade the relief out there.
+    polar = smoothstep(88.0, 78.0, np.abs(np.degrees(latitude)))[:, None]
+    slope_east *= polar
+    slope_south *= polar
+
+    def encode(slope):
+        magnitude = np.sqrt(np.clip(np.abs(slope) / RELIEF_SLOPE_MAX, 0.0, 1.0))
+        return np.clip(np.rint((0.5 + np.sign(slope) * magnitude * 0.5) * 255.0), 0, 255).astype(np.uint8)
+
+    low, high = float(heights.min()), float(heights.max())
+    alpha = np.clip(np.rint((heights - low) / max(high - low, 1e-6) * 255.0), 0, 255).astype(np.uint8)
+    pixels = np.dstack([encode(slope_east), encode(slope_south), np.full_like(alpha, 255), alpha])
+    stats = {
+        "relief_width": width, "relief_height": height_px,
+        "relief_height_min_m": round(low, 1), "relief_height_max_m": round(high, 1),
+        "relief_slope_max": RELIEF_SLOPE_MAX,
+        "relief_max_slope": round(float(np.max(np.sqrt(slope_east ** 2 + slope_south ** 2))), 4),
+    }
+    return pixels, stats
 
 
 def main():
@@ -193,7 +291,11 @@ def main():
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--detail-output", help="also bake the flow-aligned detail map here")
     parser.add_argument("--detail-width", type=int, default=4096)
+    parser.add_argument("--relief-output", help="also bake the cloud-top relief (normal+height) map here; needs the detail")
+    parser.add_argument("--relief-width", type=int, default=2048)
     args = parser.parse_args()
+    if args.relief_output and not args.detail_output:
+        parser.error("--relief-output needs --detail-output")
 
     width, height = args.width, args.width // 2
     albedo = Image.open(args.albedo).convert("RGB").resize((width, height), Image.LANCZOS)
@@ -298,10 +400,14 @@ def main():
     Image.fromarray(encoded, mode="RGBA").save(args.output, optimize=True)
 
     detail_size = None
+    relief_stats = {}
     if args.detail_output:
         detail = bake_detail(flow_u, flow_v, args.detail_width, rng)
-        Image.fromarray(detail, mode="L").save(args.detail_output, optimize=True)
+        Image.fromarray(encode_detail(detail), mode="L").save(args.detail_output, optimize=True)
         detail_size = detail.shape[::-1]
+        if args.relief_output:
+            relief, relief_stats = bake_relief(args.albedo, detail, args.relief_width)
+            Image.fromarray(relief, mode="RGBA").save(args.relief_output, optimize=True)
 
     speed_ms = np.sqrt((flow_u * 2.0 * math.pi * RADIUS_EQUATORIAL_M * cos_lat) ** 2
                        + (flow_v * math.pi * RADIUS_POLAR_M) ** 2)
@@ -313,6 +419,7 @@ def main():
         "aligned_fraction": round(float(np.mean(coherence)), 3),
         "flow_scale": FLOW_SCALE,
         "clipped": int(np.sum((np.abs(flow_u) > 1.0 / FLOW_SCALE) | (np.abs(flow_v) > 1.0 / FLOW_SCALE))),
+        **relief_stats,
     }))
 
 

@@ -198,9 +198,11 @@ Material giantWarpMaterial(SurfaceVaryings input, float3 N, float visibility)
     return m;
 }
 
-static const uint GAS_FLOW = 40, GAS_DETAIL = 41;
+static const uint GAS_FLOW = 40, GAS_DETAIL = 41, GAS_RELIEF = 42;
 // Texture units per second per unit of the flow map's signed channels, at real wind speed (FLOW_SCALE in tools/bake-flow-map.py).
 static const float GAS_FLOW_UNIT = 6.25e-7;
+// The slope at the relief map's square-root encoding's full scale (RELIEF_SLOPE_MAX in the bake tool).
+static const float GAS_SLOPE_MAX = .1;
 
 // Fine structure once the 2K map is magnified so its softness never shows,
 // riding the advected coordinate: baked filaments that run with the wind
@@ -218,12 +220,21 @@ float giantDetail(float2 uv, float t, float fine)
 // each displace the albedo backwards along the flow and reset before the
 // displacement smears; a triangle weight hands over between them, and a
 // per-region phase offset keeps the resets from lining up across the disc.
-Material giantMaterial(SurfaceVaryings input, float3 N, float visibility)
+//
+// The cloud tops have relief: zones are high ammonia cloud, belts clearings
+// into deeper cloud, the anticyclones stand proud. A baked slope+height map
+// (tools/bake-flow-map.py, modelled from the albedo since no height map of
+// the clouds exists) is advected with the albedo and tilts the shading normal,
+// which shows only where the sun is low. The height in its alpha is not traced
+// for shadows: on a height field this smooth the trace's discrete steps drew
+// coherent contour bands along the terminator, worst seen from a low angle.
+Material giantMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility)
 {
     float4 giant = root.frame->giant;
     if (giant.w < .5) return giantWarpMaterial(input, N, visibility);
     float t = root.frame->camera_time.w;
-    float2 uv = sphereUV(normalize(input.localNormal));
+    float3 localN = normalize(input.localNormal);
+    float2 uv = sphereUV(localN);
     float4 flowMap = sampleSphere(textures[GAS_FLOW], uv);
     float2 flow = (flowMap.rg * 2.0 - 1.0) * GAS_FLOW_UNIT * giant.x;
     float cycle = giant.y;
@@ -236,11 +247,50 @@ Material giantMaterial(SurfaceVaryings input, float3 N, float visibility)
     float3 c1 = sampleSphere(textures[4], uv1).rgb * giantDetail(uv1, t, fine);
     Material m;
     m.albedo = lerp(c1, c0, w0);
-    m.N = N;
     m.rough = .95;
     m.water = 0.0;
     m.visibility = visibility * beltShadow(input.worldPosition);
+    // The panel exaggerates the physical slopes so the relief reads along the
+    // terminator; under a high sun the same tilt would emboss the whole disc,
+    // so it fades to a fraction there, where the true slopes are invisible anyway.
+    float grazing = 1.0 - smoothstep(.05, .5, dot(N, L));
+    float strength = root.frame->giant_more.z * lerp(.15, 1.0, grazing);
+    float2 encoded = lerp(sampleSphere(textures[GAS_RELIEF], uv1).xy, sampleSphere(textures[GAS_RELIEF], uv0).xy, w0) * 2.0 - 1.0;
+    float2 slope = encoded * abs(encoded) * GAS_SLOPE_MAX * strength;
+    float3 T, B;
+    tangentFrame(localN, rotate, N, T, B);
+    m.N = normalize(N - T * slope.x - B * slope.y);
     return m;
+}
+
+// Henyey-Greenstein phase function, normalised so isotropic scattering is 1.
+float hazePhase(float mu, float g)
+{
+    float g2 = g * g;
+    return (1.0 - g2) / pow(max(1.0 + g2 - 2.0 * g * mu, 1e-4), 1.5);
+}
+
+// A gas giant is lit by scattering, not a surface. The cloud deck itself is
+// close to Lambert (Jupiter's continuum Minnaert exponent is 0.9 to 1.0),
+// wrapped a few degrees past the terminator; over it lies a thin haze whose
+// view path grows as 1/cos toward the limb. The haze is forward scattering,
+// so at full phase it veils the deck with little light of its own and the
+// limb darkens, at crescent phases it lights up into a rim, and being high
+// it stays sunlit a little past the terminator, carrying the glow across.
+float3 shadeGiant(Material m, float3 N, float3 geometricN, float3 L, float3 V, float3 light)
+{
+    float4 haze = root.frame->giant_more;
+    float wrap = haze.y;
+    float lit = saturate((dot(N, L) + wrap) / (1.0 + wrap));
+    float hazeWrap = wrap * 2.0 + .05;
+    float hazeLit = saturate((dot(geometricN, L) + hazeWrap) / (1.0 + hazeWrap));
+    float mu = max(dot(geometricN, V), .02);
+    float veil = 1.0 - exp(-haze.x / mu);
+    float phase = hazePhase(-dot(L, V), .5);
+    float3 hazeColour = float3(.55, .62, .74);
+    float3 deck = m.albedo / PI * lit * (1.0 - veil);
+    float3 scattered = hazeColour / PI * veil * hazeLit * phase;
+    return (deck + scattered) * light * m.visibility + m.albedo * float3(.003, .004, .008);
 }
 
 Material moonMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility)
@@ -432,9 +482,12 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     float3 V = normalize(root.frame->camera_time.xyz - input.worldPosition);
     float3 L = normalize(root.frame->sun.xyz - input.worldPosition);
     int selfBody = input.instanceIndex < uint(root.frame->scene.x) ? int(input.instanceIndex) : -1;
-    // Belt rocks lose light to the belt itself; bodies use the planet-anchored shadow map.
+    // Belt rocks lose light to the belt itself; bodies use the planet-anchored
+    // shadow map, except the gas giant, whose shadows are all analytic (the
+    // bodies' and the belt's) and whose lighting reaches a few degrees past the
+    // geometric terminator, where a depth map self-shadows a sphere in texel steps.
     float shadow = selfBody < 0 ? beltExtinction(input.worldPosition) * beltRockTransmittance(input.worldPosition)
-                                : localShadow(input.worldPosition, N);
+                                : (kind == KIND_GIANT ? 1.0 : localShadow(input.worldPosition, N));
     float visibility = solarVisibility(input.worldPosition, selfBody) * shadow;
     float nl = max(dot(N, L), 0.0);
     if (root.mode == MODE_CLOUD) return shadeClouds(input, N, L, visibility, nl);
@@ -442,10 +495,12 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     float3x3 rotate = rotation(inst.rotation_kind.xyz);
     Material m;
     if (kind == KIND_EARTH) m = earthMaterial(input, rotate, N, L, visibility);
-    else if (kind == KIND_GIANT) m = giantMaterial(input, N, visibility);
+    else if (kind == KIND_GIANT) m = giantMaterial(input, rotate, N, L, visibility);
     else if (kind == KIND_MOON) m = moonMaterial(input, rotate, N, L, visibility);
     else if (kind == KIND_MARS) m = marsMaterial(input, rotate, N, L, visibility);
     else m = rockMaterial(input, inst, rotate, N, V, visibility);
+    float3 light = float3(1.0, .99, .97) * root.frame->sun.w;
+    if (kind == KIND_GIANT) return float4(shadeGiant(m, m.N, N, L, V, light), 1);
 
     // Normal variance broadens unresolved highlights instead of sparkling.
     float3 normalDx = ddx(m.N), normalDy = ddy(m.N);
@@ -462,7 +517,6 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     float3 F = F0 + (1 - F0) * pow(1 - vh, 5);
     float3 spec = F * D * G / max(4 * nv * nl, .001);
     spec *= lerp(1.0, root.frame->earth.y, m.water); // the panel's glint intensity, sea only
-    float3 light = float3(1.0, .99, .97) * root.frame->sun.w;
     float3 diffuse = m.albedo * lerp(1.0, .22, m.water) * (1 - F0) / PI;
     float3 color = (diffuse + spec) * light * nl * m.visibility + m.albedo * float3(.003, .004, .008);
     if (kind == KIND_EARTH)

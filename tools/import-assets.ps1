@@ -193,19 +193,35 @@ foreach ($asset in $assets) {
 # Derived maps, baked from imported textures rather than downloaded.
 $flowName = 'gas_flow'
 if ($Only.Count -gt 0 -and $Only -notcontains $flowName) {
-    $manifestEntries += ($existingManifest.assets | Where-Object { $_.file -eq ($flowName + '.png') -or $_.file -eq 'gas_detail.png' })
+    $manifestEntries += ($existingManifest.assets | Where-Object { $_.file -eq ($flowName + '.png') -or $_.file -eq 'gas_detail.png' -or $_.file -eq 'gas_relief.png' })
 } else {
     $flowScript = Join-Path $PSScriptRoot 'bake-flow-map.py'
     $flowOutput = Join-Path $OutputDirectory ($flowName + '.png')
     $detailOutput = Join-Path $OutputDirectory 'gas_detail.png'
+    $reliefOutput = Join-Path $OutputDirectory 'gas_relief.png'
     $json = & python $flowScript --albedo (Join-Path $OutputDirectory 'gas_albedo.png') --output $flowOutput `
-        --detail-output $detailOutput
+        --detail-output $detailOutput --relief-output $reliefOutput
     if ($LASTEXITCODE -ne 0) { throw "bake-flow-map.py failed" }
     $flow = $json | ConvertFrom-Json
     Write-Host ("{0,-20} {1}x{2} ({3:N1} MB)" -f ($flowName + '.png'), $flow.width, $flow.height,
         ((Get-Item -LiteralPath $flowOutput).Length / 1MB))
     Write-Host ("{0,-20} {1}x{2} ({3:N1} MB)" -f 'gas_detail.png', $flow.detail_width, $flow.detail_height,
         ((Get-Item -LiteralPath $detailOutput).Length / 1MB))
+    Write-Host ("{0,-20} {1}x{2} ({3:N1} MB)" -f 'gas_relief.png', $flow.relief_width, $flow.relief_height,
+        ((Get-Item -LiteralPath $reliefOutput).Length / 1MB))
+    $manifestEntries += [pscustomobject][ordered]@{
+        file = 'gas_relief.png'
+        width = $flow.relief_width
+        height = $flow.relief_height
+        color_space = 'linear-data'
+        license = 'CC-BY-4.0'
+        attribution = 'Baked by tools/bake-flow-map.py alongside gas_flow.png: cloud-top relief modelled from the albedo (bright zones high, belts deep), the vortex list (Great Red Spot 8 km, ovals 4 km) and the filament detail'
+        source = 'gas_albedo.png'
+        layout = 'R east and G south slope, 0.5 + sign * sqrt(|slope| / slope_max) / 2; height in alpha over height_min_m..height_max_m'
+        height_min_m = $flow.relief_height_min_m
+        height_max_m = $flow.relief_height_max_m
+        slope_max = $flow.relief_slope_max
+    }
     $manifestEntries += [pscustomobject][ordered]@{
         file = 'gas_detail.png'
         width = $flow.detail_width

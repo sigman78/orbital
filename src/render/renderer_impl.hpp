@@ -65,6 +65,7 @@ enum class Slot : unsigned {
     belt_disc_rocks = 39, // far-belt map: rock coverage times albedo, splatted every few dozen frames
     gas_flow = 40,        // gas giant wind flow map, baked by tools/bake-flow-map.py
     gas_detail = 41,      // gas giant flow-aligned fine detail, baked alongside it
+    gas_relief = 42,      // gas giant cloud-top normal+height, baked alongside it
     count = ORBITAL_TEXTURE_COUNT,
 };
 

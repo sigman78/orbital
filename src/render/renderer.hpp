@@ -70,6 +70,9 @@ struct FrameInput {
     float gas_time_scale = 1500.f; // wind speed, times real
     float gas_cycle = 12.f;        // seconds per advection phase
     float gas_turbulence = 1.f;    // fine roiling detail
+    float gas_haze = .08f;         // optical depth of the limb haze at normal incidence
+    float gas_terminator = .08f;   // wrap of the deck's lighting past the terminator (cosine units)
+    float gas_relief = 6.f;        // exaggeration of the cloud-top slopes
 };
 
 // Startup choices that are not part of the scene description.
