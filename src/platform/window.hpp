@@ -37,6 +37,7 @@ enum class Key : std::uint16_t {
     f8,
     f9,
     f10,
+    f11,
     f12,
     alt_enter, // borderless fullscreen toggle
 };

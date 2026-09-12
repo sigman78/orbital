@@ -123,6 +123,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
     if (section("Belt")) {
         ImGui::Checkbox("Transmittance map (F3)", &app.belt_light_map);
         ImGui::Checkbox("Dust extinction (F4)", &app.belt_extinction);
+        ImGui::Checkbox("Dust scattering (F11)", &app.belt_dust);
         static constexpr const char* cutoffs[] = {"Off", "1.2 px", "2.5 px", "4 px"};
         combo("Splat cut-off (F6)", app.splat_mode, cutoffs);
         ImGui::Checkbox("Light splats in both cull passes (F7)", &app.splat_light_twice);

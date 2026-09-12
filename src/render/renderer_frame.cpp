@@ -259,7 +259,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
         frame.bodies[i] = f4(input.bodies[i].position - camera.position, float(input.bodies[i].radius));
     frame.scene = {float(body_count), float(giant_index), input.belt_light_map ? 1.f : 0.f,
                    input.belt_extinction ? 1.f : 0.f};
-    frame.quality = {input.temporal_aa ? 1.f : 0.f, float(input.tone_curve), 0, 0};
+    frame.quality = {input.temporal_aa ? 1.f : 0.f, float(input.tone_curve), input.belt_dust ? 1.f : 0.f, 0};
 
     // Sun position in screen space for the lens flare, hidden when a body covers it.
     const Vec3d sun_direction = normalized(system.star.position - camera.position);
@@ -674,6 +674,13 @@ bool Renderer::draw(const FrameInput& input) {
     for (unsigned body : {s.giant_index, s.mars_index, s.earth_index}) {
         root.base = body;
         s.fullscreen_pass(cmd, s.hdr, s.pso.atmosphere, root, true);
+    }
+    // Belt dust scatters over everything the belt lies in front of, after the atmospheres.
+    if (input.belt_dust) {
+        root.mode = 0; // march at half resolution
+        s.fullscreen_pass(cmd, s.belt_dust, s.pso.belt_dust, root);
+        root.mode = 1; // depth-aware composite over the frame
+        s.fullscreen_pass(cmd, s.hdr, s.pso.belt_dust_blend, root, true);
     }
     if (input.temporal_aa) {
         gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,

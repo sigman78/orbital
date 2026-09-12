@@ -3,6 +3,7 @@
 // arrays and the Frame layout; every function takes the frame explicitly.
 
 static const int BELT_MAX_BODIES = 8; // Frame.bodies capacity; scene.x holds the live count
+static const float BELT_OUTER_TAIL = 1.5; // geometry::belt_outer_tail: the density tail ends here, in belt widths past the inner edge
 
 // Fraction of the sun's disc a point sees past the bodies, with a soft edge.
 float solarVisibility(Frame* frame, float3 point, int skip)

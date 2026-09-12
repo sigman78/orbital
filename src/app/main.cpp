@@ -43,12 +43,13 @@ constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
     "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..4\n"
     "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --rocks N\n"
-    "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --splat 0..3 --tone 0|1|2 --maximize-at N --fullscreen-at N\n"
+    "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --splat 0..3 --tone 0|1|2 --maximize-at N --fullscreen-at "
+    "N\n"
     "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F free;\n"
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
     "F5 temporal AA; F6 rock splat cut-off; F7 splat lighting in both cull passes; F8 tone curve;\n"
     "F9 spatial AA (off, FXAA, SMAA); Alt+Enter borderless fullscreen;\n"
-    "F10 capture; F12 control panel (--ui shows it at start); Esc exit.";
+    "F10 capture; F11 belt dust; F12 control panel (--ui shows it at start); Esc exit.";
 
 struct Options {
     std::uint64_t seed = showcase_seed;
@@ -60,6 +61,7 @@ struct Options {
     float exposure = 1;
     unsigned rocks = 0;       // belt override for benchmarks; 0 keeps the quality tiers
     unsigned taa = 1;         // temporal anti-aliasing on
+    unsigned dust = 1;        // volumetric belt dust
     unsigned spatial = 2;     // spatial pass: 0 off, 1 FXAA, 2 SMAA
     unsigned splat = 2;       // initial splat cut-off mode, an index into splat_radii
     unsigned tone = 2;        // initial tone curve (PBR Neutral)
@@ -122,6 +124,8 @@ std::optional<Options> parse_options(int argc, char** argv) {
             ok = parse_number(value(), options.frame_limit);
         else if (arg == "--rocks")
             ok = parse_number(value(), options.rocks);
+        else if (arg == "--dust")
+            ok = parse_number(value(), options.dust) && options.dust <= 1;
         else if (arg == "--taa")
             ok = parse_number(value(), options.taa) && options.taa <= 1;
         else if (arg == "--spatial")
@@ -182,6 +186,7 @@ void handle_key(AppState& app, Key key) {
     case Key::f7: app.splat_light_twice = !app.splat_light_twice; break;
     case Key::f8: app.tone_curve = (app.tone_curve + 1) % 3; break;
     case Key::f10: app.capture_request = hotkey_capture_path; break;
+    case Key::f11: app.belt_dust = !app.belt_dust; break;
     case Key::f12: app.show_ui = !app.show_ui; break;
     case Key::plus: app.exposure = exposure_keys::range.clamp(app.exposure * exposure_keys::step); break;
     case Key::minus: app.exposure = exposure_keys::range.clamp(app.exposure / exposure_keys::step); break;
@@ -242,10 +247,11 @@ void update_title(platform::Window& window, const render::Stats& stats, const Ap
     const int fps = int(1000 / std::max(stats.frame_ms, 0.1f));
     window.set_title(std::format(
         "ORBITAL  |  {} FPS  |  {:.1f} ms (p95 {:.1f})  |  GPU {:.1f} ms  |  {} draws ({} rock groups)  |  "
-        "{} rocks  |  {:.2f} M tris  |  {}  |  belt map {} ext {}  |  TAA {} + {}  |  splats {} lit {}  |  tone {}",
+        "{} rocks  |  {:.2f} M tris  |  {}  |  belt map {} ext {} dust {}  |  TAA {} + {}  |  splats {} lit {}  |  "
+        "tone {}",
         fps, stats.frame_ms, p95_ms, stats.gpu_ms, stats.draw_calls, stats.rock_groups_drawn, stats.visible_asteroids,
         stats.triangles / 1e6, app.high ? "HIGH" : "BASELINE", app.belt_light_map ? "on" : "off",
-        app.belt_extinction ? "on" : "off", app.temporal_aa ? "on" : "off",
+        app.belt_extinction ? "on" : "off", app.belt_dust ? "on" : "off", app.temporal_aa ? "on" : "off",
         app.spatial_aa == 0   ? "none"
         : app.spatial_aa == 1 ? "FXAA"
                               : "SMAA",
@@ -291,6 +297,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.pan = options.pan;
     app.overlay = !options.no_hud;
     app.show_ui = options.ui;
+    app.belt_dust = options.dust != 0;
     app.exposure = options.exposure;
     app.auto_exposure = options.fixed_time < 0;
     app.bodies = evaluate_system(system, std::max(0.0, options.fixed_time));
@@ -368,6 +375,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .auto_exposure = app.auto_exposure,
                                              .belt_light_map = app.belt_light_map,
                                              .belt_extinction = app.belt_extinction,
+                                             .belt_dust = app.belt_dust,
                                              .temporal_aa = app.temporal_aa,
                                              .spatial_aa = app.spatial_aa,
                                              .billboard_radius = splat_radii[app.splat_mode],

@@ -78,8 +78,9 @@ Renderer::Impl::~Impl() {
         gpu::destroy_pso(pipeline);
     for (auto& image : material_images)
         destroy(image);
-    for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &shadow_map, &luminance, &history[0],
-                        &history[1], &belt_light, &belt_light_blur, &splat_mask, &smaa_edges, &smaa_weights})
+    for (auto* image :
+         {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &shadow_map, &luminance, &history[0], &history[1],
+          &belt_light, &belt_light_blur, &splat_mask, &smaa_edges, &smaa_weights, &belt_dust})
         destroy(*image);
     for (auto* heap : {&data, &texture_descriptors, &sampler_descriptors, &luminance_readback, &timestamps})
         gpu::destroy_gpu_heap(*heap);
@@ -235,6 +236,10 @@ gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
         blending = {.enabled = true,
                     .color = {gpu::BlendFactor::one, gpu::BlendFactor::one},
                     .alpha = {gpu::BlendFactor::one, gpu::BlendFactor::one}};
+    else if (desc.blend == Blend::premultiplied)
+        blending = {.enabled = true,
+                    .color = {gpu::BlendFactor::one, gpu::BlendFactor::one_minus_source_alpha},
+                    .alpha = {gpu::BlendFactor::one, gpu::BlendFactor::one_minus_source_alpha}};
     const gpu::ColorTargetDesc target{.format = desc.color_format, .blend = blending};
     auto* pipeline = gpu::create_graphics_pso(
         device, {.vertex_spirv = vertex,
@@ -414,6 +419,8 @@ void Renderer::Impl::create_pipelines() {
     pso.smaa_weights = make("fullscreen", "smaa", Format::rgba8_unorm);
     pso.smaa_blend = make("fullscreen", "smaa", Format::rgba8_srgb);
     pso.ui = make("ui", "ui", Format::bgra8_srgb, false, Blend::alpha);
+    pso.belt_dust = make("fullscreen", "dust", Format::rgba16_float);
+    pso.belt_dust_blend = make("fullscreen", "dust", Format::rgba16_float, false, Blend::premultiplied);
     pso.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
     panic_if(!pso.cull, "compute pipeline creation failed: cull");
     pipelines.push_back(pso.cull);
@@ -499,7 +506,7 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     log::info("Resizing frame targets {}x{} -> {}x{}", extent.width, extent.height, new_extent.width,
               new_extent.height);
     for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &history[0], &history[1], &splat_mask,
-                        &smaa_edges, &smaa_weights})
+                        &smaa_edges, &smaa_weights, &belt_dust})
         destroy(*image);
     extent = new_extent;
     history_valid = false;
@@ -522,6 +529,9 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     splat_mask = create_image({.extent = extent, .format = gpu::Format::r8_unorm, .usage = color_usage});
     smaa_edges = create_image({.extent = extent, .format = gpu::Format::rg8_unorm, .usage = color_usage});
     smaa_weights = create_image({.extent = extent, .format = gpu::Format::rgba8_unorm, .usage = color_usage});
+    belt_dust = create_image({.extent = {std::max(1u, extent.width / 2), std::max(1u, extent.height / 2)},
+                              .format = gpu::Format::rgba16_float,
+                              .usage = color_usage});
     bind(Slot::hdr, hdr);
     bind(Slot::bloom_a, bloom_a);
     bind(Slot::bloom_b, bloom_b);
@@ -531,6 +541,7 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     bind(Slot::splat_mask, splat_mask);
     bind(Slot::smaa_edges, smaa_edges);
     bind(Slot::smaa_weights, smaa_weights);
+    bind(Slot::belt_dust, belt_dust);
 }
 
 Renderer::Renderer(void* window, const SystemDescription& system, const std::filesystem::path& directory,

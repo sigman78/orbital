@@ -29,7 +29,7 @@ struct Frame {
     SHADER_FLOAT4 scene;       // body count, giant body index, belt transmittance map on, belt extinction on
     SHADER_MATRIX4 belt_light_projection; // orthographic box over the whole belt from the sun
     SHADER_FLOAT4 belt_light;  // box half width, half height, map texels, half span of the slice range along the light
-    SHADER_FLOAT4 quality;     // anti-aliasing mode (0 off, 1 temporal, 2 temporal + FXAA), tone curve (0 ACES filmic, 1 AgX, 2 PBR Neutral), unused x2
+    SHADER_FLOAT4 quality;     // temporal anti-aliasing on, tone curve (0 ACES filmic, 1 AgX, 2 PBR Neutral), belt dust on, unused
 };
 struct Root {
 #ifdef __cplusplus

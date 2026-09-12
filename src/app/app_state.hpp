@@ -31,6 +31,7 @@ struct AppState {
     BodyStates bodies;
     bool running = true, paused = false, high = false, overlay = true, auto_exposure = true;
     bool belt_light_map = true, belt_extinction = true; // development toggles for the belt shading
+    bool belt_dust = true;                              // volumetric belt dust (F11)
     bool temporal_aa = true;                            // F5
     unsigned spatial_aa = 2;                            // 0 off, 1 FXAA, 2 SMAA (F9)
     unsigned splat_mode = 2;                            // index into splat_radii

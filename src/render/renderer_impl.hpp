@@ -60,7 +60,8 @@ enum class Slot : unsigned {
     smaa_edges = 34,      // SMAA edges of the tone-mapped image
     smaa_weights = 35,    // SMAA blending weights
     ui_font = 36,         // Dear ImGui font atlas
-    count = 37,
+    belt_dust = 37,       // half-resolution belt dust march, composited with a depth-aware upsample
+    count = 38,
 };
 
 // Sampler descriptor slots (shaders/common.slang binds 4).
@@ -170,7 +171,7 @@ struct ImageDesc {
     unsigned mips = 1;
 };
 
-enum class Blend { none, alpha, additive };
+enum class Blend { none, alpha, additive, premultiplied };
 
 struct PipelineDesc {
     const char* vertex_shader;   // shaders/<name>.vertex.spv
@@ -216,13 +217,14 @@ struct Renderer::Impl {
     std::vector<GpuImage> material_images;
     std::vector<gpu::PSO*> pipelines;
     GpuImage hdr{}, depth{}, bloom_a{}, bloom_b{}, final_image{}, ldr{}, shadow_map{}, luminance{}, history[2]{};
-    GpuImage splat_mask{}, smaa_edges{}, smaa_weights{};
+    GpuImage splat_mask{}, smaa_edges{}, smaa_weights{}, belt_dust{};
     GpuImage belt_light{}, belt_light_blur{};
     struct {
         gpu::PSO *opaque = nullptr, *cloud = nullptr, *background = nullptr, *atmosphere = nullptr, *bloom = nullptr,
                  *post = nullptr, *present = nullptr, *shadow = nullptr, *meter = nullptr, *temporal = nullptr,
                  *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr, *fxaa = nullptr, *splat_mask = nullptr,
-                 *smaa_edges = nullptr, *smaa_weights = nullptr, *smaa_blend = nullptr, *ui = nullptr;
+                 *smaa_edges = nullptr, *smaa_weights = nullptr, *smaa_blend = nullptr, *ui = nullptr,
+                 *belt_dust = nullptr, *belt_dust_blend = nullptr;
     } pso;
     std::array<GpuMesh, geometry::lod_count> spheres{};
     std::array<GpuMesh, rock_group_count> rocks{}; // the rock library, indexed by rock_group; slices of rock_pool
