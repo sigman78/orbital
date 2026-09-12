@@ -46,13 +46,14 @@ $assets = @(
     @{ Name = 'mars_albedo';    Source = '8k_mars.jpg';           Url = $solar; Hash = '4CC52149924ABC6AE507D63032F994E1D42A55CB82C09E002D1A567FF66C23EE'; License = 'CC-BY-4.0'; Attribution = 'Solar System Scope'; ColorSpace = 'sRGB' }
     @{ Name = 'mars_normal';    Source = 'megt90n000eb.img';      Url = $mola; Hash = 'D18D9B9AB8C5516D02E157DD2CDE0F1D0D160C21940E953BA22391269A545E7B'; License = 'Public-Domain-NASA'; Attribution = $nasaMars; ColorSpace = 'linear-data'; NormalConvention = 'DirectX (green = south), height in alpha'; Bake = @{ Format = 'pds-int16'; RadiusKm = 3396.2; Strength = 1.5 } }
     # Three CC0 rock sets at 2K for the belt: albedo, normal+height (packed by tools/pack-normal-height.py) and roughness.
-    @{ Name = 'rock_albedo';    Source = 'worn_rock_natural_01_diff_2k.jpg';   Url = $havenJpg + 'worn_rock_natural_01/'; Hash = '084E528A8B63684CF6CD9C9C1D44CEF32A8F4C9E8404394A4A1A40C70CBF000D'; License = 'CC0-1.0'; Attribution = $havenWorn; ColorSpace = 'sRGB' }
+    # Albedos are desaturated 40%: the scans are warm tan, asteroids are greyer through a telescope.
+    @{ Name = 'rock_albedo';    Source = 'worn_rock_natural_01_diff_2k.jpg';   Url = $havenJpg + 'worn_rock_natural_01/'; Hash = '084E528A8B63684CF6CD9C9C1D44CEF32A8F4C9E8404394A4A1A40C70CBF000D'; License = 'CC0-1.0'; Attribution = $havenWorn; ColorSpace = 'sRGB'; Desaturate = 0.4 }
     @{ Name = 'rock_normal';    Source = 'worn_rock_natural_01_nor_gl_2k.jpg'; Url = $havenJpg + 'worn_rock_natural_01/'; Hash = '51FB7B64EDA0D68BABD621C43A06D89300D789F27FBE63D917CD7B6AB93365CB'; License = 'CC0-1.0'; Attribution = $havenWorn; ColorSpace = 'linear-data'; NormalConvention = 'DirectX (green = +v), height in alpha'; Pack = @{ Source = 'worn_rock_natural_01_disp_2k.png'; Url = $havenPng + 'worn_rock_natural_01/'; Hash = '18F7556D90EA400C180547D74CADDFAF8DC6D3FD7ECE9061B5544058E2A5F200' } }
     @{ Name = 'rock_roughness'; Source = 'worn_rock_natural_01_rough_2k.jpg';  Url = $havenJpg + 'worn_rock_natural_01/'; Hash = '1AAC2CF72392F1207B5DBF880CBE0EF58D4C7EECD9DADC12640F031670969395'; License = 'CC0-1.0'; Attribution = $havenWorn; ColorSpace = 'linear-data' }
-    @{ Name = 'rock_face_albedo';    Source = 'rock_face_03_diff_2k.jpg';   Url = $havenJpg + 'rock_face_03/'; Hash = '644EE79DF7FFBF5F6AFC330B64DD3F33794BAB8820915FE61FFE0C88ECFD7ECE'; License = 'CC0-1.0'; Attribution = $havenFace; ColorSpace = 'sRGB' }
+    @{ Name = 'rock_face_albedo';    Source = 'rock_face_03_diff_2k.jpg';   Url = $havenJpg + 'rock_face_03/'; Hash = '644EE79DF7FFBF5F6AFC330B64DD3F33794BAB8820915FE61FFE0C88ECFD7ECE'; License = 'CC0-1.0'; Attribution = $havenFace; ColorSpace = 'sRGB'; Desaturate = 0.4 }
     @{ Name = 'rock_face_normal';    Source = 'rock_face_03_nor_gl_2k.jpg'; Url = $havenJpg + 'rock_face_03/'; Hash = 'A498CEF4BA6191F6959B6D03FB835263C77271948264A289AF24497AB7111DEC'; License = 'CC0-1.0'; Attribution = $havenFace; ColorSpace = 'linear-data'; NormalConvention = 'DirectX (green = +v), height in alpha'; Pack = @{ Source = 'rock_face_03_disp_2k.png'; Url = $havenPng + 'rock_face_03/'; Hash = '3CB398FC7E958C4A1C05428DBDB124DA70AC5C62DAB0820C1FADA48065370D2B' } }
     @{ Name = 'rock_face_roughness'; Source = 'rock_face_03_rough_2k.jpg';  Url = $havenJpg + 'rock_face_03/'; Hash = '9CA3E9E196685F702328F24D66F039B72F5330FC35CF2A2C265CFA50A7916301'; License = 'CC0-1.0'; Attribution = $havenFace; ColorSpace = 'linear-data' }
-    @{ Name = 'rock_boulder_albedo';    Source = 'rock_boulder_dry_diff_2k.jpg';   Url = $havenJpg + 'rock_boulder_dry/'; Hash = 'C66DE7F7B48EF1BA542C17AF780787CA6D43DA2160A46FF3544DD9FCDF65CA30'; License = 'CC0-1.0'; Attribution = $havenBoulder; ColorSpace = 'sRGB' }
+    @{ Name = 'rock_boulder_albedo';    Source = 'rock_boulder_dry_diff_2k.jpg';   Url = $havenJpg + 'rock_boulder_dry/'; Hash = 'C66DE7F7B48EF1BA542C17AF780787CA6D43DA2160A46FF3544DD9FCDF65CA30'; License = 'CC0-1.0'; Attribution = $havenBoulder; ColorSpace = 'sRGB'; Desaturate = 0.4 }
     @{ Name = 'rock_boulder_normal';    Source = 'rock_boulder_dry_nor_gl_2k.jpg'; Url = $havenJpg + 'rock_boulder_dry/'; Hash = '72A3C96D563FC17AC36C568802E106222E6480512D98E07318E1F431CEA33DD6'; License = 'CC0-1.0'; Attribution = $havenBoulder; ColorSpace = 'linear-data'; NormalConvention = 'DirectX (green = +v), height in alpha'; Pack = @{ Source = 'rock_boulder_dry_disp_2k.png'; Url = $havenPng + 'rock_boulder_dry/'; Hash = 'E07B06123BDA2156F2A0FEF79B0EDB77280295135CB5063E7794998FF3E69A90' } }
     @{ Name = 'rock_boulder_roughness'; Source = 'rock_boulder_dry_rough_2k.jpg';  Url = $havenJpg + 'rock_boulder_dry/'; Hash = '63BB4105E6F60B5968DA785AFC292B94026A5AFA6F18388E98B00232E9E2C433'; License = 'CC0-1.0'; Attribution = $havenBoulder; ColorSpace = 'linear-data' }
 )
@@ -79,7 +80,19 @@ function Get-Source($asset) {
     return $path
 }
 
-function Convert-Texture($sourcePath, $outputPath, $widthLimit) {
+# Saturation matrix in the Rec.601 luma weights GDI+ documents for ColorMatrix.
+function New-SaturationMatrix([float]$saturation) {
+    $lr = 0.3086; $lg = 0.6094; $lb = 0.0820; $s = $saturation; $t = 1 - $s
+    [float[][]]$rows = @(
+        @(($t * $lr + $s), ($t * $lr), ($t * $lr), 0, 0),
+        @(($t * $lg), ($t * $lg + $s), ($t * $lg), 0, 0),
+        @(($t * $lb), ($t * $lb), ($t * $lb + $s), 0, 0),
+        @(0, 0, 0, 1, 0),
+        @(0, 0, 0, 0, 1))
+    return New-Object System.Drawing.Imaging.ColorMatrix(,$rows)
+}
+
+function Convert-Texture($sourcePath, $outputPath, $widthLimit, [float]$desaturate = 0) {
     $source = [System.Drawing.Image]::FromFile($sourcePath)
     try {
         $sourceWidth = $source.Width
@@ -95,6 +108,7 @@ function Convert-Texture($sourcePath, $outputPath, $widthLimit) {
             # TileFlipXY avoids the transparent-edge fringe GDI+ otherwise blends in at
             # borders; it also keeps equirectangular maps seam-safe at the wrap column.
             $attributes.SetWrapMode([System.Drawing.Drawing2D.WrapMode]::TileFlipXY)
+            if ($desaturate -gt 0) { $attributes.SetColorMatrix((New-SaturationMatrix (1 - $desaturate))) }
             $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
             $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
             $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
@@ -140,7 +154,8 @@ foreach ($asset in $assets) {
         $packed = $json | ConvertFrom-Json
         $dimensions = @($packed.source_width, $packed.source_height, $packed.width, $packed.height)
     } else {
-        $dimensions = Convert-Texture $sourcePath $outputPath $widthLimit
+        $desaturate = if ($asset.Desaturate) { [float]$asset.Desaturate } else { 0 }
+        $dimensions = Convert-Texture $sourcePath $outputPath $widthLimit $desaturate
     }
     Write-Host ("{0,-20} {1}x{2} -> {3}x{4} ({5:N1} MB)" -f ($asset.Name + '.png'), $dimensions[0], $dimensions[1],
         $dimensions[2], $dimensions[3], ((Get-Item -LiteralPath $outputPath).Length / 1MB))
@@ -157,6 +172,7 @@ foreach ($asset in $assets) {
         source_height = $dimensions[1]
     }
     if ($asset.NormalConvention) { $entry.normal_convention = $asset.NormalConvention }
+    if ($asset.Desaturate) { $entry.desaturation = [float]$asset.Desaturate }
     if ($asset.Pack) {
         $entry.height_source = $asset.Pack.Url + $asset.Pack.Source
         $entry.height_source_sha256 = $asset.Pack.Hash

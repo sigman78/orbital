@@ -147,7 +147,8 @@
       "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/worn_rock_natural_01/worn_rock_natural_01_diff_2k.jpg",
       "source_sha256": "084E528A8B63684CF6CD9C9C1D44CEF32A8F4C9E8404394A4A1A40C70CBF000D",
       "source_width": 2048,
-      "source_height": 2048
+      "source_height": 2048,
+      "desaturation": 0.4
     },
     {
       "file": "rock_normal.png",
@@ -186,7 +187,8 @@
       "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rock_face_03/rock_face_03_diff_2k.jpg",
       "source_sha256": "644EE79DF7FFBF5F6AFC330B64DD3F33794BAB8820915FE61FFE0C88ECFD7ECE",
       "source_width": 2048,
-      "source_height": 2048
+      "source_height": 2048,
+      "desaturation": 0.4
     },
     {
       "file": "rock_face_normal.png",
@@ -225,7 +227,8 @@
       "source": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rock_boulder_dry/rock_boulder_dry_diff_2k.jpg",
       "source_sha256": "C66DE7F7B48EF1BA542C17AF780787CA6D43DA2160A46FF3544DD9FCDF65CA30",
       "source_width": 2048,
-      "source_height": 2048
+      "source_height": 2048,
+      "desaturation": 0.4
     },
     {
       "file": "rock_boulder_normal.png",
