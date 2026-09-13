@@ -62,16 +62,16 @@ struct Options {
     double fixed_time = -1; // >= 0 freezes simulation and exposure adaptation at this time
     double duration = 0;    // > 0 exits after this many wall-clock seconds
     int bookmark = -1;
-    float exposure = 1;
-    unsigned rocks = 0;       // belt override for benchmarks; 0 keeps the quality tiers
-    int vsync = -1;           // -1 default: on, except off for benchmarks
-    unsigned taa = 1;         // temporal anti-aliasing on
-    unsigned dust = 1;        // volumetric belt dust
-    unsigned disc = 1;        // far-belt disc LOD
-    float lod_scale = 1;      // far-belt fade distance scale
-    unsigned spatial = 2;     // spatial pass: 0 off, 1 FXAA, 2 SMAA
-    unsigned splat = 2;       // initial splat cut-off mode, an index into splat_radii
-    unsigned tone = 2;        // initial tone curve (PBR Neutral)
+    float exposure = render::ToneSettings{}.exposure;
+    unsigned rocks = 0; // belt override for benchmarks; 0 keeps the quality tiers
+    int vsync = -1;     // -1 default: on, except off for benchmarks
+    unsigned taa = render::AntiAliasingSettings{}.temporal_aa;              // temporal anti-aliasing on
+    unsigned dust = render::BeltDustSettings{}.enabled;                     // volumetric belt dust
+    unsigned disc = render::BeltSettings{}.disc;                            // far-belt disc LOD
+    float lod_scale = render::BeltSettings{}.lod_scale;                     // far-belt fade distance scale
+    unsigned spatial = unsigned(render::AntiAliasingSettings{}.spatial_aa); // spatial pass: 0 off, 1 FXAA, 2 SMAA
+    unsigned splat = unsigned(render::BeltSettings{}.splat_mode);           // initial splat cut-off index
+    unsigned tone = unsigned(render::ToneSettings{}.tone_curve);            // initial tone curve (PBR Neutral)
     float pan = 0;            // lateral drift as a fraction of the flight speed, stepped at a fixed 60 Hz for captures
     unsigned maximize_at = 0; // > 0 maximizes the window after this many frames, to test resizing in captures
     unsigned fullscreen_at = 0; // > 0 enters borderless fullscreen after this many frames
@@ -142,7 +142,7 @@ std::optional<Options> parse_options(int argc, char** argv) {
         else if (arg == "--taa")
             ok = parse_number(value(), options.taa) && options.taa <= 1;
         else if (arg == "--spatial")
-            ok = parse_number(value(), options.spatial) && options.spatial <= 2;
+            ok = parse_number(value(), options.spatial) && options.spatial < unsigned(render::SpatialAA::Count);
         else if (arg == "--pan")
             ok = parse_number(value(), options.pan);
         else if (arg == "--maximize-at")
@@ -150,9 +150,9 @@ std::optional<Options> parse_options(int argc, char** argv) {
         else if (arg == "--fullscreen-at")
             ok = parse_number(value(), options.fullscreen_at);
         else if (arg == "--tone")
-            ok = parse_number(value(), options.tone) && options.tone <= 2;
+            ok = parse_number(value(), options.tone) && options.tone < unsigned(render::ToneCurve::Count);
         else if (arg == "--splat")
-            ok = parse_number(value(), options.splat) && options.splat < splat_radii.size();
+            ok = parse_number(value(), options.splat) && options.splat < render::BeltSettings::splat_radii.size();
         else if (arg == "--width")
             ok = parse_number(value(), options.size.width);
         else if (arg == "--height")
@@ -191,18 +191,26 @@ void handle_key(AppState& app, Key key) {
     case Key::space: app.paused = !app.paused; break;
     case Key::f1: app.overlay = !app.overlay; break;
     case Key::f2: app.high = !app.high; break;
-    case Key::f3: app.belt_light_map = !app.belt_light_map; break;
-    case Key::f4: app.belt_extinction = !app.belt_extinction; break;
-    case Key::f5: app.temporal_aa = !app.temporal_aa; break;
-    case Key::f9: app.spatial_aa = (app.spatial_aa + 1) % 3; break;
-    case Key::f6: app.splat_mode = (app.splat_mode + 1) % splat_radii.size(); break;
-    case Key::f7: app.splat_light_twice = !app.splat_light_twice; break;
-    case Key::f8: app.tone_curve = (app.tone_curve + 1) % 3; break;
+    case Key::f3: app.belt.light_map = !app.belt.light_map; break;
+    case Key::f4: app.belt.extinction = !app.belt.extinction; break;
+    case Key::f5: app.aa.temporal_aa = !app.aa.temporal_aa; break;
+    case Key::f9:
+        app.aa.spatial_aa = render::SpatialAA((unsigned(app.aa.spatial_aa) + 1) % unsigned(render::SpatialAA::Count));
+        break;
+    case Key::f6:
+        app.belt.splat_mode = render::SplatMode((unsigned(app.belt.splat_mode) + 1) %
+                                                unsigned(render::SplatMode::Count));
+        break;
+    case Key::f7: app.belt.splat_light_twice = !app.belt.splat_light_twice; break;
+    case Key::f8:
+        app.tone.tone_curve = render::ToneCurve((unsigned(app.tone.tone_curve) + 1) %
+                                                unsigned(render::ToneCurve::Count));
+        break;
     case Key::f10: app.capture_request = hotkey_capture_path; break;
-    case Key::f11: app.belt_dust = !app.belt_dust; break;
+    case Key::f11: app.belt_dust.enabled = !app.belt_dust.enabled; break;
     case Key::f12: app.show_ui = !app.show_ui; break;
-    case Key::plus: app.exposure = exposure_keys::range.clamp(app.exposure * exposure_keys::step); break;
-    case Key::minus: app.exposure = exposure_keys::range.clamp(app.exposure / exposure_keys::step); break;
+    case Key::plus: app.tone.exposure = exposure_keys::range.clamp(app.tone.exposure * exposure_keys::step); break;
+    case Key::minus: app.tone.exposure = exposure_keys::range.clamp(app.tone.exposure / exposure_keys::step); break;
     default: break;
     }
     if (key == platform::letter_key('T'))
@@ -213,7 +221,7 @@ void handle_key(AppState& app, Key key) {
     else if (key == platform::letter_key('F'))
         app.camera.set_mode(CameraMode::Free);
     else if (key == platform::letter_key('X'))
-        app.auto_exposure = !app.auto_exposure;
+        app.tone.auto_exposure = !app.tone.auto_exposure;
     else if (const auto digit = platform::digit_of(key); digit && *digit >= 1 && *digit <= bookmark_count) {
         const std::size_t index = *digit - 1;
         app.camera.set_bookmark(index, app.bodies);
@@ -263,16 +271,16 @@ void update_title(platform::Window& window, const render::Stats& stats, const Ap
         "{} rocks  |  {:.2f} M tris  |  {}  |  belt map {} ext {} dust {}  |  TAA {} + {}  |  splats {} lit {}  |  "
         "tone {}",
         fps, stats.frame_ms, p95_ms, stats.gpu_ms, stats.draw_calls, stats.rock_groups_drawn, stats.visible_asteroids,
-        stats.triangles / 1e6, app.high ? "HIGH" : "BASELINE", app.belt_light_map ? "on" : "off",
-        app.belt_extinction ? "on" : "off", app.belt_dust ? "on" : "off", app.temporal_aa ? "on" : "off",
-        app.spatial_aa == 0   ? "none"
-        : app.spatial_aa == 1 ? "FXAA"
-                              : "SMAA",
-        splat_radii[app.splat_mode] > 0 ? std::format("< {:.1f} px", splat_radii[app.splat_mode]) : "off",
-        app.splat_light_twice ? "2x" : "1x",
-        app.tone_curve == 0   ? "ACES"
-        : app.tone_curve == 1 ? "AgX"
-                              : "Neutral"));
+        stats.triangles / 1e6, app.high ? "HIGH" : "BASELINE", app.belt.light_map ? "on" : "off",
+        app.belt.extinction ? "on" : "off", app.belt_dust.enabled ? "on" : "off", app.aa.temporal_aa ? "on" : "off",
+        app.aa.spatial_aa == render::SpatialAA::Off    ? "none"
+        : app.aa.spatial_aa == render::SpatialAA::FXAA ? "FXAA"
+                                                       : "SMAA",
+        app.belt.billboard_radius() > 0 ? std::format("< {:.1f} px", app.belt.billboard_radius()) : "off",
+        app.belt.splat_light_twice ? "2x" : "1x",
+        app.tone.tone_curve == render::ToneCurve::ACES  ? "ACES"
+        : app.tone.tone_curve == render::ToneCurve::AgX ? "AgX"
+                                                        : "Neutral"));
 }
 
 struct FrameTimes {
@@ -303,19 +311,19 @@ void write_benchmark(const std::filesystem::path& path, const FrameTimes& times)
 AppState initial_state(const Options& options, const SystemDescription& system) {
     AppState app;
     app.high = options.high;
-    app.temporal_aa = options.taa != 0;
-    app.spatial_aa = options.spatial;
-    app.splat_mode = options.splat;
-    app.tone_curve = options.tone;
+    app.aa.temporal_aa = options.taa != 0;
+    app.aa.spatial_aa = render::SpatialAA(options.spatial);
+    app.belt.splat_mode = render::SplatMode(options.splat);
+    app.tone.tone_curve = render::ToneCurve(options.tone);
     app.pan = options.pan;
     app.overlay = !options.no_hud;
     app.show_ui = options.ui;
-    app.belt_dust = options.dust != 0;
-    app.belt_disc = options.disc != 0;
-    app.belt_lod_scale = options.lod_scale;
+    app.belt_dust.enabled = options.dust != 0;
+    app.belt.disc = options.disc != 0;
+    app.belt.lod_scale = options.lod_scale;
     app.vsync = options.vsync < 0 ? options.benchmark.empty() : options.vsync != 0;
-    app.exposure = options.exposure;
-    app.auto_exposure = options.fixed_time < 0;
+    app.tone.exposure = options.exposure;
+    app.tone.auto_exposure = options.fixed_time < 0;
     app.bodies = evaluate_system(system, std::max(0.0, options.fixed_time));
     if (options.bookmark >= 0)
         app.camera.set_bookmark(unsigned(options.bookmark), app.bodies);
@@ -385,77 +393,18 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
         const render::FrameInput frame_input{.camera = app.camera,
                                              .bodies = app.bodies,
                                              .time = simulation_time,
-                                             .exposure = app.exposure,
                                              .high_quality = app.high,
                                              .overlay = app.overlay,
-                                             .auto_exposure = app.auto_exposure,
-                                             .belt_light_map = app.belt_light_map,
-                                             .belt_extinction = app.belt_extinction,
-                                             .belt_dust = app.belt_dust,
-                                             .dust_density = app.dust_density,
-                                             .dust_brightness = app.dust_brightness,
-                                             .dust_far = app.dust_far,
-                                             .dust_saturation = app.dust_saturation,
-                                             .dust_tint = {app.dust_tint[0], app.dust_tint[1], app.dust_tint[2]},
-                                             .belt_disc = app.belt_disc,
-                                             .belt_lod_scale = app.belt_lod_scale,
-                                             .temporal_aa = app.temporal_aa,
-                                             .spatial_aa = app.spatial_aa,
-                                             .billboard_radius = splat_radii[app.splat_mode],
-                                             .splat_light_twice = app.splat_light_twice,
-                                             .tone_curve = app.tone_curve,
                                              .ui = ui_draw,
-                                             .ocean_roughness = app.ocean_roughness,
-                                             .glint_intensity = app.glint_intensity,
-                                             .sea_patchiness = app.sea_patchiness,
-                                             .cloud_shadow = app.cloud_shadow,
-                                             .cloud_shadow_softness = app.cloud_shadow_softness,
-                                             .cloud_opacity = app.cloud_opacity,
-                                             .glare_intensity = app.glare_intensity,
-                                             .ghost_strength = app.ghost_strength,
-                                             .starburst_strength = app.starburst_strength,
-                                             .starburst_blades = unsigned(std::max(app.starburst_blades, 0)),
-                                             .sun_disc_radius = app.sun_disc_radius,
-                                             .sun_limb_darkening = app.sun_limb_darkening,
-                                             .bloom_intensity = app.bloom ? app.bloom_intensity : 0.f,
-                                             .bloom_threshold = app.bloom_threshold,
-                                             .bloom_knee = app.bloom_knee,
-                                             .aberration = app.aberration,
-                                             .vignette = app.vignette,
-                                             .grain = app.grain,
-                                             .black_offset = app.black_offset,
-                                             .motion_streaks = app.motion_streaks,
-                                             .motion_streak_intensity = app.motion_streak_intensity,
-                                             .catalogue_stars = app.catalogue_stars,
-                                             .star_brightness = app.star_brightness,
-                                             .star_saturation = app.star_saturation,
-                                             .milky_way = app.milky_way,
-                                             .milky_way_brightness = app.milky_way_brightness,
-                                             .milky_way_contrast = app.milky_way_contrast,
-                                             .milky_way_splats = app.milky_way_splats,
-                                             .galaxy_divisor = app.galaxy_divisor,
-                                             .dust_amplitude = app.dust_amplitude,
-                                             .dust_scale = app.dust_scale,
-                                             .dust_lacunarity = app.dust_lacunarity,
-                                             .dust_gain = app.dust_gain,
-                                             .gas_flow = app.gas_flow,
-                                             .gas_time_scale = app.gas_time_scale,
-                                             .gas_cycle = app.gas_cycle,
-                                             .gas_turbulence = app.gas_turbulence,
-                                             .gas_haze = app.gas_haze,
-                                             .gas_terminator = app.gas_terminator,
-                                             .gas_relief = app.gas_relief,
-                                             .gas_lightning_rate = app.gas_lightning_rate,
-                                             .gas_lightning = app.gas_lightning,
-                                             .gas_polar = app.gas_polar,
-                                             .gas_cap_size = app.gas_cap_size,
-                                             .gas_cap_blend = app.gas_cap_blend,
-                                             .gas_cap_opacity = app.gas_cap_opacity,
-                                             .gas_layers = app.gas_layers,
-                                             .gas_layer_lift = app.gas_layer_lift,
-                                             .gas_layer_shadow = app.gas_layer_shadow,
-                                             .gas_streaks = app.gas_streaks,
-                                             .gas_streak_strength = app.gas_streak_strength};
+                                             .tone = app.tone,
+                                             .aa = app.aa,
+                                             .belt = app.belt,
+                                             .belt_dust = app.belt_dust.enabled,
+                                             .earth = app.earth,
+                                             .sun = app.sun,
+                                             .post = app.post,
+                                             .sky = app.sky,
+                                             .gas = app.gas};
         renderer.set_vsync(app.vsync);
         if (renderer.draw(frame_input)) {
             frames++;

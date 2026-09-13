@@ -255,10 +255,11 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
         frame.camera_lattice = {float(camera.position.x - index.x * cell), float(camera.position.y - index.y * cell),
                                 float(camera.position.z - index.z * cell), float(cell)};
         frame.camera_cell = {float(index.x), float(index.y), float(index.z),
-                             input.motion_streaks ? input.motion_streak_intensity : 0.f};
+                             input.post.motion_streaks ? input.post.motion_streak_intensity : 0.f};
     }
-    frame.forward_exposure.w = input.exposure * (input.auto_exposure ? adapted_exposure : 1) * tone_curves::base_gain *
-                               tone_curves::exposure_trim[std::min(input.tone_curve, 2u)];
+    frame.forward_exposure.w =
+        input.tone.exposure * (input.tone.auto_exposure ? adapted_exposure : 1) * tone_curves::base_gain *
+        tone_curves::exposure_trim[std::min(unsigned(input.tone.tone_curve), unsigned(ToneCurve::Count) - 1)];
     frame.sun = f4(system.star.position - camera.position, sun_flare::disc_radius);
     const auto distance_to = [&](unsigned body) { return length(input.bodies[body].position - camera.position); };
     const bool giant_close = distance_to(giant_index) < shadow_placement::giant_distance;
@@ -310,12 +311,12 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
         const double slab = ring.thickness * .5 * 1.4 * belt_lod::slab_half_heights;
         const double outside = std::max(std::max(std::abs(h) - slab, r - reach), 0.0) /
                                (slab * belt_lod::ramp_half_heights);
-        const double scale = std::max(double(input.belt_lod_scale), .05);
+        const double scale = std::max(double(input.belt.lod_scale), .05);
         const double u = std::clamp(
             (outside / scale - belt_lod::fade_start) / (belt_lod::fade_end - belt_lod::fade_start), 0.0, 1.0);
-        const float weight = input.belt_disc ? float(u * u * (3 - 2 * u)) : 0.f;
+        const float weight = input.belt.disc ? float(u * u * (3 - 2 * u)) : 0.f;
         frame.belt_disc = {float(targets::belt_disc_map_size), weight, float(targets::belt_disc_rock_map_size),
-                           input.belt_disc ? 1.f : 0.f};
+                           input.belt.disc ? 1.f : 0.f};
         stats.belt_lod = weight;
     }
     frame.belt_normal = f4(belt_plane_normal);
@@ -323,31 +324,35 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
                      input.overlay ? 1.f : 0.f};
     for (unsigned i = 0; i < body_count; i++)
         frame.bodies[i] = f4(input.bodies[i].position - camera.position, float(input.bodies[i].radius));
-    frame.scene = {float(body_count), float(giant_index), input.belt_light_map ? 1.f : 0.f,
-                   input.belt_extinction ? 1.f : 0.f};
-    frame.quality = {input.temporal_aa ? 1.f : 0.f, float(input.tone_curve), input.belt_dust ? 1.f : 0.f, 0};
-    frame.dust = {input.dust_density, input.dust_brightness, input.dust_far, input.dust_saturation};
-    frame.dust_tint = {input.dust_tint[0], input.dust_tint[1], input.dust_tint[2], 0};
-    frame.earth = {input.ocean_roughness, input.glint_intensity, input.cloud_shadow, input.cloud_shadow_softness};
-    frame.earth_more = {input.sea_patchiness, input.cloud_opacity, 0, 0};
-    frame.lens = {input.glare_intensity, input.ghost_strength, input.starburst_strength,
-                  float(std::min(input.starburst_blades, 12u))};
-    frame.sun_disc = {input.sun_disc_radius, input.sun_limb_darkening, 0, 0};
-    frame.post = {input.bloom_intensity, input.bloom_threshold, input.bloom_knee, input.aberration};
-    frame.post_more = {input.vignette, input.grain, input.black_offset, 0};
-    frame.giant = {input.gas_time_scale, std::max(input.gas_cycle, .1f), input.gas_turbulence,
-                   input.gas_flow ? 1.f : 0.f};
-    frame.giant_more = {input.gas_haze, input.gas_terminator, input.gas_relief, input.gas_cap_opacity};
-    frame.giant_night = {input.gas_lightning_rate, input.gas_lightning,
-                         input.gas_polar && polar_caps ? input.gas_cap_size : 0.f, input.gas_cap_blend};
-    frame.stars = {star_count && input.catalogue_stars ? 1.f : 0.f,
-                   star_count && input.catalogue_stars ? input.star_brightness : 0.f, input.star_saturation,
-                   splat_count && input.milky_way ? input.milky_way_brightness : 0.f};
-    frame.galaxy = {float(std::clamp(input.milky_way_splats, 0, int(splat_count))), input.dust_amplitude,
-                    input.dust_scale, 0};
-    frame.galaxy_more = {input.dust_lacunarity, input.dust_gain, float(galaxy_divisor), input.milky_way_contrast};
-    frame.giant_layers = {input.gas_layers ? input.gas_layer_lift : 0.f, input.gas_layer_shadow,
-                          input.gas_streaks ? input.gas_streak_strength : 0.f, 0};
+    frame.scene = {float(body_count), float(giant_index), input.belt.light_map ? 1.f : 0.f,
+                   input.belt.extinction ? 1.f : 0.f};
+    frame.quality = {input.aa.temporal_aa ? 1.f : 0.f, float(input.tone.tone_curve),
+                     input.belt_dust.enabled ? 1.f : 0.f, 0};
+    frame.dust = {input.belt_dust.density, input.belt_dust.brightness, input.belt_dust.far, input.belt_dust.saturation};
+    frame.dust_tint = {input.belt_dust.tint[0], input.belt_dust.tint[1], input.belt_dust.tint[2], 0};
+    frame.earth = {input.earth.ocean_roughness, input.earth.glint_intensity, input.earth.cloud_shadow,
+                   input.earth.cloud_shadow_softness};
+    frame.earth_more = {input.earth.sea_patchiness, input.earth.cloud_opacity, 0, 0};
+    frame.lens = {input.sun.glare_intensity, input.sun.ghost_strength, input.sun.starburst_strength,
+                  float(std::clamp(input.sun.starburst_blades, 0, 12))};
+    frame.sun_disc = {input.sun.sun_disc_radius, input.sun.sun_limb_darkening, 0, 0};
+    frame.post = {input.post.bloom ? input.post.bloom_intensity : 0.f, input.post.bloom_threshold,
+                  input.post.bloom_knee, input.post.aberration};
+    frame.post_more = {input.post.vignette, input.post.grain, input.post.black_offset, 0};
+    frame.giant = {input.gas.time_scale, std::max(input.gas.cycle, .1f), input.gas.turbulence,
+                   input.gas.flow ? 1.f : 0.f};
+    frame.giant_more = {input.gas.haze, input.gas.terminator, input.gas.relief, input.gas.cap_opacity};
+    frame.giant_night = {input.gas.lightning_rate, input.gas.lightning,
+                         input.gas.polar && polar_caps ? input.gas.cap_size : 0.f, input.gas.cap_blend};
+    frame.stars = {star_count && input.sky.catalogue_stars ? 1.f : 0.f,
+                   star_count && input.sky.catalogue_stars ? input.sky.star_brightness : 0.f, input.sky.star_saturation,
+                   splat_count && input.sky.milky_way ? input.sky.milky_way_brightness : 0.f};
+    frame.galaxy = {float(std::clamp(input.sky.milky_way_splats, 0, int(splat_count))), input.sky.dust_amplitude,
+                    input.sky.dust_scale, 0};
+    frame.galaxy_more = {input.sky.dust_lacunarity, input.sky.dust_gain, float(galaxy_divisor),
+                         input.sky.milky_way_contrast};
+    frame.giant_layers = {input.gas.layers ? input.gas.layer_lift : 0.f, input.gas.layer_shadow,
+                          input.gas.streaks ? input.gas.streak_strength : 0.f, 0};
 
     // Sun position in screen space for the lens flare, hidden when a body covers it.
     const Vec3d sun_direction = normalized(system.star.position - camera.position);
@@ -405,12 +410,12 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
         p.band_spin[band] = {transform.cos_spin[band], transform.sin_spin[band], 0, 0};
     p.levels = {geometry::rock_level_thresholds[0], geometry::rock_level_thresholds[1],
                 geometry::rock_level_thresholds[2], geometry::rock_level_thresholds[3]};
-    p.billboard = {geometry::rock_level_thresholds[4], input.billboard_radius, belt_culling::billboard::min_pixels,
-                   frame.belt_disc.y};
+    p.billboard = {geometry::rock_level_thresholds[4], input.belt.billboard_radius(),
+                   belt_culling::billboard::min_pixels, frame.belt_disc.y};
     const unsigned tier_count = (input.high_quality ? high_quality : baseline_quality).belt_count;
     p.rock_limit = std::min(rock_count, belt_count_override ? belt_count_override : tier_count);
     p.body_count = body_count;
-    p.light_in_count_pass = input.splat_light_twice ? 1u : 0u;
+    p.light_in_count_pass = input.belt.splat_light_twice ? 1u : 0u;
     for (unsigned group = 0; group < rock_group_count; group++) {
         p.index_counts[group] = rocks[group].index_count;
         p.first_indices[group] = rocks[group].first_index;
@@ -609,7 +614,7 @@ void Renderer::Impl::record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, 
 }
 
 void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view,
-                                        unsigned spatial_aa, bool bloom, const ImDrawData* ui, std::uint8_t* ui_cpu,
+                                        SpatialAA spatial_aa, bool bloom, const ImDrawData* ui, std::uint8_t* ui_cpu,
                                         std::uint64_t ui_gpu) {
     const unsigned history_write = frame_index % 2;
     root.mode = std::uint32_t(PostMode::tonemap);
@@ -622,11 +627,11 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
     }
     // Tone map into the final image, or through an intermediate when a spatial pass follows.
     root.mode = std::uint32_t(PostMode::tonemap);
-    fullscreen_pass(cmd, spatial_aa ? ldr : final_image, pso.post, root);
-    if (spatial_aa == 1) {
+    fullscreen_pass(cmd, spatial_aa != SpatialAA::Off ? ldr : final_image, pso.post, root);
+    if (spatial_aa == SpatialAA::FXAA) {
         root.mode = std::uint32_t(PostMode::fxaa);
         fullscreen_pass(cmd, final_image, pso.fxaa, root);
-    } else if (spatial_aa == 2) {
+    } else if (spatial_aa == SpatialAA::SMAA) {
         // SMAA: edges, blending weights, neighbourhood blend (modes 0, 1, 2 of smaa.slang).
         root.mode = 0;
         fullscreen_pass(cmd, smaa_edges, pso.smaa_edges, root);
@@ -724,7 +729,7 @@ bool Renderer::draw(const FrameInput& input) {
     if (!drawable.x || !drawable.y)
         return false;
     s.resize({drawable.x, drawable.y});
-    s.resize_galaxy(unsigned(input.galaxy_divisor));
+    s.resize_galaxy(unsigned(input.sky.galaxy_resolution));
     const auto swap = gpu::acquire(s.device);
     if (!swap.render_view)
         return false;
@@ -788,7 +793,7 @@ bool Renderer::draw(const FrameInput& input) {
                  gpu::Access::color_write | gpu::Access::depth_stencil_write | gpu::Access::shader_read);
     s.record_cull_passes(cmd, cull_root);
     s.record_shadow_pass(cmd, root);
-    if (input.belt_light_map) {
+    if (input.belt.light_map) {
         // Only the size-tail rocks splat; their ids are sorted, so the tier limit is a prefix.
         const auto tail_end = std::upper_bound(s.rock_tail_ids.begin(), s.rock_tail_ids.end(),
                                                scratch->params.rock_limit - 1);
@@ -833,7 +838,7 @@ bool Renderer::draw(const FrameInput& input) {
     // Belt dust scatters over everything the belt lies in front of, after the atmospheres.
     // Belt dust and the far-belt disc: the near march at half resolution, then
     // one composite that mixes it with the far tier by the LOD weight.
-    const bool near_dust = input.belt_dust && frame.belt_disc.y < 1;
+    const bool near_dust = input.belt_dust.enabled && frame.belt_disc.y < 1;
     if (near_dust) {
         root.mode = 0;
         s.fullscreen_pass(cmd, s.belt_dust, s.pso.belt_dust, root);
@@ -843,7 +848,7 @@ bool Renderer::draw(const FrameInput& input) {
         s.fullscreen_pass(cmd, s.hdr, s.pso.belt_dust_blend, root, true);
     }
     // Motion streaks: world-fixed motes streak past by their own screen motion, depth tested against the scene.
-    if (input.motion_streaks && input.motion_streak_intensity > 0) {
+    if (input.post.motion_streaks && input.post.motion_streak_intensity > 0) {
         gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,
                      gpu::Access::depth_stencil_read);
         gpu::ColorAttachment color{.render_view = s.hdr.view, .load = gpu::LoadOp::load};
@@ -860,7 +865,7 @@ bool Renderer::draw(const FrameInput& input) {
         gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
                      gpu::Access::shader_read);
     }
-    if (input.temporal_aa) {
+    if (input.aa.temporal_aa) {
         gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,
                      gpu::Access::depth_stencil_write);
         s.record_splat_mask_pass(cmd, root, args_address);
@@ -870,7 +875,8 @@ bool Renderer::draw(const FrameInput& input) {
                      gpu::Access::shader_read);
     }
     stamp(3);
-    s.record_post_passes(cmd, root, swap.render_view, input.spatial_aa, input.bloom_intensity > 0, input.ui,
+    s.record_post_passes(cmd, root, swap.render_view, input.aa.spatial_aa,
+                         input.post.bloom && input.post.bloom_intensity > 0, input.ui,
                          dynamic + heap_layout.ui_offset(), frame_address + heap_layout.ui_offset());
     stamp(4);
     s.stats.prepare_ms =

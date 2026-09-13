@@ -345,7 +345,7 @@ struct Renderer::Impl {
     void record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, std::uint64_t args_address);
     void record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input, const FrameData& frame,
                            std::uint64_t args_address);
-    void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view, unsigned spatial_aa,
+    void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view, SpatialAA spatial_aa,
                             bool bloom, const ImDrawData* ui, std::uint8_t* ui_cpu, std::uint64_t ui_gpu);
     void record_ui(gpu::CommandBuffer* cmd, const ImDrawData* ui, std::uint8_t* cpu, std::uint64_t gpu);
     void fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, gpu::PSO* pipeline, Root root,
