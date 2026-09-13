@@ -30,6 +30,7 @@ namespace window_limits {
 inline constexpr Extent2D default_size{1600, 900};
 inline constexpr Range<unsigned> width{320, 7680}, height{200, 4320};
 inline constexpr double title_refresh_seconds = 0.5;
+inline constexpr std::size_t timing_history_frames = 240; // recent CPU samples for the panel and title
 } // namespace window_limits
 
 namespace benchmark {
@@ -376,7 +377,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
         // The overlay is built every frame so its input state stays current; the panel itself is optional.
         ui.begin_frame();
         if (app.show_ui) {
-            const std::size_t recent = std::min<std::size_t>(times.cpu_ms.size(), 240);
+            const std::size_t recent = std::min(times.cpu_ms.size(), window_limits::timing_history_frames);
             draw_panel(app, renderer.stats(), std::span<const float>(times.cpu_ms).last(recent));
         }
         const ImDrawData* ui_draw = ui.end_frame();
@@ -463,13 +464,17 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
             if (options.fullscreen_at && frames == options.fullscreen_at)
                 window.toggle_fullscreen();
             const auto stats = renderer.stats();
+            if (options.benchmark.empty() && times.cpu_ms.size() == window_limits::timing_history_frames)
+                times.cpu_ms.erase(times.cpu_ms.begin());
             times.cpu_ms.push_back(stats.frame_ms);
-            times.gpu_ms.push_back(stats.gpu_ms);
-            times.prepare_ms.push_back(stats.prepare_ms);
-            times.cull_shadow_ms.push_back(stats.shadow_ms);
-            times.surface_ms.push_back(stats.surface_ms);
-            times.atmosphere_ms.push_back(stats.atmosphere_ms);
-            times.post_ms.push_back(stats.post_ms);
+            if (!options.benchmark.empty()) {
+                times.gpu_ms.push_back(stats.gpu_ms);
+                times.prepare_ms.push_back(stats.prepare_ms);
+                times.cull_shadow_ms.push_back(stats.shadow_ms);
+                times.surface_ms.push_back(stats.surface_ms);
+                times.atmosphere_ms.push_back(stats.atmosphere_ms);
+                times.post_ms.push_back(stats.post_ms);
+            }
             if (!app.capture_request.empty()) {
                 const auto path = session.directory / app.capture_request;
                 if (renderer.capture(path))
@@ -509,8 +514,17 @@ int run(const Options& options) {
     log::info(
         "Ready. RMB + WASD: fly | 1-6: views | T: tour | F12: control panel | F10: capture | --help for all controls");
     FrameTimes times;
-    times.cpu_ms.reserve(options.frame_limit ? options.frame_limit : benchmark::expected_frames);
-    times.gpu_ms.reserve(times.cpu_ms.capacity());
+    times.cpu_ms.reserve(options.benchmark.empty() ? window_limits::timing_history_frames
+                         : options.frame_limit     ? options.frame_limit
+                                                   : benchmark::expected_frames);
+    if (!options.benchmark.empty()) {
+        times.gpu_ms.reserve(times.cpu_ms.capacity());
+        times.prepare_ms.reserve(times.cpu_ms.capacity());
+        times.cull_shadow_ms.reserve(times.cpu_ms.capacity());
+        times.surface_ms.reserve(times.cpu_ms.capacity());
+        times.atmosphere_ms.reserve(times.cpu_ms.capacity());
+        times.post_ms.reserve(times.cpu_ms.capacity());
+    }
     const unsigned frames = frame_loop({.options = options,
                                         .system = system,
                                         .directory = directory,

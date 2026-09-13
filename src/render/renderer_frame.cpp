@@ -841,24 +841,6 @@ bool Renderer::draw(const FrameInput& input) {
     if (near_dust || frame.belt_disc.y > 0) {
         root.mode = 1;
         s.fullscreen_pass(cmd, s.hdr, s.pso.belt_dust_blend, root, true);
-        // Motion streaks: world-fixed motes streak past by their own screen motion, depth tested against the scene.
-        if (input.motion_streaks && input.motion_streak_intensity > 0) {
-            gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,
-                         gpu::Access::depth_stencil_read);
-            gpu::ColorAttachment color{.render_view = s.hdr.view, .load = gpu::LoadOp::load};
-            gpu::begin_render_pass(
-                cmd, {.colors = {&color, 1}, .depth = {.render_view = s.depth.view, .load = gpu::LoadOp::load}});
-            gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
-            gpu::bind_pso(cmd, s.pso.motes);
-            root.mode = 0;
-            gpu::draw(cmd, root, 6, targets::mote_count);
-            s.stats.draw_calls++;
-            gpu::end_render_pass(cmd);
-            gpu::barrier(cmd, gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_read, gpu::Stage::fragment,
-                         gpu::Access::shader_read);
-            gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
-                         gpu::Access::shader_read);
-        }
     }
     // Motion streaks: world-fixed motes streak past by their own screen motion, depth tested against the scene.
     if (input.motion_streaks && input.motion_streak_intensity > 0) {
