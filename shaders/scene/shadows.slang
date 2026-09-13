@@ -1,7 +1,7 @@
 #pragma once
 #include "bindings.slang"
 #include "../lib/noise.slang"
-#include "../belt.slang"
+#include "../belt/belt.slang"
 
 float localShadow(Frame* frame, float3 point, float3 normal)
 {

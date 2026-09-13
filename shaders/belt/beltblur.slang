@@ -1,4 +1,4 @@
-#include "scene/frame_bindings.slang"
+#include "../scene/frame_bindings.slang"
 
 // Separable blur of the belt transmittance map: mode 0 reads the splat
 // target and writes the scratch map horizontally, mode 1 reads the scratch

@@ -50,15 +50,21 @@ if(ORBITAL_BUILD_DEMO)
   add_subdirectory(third_party/NoGraphicsAPI EXCLUDE_FROM_ALL)
   find_program(SPIRV_VAL_EXECUTABLE NAMES spirv-val HINTS "${CMAKE_SOURCE_DIR}/.tools/Vulkan-ValidationLayers/bin" "$ENV{VULKAN_SDK}/Bin")
   include(cmake/Slang.cmake)
-  foreach(shader IN ITEMS fullscreen surface beltsplat ui discsplat motes stars)
-    orbital_compile_slang("shaders/${shader}.vertex.spv" "shaders/${shader}.slang" vertexMain vertex)
+  foreach(source IN ITEMS scene/fullscreen surface/surface belt/beltsplat overlay/ui belt/discsplat scene/motes sky/stars)
+    get_filename_component(shader "${source}" NAME)
+    orbital_compile_slang("shaders/${shader}.vertex.spv" "shaders/${source}.slang" vertexMain vertex)
     list(APPEND ORBITAL_SHADER_OUTPUTS "${CMAKE_BINARY_DIR}/shaders/${shader}.vertex.spv")
   endforeach()
-  foreach(shader IN ITEMS surface_earth surface_giant surface_airless surface_rock background galaxy atmosphere post temporal beltsplat beltblur smaa ui dust disc discsplat motes stars)
-    orbital_compile_slang("shaders/${shader}.fragment.spv" "shaders/${shader}.slang" fragmentMain fragment)
+  foreach(source IN ITEMS
+      planets/surface_earth planets/surface_giant planets/surface_airless planets/atmosphere
+      surface/surface_rock sky/background sky/galaxy sky/stars
+      belt/beltsplat belt/beltblur belt/dust belt/disc belt/discsplat
+      aa/temporal aa/smaa post/post overlay/ui scene/motes)
+    get_filename_component(shader "${source}" NAME)
+    orbital_compile_slang("shaders/${shader}.fragment.spv" "shaders/${source}.slang" fragmentMain fragment)
     list(APPEND ORBITAL_SHADER_OUTPUTS "${CMAKE_BINARY_DIR}/shaders/${shader}.fragment.spv")
   endforeach()
-  orbital_compile_slang("shaders/cull.compute.spv" "shaders/cull.slang" computeMain compute)
+  orbital_compile_slang("shaders/cull.compute.spv" "shaders/belt/cull.slang" computeMain compute)
   list(APPEND ORBITAL_SHADER_OUTPUTS "${CMAKE_BINARY_DIR}/shaders/cull.compute.spv")
   add_custom_target(orbital_shaders DEPENDS ${ORBITAL_SHADER_OUTPUTS})
 

@@ -1,6 +1,6 @@
-#include "scene/frame_bindings.slang"
-#include "scene/view.slang"
-#include "lib/color.slang"
+#include "../scene/frame_bindings.slang"
+#include "../scene/view.slang"
+#include "../lib/color.slang"
 
 // Temporal anti-aliasing over the jittered HDR frame. History is reprojected
 // through the previous frame's projection and camera delta, clipped to the

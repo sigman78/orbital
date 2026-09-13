@@ -1,6 +1,6 @@
-#include "scene/frame_bindings.slang"
-#include "lib/math.slang"
-#include "lib/projection.slang"
+#include "../scene/frame_bindings.slang"
+#include "../lib/math.slang"
+#include "../lib/projection.slang"
 
 // The Bright Star Catalogue as points at infinity: one instanced quad per
 // star, a Gaussian of about a pixel whose integrated energy is the star's

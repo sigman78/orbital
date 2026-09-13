@@ -1,7 +1,7 @@
-#include "scene/frame_bindings.slang"
-#include "scene/view.slang"
-#include "lib/math.slang"
-#include "lib/color.slang"
+#include "../scene/frame_bindings.slang"
+#include "../scene/view.slang"
+#include "../lib/math.slang"
+#include "../lib/color.slang"
 
 // The Milky Way as a cloud of Gaussian splats on the sphere, fitted to ESO's
 // panorama by tools/bake-splats.py and summed here per pixel at a quarter of

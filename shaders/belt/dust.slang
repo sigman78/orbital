@@ -1,6 +1,6 @@
-#include "scene/frame_bindings.slang"
-#include "scene/view.slang"
-#include "lib/noise.slang"
+#include "../scene/frame_bindings.slang"
+#include "../scene/view.slang"
+#include "../lib/noise.slang"
 #include "beltfar.slang"
 
 // Belt dust: the particulate matter between the rocks, too fine to draw, as a

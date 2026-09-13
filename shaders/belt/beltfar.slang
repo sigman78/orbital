@@ -1,10 +1,10 @@
 #pragma once
-#include "scene/frame_bindings.slang"
-#include "scene/view.slang"
-#include "lib/math.slang"
-#include "lib/noise.slang"
-#include "lib/color.slang"
-#include "lib/scattering.slang"
+#include "../scene/frame_bindings.slang"
+#include "../scene/view.slang"
+#include "../lib/math.slang"
+#include "../lib/noise.slang"
+#include "../lib/color.slang"
+#include "../lib/scattering.slang"
 #include "belt.slang"
 
 // The belt dust and the far-belt disc share these: the medium's constants,

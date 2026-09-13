@@ -1,24 +1,36 @@
 # Shader organization
 
-Entry points stay at the top level. Reusable code is separated by its dependencies,
-not collected in an umbrella include.
+Shaders are grouped by rendering feature. Entry points live beside the helpers they
+own; shared utilities and scene interfaces have separate directories.
 
-| Directory | Responsibility | Dependency rule |
-| --- | --- | --- |
-| `lib/` | Geometry, noise, color transforms, projection, sampling, scattering and tone curves | No frame, push constants or global resources; pass images and samplers explicitly |
-| `scene/` | Descriptor bindings, frame root, view reconstruction, body visibility and shadows | Frame-aware helpers take `Frame*`; only `frame_bindings.slang` declares the surface/fullscreen root |
-| `surface/` | Varyings and material records, visibility setup, BRDF, cloud geometry and gas-giant effects | Include the specific material or lighting helper needed; the vertex shader does not import fragment shading |
-| `post/` | FXAA and lens effects | Explicit inputs; no global push constants or descriptor arrays |
+| Directory | Responsibility |
+| --- | --- |
+| `aa/` | FXAA, SMAA and temporal accumulation/reprojection |
+| `planets/` | Earth, airless and gas-giant materials, clouds and atmosphere |
+| `belt/` | Culling, rock classification, splats, distant belt integration, dust and disc maps |
+| `sky/` | Background, galaxy and stars |
+| `post/` | Exposure, bloom, tone mapping, presentation and lens effects |
+| `overlay/` | UI rendering |
+| `surface/` | Shared surface vertex stage, material/varying records, BRDF and lighting; rock material used by belt rocks and moonlets |
+| `scene/` | Bindings, frame root, view reconstruction, visibility, shadows, fullscreen geometry and motion cues |
+| `lib/` | Resource-independent geometry, noise, color, projection, sampling, scattering and tone curves |
 
-`surface/brdf.slang` and `surface/giant_lightning.slang` are pure feature helpers:
-illumination, glint strength and lightning settings arrive as parameters. Giant material
-sampling uses the scene descriptor table, while its frame settings are passed explicitly.
-`belt.slang`, `beltfar.slang`, `clouds.slang` and `rockclass.slang` remain cohesive
-feature helpers at the top level.
+Feature folders contain both entry points and reusable helpers. Every helper includes
+its own dependencies and uses `#pragma once`; callers must not depend on include order
+or include an entry point. General utilities take explicit inputs and do not depend on
+scene or feature code. Frame-aware helpers take `Frame*`; resource bindings belong to
+`scene/bindings.slang`.
 
-Every helper includes its own dependencies and has an include guard. Callers must not
-depend on another entry point or on include order. Add general math to the smallest
-appropriate `lib/` file; keep scene-specific effects in their feature family.
+Dependencies follow actual reuse: shared surface geometry uses planet cloud-shell
+geometry, and scene shadows use belt extinction. These are narrow helper dependencies,
+not imports of feature entry points. `planets/giant_lightning.slang` and
+`surface/brdf.slang` are pure feature helpers. FXAA takes an explicit image and sampler;
+SMAA and temporal entry points use scene bindings. Temporal AA has no dependency on
+post-processing implementation. The post dispatcher currently invokes the FXAA helper.
+
+CMake lists source paths by feature but retains the existing flat SPIR-V filenames,
+so folder moves do not change runtime pipeline names or the C++ shader interface.
+Only shared C++/Slang ABI headers remain at the root.
 
 ## Bindings and interfaces
 

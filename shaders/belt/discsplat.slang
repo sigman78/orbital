@@ -1,4 +1,4 @@
-#include "scene_shared.h"
+#include "../scene_shared.h"
 #include "rockclass.slang"
 
 // Far-belt map, rock layer: every rock adds its projected cross-section,

@@ -1,6 +1,6 @@
-#include "scene/frame_bindings.slang"
-#include "scene/view.slang"
-#include "lib/noise.slang"
+#include "../scene/frame_bindings.slang"
+#include "../scene/view.slang"
+#include "../lib/noise.slang"
 
 // The Milky Way for this pixel: the splat sum, drawn at a quarter of the frame
 // since it is smooth at a degree and more, read here bilinearly. rgb the

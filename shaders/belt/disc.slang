@@ -1,4 +1,4 @@
-#include "scene/frame_bindings.slang"
+#include "../scene/frame_bindings.slang"
 #include "beltfar.slang"
 
 // Far-belt sunlight bake: the light reaching each texel of the belt plane

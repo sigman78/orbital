@@ -1,5 +1,5 @@
 #pragma once
-#include "lighting.slang"
+#include "../surface/lighting.slang"
 #include "giant_lightning.slang"
 #include "../lib/scattering.slang"
 

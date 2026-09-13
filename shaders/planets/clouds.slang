@@ -1,8 +1,8 @@
 #pragma once
-#include "scene/bindings.slang"
-#include "lib/noise.slang"
-#include "lib/sampling.slang"
-#include "surface/cloud_geometry.slang"
+#include "../scene/bindings.slang"
+#include "../lib/noise.slang"
+#include "../lib/sampling.slang"
+#include "cloud_geometry.slang"
 
 // The Earth's cloud layer, shared by the surface shader (which draws the
 // clouds and shadows the ground) and the atmosphere shader (which shadows the

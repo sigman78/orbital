@@ -1,4 +1,4 @@
-#include "scene_shared.h"
+#include "../scene_shared.h"
 
 // GPU belt culling: one thread per rock decides visibility, level and
 // placement, three passes turn that into per-group instance lists and
@@ -9,7 +9,7 @@
 //   pass 1  prefix   one thread turns counts into bases and draw arguments
 //   pass 2  scatter  each visible rock claims a slot and writes its instance
 
-#include "scene/bindings.slang"
+#include "../scene/bindings.slang"
 [[vk::push_constant]] ConstantBuffer<CullRoot> root;
 
 #include "belt.slang"

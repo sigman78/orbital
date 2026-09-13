@@ -1,9 +1,9 @@
-#include "scene/frame_bindings.slang"
-#include "surface/lighting.slang"
-#include "surface/giant_material.slang"
-#include "surface/giant_lighting.slang"
-#include "lib/math.slang"
-#include "lib/sampling.slang"
+#include "../scene/frame_bindings.slang"
+#include "../surface/lighting.slang"
+#include "giant_material.slang"
+#include "giant_lighting.slang"
+#include "../lib/math.slang"
+#include "../lib/sampling.slang"
 
 [shader("fragment")]
 float4 fragmentMain(SurfaceVaryings input) : SV_Target0

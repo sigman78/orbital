@@ -1,9 +1,9 @@
-#include "lib/tonemapping.slang"
-#include "post/fxaa.slang"
-#include "post/lens.slang"
-#include "scene/frame_bindings.slang"
-#include "lib/noise.slang"
-#include "lib/color.slang"
+#include "../lib/tonemapping.slang"
+#include "../aa/fxaa.slang"
+#include "lens.slang"
+#include "../scene/frame_bindings.slang"
+#include "../lib/noise.slang"
+#include "../lib/color.slang"
 
 // Root.mode values (PostMode on the C++ side).
 static const uint MODE_TONEMAP = 0, MODE_BLOOM_A = 1, MODE_BLOOM_B = 2, MODE_PRESENT = 3, MODE_METER = 4, MODE_FXAA = 5;

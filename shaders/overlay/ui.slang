@@ -3,8 +3,8 @@
 // records); colours arrive sRGB-encoded and are decoded here because the
 // swapchain is an sRGB target. The font atlas sits in a fixed texture slot.
 
-#include "scene_shared.h"
-#include "scene/bindings.slang"
+#include "../scene_shared.h"
+#include "../scene/bindings.slang"
 
 struct UiVertex {
     float4 position_uv; // pixel position, then atlas uv

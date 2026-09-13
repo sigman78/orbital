@@ -119,8 +119,9 @@ comes from.
 Shader entry points include focused helpers instead of a common umbrella. `shaders/lib` contains
 resource-independent geometry, noise, sampling, color, projection, scattering and tone curves.
 `shaders/scene` declares the bindings and frame-aware view/visibility helpers; `shaders/surface`
-separates interpolation data, BRDFs and gas-giant material/lighting effects; `shaders/post` holds
-FXAA and lens helpers with explicit inputs. Descriptor slot numbers are shared with C++ through
+holds shared surface contracts, BRDFs and lighting. Feature folders group planetary materials
+and atmosphere (`planets`), all anti-aliasing (`aa`), belt rendering (`belt`), sky (`sky`),
+post-processing (`post`) and UI (`overlay`), with entry points beside their helpers. Descriptor slot numbers are shared with C++ through
 `resource_slots.h`. See [shader organization](../shaders/README.md) for dependency rules and checks.
 
 Slang-generated depfiles track transitive includes. `tools/check-shader-helpers.py` compiles each

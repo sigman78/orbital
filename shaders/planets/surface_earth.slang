@@ -1,9 +1,9 @@
-#include "scene/frame_bindings.slang"
-#include "surface/lighting.slang"
-#include "surface/brdf.slang"
-#include "lib/math.slang"
-#include "lib/noise.slang"
-#include "lib/sampling.slang"
+#include "../scene/frame_bindings.slang"
+#include "../surface/lighting.slang"
+#include "../surface/brdf.slang"
+#include "../lib/math.slang"
+#include "../lib/noise.slang"
+#include "../lib/sampling.slang"
 #include "clouds.slang"
 
 // The Earth: day map with land grain, the sea's glint, the sourced normal map,

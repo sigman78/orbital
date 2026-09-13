@@ -1,4 +1,4 @@
-#include "scene_shared.h"
+#include "../scene_shared.h"
 
 // Belt transmittance map, splat pass: every rock adds its cross-section to
 // the light-space texel column it falls in, into one of four depth slices

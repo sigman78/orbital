@@ -1,5 +1,5 @@
-#include "scene/frame_bindings.slang"
-#include "lib/color.slang"
+#include "../scene/frame_bindings.slang"
+#include "../lib/color.slang"
 
 // SMAA 1x, Jimenez et al. 2012, ported from SMAA.hlsl (see third_party/smaa/LICENSE.txt):
 // preset HIGH, luma edge detection, diagonal and corner patterns. Three

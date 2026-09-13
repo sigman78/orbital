@@ -1,8 +1,8 @@
-#include "scene/frame_bindings.slang"
-#include "scene/view.slang"
-#include "scene/visibility.slang"
-#include "lib/math.slang"
-#include "lib/scattering.slang"
+#include "../scene/frame_bindings.slang"
+#include "../scene/view.slang"
+#include "../scene/visibility.slang"
+#include "../lib/math.slang"
+#include "../lib/scattering.slang"
 #include "clouds.slang"
 
 float airDensity(float altitude, float scaleHeight) { return exp(-max(altitude, 0.0) / scaleHeight); }

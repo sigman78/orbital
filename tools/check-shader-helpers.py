@@ -16,12 +16,8 @@ def main():
     )
     args = parser.parse_args()
     shaders = root / "shaders"
-    helpers = sorted(
-        path
-        for directory in ("lib", "scene", "surface", "post")
-        for path in (shaders / directory).rglob("*.slang")
-    )
-    helpers += [shaders / name for name in ("belt.slang", "beltfar.slang", "clouds.slang", "rockclass.slang")]
+    # Helpers declare their role with an include guard; feature folders also contain entry points.
+    helpers = sorted(path for path in shaders.rglob("*.slang") if "#pragma once" in path.read_text())
     for helper in helpers:
         subprocess.run([str(args.compiler), str(helper), "-target", "spirv", "-no-codegen"], check=True)
     print(f"All {len(helpers)} shader helpers compile independently.")

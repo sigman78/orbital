@@ -1,7 +1,7 @@
-#include "scene/frame_bindings.slang"
-#include "surface/types.slang"
-#include "surface/cloud_geometry.slang"
-#include "lib/math.slang"
+#include "../scene/frame_bindings.slang"
+#include "types.slang"
+#include "../planets/cloud_geometry.slang"
+#include "../lib/math.slang"
 
 // The vertex stage every surface pipeline shares: bodies, the pooled rock
 // draws, the Earth's cloud shell, the shadow pass and the rock billboards.

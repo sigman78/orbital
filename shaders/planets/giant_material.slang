@@ -1,5 +1,5 @@
 #pragma once
-#include "types.slang"
+#include "../surface/types.slang"
 #include "../scene/shadows.slang"
 #include "../lib/math.slang"
 #include "../lib/noise.slang"

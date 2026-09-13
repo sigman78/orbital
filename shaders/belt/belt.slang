@@ -1,6 +1,6 @@
 #pragma once
-#include "scene/bindings.slang"
-#include "scene/visibility.slang"
+#include "../scene/bindings.slang"
+#include "../scene/visibility.slang"
 
 // Belt lighting shared by the surface shaders and the culling pass, which
 // lights the sub-pixel splats once per rock. Dependencies are declared here;

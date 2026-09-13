@@ -1,6 +1,6 @@
-#include "scene/frame_bindings.slang"
-#include "lib/projection.slang"
-#include "lib/noise.slang"
+#include "frame_bindings.slang"
+#include "../lib/projection.slang"
+#include "../lib/noise.slang"
 
 // Motion cue: dust motes fixed in space around the camera, each drawn as a
 // soft streak from where it was last frame to where it is now, both seen

@@ -1,9 +1,9 @@
-#include "scene/frame_bindings.slang"
-#include "surface/lighting.slang"
-#include "surface/brdf.slang"
-#include "lib/math.slang"
-#include "lib/noise.slang"
-#include "lib/sampling.slang"
+#include "../scene/frame_bindings.slang"
+#include "../surface/lighting.slang"
+#include "../surface/brdf.slang"
+#include "../lib/math.slang"
+#include "../lib/noise.slang"
+#include "../lib/sampling.slang"
 
 // The airless bodies, the Moon and Mars: colour maps over NASA elevation
 // models baked into normal+height maps, with a short height trace for the

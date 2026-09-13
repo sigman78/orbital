@@ -1,8 +1,8 @@
-#include "scene/frame_bindings.slang"
-#include "surface/lighting.slang"
-#include "surface/brdf.slang"
-#include "lib/math.slang"
-#include "lib/noise.slang"
+#include "../scene/frame_bindings.slang"
+#include "lighting.slang"
+#include "brdf.slang"
+#include "../lib/math.slang"
+#include "../lib/noise.slang"
 
 // The belt's rocks and the moonlets: three scanned rock sets (albedo,
 // normal+height, roughness) mapped triplanar in the rock's object space, so
