@@ -23,7 +23,7 @@ add_library(orbital_scene STATIC src/scene/system.cpp src/scene/geometry.cpp src
 target_link_libraries(orbital_scene PUBLIC orbital_core)
 target_compile_options(orbital_scene PRIVATE ${ORBITAL_WARNINGS})
 
-add_library(orbital_assets STATIC src/assets/image.cpp src/assets/kernels.cpp src/assets/materials.cpp)
+add_library(orbital_assets STATIC src/assets/image.cpp src/assets/kernels.cpp src/assets/materials.cpp src/assets/texture.cpp)
 set(smaa_source "${CMAKE_CURRENT_BINARY_DIR}/generated/smaa.cpp")
 add_custom_command(
   OUTPUT "${smaa_source}"
@@ -39,8 +39,27 @@ target_include_directories(orbital_assets PRIVATE third_party/stb third_party/wu
 target_link_libraries(orbital_assets PUBLIC orbital_core)
 target_compile_options(orbital_assets PRIVATE ${ORBITAL_WARNINGS})
 
+# Optional offline encoders; the demo and its normal build do not depend on them.
+option(ORBITAL_BUILD_TEXTURE_TOOLS "Build optional ASTC/BC7 encoders and material preparation tool" OFF)
+if(ORBITAL_BUILD_TEXTURE_TOOLS)
+  set(ASTCENC_CLI ON CACHE BOOL "Build astcenc CLI")
+  set(ASTCENC_ISA_NATIVE ON)
+  set(ASTCENC_WERROR OFF CACHE BOOL "Keep vendored warnings non-fatal")
+  add_subdirectory(third_party/astcenc EXCLUDE_FROM_ALL)
+  add_executable(texture_prepare EXCLUDE_FROM_ALL tools/texture_prepare.cpp)
+  target_link_libraries(texture_prepare PRIVATE orbital_assets)
+  target_compile_options(texture_prepare PRIVATE ${ORBITAL_WARNINGS})
+  add_library(bc7enc STATIC EXCLUDE_FROM_ALL third_party/bc7enc/bc7enc.cpp)
+  target_include_directories(bc7enc PUBLIC third_party/bc7enc)
+  find_package(Threads REQUIRED)
+  add_executable(bc7_compress EXCLUDE_FROM_ALL tools/bc7_compress.cpp)
+  target_link_libraries(bc7_compress PRIVATE orbital_core bc7enc Threads::Threads)
+  target_compile_options(bc7_compress PRIVATE ${ORBITAL_WARNINGS})
+  add_custom_target(texture_tools DEPENDS texture_prepare astcenc-native bc7_compress)
+endif()
+
 if(BUILD_TESTING)
-  foreach(test IN ITEMS core system geometry camera image kernels materials smaa)
+  foreach(test IN ITEMS core system geometry camera image kernels materials smaa texture)
     add_executable(${test}_tests tests/${test}_tests.cpp)
     target_link_libraries(${test}_tests PRIVATE orbital_scene orbital_assets)
     # These tests use assertions as executable invariants, including Release.

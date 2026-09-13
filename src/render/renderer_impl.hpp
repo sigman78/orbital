@@ -4,6 +4,7 @@
 #include "render/renderer.hpp"
 
 #include "assets/image.hpp"
+#include "assets/texture.hpp"
 #include "core/small_vec.hpp"
 #include "core/types.hpp"
 #include "render/gpu_types.hpp"
@@ -194,8 +195,21 @@ struct PipelineDesc {
     Blend blend = Blend::none;
 };
 
+inline gpu::Format texture_format(const assets::TextureData& data) {
+    if (data.format == assets::TextureFormat::RGBA8)
+        return gpu::Format::rgba8_unorm;
+    if (data.format == assets::TextureFormat::BC7)
+        return gpu::Format::bc7_unorm;
+    switch (data.block_x) {
+    case 6: return gpu::Format::astc_6x6_unorm;
+    case 8: return gpu::Format::astc_8x8_unorm;
+    case 12: return gpu::Format::astc_12x12_unorm;
+    default: return gpu::Format::astc_4x4_unorm;
+    }
+}
+
 struct Upload {
-    assets::MipChain mips;
+    assets::TextureData data;
     Slot slot;
 };
 

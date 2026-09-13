@@ -1,7 +1,9 @@
 #include "render/renderer_impl.hpp"
 
 #include "assets/kernels.hpp"
+#include "assets/material_catalog.hpp"
 #include "assets/materials.hpp"
+#include "assets/texture.hpp"
 #include "core/file.hpp"
 #include "core/log.hpp"
 #include <algorithm>
@@ -19,40 +21,33 @@ constexpr unsigned decode_workers_max = 8; // upper bound for the material decod
 struct MaterialSource {
     const char* file;
     Slot slot;
-    assets::MaterialDesc desc;
     bool optional = false; // missing on disk binds a neutral map with a warning instead of a panic
 };
 
-using assets::MaterialEncoding;
-constexpr MaterialSource material_sources[] = {
-    {"earth_albedo.png", Slot::earth_albedo, {.encoding = MaterialEncoding::SRGB}},
-    {"gas_albedo.png", Slot::gas_albedo, {.encoding = MaterialEncoding::SRGB}},
-    {"earth_clouds.png", Slot::earth_clouds, {.luminance_to_alpha = true}},
-    {"earth_normal.png", Slot::earth_normal, {.normal_map = true}},
-    {"earth_specular.png", Slot::earth_specular, {}},
-    {"earth_night.png", Slot::earth_night, {.encoding = MaterialEncoding::SRGB}},
-    {"moon_albedo.png", Slot::moon_albedo, {.encoding = MaterialEncoding::SRGB}},
-    {"rock_albedo.png", Slot::rock_albedo, {.encoding = MaterialEncoding::SRGB}},
-    {"rock_normal.png", Slot::rock_normal, {.normal_map = true}},
-    {"rock_roughness.png", Slot::rock_roughness, {}},
-    {"mars_albedo.png", Slot::mars_albedo, {.encoding = MaterialEncoding::SRGB}},
-    {"mars_normal.png", Slot::mars_normal, {.normal_map = true}},
-    {"moon_normal.png", Slot::moon_normal, {.normal_map = true}},
-    {"rock_face_albedo.png", Slot::rock_face_albedo, {.encoding = MaterialEncoding::SRGB}},
-    {"rock_face_normal.png", Slot::rock_face_normal, {.normal_map = true}},
-    {"rock_face_roughness.png", Slot::rock_face_roughness, {}},
-    {"rock_boulder_albedo.png", Slot::rock_boulder_albedo, {.encoding = MaterialEncoding::SRGB}},
-    {"rock_boulder_normal.png", Slot::rock_boulder_normal, {.normal_map = true}},
-    {"rock_boulder_roughness.png", Slot::rock_boulder_roughness, {}},
-    {"gas_flow.png", Slot::gas_flow, {}, true},     // baked from the gas albedo; neutral (no flow) when absent
-    {"gas_detail.png", Slot::gas_detail, {}, true}, // baked alongside it; flat (no detail) when absent
-    {"gas_relief.png", Slot::gas_relief, {}, true}, // baked alongside it; flat (no relief) when absent
-    {"gas_polar.png",
-     Slot::gas_polar,
-     {.encoding = MaterialEncoding::SRGB},
-     true}, // baked alongside it; the caps stay the map when absent
-    {"gas_polar_flow.png", Slot::gas_polar_flow, {}, true},
-};
+constexpr MaterialSource material_sources[] = {{"earth_albedo.png", Slot::earth_albedo},
+                                               {"gas_albedo.png", Slot::gas_albedo},
+                                               {"earth_clouds.png", Slot::earth_clouds},
+                                               {"earth_normal.png", Slot::earth_normal},
+                                               {"earth_specular.png", Slot::earth_specular},
+                                               {"earth_night.png", Slot::earth_night},
+                                               {"moon_albedo.png", Slot::moon_albedo},
+                                               {"rock_albedo.png", Slot::rock_albedo},
+                                               {"rock_normal.png", Slot::rock_normal},
+                                               {"rock_roughness.png", Slot::rock_roughness},
+                                               {"mars_albedo.png", Slot::mars_albedo},
+                                               {"mars_normal.png", Slot::mars_normal},
+                                               {"moon_normal.png", Slot::moon_normal},
+                                               {"rock_face_albedo.png", Slot::rock_face_albedo},
+                                               {"rock_face_normal.png", Slot::rock_face_normal},
+                                               {"rock_face_roughness.png", Slot::rock_face_roughness},
+                                               {"rock_boulder_albedo.png", Slot::rock_boulder_albedo},
+                                               {"rock_boulder_normal.png", Slot::rock_boulder_normal},
+                                               {"rock_boulder_roughness.png", Slot::rock_boulder_roughness},
+                                               {"gas_flow.png", Slot::gas_flow, true},
+                                               {"gas_detail.png", Slot::gas_detail, true},
+                                               {"gas_relief.png", Slot::gas_relief, true},
+                                               {"gas_polar.png", Slot::gas_polar, true},
+                                               {"gas_polar_flow.png", Slot::gas_polar_flow, true}};
 constexpr std::size_t material_count = std::size(material_sources);
 static_assert(material_count <= inline_upload_count);
 
@@ -124,6 +119,16 @@ void Renderer::Impl::load_materials() {
     const unsigned cores = std::thread::hardware_concurrency();
     const std::size_t workers = std::min(material_count,
                                          std::size_t(std::clamp(cores > 1 ? cores - 1 : 1u, 1u, decode_workers_max)));
+    assets::TextureSupport support;
+    support.bc7 = gpu::supports_texture_format(device, gpu::Format::bc7_unorm,
+                                               gpu::TextureUsage::sampled | gpu::TextureUsage::transfer_destination);
+    for (const auto block : {4u, 6u, 8u, 12u}) {
+        assets::TextureData probe{
+            .format = assets::TextureFormat::ASTC, .mips = {}, .block_x = block, .block_y = block};
+        support.astc_blocks[block] = gpu::supports_texture_format(
+            device, texture_format(probe), gpu::TextureUsage::sampled | gpu::TextureUsage::transfer_destination);
+    }
+    std::atomic<unsigned> cached_count{0};
     Uploads uploads;
     for (std::size_t i = 0; i < material_count; i++)
         uploads.emplace_back();
@@ -134,6 +139,13 @@ void Renderer::Impl::load_materials() {
             for (std::size_t i = next++; i < material_count; i = next++) {
                 const auto& source = material_sources[i];
                 const auto path = directory / "assets/materials" / source.file;
+                const auto desc = assets::material_description(source.file);
+                auto cached = assets::load_texture_cache(path, desc, support);
+                if (cached) {
+                    uploads[i] = {.data = std::move(*cached), .slot = source.slot};
+                    ++cached_count;
+                    continue;
+                }
                 if (source.optional && !std::filesystem::exists(path)) {
                     log::warn("{} is missing; run tools/import-assets.ps1 to bake it (its effect is off)", source.file);
                     if (source.slot == Slot::gas_polar)
@@ -144,10 +156,11 @@ void Renderer::Impl::load_materials() {
                         neutral.pixels[p * 4] = neutral.pixels[p * 4 + 1] = 128; // zero signed flow
                         neutral.pixels[p * 4 + 3] = 255;
                     }
-                    uploads[i] = {.mips = {neutral}, .slot = source.slot};
+                    uploads[i] = {.data = assets::texture_from_images({std::move(neutral)}), .slot = source.slot};
                     continue;
                 }
-                uploads[i] = {.mips = assets::load_material(path, source.desc), .slot = source.slot};
+                uploads[i] = {.data = assets::texture_from_images(assets::load_material(path, desc)),
+                              .slot = source.slot};
             }
         }));
     for (auto& worker : pool)
@@ -164,6 +177,7 @@ void Renderer::Impl::load_materials() {
                                                                                start);
     log::info("Loaded {} materials in {} ms on {} workers ({})", material_count, elapsed.count(), workers,
               assets::kernels::backend());
+    log::info("Texture cache: {} of {} materials", cached_count.load(), material_count);
     load_stars();
     load_splats();
 }

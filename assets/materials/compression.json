@@ -1,0 +1,15 @@
+{
+  "defaults": { "format": "bc7", "quality": "medium", "block": "6x6", "weights": [1, 1, 1, 1] },
+  "textures": {
+    "earth_normal.png": { "quality": "thorough", "block": "4x4" },
+    "mars_normal.png": { "quality": "thorough", "block": "4x4" },
+    "moon_normal.png": { "quality": "thorough", "block": "4x4" },
+    "rock_normal.png": { "quality": "thorough", "block": "4x4" },
+    "rock_face_normal.png": { "quality": "thorough", "block": "4x4" },
+    "rock_boulder_normal.png": { "quality": "thorough", "block": "4x4" },
+    "gas_flow.png": { "format": "rgba8" },
+    "gas_detail.png": { "format": "rgba8" },
+    "gas_relief.png": { "format": "rgba8" },
+    "gas_polar_flow.png": { "format": "rgba8" }
+  }
+}

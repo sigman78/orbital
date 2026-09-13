@@ -65,3 +65,7 @@ F12 opens the control panel (`--ui` opens it at start), which holds frame statis
 ## License
 
 The demo is released under the [MIT License](LICENSE). NoGraphicsAPI is MIT licensed (`third_party/NoGraphicsAPI/LICENSE`); Dear ImGui is MIT (`third_party/imgui/LICENSE.txt`); the SMAA lookup tables and reference shader are MIT-style (`third_party/smaa/LICENSE.txt`); Wuffs is Apache-2.0 OR MIT (`third_party/wuffs/LICENSE`) and stb_image_write is public domain (`third_party/stb/LICENSE`). Material textures are CC BY 4.0 (Solar System Scope), public domain NASA (the Cassini Jupiter map, the Moon and Mars elevation and colour data), the public-domain Yale Bright Star Catalogue, ESO's Milky Way panorama (CC BY 4.0, ESO/S. Brunier, fitted as splats) and CC0 (Poly Haven); provenance, hashes and attribution requirements are in [docs/ASSETS.md](docs/ASSETS.md) and `assets/materials/manifest.json`. Keep attribution with redistributed assets.
+
+Optional material compression: build `texture_tools`, then run `python tools/compress-textures.py`.
+The demo prefers valid caches supported by the GPU and otherwise loads source PNGs.
+See [texture compression](docs/TEXTURE_COMPRESSION.md) for setup and per-texture overrides.
