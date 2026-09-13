@@ -65,6 +65,7 @@ struct FrameInput {
     float aberration = 1.f;       // chromatic aberration scale
     float vignette = .17f;        // corner darkening
     float grain = .010f;          // film grain amplitude in display space
+    float black_offset = .3f;     // the neutral tone curve's flare subtraction, 1 as published, 0 none
     bool motion_streaks = true;   // dust motes streaking past the moving camera
     float motion_streak_intensity = 1.f;
     bool catalogue_stars = true; // the Bright Star Catalogue as points; off keeps the procedural sky

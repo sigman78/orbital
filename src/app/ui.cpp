@@ -283,6 +283,8 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
     if (section("Camera")) {
         for (std::size_t i = 0; i < bookmark_count; i++) {
             if (i % 3)
+        ImGui::SliderFloat("Black offset", &app.black_offset, 0.f, 1.f,
+                           "%.2f"); // the neutral curve\'s flare subtraction; 1 as published
                 ImGui::SameLine();
             if (ImGui::Button(bookmark_names[i], {104, 0})) {
                 app.camera.set_bookmark(i, app.bodies);
@@ -295,6 +297,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::SameLine();
         if (ImGui::Button("Orbit (O)", {104, 0}))
             app.camera.set_orbit_target(app.selected_body,
+            app.black_offset = .3f;
                                         app.bodies[app.selected_body].radius * control::orbit_zoom_radii);
         ImGui::SameLine();
         if (ImGui::Button("Free (F)", {104, 0}))

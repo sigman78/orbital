@@ -133,12 +133,16 @@ float3 agx(float3 c)
 }
 
 // Khronos PBR Neutral: hue-preserving, linear until 0.8, then a soft
-// shoulder with a slight desaturation toward white.
+// shoulder with a slight desaturation toward white. Its black offset (a
+// flare subtraction that takes nearly the whole darkest channel below 0.08)
+// is meant for well-exposed product shots; on a scene that is mostly dark
+// sky it crushes dim neutrals threefold and inflates the tint of anything
+// faint, so the panel scales it (post_more.z; 1 is the published curve).
 float3 pbrNeutral(float3 c)
 {
     const float startCompression = 0.8 - 0.04, desaturation = 0.15;
     float x = min(c.r, min(c.g, c.b));
-    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    float offset = (x < 0.08 ? x - 6.25 * x * x : 0.04) * root.frame.post_more.z;
     c -= offset;
     float peak = max(c.r, max(c.g, c.b));
     if (peak < startCompression) return c;

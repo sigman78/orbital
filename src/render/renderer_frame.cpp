@@ -334,7 +334,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
                   float(std::min(input.starburst_blades, 12u))};
     frame.sun_disc = {input.sun_disc_radius, input.sun_limb_darkening, 0, 0};
     frame.post = {input.bloom_intensity, input.bloom_threshold, input.bloom_knee, input.aberration};
-    frame.post_more = {input.vignette, input.grain, 0, 0};
+    frame.post_more = {input.vignette, input.grain, input.black_offset, 0};
     frame.giant = {input.gas_time_scale, std::max(input.gas_cycle, .1f), input.gas_turbulence,
                    input.gas_flow ? 1.f : 0.f};
     frame.giant_more = {input.gas_haze, input.gas_terminator, input.gas_relief, input.gas_cap_opacity};

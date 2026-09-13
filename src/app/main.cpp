@@ -422,6 +422,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                                              .aberration = app.aberration,
                                              .vignette = app.vignette,
                                              .grain = app.grain,
+                                             .black_offset = app.black_offset,
                                              .motion_streaks = app.motion_streaks,
                                              .motion_streak_intensity = app.motion_streak_intensity,
                                              .catalogue_stars = app.catalogue_stars,

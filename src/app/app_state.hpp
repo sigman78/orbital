@@ -51,7 +51,7 @@ struct AppState {
     float sun_disc_radius = .007f, sun_limb_darkening = .6f;
     bool bloom = true; // Post FX panel
     float bloom_intensity = .24f, bloom_threshold = .85f, bloom_knee = .5f;
-    float aberration = 1.f, vignette = .17f, grain = .010f;
+    float aberration = 1.f, vignette = .17f, grain = .010f, black_offset = .3f;
     bool motion_streaks = true;
     float motion_streak_intensity = 1.f;
     bool catalogue_stars = true; // Sky panel
