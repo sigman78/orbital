@@ -341,7 +341,11 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.giant_night = {input.gas_lightning_rate, input.gas_lightning,
                          input.gas_polar && polar_caps ? input.gas_cap_size : 0.f, input.gas_cap_blend};
     frame.stars = {star_count && input.catalogue_stars ? 1.f : 0.f,
-                   star_count && input.catalogue_stars ? input.star_brightness : 0.f, input.star_saturation, 0};
+                   star_count && input.catalogue_stars ? input.star_brightness : 0.f, input.star_saturation,
+                   splat_count && input.milky_way ? input.milky_way_brightness : 0.f};
+    frame.galaxy = {float(std::clamp(input.milky_way_splats, 0, int(splat_count))), input.dust_amplitude,
+                    input.dust_scale, 0};
+    frame.galaxy_more = {input.dust_lacunarity, input.dust_gain, float(galaxy_divisor), input.milky_way_contrast};
     frame.giant_layers = {input.gas_layers ? input.gas_layer_lift : 0.f, input.gas_layer_shadow,
                           input.gas_streaks ? input.gas_streak_strength : 0.f, 0};
 
@@ -720,6 +724,7 @@ bool Renderer::draw(const FrameInput& input) {
     if (!drawable.x || !drawable.y)
         return false;
     s.resize({drawable.x, drawable.y});
+    s.resize_galaxy(unsigned(input.galaxy_divisor));
     const auto swap = gpu::acquire(s.device);
     if (!swap.render_view)
         return false;
@@ -803,6 +808,14 @@ bool Renderer::draw(const FrameInput& input) {
         s.record_belt_disc_bakes(cmd, bake_root, root, scratch->params.rock_limit, frame.belt_disc.y);
     }
     stamp(1);
+    if (s.splat_count &&
+        frame.stars.w > 0) { // the Milky Way's splats summed at a quarter of the frame for the background
+        Root galaxy_root = root;
+        galaxy_root.vertices = s.splat_data;
+        galaxy_root.instances = s.splat_data + std::uint64_t(s.splat_count) * 64; // the cell table after the records
+        galaxy_root.base = std::uint32_t(frame.galaxy.x); // the splats drawn, the first n by energy
+        s.fullscreen_pass(cmd, s.galaxy, s.pso.galaxy, galaxy_root);
+    }
     s.record_scene_pass(cmd, root, input, frame, args_address);
     stamp(2);
     gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::color_output,

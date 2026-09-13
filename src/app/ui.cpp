@@ -240,10 +240,38 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::SliderFloat("Star brightness", &app.star_brightness, 0.f, 4.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
         ImGui::SliderFloat("Star colour", &app.star_saturation, 0.f, 1.f, "%.2f");
         ImGui::EndDisabled();
+        ImGui::Checkbox("Milky Way", &app.milky_way); // the splat fit of ESO's panorama; off keeps the procedural band
+        ImGui::BeginDisabled(!app.milky_way);
+        ImGui::SliderFloat("Milky Way brightness", &app.milky_way_brightness, 0.f, 4.f, "%.2f x",
+                           ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Milky Way contrast", &app.milky_way_contrast, .5f, 3.f, "%.2f"); // exponent about the bulge: the halo down, the core up
+        ImGui::SliderInt("Milky Way splats", &app.milky_way_splats, 0, 4096); // the first n by energy; the file caps it
+        {
+            const char* labels[] = {"full", "half", "quarter"};
+            int choice = app.galaxy_divisor >= 4 ? 2 : app.galaxy_divisor == 2 ? 1 : 0;
+            if (ImGui::Combo("Splat pass resolution", &choice, labels, 3)) // quarter resolves a 0.6 degree splat at 1080p
+                app.galaxy_divisor = choice == 2 ? 4 : choice == 1 ? 2 : 1;
+        }
+        // The dust lanes' fBm: three octaves of value noise modulating the lanes' depth.
+        ImGui::SliderFloat("Dust amplitude", &app.dust_amplitude, 0.f, 3.f, "%.2f");
+        ImGui::SliderFloat("Dust scale", &app.dust_scale, .1f, 10.f, "%.2f deg",
+                           ImGuiSliderFlags_Logarithmic); // the base octave's feature size
+        ImGui::SliderFloat("Dust lacunarity", &app.dust_lacunarity, 1.5f, 4.f, "%.2f");
+        ImGui::SliderFloat("Dust gain", &app.dust_gain, .2f, .9f, "%.2f");
+        ImGui::EndDisabled();
         if (ImGui::SmallButton("Reset sky")) {
             app.catalogue_stars = true;
             app.star_brightness = 2.f;
             app.star_saturation = .5f;
+            app.milky_way = true;
+            app.milky_way_brightness = .1f;
+            app.milky_way_contrast = 1.f;
+            app.milky_way_splats = 4096;
+            app.galaxy_divisor = 4;
+            app.dust_amplitude = 2.f;
+            app.dust_scale = 1.4f;
+            app.dust_lacunarity = 3.f;
+            app.dust_gain = .7f;
         }
         ImGui::PopID();
     }
@@ -255,6 +283,8 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::SliderFloat("Aberration", &app.aberration, 0.f, 4.f, "%.2f x");
         ImGui::SliderFloat("Vignette", &app.vignette, 0.f, .5f, "%.2f");
         ImGui::SliderFloat("Grain", &app.grain, 0.f, .05f, "%.3f");
+        ImGui::SliderFloat("Black offset", &app.black_offset, 0.f, 1.f,
+                           "%.2f"); // the neutral curve\'s flare subtraction; 1 as published
         ImGui::Checkbox("Motion streaks", &app.motion_streaks); // dust motes streaking past the moving camera
         ImGui::BeginDisabled(!app.motion_streaks);
         ImGui::SliderFloat("Streak intensity", &app.motion_streak_intensity, 0.f, 4.f, "%.2f x");
@@ -267,6 +297,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
             app.aberration = 1.f;
             app.vignette = .17f;
             app.grain = .010f;
+            app.black_offset = .3f;
             app.motion_streaks = true;
             app.motion_streak_intensity = 1.f;
         }
@@ -283,8 +314,6 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
     if (section("Camera")) {
         for (std::size_t i = 0; i < bookmark_count; i++) {
             if (i % 3)
-        ImGui::SliderFloat("Black offset", &app.black_offset, 0.f, 1.f,
-                           "%.2f"); // the neutral curve\'s flare subtraction; 1 as published
                 ImGui::SameLine();
             if (ImGui::Button(bookmark_names[i], {104, 0})) {
                 app.camera.set_bookmark(i, app.bodies);
@@ -297,7 +326,6 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::SameLine();
         if (ImGui::Button("Orbit (O)", {104, 0}))
             app.camera.set_orbit_target(app.selected_body,
-            app.black_offset = .3f;
                                         app.bodies[app.selected_body].radius * control::orbit_zoom_radii);
         ImGui::SameLine();
         if (ImGui::Button("Free (F)", {104, 0}))

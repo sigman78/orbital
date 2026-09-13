@@ -105,6 +105,22 @@ float noise(float3 p)
                 lerp(lerp(hash(i+float3(0,0,1)),hash(i+float3(1,0,1)),f.x),lerp(hash(i+float3(0,1,1)),hash(i+float3(1,1,1)),f.x),f.y),f.z);
 }
 float fbm(float3 p) { float n=0,a=.5; for(int i=0;i<4;i++){n+=a*noise(p);p=p*2.03+float3(2.1,1.7,4.3);a*=.5;} return n; }
+// Gradient (Perlin) noise in [-1, 1] with a quintic fade: zero at the lattice
+// points and smooth across them, so unlike value noise it draws no grid.
+float3 hashGradient(float3 p)
+{
+    return float3(hash(p), hash(p + 31.7), hash(p + 67.3)) * 2.0 - 1.0; // unnormalised: the range is what the fade needs
+}
+float gradientNoise(float3 p)
+{
+    float3 i = floor(p), f = frac(p);
+    float3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    float c000 = dot(hashGradient(i), f), c100 = dot(hashGradient(i + float3(1, 0, 0)), f - float3(1, 0, 0));
+    float c010 = dot(hashGradient(i + float3(0, 1, 0)), f - float3(0, 1, 0)), c110 = dot(hashGradient(i + float3(1, 1, 0)), f - float3(1, 1, 0));
+    float c001 = dot(hashGradient(i + float3(0, 0, 1)), f - float3(0, 0, 1)), c101 = dot(hashGradient(i + float3(1, 0, 1)), f - float3(1, 0, 1));
+    float c011 = dot(hashGradient(i + float3(0, 1, 1)), f - float3(0, 1, 1)), c111 = dot(hashGradient(i + float3(1, 1, 1)), f - float3(1, 1, 1));
+    return lerp(lerp(lerp(c000, c100, u.x), lerp(c010, c110, u.x), u.y), lerp(lerp(c001, c101, u.x), lerp(c011, c111, u.x), u.y), u.z);
+}
 
 // Scattering phase functions, normalised over the sphere (isotropic is 1 / 4 pi).
 float henyeyGreenstein(float mu, float g)

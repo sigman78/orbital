@@ -68,6 +68,7 @@ enum class Slot : unsigned {
     gas_relief = 42,      // gas giant cloud-top slopes and height, baked alongside it
     gas_polar = 43,       // gas giant polar cap albedo atlas (north above south), baked alongside it
     gas_polar_flow = 44,  // gas giant polar cap flow atlas
+    milky_way = 45,       // all-sky Milky Way as cubic B-spline coefficients, baked by tools/bake-milkyway.py
     count = ORBITAL_TEXTURE_COUNT,
 };
 
@@ -211,7 +212,7 @@ struct Upload {
 };
 
 // Uploads and their GPU images are created a handful at a time.
-constexpr std::size_t inline_upload_count = 24;
+constexpr std::size_t inline_upload_count = 28;
 using Uploads = SmallVec<Upload, inline_upload_count>;
 
 // One draw group per (shape, level) pair of the rock library; the GPU
@@ -242,15 +243,16 @@ struct Renderer::Impl {
     std::vector<gpu::PSO*> pipelines;
     GpuImage hdr{}, depth{}, bloom_a{}, bloom_b{}, final_image{}, ldr{}, shadow_map{}, luminance{}, history[2]{};
     GpuImage splat_mask{}, smaa_edges{}, smaa_weights{}, belt_dust{}, belt_disc_light{}, belt_disc_rocks{};
-    GpuImage belt_light{}, belt_light_blur{};
+    GpuImage belt_light{}, belt_light_blur{}, galaxy{}; // galaxy: the Milky Way's splat sum at a quarter of the frame
     struct {
         gpu::PSO *surface_earth = nullptr, *surface_giant = nullptr, *surface_airless = nullptr,
                  *surface_rock = nullptr, *billboard = nullptr, *cloud = nullptr, *background = nullptr,
-                 *atmosphere = nullptr, *bloom = nullptr, *post = nullptr, *present = nullptr, *shadow = nullptr,
-                 *meter = nullptr, *temporal = nullptr, *cull = nullptr, *belt_splat = nullptr, *belt_blur = nullptr,
-                 *fxaa = nullptr, *splat_mask = nullptr, *smaa_edges = nullptr, *smaa_weights = nullptr,
-                 *smaa_blend = nullptr, *ui = nullptr, *belt_dust = nullptr, *belt_dust_blend = nullptr,
-                 *belt_disc = nullptr, *belt_disc_splat = nullptr, *motes = nullptr, *stars = nullptr;
+                 *galaxy = nullptr, *atmosphere = nullptr, *bloom = nullptr, *post = nullptr, *present = nullptr,
+                 *shadow = nullptr, *meter = nullptr, *temporal = nullptr, *cull = nullptr, *belt_splat = nullptr,
+                 *belt_blur = nullptr, *fxaa = nullptr, *splat_mask = nullptr, *smaa_edges = nullptr,
+                 *smaa_weights = nullptr, *smaa_blend = nullptr, *ui = nullptr, *belt_dust = nullptr,
+                 *belt_dust_blend = nullptr, *belt_disc = nullptr, *belt_disc_splat = nullptr, *motes = nullptr,
+                 *stars = nullptr;
     } pso;
     gpu::PSO* surface_pso(SurfaceKind kind) const {
         switch (kind) {
@@ -279,6 +281,8 @@ struct Renderer::Impl {
     bool polar_caps = true;      // the gas giant's polar cap atlas loaded; the blend is skipped without it
     std::uint64_t star_data = 0; // static heap address of the Bright Star Catalogue records, 0 when absent
     unsigned star_count = 0;
+    std::uint64_t splat_data = 0; // static heap address of the Milky Way's splat records, 0 when absent
+    unsigned splat_count = 0;
 
     // Frame state.
     Extent2D extent{};
@@ -311,9 +315,12 @@ struct Renderer::Impl {
     void build_belt(const BeltDescription& description);
     void load_materials();
     void load_stars();
+    void load_splats();
     void create_pipelines();
     void create_fixed_targets();
     void resize(Extent2D new_extent);
+    void resize_galaxy(unsigned divisor); // the galaxy target at the frame over divisor (1, 2 or 4)
+    unsigned galaxy_divisor = 4;
     void destroy(GpuImage& image);
     std::uint64_t upload_static(ByteView bytes);
     GpuMesh upload_mesh(const geometry::Mesh& mesh);

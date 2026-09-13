@@ -7,7 +7,9 @@
     "NASA CGI Moon Kit": "https://svs.gsfc.nasa.gov/4720",
     "NASA MOLA MEGDR": "https://pds-geosciences.wustl.edu/missions/mgs/megdr.html",
     "NASA Photojournal": "https://www.jpl.nasa.gov/jpl-image-use-policy/",
-    "Yale Bright Star Catalogue": "http://tdc-www.harvard.edu/catalogs/bsc5.html"
+    "Yale Bright Star Catalogue": "http://tdc-www.harvard.edu/catalogs/bsc5.html",
+    "ESO": "https://www.eso.org/public/outreach/copyright/",
+    "ESA/Gaia/DPAC": "https://www.cosmos.esa.int/web/gaia/gaiadr2_gaiaskyincolour"
   },
   "assets": [
     {
@@ -326,6 +328,35 @@
       "layout": "16-byte header (STAR, count, record size 32, reserved), then per star float4 direction xyz + flux relative to magnitude 0, float4 linear RGB at unit luminance + V magnitude",
       "brightest_magnitude": -1.46,
       "faintest_magnitude": 7.96
+    },
+    {
+      "file": "milky_way_splats.bin",
+      "splats": 4096,
+      "license": "CC-BY-SA-3.0-IGO",
+      "attribution": "ESA/Gaia/DPAC, Gaia DR2 sky in colour (A. Moitinho, A. F. Silva, M. Barros, C. Barata, H. Savietto); fitted as Gaussian splats by tools/bake-splats.py in stages at the coherent residuals (recipe developed on the RTX 4080 machine, lineage gaia-v5-control-4096: the 4096-splat 0.3 degree fit plus 1,500 refinement updates, exported with the compact 32x16 cell table)",
+      "source": "esa_gaia_dr2_allsky_brightness_colour_cartesian_2k.jpg (ESA's cartesian 2k rendering of the DR2 sky in colour; supplied by hand, URL to be recorded)",
+      "source_sha256": "58536692C0F4261BECBD865D9438A9A2044D6F60715FB918B5E3D4596C386224",
+      "source_width": 1800,
+      "source_height": 900,
+      "layout": "16-byte header (SPLT, count, record size 64, cell table length in uints), then per splat float4 centre xyz + sigma1, float4 axis1 xyz + sigma2, float4 signed linear RGB + cos cutoff, float4 unused; galactic xyz (x the centre, z the north pole), widths in radians, axis2 = cross(centre, axis1); then the cell table: cells_lon, cells_lat, per cell (offset, count) into the index list that follows, the splats reaching each cell (32x16 cells of 11.25 degrees in this file; the bake's default is 48x24)",
+      "fit_stages": [
+        256,
+        512,
+        1024,
+        1536,
+        2048,
+        3072,
+        4096,
+        4096
+      ],
+      "fit_width": 2048,
+      "sigma_floor_deg": 0.3,
+      "aspect_max": 2.5,
+      "fit_loss": 0.015227,
+      "cell_grid": [
+        32,
+        16
+      ]
     }
   ]
 }

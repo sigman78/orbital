@@ -71,6 +71,16 @@ struct FrameInput {
     bool catalogue_stars = true; // the Bright Star Catalogue as points; off keeps the procedural sky
     float star_brightness = 2.f; // gain on the catalogue fluxes; the display cannot hold the eye's range
     float star_saturation = .5f; // share of the blackbody chroma shown; the eye sees stars nearly white
+    bool milky_way = true;       // the splat fit of ESO's panorama as the galactic band; off keeps the procedural band
+    float milky_way_brightness = .1f; // the band's radiance against the stars; 0.1 on review with the Gaia fit
+    float milky_way_contrast = 1.f;   // exponent on the fit's radiance about its unit: above 1 the halo stays faint and the core comes up
+    int milky_way_splats =
+        4096; // splats drawn, the first n of the cloud (the bake orders them by energy); clamped to the file
+    int galaxy_divisor = 4; // the splat pass at the frame over this (1, 2 or 4); 4 resolves a 0.6 degree splat at 1080p
+    float dust_amplitude = 2.f;   // the dust lanes' fBm modulation: amplitude (0 none), ...
+    float dust_scale = 1.4f;       // ... base feature size in degrees, ...
+    float dust_lacunarity = 3.f; // ... frequency step per octave, ...
+    float dust_gain = .7f;        // ... amplitude step per octave; three octaves
     // Gas giant (panel): flow-map advection of the cloud deck.
     bool gas_flow = true;           // off holds the cloud deck still
     float gas_time_scale = 1500.f;  // wind speed, times real

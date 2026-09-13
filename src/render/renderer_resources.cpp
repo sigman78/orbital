@@ -414,6 +414,7 @@ void Renderer::Impl::load_materials() {
     log::info("Loaded {} materials in {} ms on {} workers ({})", material_count, elapsed.count(), workers,
               assets::kernels::backend());
     load_stars();
+    load_splats();
 }
 
 // The Bright Star Catalogue baked by tools/bake-stars.py: a 16-byte header
@@ -443,6 +444,36 @@ void Renderer::Impl::load_stars() {
     log::info("Loaded {} catalogue stars", count);
 }
 
+// The Milky Way as Gaussian splats fitted to ESO's panorama by tools/bake-splats.py:
+// a 16-byte header ("SPLT", count, record size, table length), 64-byte records
+// the galaxy pass reads as two vertices each, then the cell table (uints) that
+// buckets them by direction. Optional: without it the sky keeps its procedural band.
+void Renderer::Impl::load_splats() {
+    const auto path = directory / "assets/materials/milky_way_splats.bin";
+    const auto bytes = file::read(path);
+    if (!bytes) {
+        log::warn("milky_way_splats.bin is missing; run tools/import-assets.ps1 to fit it (the band stays procedural)");
+        return;
+    }
+    constexpr std::size_t header = 16, record = 64;
+    if (bytes->size() < header || std::memcmp(bytes->data(), "SPLT", 4) != 0) {
+        log::warn("milky_way_splats.bin is not a splat record file; ignored");
+        return;
+    }
+    std::uint32_t count = 0, size = 0, table = 0;
+    std::memcpy(&count, bytes->data() + 4, 4);
+    std::memcpy(&size, bytes->data() + 8, 4);
+    std::memcpy(&table, bytes->data() + 12, 4);
+    const std::size_t payload = std::size_t(count) * record + std::size_t(table) * 4;
+    if (size != record || table < 2 || bytes->size() < header + payload) {
+        log::warn("milky_way_splats.bin has an unexpected layout; ignored");
+        return;
+    }
+    splat_data = upload_static(ByteView(bytes->data() + header, payload));
+    splat_count = count;
+    log::info("Loaded {} Milky Way splats ({} KB with their cell table)", count, (payload + 512) / 1024);
+}
+
 void Renderer::Impl::create_pipelines() {
     using gpu::Format;
     const auto make = [&](const char* vertex, const char* fragment, Format format, bool depth_test = false,
@@ -461,6 +492,7 @@ void Renderer::Impl::create_pipelines() {
     pso.billboard = make("surface", "surface_rock", Format::rgba16_float, true, Blend::alpha);
     pso.cloud = make("surface", "surface_earth", Format::rgba16_float, true, Blend::alpha);
     pso.background = make("fullscreen", "background", Format::rgba16_float, true);
+    pso.galaxy = make("fullscreen", "galaxy", Format::rgba16_float);
     pso.atmosphere = make("fullscreen", "atmosphere", Format::rgba16_float, false, Blend::alpha);
     pso.belt_splat = make("beltsplat", "beltsplat", Format::rgba16_float, false, Blend::additive);
     pso.belt_blur = make("fullscreen", "beltblur", Format::rgba16_float);
@@ -567,6 +599,19 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     create_fixed_targets();
 }
 
+void Renderer::Impl::resize_galaxy(unsigned divisor) {
+    divisor = std::clamp(divisor, 1u, 4u);
+    if (divisor == galaxy_divisor || extent.width == 0)
+        return;
+    gpu::wait_idle(device);
+    galaxy_divisor = divisor;
+    destroy(galaxy);
+    galaxy = create_image({.extent = {std::max(1u, extent.width / divisor), std::max(1u, extent.height / divisor)},
+                           .format = gpu::Format::rgba16_float,
+                           .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment});
+    bind(Slot::milky_way, galaxy);
+}
+
 void Renderer::Impl::resize(Extent2D new_extent) {
     if (extent == new_extent)
         return;
@@ -574,7 +619,7 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     log::info("Resizing frame targets {}x{} -> {}x{}", extent.width, extent.height, new_extent.width,
               new_extent.height);
     for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &history[0], &history[1], &splat_mask,
-                        &smaa_edges, &smaa_weights, &belt_dust})
+                        &smaa_edges, &smaa_weights, &belt_dust, &galaxy})
         destroy(*image);
     extent = new_extent;
     history_valid = false;
@@ -600,8 +645,13 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     belt_dust = create_image({.extent = {std::max(1u, extent.width / 2), std::max(1u, extent.height / 2)},
                               .format = gpu::Format::rgba16_float,
                               .usage = color_usage});
+    // The Milky Way's splat sum is smooth at its narrowest splat, so a fraction of the frame resolves it.
+    galaxy = create_image({.extent = {std::max(1u, extent.width / galaxy_divisor), std::max(1u, extent.height / galaxy_divisor)},
+                           .format = gpu::Format::rgba16_float,
+                           .usage = color_usage});
     bind(Slot::hdr, hdr);
     bind(Slot::bloom_a, bloom_a);
+    bind(Slot::milky_way, galaxy);
     bind(Slot::bloom_b, bloom_b);
     bind(Slot::final_image, final_image);
     bind(Slot::ldr, ldr);

@@ -1,5 +1,48 @@
 #include "common.slang"
 
+static const uint MILKY_WAY = 45; // the splat sum drawn by galaxy.slang at a quarter of the frame
+
+// The Milky Way for this pixel: the splat sum, drawn at a quarter of the frame
+// since it is smooth at a degree and more, read here bilinearly. rgb the
+// radiance, w a dust depth: how much the dark splats take from the bright.
+float4 milkyWay(float2 pixel)
+{
+    return textures[MILKY_WAY].SampleLevel(samplers[0], pixel / root.frame.options.xy, 0.0);
+}
+
+// The dust's structure below the splats' scale: the dust depth is
+// redistributed by three octaves of gradient noise (fBm), the base feature size,
+// amplitude, lacunarity and gain from the Sky panel, each octave on its own
+// rotated lattice so no grid shows, and each fading out as its features drop
+// below a pixel; the mean transmittance is kept.
+static const int DUST_OCTAVES = 3;
+float3 milkyDust(float3 rd, float depth, float footprint)
+{
+    float amplitude = root.frame.galaxy.y;
+    if (amplitude <= 0.0 || depth <= 0.0) return float3(1.0, 1.0, 1.0);
+    float frequency = 1.0 / max(radians(root.frame.galaxy.z), 1e-4); // the base feature size in degrees to lattice cells per radian
+    float lacunarity = root.frame.galaxy_more.x, gain = root.frame.galaxy_more.y;
+    // Lattices turned against each other: a rotation about (1, 1, 1) by a third of a turn per octave.
+    const float3x3 turn = float3x3(.6667, -.3333, .6667, .6667, .6667, -.3333, -.3333, .6667, .6667);
+    float clumping = 0.0, weight = 0.0, octaveAmplitude = 1.0;
+    float3 p = rd * frequency;
+    for (int octave = 0; octave < DUST_OCTAVES; ++octave)
+    {
+        float visible = saturate(1.0 / (frequency * footprint * 2.0) - 1.0);
+        if (visible <= 0.0) break;
+        clumping += gradientNoise(p + float(octave) * 7.3) * .5 * octaveAmplitude * visible;
+        weight += octaveAmplitude * visible;
+        p = mul(turn, p) * lacunarity + 13.1;
+        frequency *= lacunarity;
+        octaveAmplitude *= gain;
+    }
+    if (weight <= 0.0) return float3(1.0, 1.0, 1.0);
+    float3 reddening = float3(.8, 1.0, 1.35);
+    // Extinction redistributed: exp(-tau * (1 + c)) over the mean of exp(-tau) stays near one.
+    float3 mean = exp(-depth * reddening * .25), local = exp(-depth * reddening * .25 * (1.0 + 4.0 * amplitude * clumping / weight));
+    return local / max(mean, 1e-3);
+}
+
 float3 filteredStars(float3 p)
 {
     // Gaussian pixel convolution: derivative variance broadens undersampled
@@ -40,9 +83,21 @@ float3 filteredStars(float3 p)
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
     float3 rd = rayDirection(position.xy);
-    // The band lies on the real galactic plane: the pole at RA 192.86, Dec +27.13 in the sky frame the catalogue uses.
-    float galactic = pow(max(0.0, 1.0 - abs(dot(rd, float3(-.868, .456, -.198)))), 24.0);
-    float3 color = float3(.0005, .0007, .0012) + float3(.008, .009, .014) * galactic * (.4 + fbm(rd * 14.0));
+    float3 color = float3(.0005, .0007, .0012);
+    if (root.frame.stars.w > 0.0)
+    {
+        float4 band = milkyWay(position.xy);
+        float3 radiance = band.rgb * root.frame.stars.w;
+        if (max(radiance.r, max(radiance.g, radiance.b)) > 2e-4) // the dark sky skips the noise
+            radiance *= milkyDust(rd, band.w, length(fwidth(rd)));
+        color += radiance;
+    }
+    else
+    {
+        // Without the panorama: a band on the real galactic plane (the pole at RA 192.86, Dec +27.13 in the sky frame).
+        float galactic = pow(max(0.0, 1.0 - abs(dot(rd, float3(-.868, .456, -.198)))), 24.0);
+        color += float3(.008, .009, .014) * galactic * (.4 + fbm(rd * 14.0));
+    }
     color += filteredStars(rd * 480.0);
     // The solar disc: its edge softened to the pixel footprint so it does not
     // alias from afar, and limb-darkened (I = 1 - u (1 - mu)); the brightness

@@ -56,6 +56,10 @@ struct AppState {
     float motion_streak_intensity = 1.f;
     bool catalogue_stars = true; // Sky panel
     float star_brightness = 2.f, star_saturation = .5f;
+    bool milky_way = true;
+    float milky_way_brightness = .1f, milky_way_contrast = 1.f;
+    float dust_amplitude = 2.f, dust_scale = 1.4f, dust_lacunarity = 3.f, dust_gain = .7f;
+    int milky_way_splats = 4096, galaxy_divisor = 4;
     bool gas_flow = true; // Gas giant panel
     float gas_time_scale = 1500.f, gas_cycle = 12.f, gas_turbulence = 1.f;
     float gas_haze = .08f, gas_terminator = .08f, gas_relief = 6.f;

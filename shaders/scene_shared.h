@@ -1,5 +1,5 @@
 #pragma once
-#define ORBITAL_TEXTURE_COUNT 45
+#define ORBITAL_TEXTURE_COUNT 46
 #ifdef __cplusplus
 #include <cstdint>
 struct alignas(16) ShaderFloat4 { float x, y, z, w; };
@@ -62,7 +62,9 @@ struct Frame {
     SHADER_FLOAT4 giant_layers;          // upper deck lift (texture units at 45 degrees), upper deck shadow, close-range streak strength (0 off), unused
     SHADER_FLOAT4 camera_lattice;        // the camera's offset within its mote cell, cell size
     SHADER_FLOAT4 camera_cell;           // the camera's mote cell index, motion streak intensity (0 off)
-    SHADER_FLOAT4 stars;                 // catalogue stars loaded and on, star brightness (0 off), star colour saturation, unused
+    SHADER_FLOAT4 stars;                 // catalogue stars loaded and on, star brightness (0 off), star colour saturation, Milky Way brightness (0: the procedural band)
+    SHADER_FLOAT4 galaxy;                // Milky Way splats drawn (the first n of the cloud), dust fBm amplitude (0 off), base feature size in degrees, unused
+    SHADER_FLOAT4 galaxy_more;           // dust fBm lacunarity, gain, the galaxy pass's resolution divisor, band contrast exponent
 };
 struct Root {
 #ifdef __cplusplus
