@@ -24,12 +24,23 @@ target_link_libraries(orbital_scene PUBLIC orbital_core)
 target_compile_options(orbital_scene PRIVATE ${ORBITAL_WARNINGS})
 
 add_library(orbital_assets STATIC src/assets/image.cpp src/assets/kernels.cpp src/assets/materials.cpp)
+set(smaa_source "${CMAKE_CURRENT_BINARY_DIR}/generated/smaa.cpp")
+add_custom_command(
+  OUTPUT "${smaa_source}"
+  COMMAND "${CMAKE_COMMAND}"
+    "-DINPUT_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}/third_party/smaa"
+    "-DOUTPUT=${smaa_source}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateSmaa.cmake"
+  DEPENDS third_party/smaa/area.bin third_party/smaa/search.bin cmake/GenerateSmaa.cmake
+  VERBATIM
+  COMMENT "Embedding SMAA lookup binaries")
+target_sources(orbital_assets PRIVATE "${smaa_source}")
 target_include_directories(orbital_assets PRIVATE third_party/stb third_party/wuffs)
 target_link_libraries(orbital_assets PUBLIC orbital_core)
 target_compile_options(orbital_assets PRIVATE ${ORBITAL_WARNINGS})
 
 if(BUILD_TESTING)
-  foreach(test IN ITEMS core system geometry camera image kernels materials)
+  foreach(test IN ITEMS core system geometry camera image kernels materials smaa)
     add_executable(${test}_tests tests/${test}_tests.cpp)
     target_link_libraries(${test}_tests PRIVATE orbital_scene orbital_assets)
     # These tests use assertions as executable invariants, including Release.
@@ -40,6 +51,7 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME ${test} COMMAND ${test}_tests)
   endforeach()
+  set_tests_properties(smaa PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/third_party/smaa")
 endif()
 
 if(ORBITAL_BUILD_DEMO)

@@ -1,0 +1,22 @@
+# Run at build time: keep binary resources out of checked-in C++ and avoid
+# requiring Python or platform-specific object-file tools for normal builds.
+set(source "// Generated from the SMAA lookup binaries; do not edit.\n#include \"assets/smaa.hpp\"\n\nnamespace space::assets {\nnamespace {\n")
+foreach(table IN ITEMS area search)
+  file(READ "${INPUT_DIRECTORY}/${table}.bin" bytes HEX)
+  if(bytes STREQUAL "")
+    message(FATAL_ERROR "SMAA ${table} lookup is empty")
+  endif()
+  # Bound line length for compilers and diagnostics.
+  string(REPEAT "[0-9a-f][0-9a-f]" 16 line_pattern)
+  string(REGEX REPLACE "(${line_pattern})" "\\1\n" bytes "${bytes}")
+  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," bytes "${bytes}")
+  string(APPEND source "constexpr unsigned char ${table}_bytes[] = {\n${bytes}\n};\n")
+endforeach()
+string(APPEND source "} // namespace\n\n")
+foreach(table IN ITEMS area search)
+  string(APPEND source "std::span<const unsigned char, smaa_${table}_size> smaa_${table}() {\n    return ${table}_bytes;\n}\n")
+endforeach()
+string(APPEND source "} // namespace space::assets\n")
+get_filename_component(output_directory "${OUTPUT}" DIRECTORY)
+file(MAKE_DIRECTORY "${output_directory}")
+file(WRITE "${OUTPUT}" "${source}")
