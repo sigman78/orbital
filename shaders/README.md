@@ -40,6 +40,17 @@ Use `TEX_*` and `SAMPLER_*` names rather than numeric descriptor indices.
 that file but declare their own push-constant types; they do not include the standard
 frame root. GPU records and surface mode/kind values remain in `scene_shared.h`.
 
+## Post-processing passes
+
+`post/bloom.slang`, `post/composite.slang`, `post/meter.slang`,
+`post/sun_visibility.slang`, `post/present.slang`, and `aa/fxaa_pass.slang` compile
+as separate fragment entry points, sharing the fullscreen vertex shader. Bloom's
+prefilter and two blur directions use `Root.mode`, with the C++/shader contract in
+`post/bloom_shared.h`. Other post entry points do not use a global effect selector.
+Keep the composite's per-pixel effects in one pass to avoid extra intermediate
+images. `post/hdr.slang` and `post/sun_occlusion.slang` are focused shared helpers;
+entry points do not include other entry points.
+
 ## Validation
 
 Build through CMake to compile the entry points. Slang writes a depfile per output,

@@ -54,7 +54,8 @@ Between the rocks a half-resolution march through the same density field scatter
    composited with a depth-aware upsample.
 5. The splats write their depth and a mask, so the temporal pass reprojects them exactly and keeps their
    history unclipped.
-6. Temporal anti-aliasing into a history target; bloom at quarter resolution; exposure metering every
+6. Temporal anti-aliasing into a history target; area-prefiltered bloom with adjacent-texel separable blur at quarter resolution;
+   one shared 1×1 sun-visibility estimate for lens effects; exposure metering every
    sixteenth frame from a 16x16 log-luminance image.
 7. Tone mapping (PBR Neutral, AgX or ACES filmic) with vignette, chromatic fringe and grain into an
    intermediate, then the spatial pass (SMAA or FXAA) into the final image.
@@ -123,6 +124,11 @@ holds shared surface contracts, BRDFs and lighting. Feature folders group planet
 and atmosphere (`planets`), all anti-aliasing (`aa`), belt rendering (`belt`), sky (`sky`),
 post-processing (`post`) and UI (`overlay`), with entry points beside their helpers. Descriptor slot numbers are shared with C++ through
 `resource_slots.h`. See [shader organization](../shaders/README.md) for dependency rules and checks.
+
+Post-processing uses dedicated bloom, composite, sun-visibility, metering,
+presentation and FXAA fragment entry points. Only bloom selects its internal
+stage through a shared C++/shader mode contract. The composite keeps its finishing
+effects together; splitting sources does not add passes or intermediate images.
 
 Slang-generated depfiles track transitive includes. `tools/check-shader-helpers.py` compiles each
 helper on its own to catch accidental include-order dependencies.

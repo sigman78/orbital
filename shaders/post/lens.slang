@@ -1,28 +1,9 @@
 #pragma once
-#include "../scene_shared.h"
 #include "../lib/math.slang"
 
 // Lens ghosts: a few soft, faintly tinted ellipses spaced along the axis from
 // the sun through the frame centre, stretched across that axis, plus a very
 // faint anamorphic streak. Everything scales with the sun's visibility.
-// Fraction of the solar disc not covered by scene geometry: depth taps over
-// the disc's screen footprint, so rocks and moons dim the glare and the
-// flare as they cross the sun (the planets are handled analytically).
-float sunDepthVisibility(Frame* frame, Texture2D<float4> depth, SamplerState sampler, float2 sun, float2 aspect)
-{
-    float2 uv = sun * .5 + .5;
-    if (any(uv < 0.0) || any(uv > 1.0)) return 1.0;
-    float2 radius = frame->sun_disc.x / frame->right_tan.w / aspect * .5; // disc radius in uv
-    float open = 0.0;
-    for (int i = 0; i < 12; ++i)
-    {
-        float r = sqrt((float(i) + .5) / 12.0), a = float(i) * 2.399963;
-        float2 tap = clamp(uv + float2(cos(a), sin(a)) * r * radius, 0.0, 1.0);
-        open += depth.SampleLevel(sampler, tap, 0.0).r >= .999999 ? 1.0 : 0.0;
-    }
-    return open / 12.0;
-}
-
 // Ghost images down the lens axis: the sun's image reflected between lens
 // elements lands as a few dim, soft-edged copies of the aperture (the blade
 // polygon, or a circle with no blades), lightly tinted by the coatings and a

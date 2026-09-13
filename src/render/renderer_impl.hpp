@@ -7,6 +7,7 @@
 #include "assets/texture.hpp"
 #include "core/small_vec.hpp"
 #include "core/types.hpp"
+#include "post/bloom_shared.h"
 #include "render/gpu_types.hpp"
 #include "scene/geometry.hpp"
 
@@ -74,6 +75,7 @@ enum class Slot : unsigned {
     galaxy_clouds = TEX_GALAXY_CLOUDS,
     galaxy_filaments = TEX_GALAXY_FILAMENTS,
     galaxy_original = TEX_GALAXY_ORIGINAL,
+    sun_visibility = TEX_SUN_VISIBILITY,
     count = ORBITAL_TEXTURE_COUNT,
 };
 
@@ -94,8 +96,12 @@ enum class SurfaceMode : std::uint32_t {
     billboard = ORBITAL_SURFACE_BILLBOARD,
     splat_mask = ORBITAL_SURFACE_SPLAT_MASK
 };
-// Root.mode as interpreted by post.slang; atmosphere.slang uses Root.base as the body index.
-enum class PostMode : std::uint32_t { tonemap = 0, bloom_a = 1, bloom_b = 2, present = 3, meter = 4, fxaa = 5 };
+// Only bloom selects a stage through Root.mode; other post pipelines have dedicated entry points.
+enum class BloomMode : std::uint32_t {
+    prefilter = ORBITAL_BLOOM_PREFILTER,
+    horizontal = ORBITAL_BLOOM_HORIZONTAL,
+    vertical = ORBITAL_BLOOM_VERTICAL
+};
 
 // Instance.rotation_kind.w as interpreted by surface.slang and atmosphere.slang.
 enum class SurfaceKind : unsigned {
@@ -241,6 +247,7 @@ struct Renderer::Impl {
     // Resources.
     std::vector<GpuImage> material_images;
     std::vector<gpu::PSO*> pipelines;
+    GpuImage sun_visibility{}; // one shared solar-disc visibility estimate per frame
     GpuImage hdr{}, depth{}, bloom_a{}, bloom_b{}, final_image{}, ldr{}, shadow_map{}, luminance{}, history[2]{};
     GpuImage splat_mask{}, smaa_edges{}, smaa_weights{}, belt_dust{}, belt_disc_light{}, belt_disc_rocks{};
     GpuImage belt_light{}, belt_light_blur{}, galaxy{}; // galaxy: the Milky Way's splat sum at a quarter of the frame
@@ -272,7 +279,8 @@ struct Renderer::Impl {
         } belt;
         struct {
             gpu::PSO* bloom = nullptr;
-            gpu::PSO* tonemap = nullptr;
+            gpu::PSO* composite = nullptr;
+            gpu::PSO* sun_visibility = nullptr;
             gpu::PSO* present = nullptr;
             gpu::PSO* meter = nullptr;
             gpu::PSO* temporal = nullptr;
