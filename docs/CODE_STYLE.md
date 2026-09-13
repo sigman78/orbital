@@ -299,8 +299,9 @@ was tuned rather than derived.
 - `src/render`: the Vulkan renderer. Depends on `core`, `scene` and `assets`; the HUD image and the
   native window handle are passed in, so it needs neither `app` nor `platform`. Split by
   responsibility: `renderer_impl.hpp` holds the private `Impl`, the slot and mode enumerations, the
-  heap layout, target sizes and quality tiers; `renderer_resources.cpp` creates the device, meshes, materials, pipelines and
-  targets; `renderer_frame.cpp` builds frame data, culls, records passes and captures.
+  heap layout, target sizes and quality tiers; `renderer_resources.cpp` owns device/heaps, uploads and target lifetime;
+  `renderer_frame.cpp` coordinates the frame and capture. Frame data, pipelines, assets, belt, scene,
+  post-processing and overlay live in separate implementation units (see `ARCHITECTURE.md`).
 - `src/app`: options, camera, HUD layout, frame loop, `main`. Depends on everything, calls no OS API.
 - Each directory is one CMake target with the same name prefix (`orbital_core`, `orbital_scene`,
   `orbital_assets`, `orbital_platform`, `orbital`), and the target link graph mirrors the include
