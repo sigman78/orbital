@@ -7,8 +7,9 @@
 /.tools/
 /cache/
 
-# Runtime captures, benchmarks and stability runs
+# Runtime captures, benchmarks and stability runs; experimental bakes
 /captures/
+/.scratch/
 
 # Machine-specific CMake overrides
 /CMakeUserPresets.json
@@ -30,3 +31,4 @@ compile_commands.json
 *.spv
 *.dll
 *.lib
+__pycache__/

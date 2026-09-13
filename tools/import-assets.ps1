@@ -296,6 +296,42 @@ if ($Only.Count -gt 0 -and $Only -notcontains $starsAsset.Name) {
     }
 }
 
+# The Milky Way, fitted as Gaussian splats to ESA's Gaia DR2 sky-in-colour map by tools/bake-splats.py
+# (needs torch and a GPU; twenty minutes on a GTX 1080 Ti). The cartesian 2k JPEG was supplied by hand
+# (its URL is still to be recorded); the fit is not bit-reproducible across GPUs, so this step is for
+# refits, and the shipped file is the peer machine's lineage gaia-adaptive-v4-s03-4096.
+$milkyAsset = @{ Name = 'milky_way'; Source = 'esa_gaia_dr2_allsky_brightness_colour_cartesian_2k.jpg'; Url = ''; Hash = '58536692C0F4261BECBD865D9438A9A2044D6F60715FB918B5E3D4596C386224' }
+if ($Only.Count -gt 0 -and $Only -notcontains $milkyAsset.Name) {
+    $manifestEntries += ($existingManifest.assets | Where-Object { $_.file -eq 'milky_way_splats.bin' })
+} else {
+    $milkySource = Join-Path $SourceCache $milkyAsset.Source
+    if (-not (Test-Path -LiteralPath $milkySource) -or (Get-FileHash -LiteralPath $milkySource -Algorithm SHA256).Hash -ne $milkyAsset.Hash) {
+        throw "Place $($milkyAsset.Source) (SHA-256 $($milkyAsset.Hash)) in $SourceCache; it has no recorded download URL"
+    }
+    $milkyScript = Join-Path $PSScriptRoot 'bake-splats.py'
+    $milkyOutput = Join-Path $OutputDirectory 'milky_way_splats.bin'
+    $json = & python $milkyScript --source $milkySource --kind map --output $milkyOutput --count 4096 --sigma-min 0.3 --aspect-max 2.5 --width 2048
+    if ($LASTEXITCODE -ne 0) { throw "bake-splats.py failed" }
+    $milky = ($json -split "`n")[-1] | ConvertFrom-Json
+    Write-Host ("{0,-20} {1} splats ({2:N1} KB)" -f 'milky_way_splats.bin', $milky.count, ((Get-Item -LiteralPath $milkyOutput).Length / 1KB))
+    $manifestEntries += [pscustomobject][ordered]@{
+        file = 'milky_way_splats.bin'
+        splats = $milky.count
+        license = 'CC-BY-SA-3.0-IGO'
+        attribution = 'ESA/Gaia/DPAC, Gaia DR2 sky in colour (A. Moitinho, A. F. Silva, M. Barros, C. Barata, H. Savietto); fitted as Gaussian splats by tools/bake-splats.py in stages at the coherent residuals'
+        source = $milkyAsset.Source
+        source_sha256 = $milkyAsset.Hash
+        source_width = 1800
+        source_height = 900
+        layout = '16-byte header (SPLT, count, record size 64, cell table length in uints), then per splat float4 centre xyz + sigma1, float4 axis1 xyz + sigma2, float4 signed linear RGB + cos cutoff, float4 unused; galactic xyz (x the centre, z the north pole), widths in radians, axis2 = cross(centre, axis1); then the cell table: cells_lon, cells_lat, per cell (offset, count) into the index list that follows, the splats reaching each 7.5 degree cell'
+        fit_stages = $milky.stages
+        fit_width = $milky.width
+        sigma_floor_deg = $milky.sigma_floor_deg
+        aspect_max = $milky.aspect_max
+        fit_loss = $milky.loss
+    }
+}
+
 $manifest = [ordered]@{
     version = 2
     note = 'PNG textures derived from the listed sources by tools/import-assets.ps1 (downscaled to at most 4096 px wide). Keep attribution when redistributing.'
@@ -306,6 +342,8 @@ $manifest = [ordered]@{
         'NASA MOLA MEGDR' = 'https://pds-geosciences.wustl.edu/missions/mgs/megdr.html'
         'NASA Photojournal' = 'https://www.jpl.nasa.gov/jpl-image-use-policy/'
         'Yale Bright Star Catalogue' = 'http://tdc-www.harvard.edu/catalogs/bsc5.html'
+        'ESO' = 'https://www.eso.org/public/outreach/copyright/'
+        'ESA/Gaia/DPAC' = 'https://www.cosmos.esa.int/web/gaia/gaiadr2_gaiaskyincolour'
     }
     assets = $manifestEntries
 }
