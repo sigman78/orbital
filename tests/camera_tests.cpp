@@ -52,5 +52,17 @@ int main() {
     camera.position = {20, 20, 20};
     camera.set_bookmark(0, bodies);
     assert(length(camera.position - bookmark) < 1e-9);
+    // Continuous navigation keeps history; even a tiny explicit reframe is a cut.
+    Camera temporal;
+    const auto initial_cut = temporal.cut_serial();
+    temporal.step(.016, 0, Input{1, 0, 0, 0, 0, 1}, bodies);
+    assert(temporal.cut_serial() == initial_cut);
+    temporal.look_at(temporal.position + Vec3d{.001, 0, 0}, temporal.position + temporal.forward());
+    assert(temporal.cut_serial() != initial_cut);
+    const auto reframed = temporal.cut_serial();
+    temporal.set_bookmark(bookmark_count, bodies); // invalid request is not a cut
+    assert(temporal.cut_serial() == reframed);
+    temporal.set_bookmark(0, bodies);
+    assert(temporal.cut_serial() != reframed);
     return 0;
 }

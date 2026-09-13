@@ -2,17 +2,9 @@
 #include "../scene/view.slang"
 #include "../lib/color.slang"
 
-// Temporal anti-aliasing over the jittered HDR frame. History is reprojected
-// through the previous frame's projection and camera delta, clipped to the
-// current 3x3 neighbourhood in YCoCg, and blended with luminance weights so
-// bright specks settle instead of flickering. Depth only rejects history when
-// both frames saw a surface and disagree: a pixel that flips between a thin
-// rock and the sky keeps its history and lets the colour clip decide. Rock
-// splats (textures[TEX_SPLAT_MASK] marks their pixels, and they wrote their depth) are
-// reprojected exactly and keep their history unclipped: a sub-pixel feature in
-// motion never survives the neighbourhood clip, and the exact reprojection
-// makes the clip unnecessary.
-// Frame.quality.x below 1 turns the pass into a copy.
+// Resolve jittered scene samples onto a stable output/history grid. Previous
+// projection remains jittered for other consumers; remove its displacement here.
+// Splat history validation is unchanged by this coordinate correction.
 
 static const float HISTORY_WEIGHT = .95;      // at rest
 static const float HISTORY_WEIGHT_MOVING = .80; // at one pixel of motion per frame and beyond
@@ -32,7 +24,7 @@ float3 clipToBox(float3 boxMin, float3 boxMax, float3 history)
 }
 
 // Five-tap Catmull-Rom history fetch: sharper than bilinear over many frames.
-float4 sampleHistory(float2 uv, float2 size)
+float4 reconstruct(Texture2D<float4> source, float2 uv, float2 size)
 {
     float2 texel = 1.0 / size;
     float2 position = uv * size;
@@ -45,11 +37,11 @@ float4 sampleHistory(float2 uv, float2 size)
     float2 w12 = w1 + w2;
     float2 offset12 = w2 / w12;
     float2 tc0 = (centre - 1.0) * texel, tc3 = (centre + 2.0) * texel, tc12 = (centre + offset12) * texel;
-    float4 result = textures[TEX_HISTORY_B].SampleLevel(samplers[SAMPLER_CLAMP], float2(tc12.x, tc0.y), 0.0) * w12.x * w0.y
-                  + textures[TEX_HISTORY_B].SampleLevel(samplers[SAMPLER_CLAMP], float2(tc0.x, tc12.y), 0.0) * w0.x * w12.y
-                  + textures[TEX_HISTORY_B].SampleLevel(samplers[SAMPLER_CLAMP], float2(tc12.x, tc12.y), 0.0) * w12.x * w12.y
-                  + textures[TEX_HISTORY_B].SampleLevel(samplers[SAMPLER_CLAMP], float2(tc3.x, tc12.y), 0.0) * w3.x * w12.y
-                  + textures[TEX_HISTORY_B].SampleLevel(samplers[SAMPLER_CLAMP], float2(tc12.x, tc3.y), 0.0) * w12.x * w3.y;
+    float4 result = source.SampleLevel(samplers[SAMPLER_CLAMP], float2(tc12.x, tc0.y), 0.0) * w12.x * w0.y
+                  + source.SampleLevel(samplers[SAMPLER_CLAMP], float2(tc0.x, tc12.y), 0.0) * w0.x * w12.y
+                  + source.SampleLevel(samplers[SAMPLER_CLAMP], float2(tc12.x, tc12.y), 0.0) * w12.x * w12.y
+                  + source.SampleLevel(samplers[SAMPLER_CLAMP], float2(tc3.x, tc12.y), 0.0) * w3.x * w12.y
+                  + source.SampleLevel(samplers[SAMPLER_CLAMP], float2(tc12.x, tc3.y), 0.0) * w12.x * w3.y;
     float weight = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
     return max(result / weight, float4(0.0, 0.0, 0.0, 0.0));
 }
@@ -60,13 +52,16 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     int2 size = int2(root.frame.options.xy);
     int2 pixel = clamp(int2(position.xy), int2(0, 0), size - 1);
     float2 uv = (float2(pixel) + .5) / float2(size);
-    float3 current = textures[TEX_HDR].Load(int3(pixel, 0)).rgb;
+    float2 rasterPosition = position.xy + root.frame.jitter.xy;
+    float2 rasterUV = rasterPosition / float2(size);
+    float3 current = reconstruct(textures[TEX_HDR], rasterUV, float2(size)).rgb;
+    pixel = clamp(int2(rasterPosition), int2(0, 0), size - 1);
     float deviceDepth = textures[TEX_DEPTH].Load(int3(pixel, 0)).r;
     bool sky = deviceDepth >= .999999;
     float currentZ = sky ? FAR_Z : linearViewDepth(deviceDepth);
     if (root.frame.previous_camera_delta.w < .5 || root.frame.quality.x < .5) return float4(current, currentZ);
 
-    float3 rd = rayDirection(root.frame, position.xy);
+    float3 rd = rayDirection(root.frame, rasterPosition);
     float4 previousClip;
     float predictedPreviousZ = FAR_Z;
     if (sky) {
@@ -79,11 +74,12 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         previousClip = mul(root.frame.previous_projection, float4(previousPosition, 1.0));
     }
     bool behind = previousClip.w <= 1e-5;
-    float2 previousUV = previousClip.xy / max(previousClip.w, 1e-5) * .5 + .5;
+    float2 previousUV = previousClip.xy / max(previousClip.w, 1e-5) * .5 + .5
+                      - root.frame.jitter.zw / float2(size);
     bool outside = any(previousUV < float2(0.0, 0.0)) || any(previousUV > float2(1.0, 1.0));
     if (behind || outside || (!sky && predictedPreviousZ <= 0.0)) return float4(current, currentZ);
 
-    float4 history = sampleHistory(previousUV, float2(size));
+    float4 history = reconstruct(textures[TEX_HISTORY_B], previousUV, float2(size));
     bool splat = textures[TEX_SPLAT_MASK].Load(int3(pixel, 0)).r > .5;
     // A disocclusion: both frames saw surfaces at clearly different depths.
     bool historySky = history.a >= FAR_Z * .999;
@@ -94,8 +90,8 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 
     float3 mean = float3(0.0, 0.0, 0.0), meanSquare = float3(0.0, 0.0, 0.0);
     for (int y = -1; y <= 1; ++y) for (int x = -1; x <= 1; ++x) {
-        int2 q = clamp(pixel + int2(x, y), int2(0, 0), size - 1);
-        float3 c = toYCoCg(textures[TEX_HDR].Load(int3(q, 0)).rgb);
+        float2 q = rasterUV + float2(x, y) / float2(size);
+        float3 c = toYCoCg(textures[TEX_HDR].SampleLevel(samplers[SAMPLER_CLAMP], q, 0.0).rgb);
         mean += c;
         meanSquare += c * c;
     }

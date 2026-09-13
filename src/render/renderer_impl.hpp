@@ -332,6 +332,8 @@ struct Renderer::Impl {
     std::chrono::steady_clock::time_point meter_time{}; // last adaptation step
     FrameData previous_frame{};
     Vec3d previous_camera{};
+    double previous_vertical_fov = 0;
+    std::size_t previous_camera_cut = 0;
     bool history_valid = false;
     bool ui_overflow_logged = false;
     bool belt_disc_baked = false;          // the far-belt maps hold data (baked once the far tier is first needed)

@@ -30,6 +30,8 @@ struct Camera {
 
     Camera();
     CameraMode mode() const { return mode_; }
+    // Explicit view discontinuities invalidate temporal history even for small jumps.
+    std::size_t cut_serial() const { return cut_serial_; }
     Vec3d forward() const { return forward_; }
     Vec3d right() const { return right_; }
     Vec3d up() const { return up_; }
@@ -64,6 +66,7 @@ private:
     bool tour_override_ = false;
     double tour_override_time_ = 0.0;
     Bookmark bookmarks_[bookmark_count]{};
+    std::size_t cut_serial_ = 0;
 
     void step_tour(double time, std::span<const BodyState> bodies);
     void step_orbit(double dt, double speed, const Input& input, const BodyState& body);
