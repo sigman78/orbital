@@ -78,11 +78,12 @@ void Renderer::Impl::create_pipelines() {
     pso.belt.disc = make("fullscreen", "disc", Format::rgba16_float);
     pso.belt.disc_splat = make("discsplat", "discsplat", Format::rgba16_float, false, Blend::additive);
     // Temporal, tone mapping and spatial anti-aliasing pipelines.
-    pso.post.bloom = make("fullscreen", "post", Format::rgba16_float);
-    pso.post.tonemap = make("fullscreen", "post", Format::rgba8_srgb);
-    pso.post.present = make("fullscreen", "post", Format::bgra8_srgb);
-    pso.post.fxaa = make("fullscreen", "post", Format::rgba8_srgb);
-    pso.post.meter = make("fullscreen", "post", Format::rgba32_float);
+    pso.post.sun_visibility = make("fullscreen", "sun_visibility", Format::rgba16_float);
+    pso.post.bloom = make("fullscreen", "bloom", Format::rgba16_float);
+    pso.post.composite = make("fullscreen", "composite", Format::rgba8_srgb);
+    pso.post.present = make("fullscreen", "present", Format::bgra8_srgb);
+    pso.post.fxaa = make("fullscreen", "fxaa_pass", Format::rgba8_srgb);
+    pso.post.meter = make("fullscreen", "meter", Format::rgba32_float);
     pso.post.temporal = make("fullscreen", "temporal", Format::rgba16_float);
     pso.post.smaa_edges = make("fullscreen", "smaa", Format::rg8_unorm);
     pso.post.smaa_weights = make("fullscreen", "smaa", Format::rgba8_unorm);

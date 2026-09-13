@@ -24,9 +24,9 @@ Renderer::Impl::~Impl() {
         gpu::destroy_pso(pipeline);
     for (auto& image : material_images)
         destroy(image);
-    for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &shadow_map, &luminance, &history[0],
-                        &history[1], &belt_light, &belt_light_blur, &splat_mask, &smaa_edges, &smaa_weights, &belt_dust,
-                        &belt_disc_light, &belt_disc_rocks})
+    for (auto* image : {&hdr, &depth, &sun_visibility, &bloom_a, &bloom_b, &final_image, &ldr, &shadow_map, &luminance,
+                        &history[0], &history[1], &belt_light, &belt_light_blur, &splat_mask, &smaa_edges,
+                        &smaa_weights, &belt_dust, &belt_disc_light, &belt_disc_rocks})
         destroy(*image);
     for (auto* heap : {&data, &texture_descriptors, &sampler_descriptors, &luminance_readback, &timestamps})
         gpu::destroy_gpu_heap(*heap);
@@ -273,8 +273,8 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     gpu::wait_idle(device);
     log::info("Resizing frame targets {}x{} -> {}x{}", extent.width, extent.height, new_extent.width,
               new_extent.height);
-    for (auto* image : {&hdr, &depth, &bloom_a, &bloom_b, &final_image, &ldr, &history[0], &history[1], &splat_mask,
-                        &smaa_edges, &smaa_weights, &belt_dust, &galaxy})
+    for (auto* image : {&hdr, &depth, &sun_visibility, &bloom_a, &bloom_b, &final_image, &ldr, &history[0], &history[1],
+                        &splat_mask, &smaa_edges, &smaa_weights, &belt_dust, &galaxy})
         destroy(*image);
     extent = new_extent;
     history_valid = false;
@@ -284,6 +284,7 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     depth = create_image({.extent = extent,
                           .format = gpu::Format::d32_float,
                           .usage = gpu::TextureUsage::depth_stencil_attachment | gpu::TextureUsage::sampled});
+    sun_visibility = create_image({.extent = {1, 1}, .format = gpu::Format::rgba16_float, .usage = color_usage});
     bloom_a = create_image(
         {.extent = {bloom_width, bloom_height}, .format = gpu::Format::rgba16_float, .usage = color_usage});
     bloom_b = create_image(
@@ -307,6 +308,7 @@ void Renderer::Impl::resize(Extent2D new_extent) {
          .usage = color_usage});
     bind(Slot::hdr, hdr);
     bind(Slot::bloom_a, bloom_a);
+    bind(Slot::sun_visibility, sun_visibility);
     bind(Slot::milky_way, galaxy);
     bind(Slot::bloom_b, bloom_b);
     bind(Slot::final_image, final_image);

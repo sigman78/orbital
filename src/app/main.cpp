@@ -51,6 +51,7 @@ constexpr std::string_view usage =
     "N\n"
     "--galaxy 0|1|2 (splats, texture layers, original full resolution) --galaxy-view -180..180 (longitude, sky-only "
     "view)\n"
+    "--belt-sun-view (sun through the gas giant's belt, for bloom/occlusion checks)\n"
     "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F free;\n"
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
     "F5 temporal AA; F6 rock splat cut-off; F7 splat lighting in both cull passes; F8 tone curve;\n"
@@ -80,7 +81,8 @@ struct Options {
     unsigned maximize_at = 0; // > 0 maximizes the window after this many frames, to test resizing in captures
     unsigned fullscreen_at = 0; // > 0 enters borderless fullscreen after this many frames
     bool tour = false, high = false, no_hud = false, help = false;
-    bool ui = false; // start with the control panel shown
+    bool ui = false;            // start with the control panel shown
+    bool belt_sun_view = false; // repeatable view through the gas giant's belt toward the sun
     std::filesystem::path capture, benchmark;
 };
 
@@ -125,6 +127,8 @@ std::optional<Options> parse_options(int argc, char** argv) {
             options.tour = true;
         else if (arg == "--ui")
             options.ui = true;
+        else if (arg == "--belt-sun-view")
+            options.belt_sun_view = true;
         else if (arg == "--high")
             options.high = true;
         else if (arg == "--no-hud")
@@ -348,6 +352,16 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
         const double c = std::cos(longitude), s = std::sin(longitude);
         const Vec3d direction{-.054876 * c + .494109 * s, -.483835 * c + .746982 * s, -.873437 * c - .444830 * s};
         app.camera.look_at({0, 1000, 0}, Vec3d{0, 1000, 0} + direction);
+        app.camera.set_mode(CameraMode::Free);
+    }
+    if (options.belt_sun_view && app.bodies.size() > 1 && !system.belts.empty()) {
+        const auto& belt = system.belts.front();
+        // Same tilted ring plane as the belt renderer (normal 0, .933, .36).
+        const Vec3d ring_point = app.bodies[1].position +
+                                 normalized(Vec3d{0, -.36, .933}) * ((belt.inner_radius + belt.outer_radius) * .5);
+        const Vec3d toward_sun = normalized(system.star.position - ring_point);
+        // Behind the belt plane: the centre ray crosses its middle, clear of the planet.
+        app.camera.look_at(ring_point - toward_sun * 12.0, system.star.position);
         app.camera.set_mode(CameraMode::Free);
     }
     return app;
