@@ -1,4 +1,5 @@
-param([ValidateSet('release','debug')][string]$Preset = 'release')
+param([ValidateSet('release','debug')][string]$Preset = 'release',
+      [ValidateSet('all','texture_tools')][string]$Target = 'all')
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $vcvars = $env:ORBITAL_VCVARS
@@ -12,6 +13,7 @@ if (-not $vcvars) {
 if (-not $vcvars -or -not (Test-Path -LiteralPath $vcvars)) {
     throw 'MSVC environment not found. Set ORBITAL_VCVARS to the absolute vcvarsall.bat path.'
 }
-$command = 'call "' + $vcvars + '" x64 && cd /d "' + $workspace + '" && cmake --preset ' + $Preset + ' && cmake --build --preset ' + $Preset
+$toolOption = if ($Target -eq 'texture_tools') { ' -DORBITAL_BUILD_TEXTURE_TOOLS=ON' } else { '' }
+$command = 'call "' + $vcvars + '" x64 && cd /d "' + $workspace + '" && cmake --preset ' + $Preset + $toolOption + ' && cmake --build --preset ' + $Preset + ' --target ' + $Target
 & cmd.exe /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE" }

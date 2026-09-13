@@ -32,3 +32,7 @@ compile_commands.json
 *.dll
 *.lib
 __pycache__/
+
+# On-demand material caches; source PNGs remain authoritative.
+/assets/materials/*.otex
+/assets/materials/*.otex.*.tmp

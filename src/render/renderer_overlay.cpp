@@ -87,7 +87,7 @@ void Renderer::set_ui_font(const std::uint8_t* rgba, unsigned width, unsigned he
     upload.emplace_back();
     assets::Image image{.extent = {width, height}, .pixels = {}};
     image.pixels.assign(rgba, rgba + std::size_t(width) * height * 4);
-    upload.back().mips.push_back(std::move(image));
+    upload.back().data = assets::texture_from_images({std::move(image)});
     upload.back().slot = Slot::ui_font;
     impl_->upload_images(upload);
 }

@@ -135,6 +135,9 @@ enum class Format : uint8
     eac_rg,
     astc_4x4_srgb,
     astc_4x4_unorm,
+    astc_6x6_unorm,
+    astc_8x8_unorm,
+    astc_12x12_unorm,
     bc3_srgb,
     bc3_unorm,
     bc5_rg,
@@ -243,6 +246,9 @@ struct TextureFormatInfo
             .block_extent = {.x = 4, .y = 4},
             .bytes_per_block = 16,
         };
+    case Format::astc_6x6_unorm: return {.block_extent = {.x = 6, .y = 6}, .bytes_per_block = 16};
+    case Format::astc_8x8_unorm: return {.block_extent = {.x = 8, .y = 8}, .bytes_per_block = 16};
+    case Format::astc_12x12_unorm: return {.block_extent = {.x = 12, .y = 12}, .bytes_per_block = 16};
     case Format::undefined: return {};
     }
     return {};

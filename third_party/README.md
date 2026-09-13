@@ -46,3 +46,17 @@ MIT-style licence). The tables are embedded by a CMake build step; see [resource
 `imgui/` is [ocornut/imgui](https://github.com/ocornut/imgui) 1.91.9b (MIT, see `imgui/LICENSE.txt`): the core sources and the Win32
 and SDL2 backends. Both backends are from the same 1.91.9b tag. The core is platform-agnostic and used by the application; the selected backend is compiled into the
 platform layer, and the draw lists are rendered by the demo's own NoGraphicsAPI backend.
+
+## Arm astcenc (optional offline tool)
+
+`astcenc/` contains the unmodified build sources of Arm astc-encoder 5.7.0 at
+commit `9fbec68053d507023bb30e2a449f900a915882b9`, Apache-2.0. See
+[vendoring details](astcenc/ORBITAL.md) and [texture compression](../docs/TEXTURE_COMPRESSION.md).
+The default build does not compile it; the demo does not link it.
+
+## bc7enc (optional offline tool)
+
+`bc7enc/` contains the unmodified block encoder from Richard Geldreich's bc7enc_rdo.
+MIT/public domain, with license notice in the source. See
+[vendoring details](bc7enc/ORBITAL.md). Only the optional `bc7_compress` executable
+links it; the demo has no encoder dependency.

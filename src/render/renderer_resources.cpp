@@ -11,8 +11,8 @@
 namespace space::render {
 
 namespace {
-std::uint64_t padded_size(const assets::Image& mip) {
-    return (mip.pixels.size() + 15) & ~15ull;
+std::uint64_t padded_size(const assets::TextureMip& mip) {
+    return (mip.bytes.size() + 15) & ~15ull;
 }
 
 } // namespace
@@ -75,7 +75,7 @@ void Renderer::Impl::bind(Slot slot, const GpuImage& image) {
                                   image.texture, gpu::TextureDescriptorType::sampled);
 }
 
-// Creates one sampled RGBA8 texture per upload and streams every mip through
+// Creates one sampled texture per upload and streams every mip through
 // a single reusable staging heap. Host-visible heaps live in device-local
 // (BAR) memory on this backend, so the heap is capped and flushed in batches
 // instead of sized to the whole set. Textures are created before
@@ -85,16 +85,16 @@ void Renderer::Impl::upload_images(std::span<Upload> uploads) {
     images.reserve(uploads.size());
     std::uint64_t largest = 0;
     for (const auto& upload : uploads) {
-        ORBITAL_ASSERT(!upload.mips.empty());
-        const auto& base = upload.mips.front();
+        ORBITAL_ASSERT(!upload.data.mips.empty());
+        const auto& base = upload.data.mips.front();
         images.push_back(create_image({.extent = base.extent,
-                                       .format = gpu::Format::rgba8_unorm,
+                                       .format = texture_format(upload.data),
                                        .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::transfer_destination,
-                                       .mips = unsigned(upload.mips.size())}));
+                                       .mips = unsigned(upload.data.mips.size())}));
         material_images.push_back(images.back());
         bind(upload.slot, images.back());
         std::uint64_t bytes = 0;
-        for (const auto& mip : upload.mips)
+        for (const auto& mip : upload.data.mips)
             bytes += padded_size(mip);
         largest = std::max(largest, bytes);
     }
@@ -114,17 +114,17 @@ void Renderer::Impl::upload_images(std::span<Upload> uploads) {
     };
     for (std::size_t i = 0; i < uploads.size(); i++) {
         std::uint64_t bytes = 0;
-        for (const auto& mip : uploads[i].mips)
+        for (const auto& mip : uploads[i].data.mips)
             bytes += padded_size(mip);
         if (offset + bytes > staging.range.size)
             flush();
         if (!cmd)
             cmd = gpu::begin_commands(device);
-        for (unsigned level = 0; level < uploads[i].mips.size(); level++) {
-            const auto& mip = uploads[i].mips[level];
-            std::memcpy(staging.range.cpu + offset, mip.pixels.data(), mip.pixels.size());
+        for (unsigned level = 0; level < uploads[i].data.mips.size(); level++) {
+            const auto& mip = uploads[i].data.mips[level];
+            std::memcpy(staging.range.cpu + offset, mip.bytes.data(), mip.bytes.size());
             const auto source = reinterpret_cast<std::uint64_t>(staging.range.gpu) + offset;
-            gpu::copy_memory_to_texture(cmd, {reinterpret_cast<void*>(source), mip.pixels.size()}, images[i].texture,
+            gpu::copy_memory_to_texture(cmd, {reinterpret_cast<void*>(source), mip.bytes.size()}, images[i].texture,
                                         {.mip_level = level});
             offset += padded_size(mip);
         }
@@ -228,7 +228,7 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     load_materials();
     Uploads hud;
     hud.emplace_back();
-    hud.back().mips.push_back(assets::make_hud());
+    hud.back().data = assets::texture_from_images({assets::make_hud()});
     hud.back().slot = Slot::hud;
     upload_images(hud);
     // Embedded SMAA lookup tables, widened to RGBA8 for the upload path.
@@ -242,12 +242,12 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     };
     Uploads smaa;
     smaa.emplace_back();
-    smaa.back().mips.push_back(
-        widen(assets::smaa_area(), assets::smaa_area_width, assets::smaa_area_height, assets::smaa_area_channels));
+    smaa.back().data = assets::texture_from_images(
+        {widen(assets::smaa_area(), assets::smaa_area_width, assets::smaa_area_height, assets::smaa_area_channels)});
     smaa.back().slot = Slot::smaa_area;
     smaa.emplace_back();
-    smaa.back().mips.push_back(widen(assets::smaa_search(), assets::smaa_search_width, assets::smaa_search_height,
-                                     assets::smaa_search_channels));
+    smaa.back().data = assets::texture_from_images({widen(assets::smaa_search(), assets::smaa_search_width,
+                                                          assets::smaa_search_height, assets::smaa_search_channels)});
     smaa.back().slot = Slot::smaa_search;
     upload_images(smaa);
     create_pipelines();
