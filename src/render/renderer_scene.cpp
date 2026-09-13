@@ -29,7 +29,7 @@ void Renderer::Impl::record_shadow_pass(gpu::CommandBuffer* cmd, Root root) {
 }
 
 void Renderer::Impl::record_galaxy_pass(gpu::CommandBuffer* cmd, Root root, const FrameData& frame) {
-    if (splat_count &&
+    if (splat_count && frame.galaxy.w < .5f &&
         frame.stars.w > 0) { // the Milky Way's splats summed at a quarter of the frame for the background
         Root galaxy_root = root;
         galaxy_root.vertices = splat_data;

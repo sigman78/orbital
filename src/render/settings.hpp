@@ -77,11 +77,15 @@ struct PostSettings {
     float motion_streak_intensity = 1.f;
 };
 
+enum class GalaxyMode { Splats, TextureLayers, OriginalTexture, Count };
+
 struct SkySettings {
-    bool catalogue_stars = true; // the Bright Star Catalogue as points; off keeps the procedural sky
-    float star_brightness = 2.f; // gain on the catalogue fluxes; the display cannot hold the eye's range
-    float star_saturation = .5f; // share of the blackbody chroma shown; the eye sees stars nearly white
-    bool milky_way = true;       // the splat fit of ESO's panorama as the galactic band; off keeps the procedural band
+    GalaxyMode galaxy_mode = GalaxyMode::Splats;
+    float galaxy_low = 1.f, galaxy_clouds = 1.f, galaxy_filaments = 1.f;
+    bool catalogue_stars = true;      // the Bright Star Catalogue as points; off keeps the procedural sky
+    float star_brightness = 2.f;      // gain on the catalogue fluxes; the display cannot hold the eye's range
+    float star_saturation = .5f;      // share of the blackbody chroma shown; the eye sees stars nearly white
+    bool milky_way = true;            // the fitted galactic band; off keeps the procedural band
     float milky_way_brightness = .1f; // the band's radiance against the stars; 0.1 on review with the Gaia fit
     float milky_way_contrast =
         1.f; // exponent on the fit's radiance about its unit: above 1 the halo stays faint and the core comes up

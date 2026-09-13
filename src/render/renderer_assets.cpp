@@ -180,6 +180,8 @@ void Renderer::Impl::load_materials() {
     log::info("Texture cache: {} of {} materials", cached_count.load(), material_count);
     load_stars();
     load_splats();
+    load_galaxy_layers(support);
+    load_galaxy_original();
 }
 
 // The Bright Star Catalogue baked by tools/bake-stars.py: a 16-byte header
@@ -209,7 +211,7 @@ void Renderer::Impl::load_stars() {
     log::info("Loaded {} catalogue stars", count);
 }
 
-// The Milky Way as Gaussian splats fitted to ESO's panorama by tools/bake-splats.py:
+// The Milky Way as Gaussian splats fitted to Gaia's sky map by tools/bake-splats.py:
 // a 16-byte header ("SPLT", count, record size, table length), 64-byte records
 // the galaxy pass reads as two vertices each, then the cell table (uints) that
 // buckets them by direction. Optional: without it the sky keeps its procedural band.
@@ -239,4 +241,51 @@ void Renderer::Impl::load_splats() {
     log::info("Loaded {} Milky Way splats ({} KB with their cell table)", count, (payload + 512) / 1024);
 }
 
+void Renderer::Impl::load_galaxy_layers(const assets::TextureSupport& support) {
+    constexpr std::array names{"galaxy_low.png", "galaxy_clouds.png", "galaxy_filaments.png"};
+    constexpr std::array slots{Slot::galaxy_low, Slot::galaxy_clouds, Slot::galaxy_filaments};
+    std::array<Upload, 3> uploads;
+    unsigned cached_count = 0;
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        const auto path = directory / "assets/materials" / names[i];
+        auto cached = assets::load_texture_cache(path, {}, support);
+        if (cached) {
+            uploads[i] = {.data = std::move(*cached), .slot = slots[i]};
+            ++cached_count;
+        } else if (std::filesystem::exists(path)) {
+            auto image = assets::try_load_png(path);
+            if (!image)
+                return;
+            uploads[i] = {.data = assets::texture_from_images(assets::prepare_material(std::move(*image), {})),
+                          .slot = slots[i]};
+        } else {
+            log::info("Galaxy texture layers unavailable; splat/procedural fallback remains active");
+            return;
+        }
+    }
+    for (std::size_t i = 0; i < uploads.size(); ++i) {
+        const auto dimensions = uploads[i].data.mips.front().extent;
+        if (dimensions.width != dimensions.height * (i == 0 ? 2u : 4u)) {
+            log::warn("Invalid galaxy layer aspect ratio: {}", names[i]);
+            return;
+        }
+    }
+    upload_images(uploads);
+    galaxy_layers_available = true;
+    log::info("Loaded 3 Gaia galaxy layers ({} cached)", cached_count);
+}
+void Renderer::Impl::load_galaxy_original() {
+    // Keep the comparison source uncompressed, independent of the fitted layer caches.
+    auto image = assets::try_load_png(directory / "assets/materials/galaxy_original.png");
+    if (!image) {
+        log::warn("Original Gaia texture unavailable; splat/procedural fallback remains active");
+        return;
+    }
+    std::array<Upload, 1> uploads{
+        {{.data = assets::texture_from_images(assets::prepare_material(std::move(*image), {})),
+          .slot = Slot::galaxy_original}}};
+    upload_images(uploads);
+    galaxy_original_available = true;
+    log::info("Loaded original full-resolution Gaia texture (uncompressed)");
+}
 } // namespace space::render

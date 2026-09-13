@@ -63,7 +63,8 @@ struct Frame {
     SHADER_FLOAT4 camera_lattice;        // the camera's offset within its mote cell, cell size
     SHADER_FLOAT4 camera_cell;           // the camera's mote cell index, motion streak intensity (0 off)
     SHADER_FLOAT4 stars;                 // catalogue stars loaded and on, star brightness (0 off), star colour saturation, Milky Way brightness (0: the procedural band)
-    SHADER_FLOAT4 galaxy;                // Milky Way splats drawn (the first n of the cloud), dust fBm amplitude (0 off), base feature size in degrees, unused
+    SHADER_FLOAT4 galaxy;                // Milky Way splats drawn (the first n of the cloud), dust fBm amplitude (0 off), base feature size in degrees, galaxy mode (0 splats, 1 layers, 2 original)
+    SHADER_FLOAT4 galaxy_layers;         // low-frequency, cloud and filament gains, unused
     SHADER_FLOAT4 galaxy_more;           // dust fBm lacunarity, gain, the galaxy pass's resolution divisor, band contrast exponent
 };
 struct Root {

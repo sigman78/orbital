@@ -1,7 +1,7 @@
 #pragma once
 
 // Descriptor ABI shared by C++ Slot/SamplerSlot and every shader.
-#define ORBITAL_TEXTURE_COUNT 46
+#define ORBITAL_TEXTURE_COUNT 50
 #define ORBITAL_SAMPLER_COUNT 4
 #define TEX_HDR 0
 #define TEX_BLOOM_A 1
@@ -49,6 +49,10 @@
 #define TEX_GAS_POLAR 43
 #define TEX_GAS_POLAR_FLOW 44
 #define TEX_MILKY_WAY 45
+#define TEX_GALAXY_LOW 46
+#define TEX_GALAXY_CLOUDS 47
+#define TEX_GALAXY_FILAMENTS 48
+#define TEX_GALAXY_ORIGINAL 49
 #define SAMPLER_CLAMP 0
 #define SAMPLER_WRAP_U_ANISOTROPIC 1
 #define SAMPLER_SHADOW_COMPARE 2

@@ -215,12 +215,24 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::SliderFloat("Star colour", &app.sky.star_saturation, 0.f, 1.f, "%.2f");
         ImGui::EndDisabled();
         ImGui::Checkbox("Milky Way",
-                        &app.sky.milky_way); // the splat fit of ESO's panorama; off keeps the procedural band
+                        &app.sky.milky_way); // the fitted galactic band; off keeps the procedural band
         ImGui::BeginDisabled(!app.sky.milky_way);
         ImGui::SliderFloat("Milky Way brightness", &app.sky.milky_way_brightness, 0.f, 4.f, "%.2f x",
                            ImGuiSliderFlags_Logarithmic);
         ImGui::SliderFloat("Milky Way contrast", &app.sky.milky_way_contrast, .5f, 3.f,
                            "%.2f"); // exponent about the bulge: the halo down, the core up
+        {
+            const char* modes[] = {"Splats", "Texture layers", "Original full resolution"};
+            int choice = int(app.sky.galaxy_mode);
+            if (ImGui::Combo("Galaxy background", &choice, modes, int(render::GalaxyMode::Count)))
+                app.sky.galaxy_mode = render::GalaxyMode(choice);
+        }
+        if (app.sky.galaxy_mode == render::GalaxyMode::TextureLayers) {
+            ImGui::SliderFloat("Global structure", &app.sky.galaxy_low, 0.f, 2.f);
+            ImGui::SliderFloat("Coloured clouds", &app.sky.galaxy_clouds, 0.f, 2.f);
+            ImGui::SliderFloat("Dark filaments", &app.sky.galaxy_filaments, 0.f, 1.f);
+        }
+        ImGui::BeginDisabled(app.sky.galaxy_mode != render::GalaxyMode::Splats);
         ImGui::SliderInt("Milky Way splats", &app.sky.milky_way_splats, 0,
                          4096); // the first n by energy; the file caps it
         {
@@ -240,6 +252,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
                            ImGuiSliderFlags_Logarithmic); // the base octave's feature size
         ImGui::SliderFloat("Dust lacunarity", &app.sky.dust_lacunarity, 1.5f, 4.f, "%.2f");
         ImGui::SliderFloat("Dust gain", &app.sky.dust_gain, .2f, .9f, "%.2f");
+        ImGui::EndDisabled();
         ImGui::EndDisabled();
         if (ImGui::SmallButton("Reset sky"))
             app.sky = {};

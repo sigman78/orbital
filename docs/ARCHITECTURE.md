@@ -133,3 +133,12 @@ Seven CTest suites cover the CPU layers: core, system, geometry, camera, image, 
 use assertions as executable invariants and also run under GCC. `tools/check-gcc.ps1` runs that build
 locally; `tools/smoke-window.ps1` drives the window through resize, minimize and key transitions;
 `tools/check-stability.ps1` compares two fixed-time captures pixel by pixel.
+
+The optional Gaia texture-layer sky path samples a global colour map, a cropped
+cloud map and a scalar darkening map directly in the background shader. It skips
+the galaxy splat pass. The three textures use the existing optional cache loader;
+all three must be available before the mode activates. See [galaxy layers](GALAXY_LAYERS.md).
+An independent uncompressed original-map path supports full-resolution comparison.
+The Sky selector and `--galaxy` choose splats, layers or original; all assets load
+at startup, while only the selected path renders. Texture modes share the splat
+sky's brightness/contrast but bypass its procedural dust. Splats remain the default.

@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "source": "esa_gaia_dr2_allsky_brightness_colour_cartesian_2k.jpg",
+  "source_sha256": "58536692c0f4261becbd865d9438a9a2044d6f60715fb918b5e3d4596c386224",
+  "attribution": "ESA/Gaia/DPAC; A. Moitinho, A. F. Silva, M. Barros, C. Barata, H. Savietto",
+  "license": "CC BY-SA 3.0 IGO",
+  "source_url": "https://www.cosmos.esa.int/web/gaia/gaiadr2_gaiaskyincolour",
+  "band_half_uv": 0.25,
+  "fit": {
+    "preset": "compact",
+    "widths": [
+      64,
+      256,
+      768
+    ],
+    "bc7_bytes_with_mips": 221584,
+    "png_bytes": 119111,
+    "uncompressed": {
+      "psnr_db": 44.980875272903155,
+      "mae_255": 0.7551797032356262,
+      "band_mae_255": 0.9826992750167847
+    },
+    "bc7": {
+      "psnr_db": 44.238859197744645,
+      "mae_255": 0.8425190448760986,
+      "band_mae_255": 1.1203726530075073
+    },
+    "history": [
+      {
+        "step": 1,
+        "loss": 0.00047571046161465347
+      },
+      {
+        "step": 50,
+        "loss": 6.219992064870894e-05
+      },
+      {
+        "step": 100,
+        "loss": 4.971440648660064e-05
+      },
+      {
+        "step": 150,
+        "loss": 4.520231595961377e-05
+      },
+      {
+        "step": 200,
+        "loss": 4.298340354580432e-05
+      },
+      {
+        "step": 250,
+        "loss": 4.1817835153779015e-05
+      },
+      {
+        "step": 300,
+        "loss": 4.1153092752210796e-05
+      },
+      {
+        "step": 350,
+        "loss": 4.076403638464399e-05
+      },
+      {
+        "step": 400,
+        "loss": 4.206973244436085e-05
+      },
+      {
+        "step": 450,
+        "loss": 4.188422462902963e-05
+      },
+      {
+        "step": 500,
+        "loss": 4.184333374723792e-05
+      }
+    ],
+    "seconds": 10.325635600020178
+  }
+}

@@ -8,8 +8,11 @@
 namespace space::assets {
 
 MipChain load_material(const std::filesystem::path& path, const MaterialDesc& desc) {
+    return prepare_material(load_png(path), desc);
+}
+
+MipChain prepare_material(Image base, const MaterialDesc& desc) {
     ORBITAL_ASSERT(!(desc.normal_map && desc.luminance_to_alpha));
-    Image base = load_png(path);
     if (desc.luminance_to_alpha)
         kernels::luminance_to_alpha(base.pixels.data(), base.pixel_count());
     else if (desc.encoding == MaterialEncoding::SRGB)

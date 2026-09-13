@@ -144,7 +144,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
 -constexpr uint32 max_surface_formats = 64;
 +constexpr uint32 max_surface_formats = 256;
  constexpr uint32 format_count = static_cast<uint32>(Format::undefined);
-+constexpr uint32 conventional_texture_descriptor_count = 46;
++constexpr uint32 conventional_texture_descriptor_count = 50;
  
  [[nodiscard]] Error error_from_vk(VkResult result) noexcept
  {

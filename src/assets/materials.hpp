@@ -20,6 +20,9 @@ struct MaterialDesc {
     bool normal_map = false;
 };
 
+// Prepares an already decoded image with the same conversion and mip rules.
+MipChain prepare_material(Image base, const MaterialDesc& desc);
+
 // Loads a PNG material and returns its complete RGBA8_UNORM mip chain down to
 // 1x1. Panics if the file is missing or unreadable.
 MipChain load_material(const std::filesystem::path& path, const MaterialDesc& desc);

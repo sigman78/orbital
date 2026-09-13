@@ -69,7 +69,11 @@ enum class Slot : unsigned {
     gas_relief = TEX_GAS_RELIEF,           // gas giant cloud-top slopes and height, baked alongside it
     gas_polar = TEX_GAS_POLAR,             // gas giant polar cap albedo atlas (north above south), baked alongside it
     gas_polar_flow = TEX_GAS_POLAR_FLOW,   // gas giant polar cap flow atlas
-    milky_way = TEX_MILKY_WAY, // all-sky Milky Way as cubic B-spline coefficients, baked by tools/bake-milkyway.py
+    milky_way = TEX_MILKY_WAY,             // screen-space galaxy splat sum
+    galaxy_low = TEX_GALAXY_LOW,
+    galaxy_clouds = TEX_GALAXY_CLOUDS,
+    galaxy_filaments = TEX_GALAXY_FILAMENTS,
+    galaxy_original = TEX_GALAXY_ORIGINAL,
     count = ORBITAL_TEXTURE_COUNT,
 };
 
@@ -308,6 +312,8 @@ struct Renderer::Impl {
     unsigned star_count = 0;
     std::uint64_t splat_data = 0; // static heap address of the Milky Way's splat records, 0 when absent
     unsigned splat_count = 0;
+    bool galaxy_layers_available = false;
+    bool galaxy_original_available = false;
 
     // Frame state.
     Extent2D extent{};
@@ -353,6 +359,8 @@ struct Renderer::Impl {
     void load_materials();
     void load_stars();
     void load_splats();
+    void load_galaxy_layers(const assets::TextureSupport& support);
+    void load_galaxy_original();
     GpuMesh upload_mesh(const geometry::Mesh& mesh);
     void upload_rock_pool(std::span<const geometry::Mesh> meshes);
     const GpuMesh& body_mesh(unsigned body, unsigned lod) const;

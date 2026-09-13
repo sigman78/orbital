@@ -49,6 +49,8 @@ constexpr std::string_view usage =
     "--maximize-at N "
     "--fullscreen-at "
     "N\n"
+    "--galaxy 0|1|2 (splats, texture layers, original full resolution) --galaxy-view -180..180 (longitude, sky-only "
+    "view)\n"
     "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F free;\n"
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
     "F5 temporal AA; F6 rock splat cut-off; F7 splat lighting in both cull passes; F8 tone curve;\n"
@@ -70,8 +72,10 @@ struct Options {
     unsigned disc = render::BeltSettings{}.disc;                            // far-belt disc LOD
     float lod_scale = render::BeltSettings{}.lod_scale;                     // far-belt fade distance scale
     unsigned spatial = unsigned(render::AntiAliasingSettings{}.spatial_aa); // spatial pass: 0 off, 1 FXAA, 2 SMAA
-    unsigned splat = unsigned(render::BeltSettings{}.splat_mode);           // initial splat cut-off index
-    unsigned tone = unsigned(render::ToneSettings{}.tone_curve);            // initial tone curve (PBR Neutral)
+    std::optional<double> galaxy_view; // galactic longitude in degrees; absent means normal camera
+    unsigned galaxy = unsigned(render::SkySettings{}.galaxy_mode);
+    unsigned splat = unsigned(render::BeltSettings{}.splat_mode); // initial splat cut-off index
+    unsigned tone = unsigned(render::ToneSettings{}.tone_curve);  // initial tone curve (PBR Neutral)
     float pan = 0;            // lateral drift as a fraction of the flight speed, stepped at a fixed 60 Hz for captures
     unsigned maximize_at = 0; // > 0 maximizes the window after this many frames, to test resizing in captures
     unsigned fullscreen_at = 0; // > 0 enters borderless fullscreen after this many frames
@@ -151,6 +155,11 @@ std::optional<Options> parse_options(int argc, char** argv) {
             ok = parse_number(value(), options.fullscreen_at);
         else if (arg == "--tone")
             ok = parse_number(value(), options.tone) && options.tone < unsigned(render::ToneCurve::Count);
+        else if (arg == "--galaxy-view") {
+            auto& longitude = options.galaxy_view.emplace();
+            ok = parse_number(value(), longitude) && longitude >= -180 && longitude <= 180;
+        } else if (arg == "--galaxy")
+            ok = parse_number(value(), options.galaxy) && options.galaxy < unsigned(render::GalaxyMode::Count);
         else if (arg == "--splat")
             ok = parse_number(value(), options.splat) && options.splat < render::BeltSettings::splat_radii.size();
         else if (arg == "--width")
@@ -313,6 +322,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.high = options.high;
     app.aa.temporal_aa = options.taa != 0;
     app.aa.spatial_aa = render::SpatialAA(options.spatial);
+    app.sky.galaxy_mode = render::GalaxyMode(options.galaxy);
     app.belt.splat_mode = render::SplatMode(options.splat);
     app.tone.tone_curve = render::ToneCurve(options.tone);
     app.pan = options.pan;
@@ -332,6 +342,13 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
             app.camera.set_tour_time(options.fixed_time);
         else
             app.camera.toggle_tour();
+    }
+    if (options.galaxy_view) {
+        const double longitude = *options.galaxy_view * pi<double> / 180;
+        const double c = std::cos(longitude), s = std::sin(longitude);
+        const Vec3d direction{-.054876 * c + .494109 * s, -.483835 * c + .746982 * s, -.873437 * c - .444830 * s};
+        app.camera.look_at({0, 1000, 0}, Vec3d{0, 1000, 0} + direction);
+        app.camera.set_mode(CameraMode::Free);
     }
     return app;
 }
