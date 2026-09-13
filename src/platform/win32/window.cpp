@@ -14,6 +14,7 @@ namespace {
 constexpr const wchar_t* window_class_name = L"OrbitalWindow";
 constexpr LPARAM key_repeat_bit = 1ll << 30;
 constexpr std::size_t inline_press_count = 16;
+constexpr COLORREF background_color = RGB(32, 32, 32), hatch_color = RGB(96, 96, 96);
 
 std::wstring to_wide(std::string_view utf8) {
     if (utf8.empty())
@@ -77,6 +78,7 @@ int virtual_from_key(Key key) {
 
 struct Window::Impl {
     HWND handle = nullptr;
+    HBRUSH background_brush = nullptr;
     bool closed = false;
     bool mouse_look = false, mouse_look_began = false;
     POINT previous_cursor{};
@@ -92,6 +94,8 @@ struct Window::Impl {
     ~Impl() {
         if (handle)
             DestroyWindow(handle);
+        if (background_brush)
+            DeleteObject(background_brush);
     }
 
     LRESULT handle_message(UINT message, WPARAM w, LPARAM l) {
@@ -101,6 +105,17 @@ struct Window::Impl {
                 return LRESULT(result);
         }
         switch (message) {
+        case WM_PAINT: {
+            PAINTSTRUCT paint{};
+            HDC dc = BeginPaint(handle, &paint);
+            const COLORREF previous_color = SetBkColor(dc, background_color);
+            const int previous_mode = SetBkMode(dc, OPAQUE);
+            FillRect(dc, &paint.rcPaint, background_brush);
+            SetBkMode(dc, previous_mode);
+            SetBkColor(dc, previous_color);
+            EndPaint(handle, &paint);
+            return 0;
+        }
         case WM_CLOSE: closed = true; return 0;
         case WM_DESTROY: PostQuitMessage(0); return 0;
         case WM_KILLFOCUS:
@@ -169,6 +184,8 @@ std::unique_ptr<Window> Window::create(const WindowDesc& desc) {
     RECT area{0, 0, LONG(desc.client_size.width), LONG(desc.client_size.height)};
     AdjustWindowRect(&area, WS_OVERLAPPEDWINDOW, FALSE);
     auto impl = std::make_unique<Impl>();
+    impl->background_brush = CreateHatchBrush(HS_BDIAGONAL, hatch_color);
+    panic_if(!impl->background_brush, "cannot create the window background brush");
     const std::wstring title = to_wide(desc.title);
     HWND handle = CreateWindowExW(0, window_class_name, title.c_str(), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
                                   CW_USEDEFAULT, area.right - area.left, area.bottom - area.top, nullptr, nullptr,
@@ -176,6 +193,7 @@ std::unique_ptr<Window> Window::create(const WindowDesc& desc) {
     panic_if(!handle, "cannot create the desktop window");
     impl->handle = handle;
     ShowWindow(handle, SW_SHOW);
+    UpdateWindow(handle); // Paint now, before synchronous renderer and asset initialization.
     return std::unique_ptr<Window>(new Window(std::move(impl)));
 }
 
