@@ -1,5 +1,5 @@
 #pragma once
-#define ORBITAL_TEXTURE_COUNT 46
+#include "resource_slots.h"
 #ifdef __cplusplus
 #include <cstdint>
 struct alignas(16) ShaderFloat4 { float x, y, z, w; };
@@ -77,7 +77,7 @@ struct Root {
     SHADER_UINT base, mode;
 };
 
-// --- GPU belt culling (shaders/cull.slang) ----------------------------------
+// --- GPU belt culling (shaders/belt/cull.slang) ----------------------------------
 
 #define ORBITAL_ROCK_LEVELS 6                            // geometry::rock_level_count
 #define ORBITAL_ROCK_GROUPS (16 * ORBITAL_ROCK_LEVELS)   // geometry::rock_shape_count * levels; group index = shape * levels + level

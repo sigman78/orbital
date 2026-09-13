@@ -1,0 +1,67 @@
+#include "../scene_shared.h"
+#include "rockclass.slang"
+
+// Far-belt map, rock layer: every rock adds its projected cross-section,
+// times its albedo, to the belt-plane texel it falls in (additive blend).
+// The map holds coverage times albedo in rgb and coverage in alpha, per unit
+// plane area; the far tier turns it into a volume density with the belt's
+// vertical profile and lights it with the phase and the baked sunlight.
+// Refreshed every few dozen frames, since the rocks only drift along their bands.
+
+[[vk::push_constant]] ConstantBuffer<CullRoot> root;
+
+
+struct SplatVaryings {
+    float4 position : SV_Position;
+    [[vk::location(0)]] float2 disk : DISK;                     // -1..1 across the splat
+    [[vk::location(1)]] nointerpolation float4 value : VALUE;   // coverage * albedo, coverage
+};
+
+[shader("vertex")]
+SplatVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_InstanceID)
+{
+    const float2 corners[6] = { float2(-1, -1), float2(1, -1), float2(1, 1), float2(-1, -1), float2(1, 1), float2(-1, 1) };
+    SplatVaryings output;
+    CullParams* p = &root.scratch->params;
+    output.disk = corners[vertexIndex];
+    output.value = float4(0.0, 0.0, 0.0, 0.0);
+    if (instanceId >= root.pass || root.rocks[instanceId].position_radius.w > DISC_BAKE_MAX_RADIUS) // pass carries the rock count for this draw
+    {
+        output.position = float4(0.0, 0.0, -2.0, 1.0); // clipped away
+        return output;
+    }
+    RockData rock = root.rocks[instanceId];
+    uint packed = uint(rock.spin_group.w + .5);
+    uint band = packed & (ORBITAL_BELT_BANDS - 1);
+    float2 spin = p->band_spin[band].xy;
+    float3 v = rock.position_radius.xyz;
+    float bx = v.x * spin.x - v.z * spin.y, bz = v.x * spin.y + v.z * spin.x;
+    float3 local = float3(bx, v.y * p->belt_tilt.x - bz * p->belt_tilt.y, bz * p->belt_tilt.z);
+    float3 position = p->giant.xyz + local;
+    float radius = rock.position_radius.w;
+
+    float4 ring = root.frame->belt_ring;
+    float radial = (length(v.xz) - ring.x) / (ring.y - ring.x);
+    uint composition = rockClass(instanceId, radial);
+    float3 albedo = rockColour(composition, instanceId) * (composition == CLASS_C ? ROCK_SET_AVERAGE_C : ROCK_SET_AVERAGE_S);
+
+    // Splat at least one texel wide; the weight keeps the covered area right.
+    float4 clip = mul(root.frame->belt_disc_projection, float4(position, 1.0));
+    float halfExtent = root.frame->belt_disc_right.w, texels = root.frame->belt_disc.z;
+    float2 halfNdc = radius / halfExtent;
+    float2 texelNdc = 1.0 / texels; // half a texel each way
+    float2 extent = max(halfNdc, texelNdc);
+    float texelArea = (2.0 * halfExtent / texels) * (2.0 * halfExtent / texels);
+    float coverage = SPLAT_AREA * 3.141592653589793 * radius * radius / texelArea; // area fraction of one texel
+    coverage *= (halfNdc.x * halfNdc.y) / (extent.x * extent.y);           // spread over the enlarged footprint
+    output.value = float4(albedo * coverage, coverage);
+    output.position = float4(clip.xy + output.disk * extent, .5, 1.0);
+    return output;
+}
+
+[shader("fragment")]
+float4 fragmentMain(SplatVaryings input) : SV_Target0
+{
+    if (dot(input.disk, input.disk) > 1.0) discard;
+    return input.value;
+}

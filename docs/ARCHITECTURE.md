@@ -114,6 +114,19 @@ its intensity, and the renderer derives the effective intensity and splat radius
 Captures and benchmarks run the same loop with a frozen time and a frame limit, which is what every measurement in DECISIONS.md
 comes from.
 
+## Shader implementation
+
+Shader entry points include focused helpers instead of a common umbrella. `shaders/lib` contains
+resource-independent geometry, noise, sampling, color, projection, scattering and tone curves.
+`shaders/scene` declares the bindings and frame-aware view/visibility helpers; `shaders/surface`
+holds shared surface contracts, BRDFs and lighting. Feature folders group planetary materials
+and atmosphere (`planets`), all anti-aliasing (`aa`), belt rendering (`belt`), sky (`sky`),
+post-processing (`post`) and UI (`overlay`), with entry points beside their helpers. Descriptor slot numbers are shared with C++ through
+`resource_slots.h`. See [shader organization](../shaders/README.md) for dependency rules and checks.
+
+Slang-generated depfiles track transitive includes. `tools/check-shader-helpers.py` compiles each
+helper on its own to catch accidental include-order dependencies.
+
 ## Tools and tests
 
 Seven CTest suites cover the CPU layers: core, system, geometry, camera, image, kernels and materials. They

@@ -3,7 +3,7 @@
 Working notes on representing the galactic band without a bitmap: what the
 renderer does, how the fit works, what was tried, what the measurements say,
 and where the promising direction is. Dates are September 2026; the tool is
-`tools/bake-splats.py`, the pass is `shaders/galaxy.slang`, the experiments
+`tools/bake-splats.py`, the pass is `shaders/sky/galaxy.slang`, the experiments
 live in `.scratch/milky-way/` (ignored by git). The decisions log holds the
 short version of each step; this file holds the reasoning.
 
@@ -48,7 +48,7 @@ area) so the renderer can draw the first n.
 
 ## The render
 
-`shaders/galaxy.slang` sums the splats per pixel at a fraction of the frame
+`shaders/sky/galaxy.slang` sums the splats per pixel at a fraction of the frame
 (a quarter by default, half or full from the Sky panel) into an rgba16
 target; the background samples it bilinearly. A 0.6-degree splat is about 11
 pixels at 1080p, which the quarter target resolves; the shipped 0.3-degree fit
