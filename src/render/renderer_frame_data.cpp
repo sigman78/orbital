@@ -287,11 +287,18 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.giant_more = {input.gas.haze, input.gas.terminator, input.gas.relief, input.gas.cap_opacity};
     frame.giant_night = {input.gas.lightning_rate, input.gas.lightning,
                          input.gas.polar && polar_caps ? input.gas.cap_size : 0.f, input.gas.cap_blend};
+    const bool original_galaxy = input.sky.galaxy_mode == GalaxyMode::OriginalTexture && galaxy_original_available;
+    const bool texture_galaxy = original_galaxy ||
+                                (input.sky.galaxy_mode == GalaxyMode::TextureLayers && galaxy_layers_available);
+    frame.galaxy_layers = {input.sky.galaxy_low, input.sky.galaxy_clouds, input.sky.galaxy_filaments, 0};
     frame.stars = {star_count && input.sky.catalogue_stars ? 1.f : 0.f,
                    star_count && input.sky.catalogue_stars ? input.sky.star_brightness : 0.f, input.sky.star_saturation,
-                   splat_count && input.sky.milky_way ? input.sky.milky_way_brightness : 0.f};
+                   (texture_galaxy || splat_count) && input.sky.milky_way ? input.sky.milky_way_brightness : 0.f};
     frame.galaxy = {float(std::clamp(input.sky.milky_way_splats, 0, int(splat_count))), input.sky.dust_amplitude,
-                    input.sky.dust_scale, 0};
+                    input.sky.dust_scale,
+                    original_galaxy  ? 2.f
+                    : texture_galaxy ? 1.f
+                                     : 0.f};
     frame.galaxy_more = {input.sky.dust_lacunarity, input.sky.dust_gain, float(galaxy_divisor),
                          input.sky.milky_way_contrast};
     frame.giant_layers = {input.gas.layers ? input.gas.layer_lift : 0.f, input.gas.layer_shadow,

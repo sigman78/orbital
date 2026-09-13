@@ -1,6 +1,7 @@
 #include "../scene/frame_bindings.slang"
 #include "../scene/view.slang"
 #include "../lib/noise.slang"
+#include "galaxy_layers.slang"
 
 // The Milky Way for this pixel: the splat sum, drawn at a quarter of the frame
 // since it is smooth at a degree and more, read here bilinearly. rgb the
@@ -86,11 +87,17 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float3 color = float3(.0005, .0007, .0012);
     if (root.frame.stars.w > 0.0)
     {
-        float4 band = milkyWay(position.xy);
-        float3 radiance = band.rgb * root.frame.stars.w;
-        if (max(radiance.r, max(radiance.g, radiance.b)) > 2e-4) // the dark sky skips the noise
-            radiance *= milkyDust(rd, band.w, length(fwidth(rd)));
-        color += radiance;
+        if (root.frame.galaxy.w > 1.5)
+            color += galaxyOriginal(rd) * root.frame.stars.w;
+        else if (root.frame.galaxy.w > .5)
+            color += galaxyLayers(rd) * root.frame.stars.w;
+        else {
+            float4 band = milkyWay(position.xy);
+            float3 radiance = band.rgb * root.frame.stars.w;
+            if (max(radiance.r, max(radiance.g, radiance.b)) > 2e-4) // the dark sky skips the noise
+                radiance *= milkyDust(rd, band.w, length(fwidth(rd)));
+            color += radiance;
+        }
     }
     else
     {

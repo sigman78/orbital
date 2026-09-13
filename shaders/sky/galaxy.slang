@@ -2,9 +2,10 @@
 #include "../scene/view.slang"
 #include "../lib/math.slang"
 #include "../lib/color.slang"
+#include "galactic.slang"
 
-// The Milky Way as a cloud of Gaussian splats on the sphere, fitted to ESO's
-// panorama by tools/bake-splats.py and summed here per pixel at a quarter of
+// The Milky Way as a cloud of Gaussian splats on the sphere, fitted to Gaia's
+// sky map by tools/bake-splats.py and summed here per pixel at a quarter of
 // the frame (the sum is smooth at a degree and more; the background reads it
 // bilinearly). Each splat has a centre, two widths along a tangent frame (in
 // angle, so it is right anywhere on the sphere) and a signed colour, the
@@ -19,19 +20,13 @@
 // bright ones, which the background redistributes into filaments.
 
 static const float MILKY_WAY_SCALE = .1; // HDR radiance of the fit's unit (the bulge) at the panel's 1
-// Equatorial J2000 (standard xyz: x toward the vernal equinox, z toward the celestial pole)
-// to galactic, IAU 1958 pole at J2000; the sky frame stores y as the pole, so the rows swap.
-static const float3x3 EQUATORIAL_TO_GALACTIC = float3x3(-.054876, -.873437, -.483835,
-                                                        .494109, -.444830, .746982,
-                                                        -.867666, -.198076, .455984);
-
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
     // This target is the frame over a divisor: the frame pixel under this one's centre.
     float2 pixel = position.xy * root.frame.options.xy / floor(root.frame.options.xy / root.frame.galaxy_more.z);
     float3 rd = rayDirection(root.frame, pixel);
-    float3 g = mul(EQUATORIAL_TO_GALACTIC, float3(rd.x, rd.z, rd.y));
+    float3 g = galacticDirection(rd);
     float3 light = float3(0.0, 0.0, 0.0), dark = float3(0.0, 0.0, 0.0);
     // The cell table follows the records; the pass points root.instances at it.
     uint* table = (uint*)(uint64_t(root.instances));

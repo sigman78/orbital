@@ -31,7 +31,10 @@ inline constexpr std::array material_catalog = {
     MaterialSource{"gas_detail.png", {}},
     MaterialSource{"gas_relief.png", {}},
     MaterialSource{"gas_polar.png", {.encoding = MaterialEncoding::SRGB}},
-    MaterialSource{"gas_polar_flow.png", {}}};
+    MaterialSource{"gas_polar_flow.png", {}},
+    MaterialSource{"galaxy_low.png", {}},
+    MaterialSource{"galaxy_clouds.png", {}},
+    MaterialSource{"galaxy_filaments.png", {}}};
 inline MaterialDesc material_description(std::string_view file) {
     for (const auto& source : material_catalog)
         if (source.file == file)
