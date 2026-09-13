@@ -80,8 +80,14 @@ on resize; history is invalidated for one frame.
 
 `app/main.cpp` parses options, owns the frame loop and turns key presses into `AppState`. The camera has
 free flight, orbit and a scripted tour, with body-relative bookmarks for the six views. The control panel
-(`app/ui.cpp`) edits the same `AppState` the hotkeys do, so the two never disagree. Captures and benchmarks
-run the same loop with a frozen time and a frame limit, which is what every measurement in DECISIONS.md
+(`app/ui.cpp`) edits the same `AppState` the hotkeys do, so the two never disagree.
+Render controls use the concern-specific types in `render/settings.hpp`: tone, anti-aliasing, belt,
+belt dust, Earth, sun, post effects, sky and gas giant. `AppState` owns the groups and `FrameInput`
+copies them as complete values. Defaults, including panel resets and CLI defaults, come from those
+types; adding a field within a group needs no new frame-loop assignment. Bloom enablement retains
+its intensity, and the renderer derives the effective intensity and splat radius at use sites.
+
+Captures and benchmarks run the same loop with a frozen time and a frame limit, which is what every measurement in DECISIONS.md
 comes from.
 
 ## Tools and tests

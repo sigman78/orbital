@@ -25,10 +25,10 @@ bool section(const char* title) {
     return open;
 }
 
-void combo(const char* label, unsigned& value, std::span<const char* const> items) {
-    int index = int(std::min<unsigned>(value, unsigned(items.size() - 1)));
+template <class Enum> void combo(const char* label, Enum& value, std::span<const char* const> items) {
+    int index = int(std::min<unsigned>(unsigned(value), unsigned(items.size() - 1)));
     if (ImGui::Combo(label, &index, items.data(), int(items.size())))
-        value = unsigned(index);
+        value = Enum(index);
 }
 
 } // namespace
@@ -118,199 +118,157 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::PopID();
     }
     if (section("Anti-aliasing")) {
-        ImGui::Checkbox("Temporal (F5)", &app.temporal_aa);
+        ImGui::Checkbox("Temporal (F5)", &app.aa.temporal_aa);
         static constexpr const char* spatial[] = {"Off", "FXAA", "SMAA"};
-        combo("Spatial (F9)", app.spatial_aa, spatial);
+        combo("Spatial (F9)", app.aa.spatial_aa, spatial);
         ImGui::PopID();
     }
     if (section("Belt")) {
-        ImGui::Checkbox("Transmittance map (F3)", &app.belt_light_map);
-        ImGui::Checkbox("Dust extinction (F4)", &app.belt_extinction);
-        ImGui::Checkbox("Dust scattering (F11)", &app.belt_dust);
-        ImGui::BeginDisabled(!app.belt_dust);
-        ImGui::SliderFloat("Dust density", &app.dust_density, .1f, 8.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
-        ImGui::SliderFloat("Dust brightness", &app.dust_brightness, .1f, 8.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
-        ImGui::SliderFloat("Far-belt brightness", &app.dust_far, .1f, 8.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
-        ImGui::ColorEdit3("Dust tint", app.dust_tint, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_Float);
-        ImGui::SliderFloat("Dust saturation", &app.dust_saturation, 0.f, 3.f, "%.2f");
-        if (ImGui::SmallButton("Reset dust")) {
-            app.dust_density = app.dust_brightness = app.dust_far = app.dust_saturation = 1;
-            app.dust_tint[0] = app.dust_tint[1] = app.dust_tint[2] = 1;
-        }
+        ImGui::Checkbox("Transmittance map (F3)", &app.belt.light_map);
+        ImGui::Checkbox("Dust extinction (F4)", &app.belt.extinction);
+        ImGui::Checkbox("Dust scattering (F11)", &app.belt_dust.enabled);
+        ImGui::BeginDisabled(!app.belt_dust.enabled);
+        ImGui::SliderFloat("Dust density", &app.belt_dust.density, .1f, 8.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Dust brightness", &app.belt_dust.brightness, .1f, 8.f, "%.2f x",
+                           ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Far-belt brightness", &app.belt_dust.far, .1f, 8.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
+        ImGui::ColorEdit3("Dust tint", app.belt_dust.tint, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_Float);
+        ImGui::SliderFloat("Dust saturation", &app.belt_dust.saturation, 0.f, 3.f, "%.2f");
+        if (ImGui::SmallButton("Reset dust"))
+            app.belt_dust = {.enabled = app.belt_dust.enabled};
         ImGui::EndDisabled();
         static constexpr const char* cutoffs[] = {"Off", "1.2 px", "2.5 px", "4 px"};
-        combo("Splat cut-off (F6)", app.splat_mode, cutoffs);
-        ImGui::Checkbox("Light splats in both cull passes (F7)", &app.splat_light_twice);
+        combo("Splat cut-off (F6)", app.belt.splat_mode, cutoffs);
+        ImGui::Checkbox("Light splats in both cull passes (F7)", &app.belt.splat_light_twice);
         ImGui::Checkbox("Far-belt disc LOD",
-                        &app.belt_disc); // off: the dust march and splats at every distance, as before the disc
+                        &app.belt.disc); // off: the dust march and splats at every distance, as before the disc
         ImGui::SameLine();
         ImGui::TextDisabled("disc %.0f%%", stats.belt_lod * 100);
-        ImGui::BeginDisabled(!app.belt_disc);
-        ImGui::SliderFloat("Far-belt fade distance", &app.belt_lod_scale, .25f, 4.f, "%.2f x",
+        ImGui::BeginDisabled(!app.belt.disc);
+        ImGui::SliderFloat("Far-belt fade distance", &app.belt.lod_scale, .25f, 4.f, "%.2f x",
                            ImGuiSliderFlags_Logarithmic);
         ImGui::EndDisabled();
         ImGui::PopID();
     }
     if (section("Gas giant")) {
-        ImGui::Checkbox("Flow map", &app.gas_flow); // off holds the deck still
-        ImGui::BeginDisabled(!app.gas_flow);
-        ImGui::SliderFloat("Wind speed", &app.gas_time_scale, 100.f, 20000.f, "%.0f x real",
+        ImGui::Checkbox("Flow map", &app.gas.flow); // off holds the deck still
+        ImGui::BeginDisabled(!app.gas.flow);
+        ImGui::SliderFloat("Wind speed", &app.gas.time_scale, 100.f, 20000.f, "%.0f x real",
                            ImGuiSliderFlags_Logarithmic);
-        ImGui::SliderFloat("Cycle", &app.gas_cycle, 4.f, 60.f, "%.0f s");
+        ImGui::SliderFloat("Cycle", &app.gas.cycle, 4.f, 60.f, "%.0f s");
         ImGui::EndDisabled();
-        ImGui::SliderFloat("Turbulence", &app.gas_turbulence, 0.f, 3.f, "%.2f x");
-        ImGui::Checkbox("Close streaks", &app.gas_streaks); // per-pixel wind streaks where the filament map runs out
-        ImGui::BeginDisabled(!app.gas_streaks);
-        ImGui::SliderFloat("Streak strength", &app.gas_streak_strength, 0.f, 3.f, "%.2f x");
+        ImGui::SliderFloat("Turbulence", &app.gas.turbulence, 0.f, 3.f, "%.2f x");
+        ImGui::Checkbox("Close streaks", &app.gas.streaks); // per-pixel wind streaks where the filament map runs out
+        ImGui::BeginDisabled(!app.gas.streaks);
+        ImGui::SliderFloat("Streak strength", &app.gas.streak_strength, 0.f, 3.f, "%.2f x");
         ImGui::EndDisabled();
-        ImGui::SliderFloat("Limb haze", &app.gas_haze, 0.f, .5f, "%.3f");
-        ImGui::SliderFloat("Terminator softness", &app.gas_terminator, 0.f, .3f, "%.3f");
-        ImGui::SliderFloat("Cloud relief", &app.gas_relief, 0.f, 20.f, "%.1f x");
-        ImGui::SliderFloat("Lightning rate", &app.gas_lightning_rate, 0.f, 40.f, "%.0f /s");
-        ImGui::SliderFloat("Lightning brightness", &app.gas_lightning, 0.f, 4.f, "%.2f x");
-        ImGui::Checkbox("Polar cyclones", &app.gas_polar);
-        ImGui::BeginDisabled(!app.gas_polar);
-        ImGui::SliderFloat("Cap size", &app.gas_cap_size, .5f, 3.f, "%.2f x");
-        ImGui::SliderFloat("Cap blend", &app.gas_cap_blend, .05f, 1.f, "%.2f");
-        ImGui::SliderFloat("Cap opacity", &app.gas_cap_opacity, 0.f, 1.f, "%.2f");
+        ImGui::SliderFloat("Limb haze", &app.gas.haze, 0.f, .5f, "%.3f");
+        ImGui::SliderFloat("Terminator softness", &app.gas.terminator, 0.f, .3f, "%.3f");
+        ImGui::SliderFloat("Cloud relief", &app.gas.relief, 0.f, 20.f, "%.1f x");
+        ImGui::SliderFloat("Lightning rate", &app.gas.lightning_rate, 0.f, 40.f, "%.0f /s");
+        ImGui::SliderFloat("Lightning brightness", &app.gas.lightning, 0.f, 4.f, "%.2f x");
+        ImGui::Checkbox("Polar cyclones", &app.gas.polar);
+        ImGui::BeginDisabled(!app.gas.polar);
+        ImGui::SliderFloat("Cap size", &app.gas.cap_size, .5f, 3.f, "%.2f x");
+        ImGui::SliderFloat("Cap blend", &app.gas.cap_blend, .05f, 1.f, "%.2f");
+        ImGui::SliderFloat("Cap opacity", &app.gas.cap_opacity, 0.f, 1.f, "%.2f");
         ImGui::EndDisabled();
-        ImGui::Checkbox("Two decks", &app.gas_layers);
-        ImGui::BeginDisabled(!app.gas_layers);
-        ImGui::SliderFloat("Deck lift", &app.gas_layer_lift, 0.f, .006f, "%.4f");
-        ImGui::SliderFloat("Deck shadow", &app.gas_layer_shadow, 0.f, 1.f, "%.2f");
+        ImGui::Checkbox("Two decks", &app.gas.layers);
+        ImGui::BeginDisabled(!app.gas.layers);
+        ImGui::SliderFloat("Deck lift", &app.gas.layer_lift, 0.f, .006f, "%.4f");
+        ImGui::SliderFloat("Deck shadow", &app.gas.layer_shadow, 0.f, 1.f, "%.2f");
         ImGui::EndDisabled();
-        if (ImGui::SmallButton("Reset giant")) {
-            app.gas_flow = true;
-            app.gas_time_scale = 1500.f;
-            app.gas_cycle = 12.f;
-            app.gas_turbulence = 1.f;
-            app.gas_haze = .08f;
-            app.gas_terminator = .08f;
-            app.gas_relief = 6.f;
-            app.gas_lightning_rate = 4.f;
-            app.gas_lightning = 1.f;
-            app.gas_polar = true;
-            app.gas_cap_size = 1.5f;
-            app.gas_cap_blend = .5f;
-            app.gas_cap_opacity = 1.f;
-            app.gas_layers = true;
-            app.gas_layer_lift = .0015f;
-            app.gas_layer_shadow = .3f;
-            app.gas_streaks = true;
-            app.gas_streak_strength = 1.f;
-        }
+        if (ImGui::SmallButton("Reset giant"))
+            app.gas = {};
         ImGui::PopID();
     }
     if (section("Earth")) {
-        ImGui::SliderFloat("Ocean roughness", &app.ocean_roughness, .03f, .6f, "%.3f", ImGuiSliderFlags_Logarithmic);
-        ImGui::SliderFloat("Glint intensity", &app.glint_intensity, .1f, 4.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
-        ImGui::SliderFloat("Sea patchiness", &app.sea_patchiness, 0.f, 1.f, "%.2f");
-        ImGui::SliderFloat("Cloud shadow", &app.cloud_shadow, 0.f, 1.f, "%.2f");
-        ImGui::SliderFloat("Cloud shadow softness", &app.cloud_shadow_softness, 0.f, 4.f, "%.1f mips");
-        ImGui::SliderFloat("Cloud opacity", &app.cloud_opacity, 0.f, 1.f, "%.2f");
-        if (ImGui::SmallButton("Reset Earth")) {
-            app.ocean_roughness = .18f;
-            app.glint_intensity = 1.f;
-            app.sea_patchiness = .5f;
-            app.cloud_shadow = .6f;
-            app.cloud_shadow_softness = 1.5f;
-            app.cloud_opacity = .88f;
-        }
+        ImGui::SliderFloat("Ocean roughness", &app.earth.ocean_roughness, .03f, .6f, "%.3f",
+                           ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Glint intensity", &app.earth.glint_intensity, .1f, 4.f, "%.2f x",
+                           ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Sea patchiness", &app.earth.sea_patchiness, 0.f, 1.f, "%.2f");
+        ImGui::SliderFloat("Cloud shadow", &app.earth.cloud_shadow, 0.f, 1.f, "%.2f");
+        ImGui::SliderFloat("Cloud shadow softness", &app.earth.cloud_shadow_softness, 0.f, 4.f, "%.1f mips");
+        ImGui::SliderFloat("Cloud opacity", &app.earth.cloud_opacity, 0.f, 1.f, "%.2f");
+        if (ImGui::SmallButton("Reset Earth"))
+            app.earth = {};
         ImGui::PopID();
     }
     if (section("Sun & lens")) {
-        ImGui::SliderFloat("Glare", &app.glare_intensity, 0.f, 4.f, "%.2f x");
-        ImGui::SliderFloat("Ghosts", &app.ghost_strength, 0.f, 4.f, "%.2f x");
-        ImGui::SliderFloat("Starburst", &app.starburst_strength, 0.f, 4.f, "%.2f x");
-        ImGui::SliderInt("Starburst blades", &app.starburst_blades, 0, 12);
-        ImGui::SliderFloat("Disc radius", &app.sun_disc_radius, .003f, .02f, "%.4f rad");
-        ImGui::SliderFloat("Limb darkening", &app.sun_limb_darkening, 0.f, 1.f, "%.2f");
-        if (ImGui::SmallButton("Reset sun")) {
-            app.glare_intensity = app.ghost_strength = app.starburst_strength = 1.f;
-            app.starburst_blades = 6;
-            app.sun_disc_radius = .007f;
-            app.sun_limb_darkening = .6f;
-        }
+        ImGui::SliderFloat("Glare", &app.sun.glare_intensity, 0.f, 4.f, "%.2f x");
+        ImGui::SliderFloat("Ghosts", &app.sun.ghost_strength, 0.f, 4.f, "%.2f x");
+        ImGui::SliderFloat("Starburst", &app.sun.starburst_strength, 0.f, 4.f, "%.2f x");
+        ImGui::SliderInt("Starburst blades", &app.sun.starburst_blades, 0, 12);
+        ImGui::SliderFloat("Disc radius", &app.sun.sun_disc_radius, .003f, .02f, "%.4f rad");
+        ImGui::SliderFloat("Limb darkening", &app.sun.sun_limb_darkening, 0.f, 1.f, "%.2f");
+        if (ImGui::SmallButton("Reset sun"))
+            app.sun = {};
         ImGui::PopID();
     }
     if (section("Sky")) {
         ImGui::Checkbox("Catalogue stars",
-                        &app.catalogue_stars); // the Bright Star Catalogue; off keeps the procedural sky
-        ImGui::BeginDisabled(!app.catalogue_stars);
-        ImGui::SliderFloat("Star brightness", &app.star_brightness, 0.f, 4.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
-        ImGui::SliderFloat("Star colour", &app.star_saturation, 0.f, 1.f, "%.2f");
-        ImGui::EndDisabled();
-        ImGui::Checkbox("Milky Way", &app.milky_way); // the splat fit of ESO's panorama; off keeps the procedural band
-        ImGui::BeginDisabled(!app.milky_way);
-        ImGui::SliderFloat("Milky Way brightness", &app.milky_way_brightness, 0.f, 4.f, "%.2f x",
+                        &app.sky.catalogue_stars); // the Bright Star Catalogue; off keeps the procedural sky
+        ImGui::BeginDisabled(!app.sky.catalogue_stars);
+        ImGui::SliderFloat("Star brightness", &app.sky.star_brightness, 0.f, 4.f, "%.2f x",
                            ImGuiSliderFlags_Logarithmic);
-        ImGui::SliderFloat("Milky Way contrast", &app.milky_way_contrast, .5f, 3.f,
+        ImGui::SliderFloat("Star colour", &app.sky.star_saturation, 0.f, 1.f, "%.2f");
+        ImGui::EndDisabled();
+        ImGui::Checkbox("Milky Way",
+                        &app.sky.milky_way); // the splat fit of ESO's panorama; off keeps the procedural band
+        ImGui::BeginDisabled(!app.sky.milky_way);
+        ImGui::SliderFloat("Milky Way brightness", &app.sky.milky_way_brightness, 0.f, 4.f, "%.2f x",
+                           ImGuiSliderFlags_Logarithmic);
+        ImGui::SliderFloat("Milky Way contrast", &app.sky.milky_way_contrast, .5f, 3.f,
                            "%.2f"); // exponent about the bulge: the halo down, the core up
-        ImGui::SliderInt("Milky Way splats", &app.milky_way_splats, 0, 4096); // the first n by energy; the file caps it
+        ImGui::SliderInt("Milky Way splats", &app.sky.milky_way_splats, 0,
+                         4096); // the first n by energy; the file caps it
         {
             const char* labels[] = {"full", "half", "quarter"};
-            int choice = app.galaxy_divisor >= 4 ? 2 : app.galaxy_divisor == 2 ? 1 : 0;
+            int choice = app.sky.galaxy_resolution == render::GalaxyResolution::Quarter ? 2
+                         : app.sky.galaxy_resolution == render::GalaxyResolution::Half  ? 1
+                                                                                        : 0;
             if (ImGui::Combo("Splat pass resolution", &choice, labels,
                              3)) // quarter resolves a 0.6 degree splat at 1080p
-                app.galaxy_divisor = choice == 2 ? 4 : choice == 1 ? 2 : 1;
+                app.sky.galaxy_resolution = choice == 2   ? render::GalaxyResolution::Quarter
+                                            : choice == 1 ? render::GalaxyResolution::Half
+                                                          : render::GalaxyResolution::Full;
         }
         // The dust lanes' fBm: three octaves of value noise modulating the lanes' depth.
-        ImGui::SliderFloat("Dust amplitude", &app.dust_amplitude, 0.f, 3.f, "%.2f");
-        ImGui::SliderFloat("Dust scale", &app.dust_scale, .1f, 10.f, "%.2f deg",
+        ImGui::SliderFloat("Dust amplitude", &app.sky.dust_amplitude, 0.f, 3.f, "%.2f");
+        ImGui::SliderFloat("Dust scale", &app.sky.dust_scale, .1f, 10.f, "%.2f deg",
                            ImGuiSliderFlags_Logarithmic); // the base octave's feature size
-        ImGui::SliderFloat("Dust lacunarity", &app.dust_lacunarity, 1.5f, 4.f, "%.2f");
-        ImGui::SliderFloat("Dust gain", &app.dust_gain, .2f, .9f, "%.2f");
+        ImGui::SliderFloat("Dust lacunarity", &app.sky.dust_lacunarity, 1.5f, 4.f, "%.2f");
+        ImGui::SliderFloat("Dust gain", &app.sky.dust_gain, .2f, .9f, "%.2f");
         ImGui::EndDisabled();
-        if (ImGui::SmallButton("Reset sky")) {
-            app.catalogue_stars = true;
-            app.star_brightness = 2.f;
-            app.star_saturation = .5f;
-            app.milky_way = true;
-            app.milky_way_brightness = .1f;
-            app.milky_way_contrast = 1.f;
-            app.milky_way_splats = 4096;
-            app.galaxy_divisor = 4;
-            app.dust_amplitude = 2.f;
-            app.dust_scale = 1.4f;
-            app.dust_lacunarity = 3.f;
-            app.dust_gain = .7f;
-        }
+        if (ImGui::SmallButton("Reset sky"))
+            app.sky = {};
         ImGui::PopID();
     }
     if (section("Post FX")) {
-        ImGui::Checkbox("Bloom", &app.bloom);
-        ImGui::SliderFloat("Bloom intensity", &app.bloom_intensity, 0.f, 1.f, "%.2f");
-        ImGui::SliderFloat("Bloom threshold", &app.bloom_threshold, 0.f, 3.f, "%.2f");
-        ImGui::SliderFloat("Bloom knee", &app.bloom_knee, 0.f, 1.f, "%.2f");
-        ImGui::SliderFloat("Aberration", &app.aberration, 0.f, 4.f, "%.2f x");
-        ImGui::SliderFloat("Vignette", &app.vignette, 0.f, .5f, "%.2f");
-        ImGui::SliderFloat("Grain", &app.grain, 0.f, .05f, "%.3f");
-        ImGui::SliderFloat("Black offset", &app.black_offset, 0.f, 1.f,
+        ImGui::Checkbox("Bloom", &app.post.bloom);
+        ImGui::SliderFloat("Bloom intensity", &app.post.bloom_intensity, 0.f, 1.f, "%.2f");
+        ImGui::SliderFloat("Bloom threshold", &app.post.bloom_threshold, 0.f, 3.f, "%.2f");
+        ImGui::SliderFloat("Bloom knee", &app.post.bloom_knee, 0.f, 1.f, "%.2f");
+        ImGui::SliderFloat("Aberration", &app.post.aberration, 0.f, 4.f, "%.2f x");
+        ImGui::SliderFloat("Vignette", &app.post.vignette, 0.f, .5f, "%.2f");
+        ImGui::SliderFloat("Grain", &app.post.grain, 0.f, .05f, "%.3f");
+        ImGui::SliderFloat("Black offset", &app.post.black_offset, 0.f, 1.f,
                            "%.2f"); // the neutral curve\'s flare subtraction; 1 as published
-        ImGui::Checkbox("Motion streaks", &app.motion_streaks); // dust motes streaking past the moving camera
-        ImGui::BeginDisabled(!app.motion_streaks);
-        ImGui::SliderFloat("Streak intensity", &app.motion_streak_intensity, 0.f, 4.f, "%.2f x");
+        ImGui::Checkbox("Motion streaks", &app.post.motion_streaks); // dust motes streaking past the moving camera
+        ImGui::BeginDisabled(!app.post.motion_streaks);
+        ImGui::SliderFloat("Streak intensity", &app.post.motion_streak_intensity, 0.f, 4.f, "%.2f x");
         ImGui::EndDisabled();
-        if (ImGui::SmallButton("Reset post")) {
-            app.bloom = true;
-            app.bloom_intensity = .24f;
-            app.bloom_threshold = .85f;
-            app.bloom_knee = .5f;
-            app.aberration = 1.f;
-            app.vignette = .17f;
-            app.grain = .010f;
-            app.black_offset = .3f;
-            app.motion_streaks = true;
-            app.motion_streak_intensity = 1.f;
-        }
+        if (ImGui::SmallButton("Reset post"))
+            app.post = {};
         ImGui::PopID();
     }
     if (section("Tone")) {
         static constexpr const char* curves[] = {"ACES filmic", "AgX", "PBR Neutral"};
-        combo("Curve (F8)", app.tone_curve, curves);
-        ImGui::SliderFloat("Exposure (+/-)", &app.exposure, exposure_keys::range.min, exposure_keys::range.max, "%.2f",
-                           ImGuiSliderFlags_Logarithmic);
-        ImGui::Checkbox("Auto exposure (X)", &app.auto_exposure);
+        combo("Curve (F8)", app.tone.tone_curve, curves);
+        ImGui::SliderFloat("Exposure (+/-)", &app.tone.exposure, exposure_keys::range.min, exposure_keys::range.max,
+                           "%.2f", ImGuiSliderFlags_Logarithmic);
+        ImGui::Checkbox("Auto exposure (X)", &app.tone.auto_exposure);
         ImGui::PopID();
     }
     if (section("Camera")) {
