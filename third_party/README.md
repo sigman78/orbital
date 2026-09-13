@@ -37,9 +37,9 @@ screenshots. Wuffs has no PNG encoder, so this is kept for export only.
 
 ## SMAA
 
-`smaa/LICENSE.txt` covers the SMAA lookup tables in `src/render/smaa/` (`AreaTex.h`, `SearchTex.h`) and the
-port of `SMAA.hlsl` in `shaders/smaa.slang`, from [iryoku/smaa](https://github.com/iryoku/smaa) (Jimenez et al.,
-MIT-style licence).
+`smaa/LICENSE.txt` covers the binary lookup tables in `smaa/` (`area.bin`, `search.bin`) and the
+port of `SMAA.hlsl` in `shaders/aa/smaa.slang`, from [iryoku/smaa](https://github.com/iryoku/smaa) (Jimenez et al.,
+MIT-style licence). The tables are embedded by a CMake build step; see [resource details](smaa/README.md).
 
 ## Dear ImGui
 

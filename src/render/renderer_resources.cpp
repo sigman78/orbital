@@ -1,10 +1,9 @@
 #include "render/renderer_impl.hpp"
 
 #include "app/hud.hpp"
+#include "assets/smaa.hpp"
 #include "core/log.hpp"
 #include "core/panic.hpp"
-#include "render/smaa/AreaTex.h"
-#include "render/smaa/SearchTex.h"
 #include <algorithm>
 #include <cstring>
 #include <format>
@@ -232,8 +231,8 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     hud.back().mips.push_back(assets::make_hud());
     hud.back().slot = Slot::hud;
     upload_images(hud);
-    // SMAA lookup tables, shipped as byte arrays and widened to RGBA8.
-    const auto widen = [](const unsigned char* bytes, unsigned width, unsigned height, unsigned channels) {
+    // Embedded SMAA lookup tables, widened to RGBA8 for the upload path.
+    const auto widen = [](std::span<const unsigned char> bytes, unsigned width, unsigned height, unsigned channels) {
         assets::Image image{.extent = {width, height}, .pixels = {}};
         image.pixels.resize(std::size_t(width) * height * 4);
         for (std::size_t i = 0; i < std::size_t(width) * height; i++)
@@ -243,10 +242,12 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     };
     Uploads smaa;
     smaa.emplace_back();
-    smaa.back().mips.push_back(widen(areaTexBytes, AREATEX_WIDTH, AREATEX_HEIGHT, 2));
+    smaa.back().mips.push_back(
+        widen(assets::smaa_area(), assets::smaa_area_width, assets::smaa_area_height, assets::smaa_area_channels));
     smaa.back().slot = Slot::smaa_area;
     smaa.emplace_back();
-    smaa.back().mips.push_back(widen(searchTexBytes, SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT, 1));
+    smaa.back().mips.push_back(widen(assets::smaa_search(), assets::smaa_search_width, assets::smaa_search_height,
+                                     assets::smaa_search_channels));
     smaa.back().slot = Slot::smaa_search;
     upload_images(smaa);
     create_pipelines();
