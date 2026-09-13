@@ -1,4 +1,4 @@
-"""GPU regression for stable TAA output.
+"""GPU regression for stable TAA output and fractional sun occlusion.
 
 Uses isolated shader fixtures in .scratch; requires the Windows build, Slang,
 numpy and Pillow. Scene/projection construction and the production TAA run intact.
@@ -96,6 +96,26 @@ def main():
         displacement = np.ptp(np.unwrap(phases, axis=0), axis=0) * 32 / (2*np.pi)
         report[f'taa_{taa}_displacement_px'] = displacement.tolist()
         assert max(displacement) < .04, report
+    # Check the production visibility helper with known fractional coverage.
+    helper = (ROOT / 'shaders/post/sun_occlusion.slang').read_text()
+    helper = re.sub(r'#include "([^\"]+)"', lambda m: '#include "' +
+                    (ROOT / 'shaders/post' / m[1]).resolve().as_posix() + '"', helper)
+    helper = helper.replace('splats.Load', 'fixtureSplats')
+    compile_shader(bindings + '''
+    float4 fixtureSplats(int3 p) { return float4(0.0, 0.0, 0.0, root.frame.camera_time.w); }
+    ''' + helper + '''
+    [shader("fragment")]
+    float4 fragmentMain(float4 p : SV_Position) : SV_Target0 {
+        float v = sunDepthVisibility(root.frame, textures[TEX_DEPTH], textures[TEX_SPLAT_MASK],
+                                    float2(0.0), float2(root.frame.options.x / root.frame.options.y, 1.0));
+        return float4(v, v, v, 1.0);
+    }
+    ''', 'composite')
+    for taa in [0, 1]:
+        for alpha in [0, .25, .5, 1]:
+            v = capture(f'coverage-{taa}-{alpha}', frames=2, taa=taa, time=alpha)[100, 100]
+            assert abs(v - (1-alpha)) < .01, (taa, alpha, v)
+    report['fractional_visibility'] = 'passed at alpha 0, .25, .5, 1 with TAA on and off'
     (RUNTIME / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report, indent=2))
 

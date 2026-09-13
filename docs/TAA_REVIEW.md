@@ -2,6 +2,7 @@
 
 Reviewed revision: `c4bbb60`. This is a source and numerical review, not an implementation change. Numerical results below evaluate the current shader equations; they are not new GPU captures or a measured reproduction at 30 fps. The exact contribution of each mechanism to the reported scene still needs controlled visual tests.
 
+Implementation update: stages 1 and 2 are implemented on `fix/taa-coordinates-occlusion`; see [TAA_COORDINATES.md](TAA_COORDINATES.md). Findings below describe the reviewed baseline, including defects subsequently corrected.
 
 The implementation has useful components, but its sampling coordinates and treatment of partially covered pixels need correction before tuning filter constants. Replacing TAA wholesale is not yet justified.
 

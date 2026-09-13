@@ -107,15 +107,14 @@ bool Renderer::draw(const FrameInput& input) {
     s.record_atmosphere_passes(cmd, root);
     s.record_belt_dust_passes(cmd, root, input.belt_dust.enabled, frame.belt_disc.y);
     s.record_motion_streaks(cmd, root, input.post);
-    if (input.aa.temporal_aa) {
-        gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,
-                     gpu::Access::depth_stencil_write);
-        s.record_splat_mask_pass(cmd, root, args_address);
-        gpu::barrier(cmd, gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_write, gpu::Stage::fragment,
-                     gpu::Access::shader_read);
-        gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
-                     gpu::Access::shader_read);
-    }
+    // Coverage is also needed by sun visibility with TAA disabled.
+    gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,
+                 gpu::Access::depth_stencil_read);
+    s.record_splat_mask_pass(cmd, root, args_address);
+    gpu::barrier(cmd, gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_read, gpu::Stage::fragment,
+                 gpu::Access::shader_read);
+    gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
+                 gpu::Access::shader_read);
     stamp(3);
     s.record_post_passes(cmd, root, swap.render_view, input.aa.spatial_aa,
                          input.post.bloom && input.post.bloom_intensity > 0, input.ui,

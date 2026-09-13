@@ -4,7 +4,8 @@
 
 // Resolve jittered scene samples onto a stable output/history grid. Previous
 // projection remains jittered for other consumers; remove its displacement here.
-// Splat history validation is unchanged by this coordinate correction.
+// Splat metadata carries coverage and coverage-weighted depth, never scene depth.
+// Coverage-aware history validation is a separate follow-up to this coordinate fix.
 
 static const float HISTORY_WEIGHT = .95;      // at rest
 static const float HISTORY_WEIGHT_MOVING = .80; // at one pixel of motion per frame and beyond
@@ -57,8 +58,10 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float3 current = reconstruct(textures[TEX_HDR], rasterUV, float2(size)).rgb;
     pixel = clamp(int2(rasterPosition), int2(0, 0), size - 1);
     float deviceDepth = textures[TEX_DEPTH].Load(int3(pixel, 0)).r;
-    bool sky = deviceDepth >= .999999;
-    float currentZ = sky ? FAR_Z : linearViewDepth(deviceDepth);
+    float4 metadata = textures[TEX_SPLAT_MASK].Load(int3(pixel, 0));
+    bool splat = metadata.a > 1e-5;
+    bool sky = deviceDepth >= .999999 && !splat;
+    float currentZ = splat ? metadata.r / metadata.a : (sky ? FAR_Z : linearViewDepth(deviceDepth));
     if (root.frame.previous_camera_delta.w < .5 || root.frame.quality.x < .5) return float4(current, currentZ);
 
     float3 rd = rayDirection(root.frame, rasterPosition);
@@ -80,7 +83,6 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     if (behind || outside || (!sky && predictedPreviousZ <= 0.0)) return float4(current, currentZ);
 
     float4 history = reconstruct(textures[TEX_HISTORY_B], previousUV, float2(size));
-    bool splat = textures[TEX_SPLAT_MASK].Load(int3(pixel, 0)).r > .5;
     // A disocclusion: both frames saw surfaces at clearly different depths.
     bool historySky = history.a >= FAR_Z * .999;
     if (!sky && !historySky && !splat) {

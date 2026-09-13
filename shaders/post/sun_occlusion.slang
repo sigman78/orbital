@@ -1,10 +1,16 @@
 #pragma once
 #include "../scene_shared.h"
 
+// Opaque geometry blocks fully; billboards attenuate by their actual alpha.
+float sunPixelVisibility(Texture2D<float4> depth, Texture2D<float4> splats, int2 pixel)
+{
+    return step(.999999, depth.Load(int3(pixel, 0)).r) * (1.0 - saturate(splats.Load(int3(pixel, 0)).a));
+}
+
 // Fraction of the solar disc not covered by scene geometry: depth taps over
 // the disc's screen footprint, so rocks and moons dim the glare and the
 // flare as they cross the sun (the planets are handled analytically).
-float sunDepthVisibility(Frame* frame, Texture2D<float4> depth, float2 sun, float2 aspect)
+float sunDepthVisibility(Frame* frame, Texture2D<float4> depth, Texture2D<float4> splats, float2 sun, float2 aspect)
 {
     float2 uv = sun * .5 + .5 + frame->jitter.xy / frame->options.xy;
     if (any(uv < 0.0) || any(uv > 1.0)) return 1.0;
@@ -23,10 +29,10 @@ float sunDepthVisibility(Frame* frame, Texture2D<float4> depth, float2 sun, floa
         float2 f = frac(pixel);
         // Filter visibility, not depth: thresholding interpolated depth makes
         // even a tiny contribution from a foreground rock close the whole tap.
-        float a00 = step(.999999, depth.Load(int3(clamp(first, int2(0, 0), size - 1), 0)).r);
-        float a10 = step(.999999, depth.Load(int3(clamp(first + int2(1, 0), int2(0, 0), size - 1), 0)).r);
-        float a01 = step(.999999, depth.Load(int3(clamp(first + int2(0, 1), int2(0, 0), size - 1), 0)).r);
-        float a11 = step(.999999, depth.Load(int3(clamp(first + int2(1, 1), int2(0, 0), size - 1), 0)).r);
+        float a00 = sunPixelVisibility(depth, splats, clamp(first, int2(0, 0), size - 1));
+        float a10 = sunPixelVisibility(depth, splats, clamp(first + int2(1, 0), int2(0, 0), size - 1));
+        float a01 = sunPixelVisibility(depth, splats, clamp(first + int2(0, 1), int2(0, 0), size - 1));
+        float a11 = sunPixelVisibility(depth, splats, clamp(first + int2(1, 1), int2(0, 0), size - 1));
         open += lerp(lerp(a00, a10, f.x), lerp(a01, a11, f.x), f.y);
     }
     return open / float(samples);
