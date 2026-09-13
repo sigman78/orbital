@@ -646,9 +646,10 @@ void Renderer::Impl::resize(Extent2D new_extent) {
                               .format = gpu::Format::rgba16_float,
                               .usage = color_usage});
     // The Milky Way's splat sum is smooth at its narrowest splat, so a fraction of the frame resolves it.
-    galaxy = create_image({.extent = {std::max(1u, extent.width / galaxy_divisor), std::max(1u, extent.height / galaxy_divisor)},
-                           .format = gpu::Format::rgba16_float,
-                           .usage = color_usage});
+    galaxy = create_image(
+        {.extent = {std::max(1u, extent.width / galaxy_divisor), std::max(1u, extent.height / galaxy_divisor)},
+         .format = gpu::Format::rgba16_float,
+         .usage = color_usage});
     bind(Slot::hdr, hdr);
     bind(Slot::bloom_a, bloom_a);
     bind(Slot::milky_way, galaxy);

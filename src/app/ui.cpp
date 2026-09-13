@@ -244,12 +244,14 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::BeginDisabled(!app.milky_way);
         ImGui::SliderFloat("Milky Way brightness", &app.milky_way_brightness, 0.f, 4.f, "%.2f x",
                            ImGuiSliderFlags_Logarithmic);
-        ImGui::SliderFloat("Milky Way contrast", &app.milky_way_contrast, .5f, 3.f, "%.2f"); // exponent about the bulge: the halo down, the core up
+        ImGui::SliderFloat("Milky Way contrast", &app.milky_way_contrast, .5f, 3.f,
+                           "%.2f"); // exponent about the bulge: the halo down, the core up
         ImGui::SliderInt("Milky Way splats", &app.milky_way_splats, 0, 4096); // the first n by energy; the file caps it
         {
             const char* labels[] = {"full", "half", "quarter"};
             int choice = app.galaxy_divisor >= 4 ? 2 : app.galaxy_divisor == 2 ? 1 : 0;
-            if (ImGui::Combo("Splat pass resolution", &choice, labels, 3)) // quarter resolves a 0.6 degree splat at 1080p
+            if (ImGui::Combo("Splat pass resolution", &choice, labels,
+                             3)) // quarter resolves a 0.6 degree splat at 1080p
                 app.galaxy_divisor = choice == 2 ? 4 : choice == 1 ? 2 : 1;
         }
         // The dust lanes' fBm: three octaves of value noise modulating the lanes' depth.
