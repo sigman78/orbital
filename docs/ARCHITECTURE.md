@@ -63,6 +63,30 @@ Between the rocks a half-resolution march through the same density field scatter
 GPU timestamps bracket the cull and shadow passes, the scene, the atmospheres with the dust, and the post
 passes; the title bar and the panel show them.
 
+## Renderer implementation
+
+`Renderer::Impl` owns the device, heaps, images and pipeline lifetime registry. The implementation
+is split by responsibility; pass files operate on that shared state without introducing separate
+resource owners or a render graph.
+
+| File in `src/render/` | Responsibility |
+| --- | --- |
+| `renderer_frame.cpp` | Acquire, prepare, ordered pass calls, timestamps, submit and capture |
+| `renderer_frame_data.cpp` | Camera/light transforms, frame constants, body instances and culling inputs |
+| `renderer_pipelines.cpp` | Shader loading and pipeline creation, grouped into scene, belt, post and overlay |
+| `renderer_assets.cpp` | Mesh packing, material decode batches and sky catalogues |
+| `renderer_resources.cpp` | Device/heaps, generic uploads, image lifetime and resize |
+| `renderer_belt.cpp` | Rock population, GPU culling, indirect rock batch, light/disc maps, splat mask and dust |
+| `renderer_scene.cpp` | Shadow, galaxy, bodies/clouds, atmospheres and motion streaks |
+| `renderer_post.cpp` | Temporal resolve, bloom, tone mapping, spatial AA, metering and presentation |
+| `renderer_overlay.cpp` | ImGui font upload and draw-list packing |
+
+The frame function retains pass order and timestamp boundaries. Pass functions retain the barriers
+needed by their consumers; the splat-mask depth transitions remain visible in the frame sequence
+because that pass must follow atmospheres and precede temporal resolve. `draw_rock_batch` records
+inside the scene pass, and `record_ui` records inside the presentation pass. Helpers taking `Root&`
+explicitly preserve the push-constant updates used by subsequent draws.
+
 ## Resources
 
 One 128 MiB host-visible heap holds everything: meshes and rock records appended from the front at startup,

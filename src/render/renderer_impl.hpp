@@ -1,7 +1,6 @@
 #pragma once
-// Private implementation shared by renderer_resources.cpp (device, heaps,
-// meshes, materials, pipelines, targets) and renderer_frame.cpp (per-frame
-// data, culling, pass recording, capture).
+// Private renderer state: one owner for shared GPU resources. Implementation
+// units separate frame preparation, assets, pipelines, and pass families.
 #include "render/renderer.hpp"
 
 #include "assets/image.hpp"
@@ -112,7 +111,7 @@ constexpr SurfaceKind surface_kind(BodyClass body_class) {
     return SurfaceKind::rock;
 }
 
-// --- Constants both files depend on ------------------------------------------
+// --- Shared heap layout and limits ------------------------------------------
 
 // One host-visible heap: meshes are appended from the front at startup, the
 // per-frame FrameData and instance list live in the back half.
@@ -132,18 +131,6 @@ static_assert(heap_layout.cull_offset >= sizeof(FrameData));
 static_assert(heap_layout.instance_offset >= heap_layout.cull_offset + sizeof(CullScratch));
 static_assert(heap_layout.dynamic_offset + heap_layout.instance_offset < heap_layout.static_heap);
 static_assert(heap_layout.instance_offset < heap_layout.ui_offset());
-
-// Overlay vertex and push constants, mirrored in ui.slang.
-struct UiVertex {
-    float position_uv[4];
-    std::uint32_t colour[4];
-};
-struct UiRoot {
-    float scale[2], translate[2];
-    std::uint64_t vertices;
-    std::uint32_t texture, unused;
-};
-static_assert(sizeof(UiVertex) == 32 && sizeof(UiRoot) == 32);
 
 // Sizes of the fixed GPU targets, created by the resources side and addressed by the frame side.
 namespace targets {
@@ -224,12 +211,6 @@ constexpr unsigned rock_group(unsigned shape, unsigned level) {
 static_assert(rock_group_count == ORBITAL_ROCK_GROUPS && geometry::rock_level_count == ORBITAL_ROCK_LEVELS &&
               belt::radial_bands == ORBITAL_BELT_BANDS);
 
-// Orthographic light box, camera relative: right and up span the map, forward is the light direction.
-struct LightFrame {
-    Vec3f centre{}, forward{}, right{}, up{};
-    float half_x = 1, half_y = 1, half_depth = 1;
-};
-
 struct Renderer::Impl {
     // Device and heaps.
     gpu::Device* device = nullptr;
@@ -244,25 +225,54 @@ struct Renderer::Impl {
     GpuImage hdr{}, depth{}, bloom_a{}, bloom_b{}, final_image{}, ldr{}, shadow_map{}, luminance{}, history[2]{};
     GpuImage splat_mask{}, smaa_edges{}, smaa_weights{}, belt_dust{}, belt_disc_light{}, belt_disc_rocks{};
     GpuImage belt_light{}, belt_light_blur{}, galaxy{}; // galaxy: the Milky Way's splat sum at a quarter of the frame
+    // Non-owning handles grouped by pass family; pipelines owns their lifetime.
     struct {
-        gpu::PSO *surface_earth = nullptr, *surface_giant = nullptr, *surface_airless = nullptr,
-                 *surface_rock = nullptr, *billboard = nullptr, *cloud = nullptr, *background = nullptr,
-                 *galaxy = nullptr, *atmosphere = nullptr, *bloom = nullptr, *post = nullptr, *present = nullptr,
-                 *shadow = nullptr, *meter = nullptr, *temporal = nullptr, *cull = nullptr, *belt_splat = nullptr,
-                 *belt_blur = nullptr, *fxaa = nullptr, *splat_mask = nullptr, *smaa_edges = nullptr,
-                 *smaa_weights = nullptr, *smaa_blend = nullptr, *ui = nullptr, *belt_dust = nullptr,
-                 *belt_dust_blend = nullptr, *belt_disc = nullptr, *belt_disc_splat = nullptr, *motes = nullptr,
-                 *stars = nullptr;
+        struct {
+            gpu::PSO* surface_earth = nullptr;
+            gpu::PSO* surface_giant = nullptr;
+            gpu::PSO* surface_airless = nullptr;
+            gpu::PSO* surface_rock = nullptr;
+            gpu::PSO* cloud = nullptr;
+            gpu::PSO* background = nullptr;
+            gpu::PSO* galaxy = nullptr;
+            gpu::PSO* atmosphere = nullptr;
+            gpu::PSO* shadow = nullptr;
+            gpu::PSO* motes = nullptr;
+            gpu::PSO* stars = nullptr;
+        } scene;
+        struct {
+            gpu::PSO* billboard = nullptr;
+            gpu::PSO* cull = nullptr;
+            gpu::PSO* splat = nullptr;
+            gpu::PSO* blur = nullptr;
+            gpu::PSO* splat_mask = nullptr;
+            gpu::PSO* dust = nullptr;
+            gpu::PSO* dust_blend = nullptr;
+            gpu::PSO* disc = nullptr;
+            gpu::PSO* disc_splat = nullptr;
+        } belt;
+        struct {
+            gpu::PSO* bloom = nullptr;
+            gpu::PSO* tonemap = nullptr;
+            gpu::PSO* present = nullptr;
+            gpu::PSO* meter = nullptr;
+            gpu::PSO* temporal = nullptr;
+            gpu::PSO* fxaa = nullptr;
+            gpu::PSO* smaa_edges = nullptr;
+            gpu::PSO* smaa_weights = nullptr;
+            gpu::PSO* smaa_blend = nullptr;
+        } post;
+        gpu::PSO* ui = nullptr;
     } pso;
     gpu::PSO* surface_pso(SurfaceKind kind) const {
         switch (kind) {
-        case SurfaceKind::earth: return pso.surface_earth;
-        case SurfaceKind::giant: return pso.surface_giant;
+        case SurfaceKind::earth: return pso.scene.surface_earth;
+        case SurfaceKind::giant: return pso.scene.surface_giant;
         case SurfaceKind::moon:
-        case SurfaceKind::mars: return pso.surface_airless;
-        case SurfaceKind::rock: return pso.surface_rock;
+        case SurfaceKind::mars: return pso.scene.surface_airless;
+        case SurfaceKind::rock: return pso.scene.surface_rock;
         }
-        return pso.surface_rock;
+        return pso.scene.surface_rock;
     }
     std::array<GpuMesh, geometry::lod_count> spheres{};
     std::array<GpuMesh, rock_group_count> rocks{}; // the rock library, indexed by rock_group; slices of rock_pool
@@ -297,8 +307,6 @@ struct Renderer::Impl {
     bool ui_overflow_logged = false;
     bool belt_disc_baked = false;          // the far-belt maps hold data (baked once the far tier is first needed)
     gpu::SwapchainInfo logged_swapchain{}; // last presentation mode and image count reported to the log
-    void record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root, unsigned rock_limit,
-                                float far_weight);
 
     // Per-frame scratch, cleared and reused: the body instances only, rocks
     // are placed by the GPU.
@@ -306,51 +314,75 @@ struct Renderer::Impl {
 
     ~Impl();
 
-    // renderer_resources.cpp
+    // Device, shared heaps, uploads and target lifetime (renderer_resources.cpp).
     void init(void* window, const SystemDescription& description, const std::filesystem::path& base_directory,
               const RendererConfig& config);
     void create_device(void* window);
     void create_samplers();
-    void create_meshes();
-    void build_belt(const BeltDescription& description);
-    void load_materials();
-    void load_stars();
-    void load_splats();
-    void create_pipelines();
     void create_fixed_targets();
     void resize(Extent2D new_extent);
-    void resize_galaxy(unsigned divisor); // the galaxy target at the frame over divisor (1, 2 or 4)
+    void resize_galaxy(unsigned divisor);
     unsigned galaxy_divisor = 4;
     void destroy(GpuImage& image);
     std::uint64_t upload_static(ByteView bytes);
-    GpuMesh upload_mesh(const geometry::Mesh& mesh);
-    void upload_rock_pool(std::span<const geometry::Mesh> meshes);
     GpuImage create_image(const ImageDesc& desc);
     void bind(Slot slot, const GpuImage& image);
-    const GpuMesh& body_mesh(unsigned body, unsigned lod) const;
     void upload_images(std::span<Upload> uploads);
+
+    // Pipeline creation and ownership registration (renderer_pipelines.cpp).
+    void create_pipelines();
     gpu::PSO* create_pipeline(const PipelineDesc& desc);
 
-    // renderer_frame.cpp
-    void read_gpu_timings();
-    void apply_metering();
+    // Static mesh and material assets (renderer_assets.cpp).
+    void create_meshes();
+    void load_materials();
+    void load_stars();
+    void load_splats();
+    GpuMesh upload_mesh(const geometry::Mesh& mesh);
+    void upload_rock_pool(std::span<const geometry::Mesh> meshes);
+    const GpuMesh& body_mesh(unsigned body, unsigned lod) const;
+
+    // CPU frame packing (renderer_frame_data.cpp).
     FrameData build_frame(const FrameInput& input);
     void write_body_instances(const FrameInput& input, const FrameData& frame);
     void write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
                             std::uint64_t instance_address);
+
+    // Belt population, GPU culling, indirect batch and maps (renderer_belt.cpp).
+    void build_belt(const BeltDescription& description);
     void read_cull_counts(const CullScratch& scratch);
     void record_cull_passes(gpu::CommandBuffer* cmd, const CullRoot& root);
+    void record_belt_maps(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root, unsigned rock_limit,
+                          bool light_map, float far_weight);
     void record_belt_light_pass(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root, unsigned rock_limit);
-    void record_shadow_pass(gpu::CommandBuffer* cmd, Root root);
+    void record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root, unsigned rock_limit,
+                                float far_weight);
+    // Records draws inside the scene pass; other record_* methods own their render passes.
+    void draw_rock_batch(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address);
     void record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, std::uint64_t args_address);
+    void record_belt_dust_passes(gpu::CommandBuffer* cmd, Root& root, bool enabled, float far_weight);
+
+    // Bodies, sky and atmosphere (renderer_scene.cpp).
+    void record_shadow_pass(gpu::CommandBuffer* cmd, Root root);
+    void record_galaxy_pass(gpu::CommandBuffer* cmd, Root root, const FrameData& frame);
     void record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input, const FrameData& frame,
                            std::uint64_t args_address);
+    void record_atmosphere_passes(gpu::CommandBuffer* cmd, Root& root);
+    void record_motion_streaks(gpu::CommandBuffer* cmd, Root& root, const PostSettings& settings);
+    void draw_mesh(gpu::CommandBuffer* cmd, Root& root, const GpuMesh& mesh, unsigned base, unsigned instance_count);
+
+    // Post-processing and exposure (renderer_post.cpp).
+    void apply_metering();
     void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view, SpatialAA spatial_aa,
                             bool bloom, const ImDrawData* ui, std::uint8_t* ui_cpu, std::uint64_t ui_gpu);
-    void record_ui(gpu::CommandBuffer* cmd, const ImDrawData* ui, std::uint8_t* cpu, std::uint64_t gpu);
     void fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, gpu::PSO* pipeline, Root root,
                          bool preserve = false);
-    void draw_mesh(gpu::CommandBuffer* cmd, Root& root, const GpuMesh& mesh, unsigned base, unsigned instance_count);
+
+    // ImGui draws inside the presentation pass (renderer_overlay.cpp).
+    void record_ui(gpu::CommandBuffer* cmd, const ImDrawData* ui, std::uint8_t* cpu, std::uint64_t gpu);
+
+    // Frame orchestration and readback (renderer_frame.cpp).
+    void read_gpu_timings();
 };
 
 } // namespace space::render

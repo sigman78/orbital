@@ -1,83 +1,20 @@
 #include "render/renderer_impl.hpp"
-#include "render/smaa/AreaTex.h"
-#include "render/smaa/SearchTex.h"
 
 #include "app/hud.hpp"
-#include "assets/kernels.hpp"
-#include "assets/materials.hpp"
-#include "core/file.hpp"
 #include "core/log.hpp"
 #include "core/panic.hpp"
-
+#include "render/smaa/AreaTex.h"
+#include "render/smaa/SearchTex.h"
 #include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <cmath>
 #include <cstring>
-#include <filesystem>
 #include <format>
-#include <future>
-#include <iterator>
-#include <thread>
 
 namespace space::render {
+
 namespace {
-
-constexpr unsigned decode_workers_max = 8; // upper bound for the material decode pool
-
-std::vector<std::uint32_t> read_spirv(const std::filesystem::path& path) {
-    const auto bytes = file::read(path);
-    panic_if(!bytes || bytes->empty() || bytes->size() % 4, "missing or invalid shader: {}", path.string());
-    std::vector<std::uint32_t> words(bytes->size() / 4);
-    std::memcpy(words.data(), bytes->data(), bytes->size());
-    constexpr std::uint32_t spirv_magic = 0x07230203;
-    panic_if(words[0] != spirv_magic, "not a SPIR-V module: {}", path.string());
-    return words;
-}
-
 std::uint64_t padded_size(const assets::Image& mip) {
     return (mip.pixels.size() + 15) & ~15ull;
 }
-
-struct MaterialSource {
-    const char* file;
-    Slot slot;
-    assets::MaterialDesc desc;
-    bool optional = false; // missing on disk binds a neutral map with a warning instead of a panic
-};
-
-using assets::MaterialEncoding;
-constexpr MaterialSource material_sources[] = {
-    {"earth_albedo.png", Slot::earth_albedo, {.encoding = MaterialEncoding::SRGB}},
-    {"gas_albedo.png", Slot::gas_albedo, {.encoding = MaterialEncoding::SRGB}},
-    {"earth_clouds.png", Slot::earth_clouds, {.luminance_to_alpha = true}},
-    {"earth_normal.png", Slot::earth_normal, {.normal_map = true}},
-    {"earth_specular.png", Slot::earth_specular, {}},
-    {"earth_night.png", Slot::earth_night, {.encoding = MaterialEncoding::SRGB}},
-    {"moon_albedo.png", Slot::moon_albedo, {.encoding = MaterialEncoding::SRGB}},
-    {"rock_albedo.png", Slot::rock_albedo, {.encoding = MaterialEncoding::SRGB}},
-    {"rock_normal.png", Slot::rock_normal, {.normal_map = true}},
-    {"rock_roughness.png", Slot::rock_roughness, {}},
-    {"mars_albedo.png", Slot::mars_albedo, {.encoding = MaterialEncoding::SRGB}},
-    {"mars_normal.png", Slot::mars_normal, {.normal_map = true}},
-    {"moon_normal.png", Slot::moon_normal, {.normal_map = true}},
-    {"rock_face_albedo.png", Slot::rock_face_albedo, {.encoding = MaterialEncoding::SRGB}},
-    {"rock_face_normal.png", Slot::rock_face_normal, {.normal_map = true}},
-    {"rock_face_roughness.png", Slot::rock_face_roughness, {}},
-    {"rock_boulder_albedo.png", Slot::rock_boulder_albedo, {.encoding = MaterialEncoding::SRGB}},
-    {"rock_boulder_normal.png", Slot::rock_boulder_normal, {.normal_map = true}},
-    {"rock_boulder_roughness.png", Slot::rock_boulder_roughness, {}},
-    {"gas_flow.png", Slot::gas_flow, {}, true},     // baked from the gas albedo; neutral (no flow) when absent
-    {"gas_detail.png", Slot::gas_detail, {}, true}, // baked alongside it; flat (no detail) when absent
-    {"gas_relief.png", Slot::gas_relief, {}, true}, // baked alongside it; flat (no relief) when absent
-    {"gas_polar.png",
-     Slot::gas_polar,
-     {.encoding = MaterialEncoding::SRGB},
-     true}, // baked alongside it; the caps stay the map when absent
-    {"gas_polar_flow.png", Slot::gas_polar_flow, {}, true},
-};
-constexpr std::size_t material_count = std::size(material_sources);
-static_assert(material_count <= inline_upload_count);
 
 } // namespace
 
@@ -112,43 +49,6 @@ std::uint64_t Renderer::Impl::upload_static(ByteView bytes) {
     std::memcpy(data.range.cpu + static_cursor, bytes.data(), bytes.size());
     static_cursor += bytes.size();
     return address;
-}
-
-namespace {
-void append_vertices(std::vector<Vertex>& out, const geometry::Mesh& mesh) {
-    for (const auto& v : mesh.vertices)
-        out.push_back({{v.position.x, v.position.y, v.position.z, 1}, {v.normal.x, v.normal.y, v.normal.z, 0}});
-}
-} // namespace
-
-GpuMesh Renderer::Impl::upload_mesh(const geometry::Mesh& mesh) {
-    std::vector<Vertex> vertices;
-    vertices.reserve(mesh.vertices.size());
-    append_vertices(vertices, mesh);
-    return {.vertices = upload_static(bytes_of(vertices)),
-            .indices = upload_static(bytes_of(mesh.indices)),
-            .index_count = unsigned(mesh.indices.size())};
-}
-
-// One vertex and one index range for the whole rock library, so every rock
-// group is a first-index/vertex-offset slice and one multi-draw covers them all.
-void Renderer::Impl::upload_rock_pool(std::span<const geometry::Mesh> meshes) {
-    std::vector<Vertex> vertices;
-    std::vector<std::uint32_t> indices;
-    for (std::size_t group = 0; group < meshes.size(); group++) {
-        rocks[group] = {.index_count = unsigned(meshes[group].indices.size()),
-                        .first_index = unsigned(indices.size()),
-                        .vertex_offset = unsigned(vertices.size())};
-        append_vertices(vertices, meshes[group]);
-        indices.insert(indices.end(), meshes[group].indices.begin(), meshes[group].indices.end());
-    }
-    rock_pool = {.vertices = upload_static(bytes_of(vertices)),
-                 .indices = upload_static(bytes_of(indices)),
-                 .index_count = unsigned(indices.size())};
-    for (auto& rock : rocks) {
-        rock.vertices = rock_pool.vertices;
-        rock.indices = rock_pool.indices;
-    }
 }
 
 GpuImage Renderer::Impl::create_image(const ImageDesc& desc) {
@@ -234,33 +134,6 @@ void Renderer::Impl::upload_images(std::span<Upload> uploads) {
     gpu::destroy_gpu_heap(staging);
 }
 
-gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
-    const auto vertex = read_spirv(directory / "shaders" / std::format("{}.vertex.spv", desc.vertex_shader));
-    const auto fragment = read_spirv(directory / "shaders" / std::format("{}.fragment.spv", desc.fragment_shader));
-    gpu::BlendState blending{};
-    if (desc.blend == Blend::alpha)
-        blending = {.enabled = true,
-                    .color = {gpu::BlendFactor::source_alpha, gpu::BlendFactor::one_minus_source_alpha},
-                    .alpha = {gpu::BlendFactor::one, gpu::BlendFactor::one_minus_source_alpha}};
-    else if (desc.blend == Blend::additive)
-        blending = {.enabled = true,
-                    .color = {gpu::BlendFactor::one, gpu::BlendFactor::one},
-                    .alpha = {gpu::BlendFactor::one, gpu::BlendFactor::one}};
-    else if (desc.blend == Blend::premultiplied)
-        blending = {.enabled = true,
-                    .color = {gpu::BlendFactor::one, gpu::BlendFactor::one_minus_source_alpha},
-                    .alpha = {gpu::BlendFactor::one, gpu::BlendFactor::one_minus_source_alpha}};
-    const gpu::ColorTargetDesc target{.format = desc.color_format, .blend = blending};
-    auto* pipeline = gpu::create_graphics_pso(
-        device, {.vertex_spirv = vertex,
-                 .fragment_spirv = fragment,
-                 .color_targets = {&target, 1},
-                 .depth_format = desc.depth_test ? gpu::Format::d32_float : gpu::Format::undefined});
-    panic_if(!pipeline, "pipeline creation failed for {} + {}", desc.vertex_shader, desc.fragment_shader);
-    pipelines.push_back(pipeline);
-    return pipeline;
-}
-
 void Renderer::Impl::create_device(void* window) {
     const auto init = gpu::create_device(
         {.window = window, .swapchain_format = gpu::Format::bgra8_srgb, .timestamp_query_count = 16});
@@ -305,225 +178,6 @@ void Renderer::Impl::create_samplers() {
                                           .address_v = AddressMode::repeat,
                                           .address_w = AddressMode::clamp_to_edge,
                                           .anisotropic = true});
-}
-
-void Renderer::Impl::create_meshes() {
-    for (unsigned lod = 0; lod < geometry::lod_count; lod++)
-        spheres[lod] = upload_mesh(geometry::generate_sphere(32u << lod, 16u << lod));
-    constexpr std::uint32_t rock_seed_base = 71, rock_seed_stride = 37;
-    std::vector<geometry::Mesh> library(rock_group_count);
-    for (unsigned shape = 0; shape < geometry::rock_shape_count; shape++)
-        for (unsigned level = 0; level < geometry::rock_level_count; level++)
-            library[rock_group(shape, level)] = geometry::generate_rock(rock_seed_base + shape * rock_seed_stride,
-                                                                        level);
-    upload_rock_pool(library);
-    // Moonlets are irregular bodies: each gets its own seeded rock at full detail.
-    for (unsigned i = 0; i < body_count; i++)
-        if (system.bodies[i].body_class == BodyClass::Moonlet)
-            moonlet_meshes[i] = upload_mesh(
-                geometry::generate_rock(std::uint32_t(system.bodies[i].material_seed), geometry::rock_level_count - 1));
-}
-
-const GpuMesh& Renderer::Impl::body_mesh(unsigned body, unsigned lod) const {
-    return system.bodies[body].body_class == BodyClass::Moonlet ? moonlet_meshes[body] : spheres[lod];
-}
-
-// Uploads the static per-rock records the GPU culling pass places each frame.
-// The seeded belt order defines quality tiers, so records keep their ids.
-void Renderer::Impl::build_belt(const BeltDescription& description) {
-    const float inner = float(description.inner_radius), outer = float(description.outer_radius);
-    const auto belt = geometry::generate_belt({.seed = description.seed,
-                                               .count = std::max(high_quality.belt_count, belt_count_override),
-                                               .inner_radius = inner,
-                                               .outer_radius = outer,
-                                               .thickness = float(description.thickness)});
-    std::vector<RockData> records;
-    records.reserve(belt.size());
-    for (unsigned id = 0; id < belt.size(); ++id) {
-        const auto& rock = belt[id];
-        const float radial = std::sqrt(rock.position.x * rock.position.x + rock.position.z * rock.position.z);
-        const unsigned band = std::min(
-            belt::radial_bands - 1,
-            unsigned(std::clamp((radial - inner) / std::max(outer - inner, 1e-4f), 0.f, .999999f) *
-                     belt::radial_bands));
-        const float radius = rock.scale.x * belt::rock_radius_scale;
-        records.push_back(
-            {.position_radius = {rock.position.x, rock.position.y, rock.position.z, radius},
-             .rotation_seed = {rock.rotation.x, rock.rotation.y, rock.rotation.z, 0},
-             .spin_group = {rock.spin.x, rock.spin.y, rock.spin.z, float(rock.variant * belt::radial_bands + band)}});
-    }
-    rock_data = upload_static(bytes_of(records));
-    rock_count = unsigned(records.size());
-    std::vector<RockData> tail;
-    for (unsigned id = 0; id < records.size(); ++id)
-        if (records[id].position_radius.w >= belt::map_caster_min_radius) {
-            tail.push_back(records[id]);
-            rock_tail_ids.push_back(id);
-        }
-    rock_tail_data = tail.empty() ? rock_data : upload_static(bytes_of(tail));
-}
-
-// Decodes and mip-filters every material on a bounded worker pool, then
-// uploads them all in one batch on this thread. Unused descriptor slots point
-// at the first map so every binding is valid.
-void Renderer::Impl::load_materials() {
-    const auto start = std::chrono::steady_clock::now();
-    // Leave one core for this thread and cap the pool: decoding and filtering
-    // are memory-bound enough that more workers stop helping.
-    const unsigned cores = std::thread::hardware_concurrency();
-    const std::size_t workers = std::min(material_count,
-                                         std::size_t(std::clamp(cores > 1 ? cores - 1 : 1u, 1u, decode_workers_max)));
-    Uploads uploads;
-    for (std::size_t i = 0; i < material_count; i++)
-        uploads.emplace_back();
-    std::atomic<std::size_t> next{0};
-    SmallVec<std::future<void>, decode_workers_max> pool;
-    for (std::size_t worker = 0; worker < workers; worker++)
-        pool.push_back(std::async(std::launch::async, [&] {
-            for (std::size_t i = next++; i < material_count; i = next++) {
-                const auto& source = material_sources[i];
-                const auto path = directory / "assets/materials" / source.file;
-                if (source.optional && !std::filesystem::exists(path)) {
-                    log::warn("{} is missing; run tools/import-assets.ps1 to bake it (its effect is off)", source.file);
-                    if (source.slot == Slot::gas_polar)
-                        polar_caps = false;
-                    assets::Image neutral{.extent = {4, 4}, .pixels = {}};
-                    neutral.pixels.resize(4 * 4 * 4);
-                    for (std::size_t p = 0; p < 16; p++) {
-                        neutral.pixels[p * 4] = neutral.pixels[p * 4 + 1] = 128; // zero signed flow
-                        neutral.pixels[p * 4 + 3] = 255;
-                    }
-                    uploads[i] = {.mips = {neutral}, .slot = source.slot};
-                    continue;
-                }
-                uploads[i] = {.mips = assets::load_material(path, source.desc), .slot = source.slot};
-            }
-        }));
-    for (auto& worker : pool)
-        worker.get();
-    const auto first_material = material_images.size();
-    upload_images(uploads);
-    bool used[unsigned(Slot::count)]{};
-    for (const auto& source : material_sources)
-        used[unsigned(source.slot)] = true;
-    for (unsigned slot = 0; slot < unsigned(Slot::count); slot++)
-        if (!used[slot])
-            bind(Slot(slot), material_images[first_material]);
-    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
-                                                                               start);
-    log::info("Loaded {} materials in {} ms on {} workers ({})", material_count, elapsed.count(), workers,
-              assets::kernels::backend());
-    load_stars();
-    load_splats();
-}
-
-// The Bright Star Catalogue baked by tools/bake-stars.py: a 16-byte header
-// ("STAR", count, record size, reserved) and 32-byte records the star pass
-// reads as vertices. Optional: without it the sky keeps its procedural stars.
-void Renderer::Impl::load_stars() {
-    const auto path = directory / "assets/materials/stars_bsc5.bin";
-    const auto bytes = file::read(path);
-    if (!bytes) {
-        log::warn("stars_bsc5.bin is missing; run tools/import-assets.ps1 to bake it (the sky stays procedural)");
-        return;
-    }
-    constexpr std::size_t header = 16, record = 32;
-    if (bytes->size() < header || std::memcmp(bytes->data(), "STAR", 4) != 0) {
-        log::warn("stars_bsc5.bin is not a star record file; ignored");
-        return;
-    }
-    std::uint32_t count = 0, size = 0;
-    std::memcpy(&count, bytes->data() + 4, 4);
-    std::memcpy(&size, bytes->data() + 8, 4);
-    if (size != record || bytes->size() < header + std::size_t(count) * record) {
-        log::warn("stars_bsc5.bin has an unexpected layout; ignored");
-        return;
-    }
-    star_data = upload_static(ByteView(bytes->data() + header, std::size_t(count) * record));
-    star_count = count;
-    log::info("Loaded {} catalogue stars", count);
-}
-
-// The Milky Way as Gaussian splats fitted to ESO's panorama by tools/bake-splats.py:
-// a 16-byte header ("SPLT", count, record size, table length), 64-byte records
-// the galaxy pass reads as two vertices each, then the cell table (uints) that
-// buckets them by direction. Optional: without it the sky keeps its procedural band.
-void Renderer::Impl::load_splats() {
-    const auto path = directory / "assets/materials/milky_way_splats.bin";
-    const auto bytes = file::read(path);
-    if (!bytes) {
-        log::warn("milky_way_splats.bin is missing; run tools/import-assets.ps1 to fit it (the band stays procedural)");
-        return;
-    }
-    constexpr std::size_t header = 16, record = 64;
-    if (bytes->size() < header || std::memcmp(bytes->data(), "SPLT", 4) != 0) {
-        log::warn("milky_way_splats.bin is not a splat record file; ignored");
-        return;
-    }
-    std::uint32_t count = 0, size = 0, table = 0;
-    std::memcpy(&count, bytes->data() + 4, 4);
-    std::memcpy(&size, bytes->data() + 8, 4);
-    std::memcpy(&table, bytes->data() + 12, 4);
-    const std::size_t payload = std::size_t(count) * record + std::size_t(table) * 4;
-    if (size != record || table < 2 || bytes->size() < header + payload) {
-        log::warn("milky_way_splats.bin has an unexpected layout; ignored");
-        return;
-    }
-    splat_data = upload_static(ByteView(bytes->data() + header, payload));
-    splat_count = count;
-    log::info("Loaded {} Milky Way splats ({} KB with their cell table)", count, (payload + 512) / 1024);
-}
-
-void Renderer::Impl::create_pipelines() {
-    using gpu::Format;
-    const auto make = [&](const char* vertex, const char* fragment, Format format, bool depth_test = false,
-                          Blend blend = Blend::none) {
-        return create_pipeline({.vertex_shader = vertex,
-                                .fragment_shader = fragment,
-                                .color_format = format,
-                                .depth_test = depth_test,
-                                .blend = blend});
-    };
-    // One fragment shader per body kind, all on the shared vertex stage.
-    pso.surface_earth = make("surface", "surface_earth", Format::rgba16_float, true);
-    pso.surface_giant = make("surface", "surface_giant", Format::rgba16_float, true);
-    pso.surface_airless = make("surface", "surface_airless", Format::rgba16_float, true);
-    pso.surface_rock = make("surface", "surface_rock", Format::rgba16_float, true);
-    pso.billboard = make("surface", "surface_rock", Format::rgba16_float, true, Blend::alpha);
-    pso.cloud = make("surface", "surface_earth", Format::rgba16_float, true, Blend::alpha);
-    pso.background = make("fullscreen", "background", Format::rgba16_float, true);
-    pso.galaxy = make("fullscreen", "galaxy", Format::rgba16_float);
-    pso.atmosphere = make("fullscreen", "atmosphere", Format::rgba16_float, false, Blend::alpha);
-    pso.belt_splat = make("beltsplat", "beltsplat", Format::rgba16_float, false, Blend::additive);
-    pso.belt_blur = make("fullscreen", "beltblur", Format::rgba16_float);
-    pso.bloom = make("fullscreen", "post", Format::rgba16_float);
-    pso.post = make("fullscreen", "post", Format::rgba8_srgb);
-    pso.present = make("fullscreen", "post", Format::bgra8_srgb);
-    pso.fxaa = make("fullscreen", "post", Format::rgba8_srgb);
-    pso.meter = make("fullscreen", "post", Format::rgba32_float);
-    pso.temporal = make("fullscreen", "temporal", Format::rgba16_float);
-    pso.splat_mask = make("surface", "surface_rock", Format::r8_unorm, true);
-    pso.smaa_edges = make("fullscreen", "smaa", Format::rg8_unorm);
-    pso.smaa_weights = make("fullscreen", "smaa", Format::rgba8_unorm);
-    pso.smaa_blend = make("fullscreen", "smaa", Format::rgba8_srgb);
-    pso.ui = make("ui", "ui", Format::bgra8_srgb, false, Blend::alpha);
-    pso.belt_dust = make("fullscreen", "dust", Format::rgba16_float);
-    pso.belt_dust_blend = make("fullscreen", "dust", Format::rgba16_float, false, Blend::premultiplied);
-    pso.belt_disc = make("fullscreen", "disc", Format::rgba16_float);
-    pso.belt_disc_splat = make("discsplat", "discsplat", Format::rgba16_float, false, Blend::additive);
-    pso.motes = make("motes", "motes", Format::rgba16_float, true, Blend::additive);
-    pso.stars = make("stars", "stars", Format::rgba16_float, false, Blend::additive);
-    pso.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
-    panic_if(!pso.cull, "compute pipeline creation failed: cull");
-    pipelines.push_back(pso.cull);
-    // Depth-only shadow pass reuses the surface vertex shader with a slope bias.
-    const auto shadow_vertex = read_spirv(directory / "shaders/surface.vertex.spv");
-    pso.shadow = gpu::create_graphics_pso(device,
-                                          {.vertex_spirv = shadow_vertex,
-                                           .depth_format = Format::d32_float,
-                                           .rasterization = {.depth_bias_constant = 1, .depth_bias_slope = 1.5f}});
-    panic_if(!pso.shadow, "shadow pipeline creation failed");
-    pipelines.push_back(pso.shadow);
 }
 
 void Renderer::Impl::create_fixed_targets() {
@@ -673,16 +327,6 @@ Renderer::~Renderer() = default;
 
 Stats Renderer::stats() const {
     return impl_->stats;
-}
-
-void Renderer::set_ui_font(const std::uint8_t* rgba, unsigned width, unsigned height) {
-    Uploads upload;
-    upload.emplace_back();
-    assets::Image image{.extent = {width, height}, .pixels = {}};
-    image.pixels.assign(rgba, rgba + std::size_t(width) * height * 4);
-    upload.back().mips.push_back(std::move(image));
-    upload.back().slot = Slot::ui_font;
-    impl_->upload_images(upload);
 }
 
 } // namespace space::render
