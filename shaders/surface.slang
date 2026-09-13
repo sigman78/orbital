@@ -1,6 +1,10 @@
+#include "scene/frame_bindings.slang"
+#include "surface/types.slang"
+#include "surface/cloud_geometry.slang"
+#include "lib/math.slang"
+
 // The vertex stage every surface pipeline shares: bodies, the pooled rock
 // draws, the Earth's cloud shell, the shadow pass and the rock billboards.
-#include "surface_common.slang"
 
 [shader("vertex")]
 SurfaceVaryings vertexMain(uint vertexIndex : SV_VertexID, uint firstVertex : SV_StartVertexLocation,

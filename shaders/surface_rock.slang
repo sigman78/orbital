@@ -1,3 +1,9 @@
+#include "scene/frame_bindings.slang"
+#include "surface/lighting.slang"
+#include "surface/brdf.slang"
+#include "lib/math.slang"
+#include "lib/noise.slang"
+
 // The belt's rocks and the moonlets: three scanned rock sets (albedo,
 // normal+height, roughness) mapped triplanar in the rock's object space, so
 // there are no seams or pole pinch. Each rock blends a primary and a secondary
@@ -5,7 +11,6 @@
 // dominant plane. The far tail of the belt draws as billboards, lit once per
 // rock in the culling pass, and their splat mask marks their pixels for the
 // temporal pass.
-#include "surface_common.slang"
 
 static const float ROCK_TILE = 1.4;            // texture repeats per unit of rock radius
 static const float ROCK_PARALLAX = .03;        // parallax depth as a fraction of one tile
@@ -21,9 +26,9 @@ struct RockSample {
 
 float4 rockTap(int set, int map, float2 uv, float2 dx, float2 dy)
 {
-    if (set == 0) return map == 0 ? textures[11].SampleGrad(samplers[3], uv, dx, dy) : map == 1 ? textures[12].SampleGrad(samplers[3], uv, dx, dy) : textures[13].SampleGrad(samplers[3], uv, dx, dy);
-    if (set == 1) return map == 0 ? textures[22].SampleGrad(samplers[3], uv, dx, dy) : map == 1 ? textures[23].SampleGrad(samplers[3], uv, dx, dy) : textures[24].SampleGrad(samplers[3], uv, dx, dy);
-    return map == 0 ? textures[25].SampleGrad(samplers[3], uv, dx, dy) : map == 1 ? textures[26].SampleGrad(samplers[3], uv, dx, dy) : textures[27].SampleGrad(samplers[3], uv, dx, dy);
+    if (set == 0) return map == 0 ? textures[TEX_ROCK_ALBEDO].SampleGrad(samplers[SAMPLER_WRAP_ANISOTROPIC], uv, dx, dy) : map == 1 ? textures[TEX_ROCK_NORMAL].SampleGrad(samplers[SAMPLER_WRAP_ANISOTROPIC], uv, dx, dy) : textures[TEX_ROCK_ROUGHNESS].SampleGrad(samplers[SAMPLER_WRAP_ANISOTROPIC], uv, dx, dy);
+    if (set == 1) return map == 0 ? textures[TEX_ROCK_FACE_ALBEDO].SampleGrad(samplers[SAMPLER_WRAP_ANISOTROPIC], uv, dx, dy) : map == 1 ? textures[TEX_ROCK_FACE_NORMAL].SampleGrad(samplers[SAMPLER_WRAP_ANISOTROPIC], uv, dx, dy) : textures[TEX_ROCK_FACE_ROUGHNESS].SampleGrad(samplers[SAMPLER_WRAP_ANISOTROPIC], uv, dx, dy);
+    return map == 0 ? textures[TEX_ROCK_BOULDER_ALBEDO].SampleGrad(samplers[SAMPLER_WRAP_ANISOTROPIC], uv, dx, dy) : map == 1 ? textures[TEX_ROCK_BOULDER_NORMAL].SampleGrad(samplers[SAMPLER_WRAP_ANISOTROPIC], uv, dx, dy) : textures[TEX_ROCK_BOULDER_ROUGHNESS].SampleGrad(samplers[SAMPLER_WRAP_ANISOTROPIC], uv, dx, dy);
 }
 
 RockSample sampleRockSet(int set, float2 uv, float2 dx, float2 dy)
@@ -169,8 +174,8 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
         // Depth and mask over the whole quad, since the Gaussian footprint fills it.
         return float4(1.0, 1.0, 1.0, 1.0);
     }
-    Surface s = surfaceAt(input, true);
+    Surface s = surfaceAt(root.frame, root.instances, input, true);
     float3x3 rotate = rotation(s.inst.rotation_kind.xyz);
     Material m = rockMaterial(input, s.inst, rotate, s.N, s.V, s.visibility);
-    return float4(shadeSurface(m, s.L, s.V), 1);
+    return float4(shadeSurface(m, s.L, s.V, sunlight(root.frame), root.frame->earth.y), 1);
 }

@@ -4,8 +4,7 @@
 // swapchain is an sRGB target. The font atlas sits in a fixed texture slot.
 
 #include "scene_shared.h"
-[[vk::binding(0, 0)]] Texture2D<float4> textures[ORBITAL_TEXTURE_COUNT];
-[[vk::binding(1, 0)]] SamplerState samplers[4];
+#include "scene/bindings.slang"
 
 struct UiVertex {
     float4 position_uv; // pixel position, then atlas uv
@@ -26,8 +25,6 @@ struct UiVaryings {
     [[vk::location(1)]] float4 colour : COLOUR;
 };
 
-static const uint UI_FONT = 36;
-
 [shader("vertex")]
 UiVaryings vertexMain(uint vertexIndex : SV_VertexID)
 {
@@ -45,5 +42,5 @@ UiVaryings vertexMain(uint vertexIndex : SV_VertexID)
 [shader("fragment")]
 float4 fragmentMain(UiVaryings input) : SV_Target0
 {
-    return input.colour * textures[UI_FONT].Sample(samplers[0], input.uv);
+    return input.colour * textures[TEX_UI_FONT].Sample(samplers[SAMPLER_CLAMP], input.uv);
 }

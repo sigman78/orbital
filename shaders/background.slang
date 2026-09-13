@@ -1,13 +1,13 @@
-#include "common.slang"
-
-static const uint MILKY_WAY = 45; // the splat sum drawn by galaxy.slang at a quarter of the frame
+#include "scene/frame_bindings.slang"
+#include "scene/view.slang"
+#include "lib/noise.slang"
 
 // The Milky Way for this pixel: the splat sum, drawn at a quarter of the frame
 // since it is smooth at a degree and more, read here bilinearly. rgb the
 // radiance, w a dust depth: how much the dark splats take from the bright.
 float4 milkyWay(float2 pixel)
 {
-    return textures[MILKY_WAY].SampleLevel(samplers[0], pixel / root.frame.options.xy, 0.0);
+    return textures[TEX_MILKY_WAY].SampleLevel(samplers[SAMPLER_CLAMP], pixel / root.frame.options.xy, 0.0);
 }
 
 // The dust's structure below the splats' scale: the dust depth is
@@ -82,7 +82,7 @@ float3 filteredStars(float3 p)
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
-    float3 rd = rayDirection(position.xy);
+    float3 rd = rayDirection(root.frame, position.xy);
     float3 color = float3(.0005, .0007, .0012);
     if (root.frame.stars.w > 0.0)
     {

@@ -14,15 +14,10 @@ function(orbital_compile_slang output source entry stage)
         COMMAND "${ORBITAL_SLANGC}" "${source_absolute}"
                 -target spirv -profile spirv_1_6 -matrix-layout-column-major -fvk-use-entrypoint-name
                 -entry "${entry}" -stage "${stage}" -o "${output_absolute}"
+                -depfile "${output_absolute}.d"
         ${validation}
         DEPENDS "${source_absolute}"
-                "${CMAKE_SOURCE_DIR}/shaders/common.slang"
-                "${CMAKE_SOURCE_DIR}/shaders/belt.slang"
-                "${CMAKE_SOURCE_DIR}/shaders/rockclass.slang"
-                "${CMAKE_SOURCE_DIR}/shaders/beltfar.slang"
-                "${CMAKE_SOURCE_DIR}/shaders/clouds.slang"
-                "${CMAKE_SOURCE_DIR}/shaders/surface_common.slang"
-                "${CMAKE_SOURCE_DIR}/shaders/scene_shared.h"
+        DEPFILE "${output_absolute}.d"
         VERBATIM
         COMMENT "Compiling Slang ${entry} (${stage})"
     )

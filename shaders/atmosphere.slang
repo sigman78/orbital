@@ -1,4 +1,8 @@
-#include "common.slang"
+#include "scene/frame_bindings.slang"
+#include "scene/view.slang"
+#include "scene/visibility.slang"
+#include "lib/math.slang"
+#include "lib/scattering.slang"
 #include "clouds.slang"
 
 float airDensity(float altitude, float scaleHeight) { return exp(-max(altitude, 0.0) / scaleHeight); }
@@ -6,7 +10,7 @@ float airDensity(float altitude, float scaleHeight) { return exp(-max(altitude, 
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
-    int bodyIndex = clamp(int(root.base), 0, BELT_MAX_BODIES - 1);
+    int bodyIndex = clamp(int(root.base), 0, MAX_OCCLUDING_BODIES - 1);
     Instance body = root.instances[bodyIndex];
     float3 centre = body.center_radius.xyz;
     float radius = max(body.center_radius.w, 1e-4);
@@ -14,7 +18,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     bool gas = kind == 1, desert = kind == 4;
     float shellRadius = radius * (gas ? 1.010 : desert ? 1.014 : 1.018);
     float3 ro = root.frame.camera_time.xyz;
-    float3 rd = normalize(rayDirection(position.xy));
+    float3 rd = normalize(rayDirection(root.frame, position.xy));
     float2 atmosphereHit = sphereHit(ro, rd, centre, shellRadius);
     float begin = max(atmosphereHit.x, 0.0);
     float end = atmosphereHit.y;
@@ -26,13 +30,13 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         end = min(end, nearGround);
     }
     int bodyCount = int(root.frame.scene.x);
-    for (int i = 0; i < BELT_MAX_BODIES; ++i) if (i < bodyCount && i != bodyIndex) {
+    for (int i = 0; i < MAX_OCCLUDING_BODIES; ++i) if (i < bodyCount && i != bodyIndex) {
         float4 other = root.frame.bodies[i];
         float2 hit = sphereHit(ro, rd, other.xyz, other.w);
         if (hit.x > 0.0) end = min(end, hit.x);
     }
     // Anything already drawn in front of the shell (asteroids, the moon) ends the march.
-    end = min(end, sceneDistance(position.xy, rd));
+    end = min(end, sceneDistance(root.frame, textures[TEX_DEPTH], position.xy, rd));
     if (end <= begin) return float4(0.0, 0.0, 0.0, 0.0);
 
     float3 sunDirection = normalize(root.frame.sun.xyz - centre);
@@ -79,7 +83,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         float densityM = airDensity(altitude, scaleM);
         float3 extinctionHere = betaR * densityR + betaM * densityM;
         float3 viewTransmittance = exp(-viewOpticalDepth);
-        float visibility = solarVisibility(p, bodyIndex);
+        float visibility = solarVisibility(root.frame, p, bodyIndex);
         float2 ownHit = sphereHit(p + sunDirection * radius * 1e-5, sunDirection, centre, radius);
         if (ownHit.x > 0.0 && ownHit.y > ownHit.x) visibility = 0.0;
         if (altitude < CLOUD_HEIGHT) visibility *= lowShadow;

@@ -1,4 +1,6 @@
-#include "common.slang"
+#include "scene/frame_bindings.slang"
+#include "scene/view.slang"
+#include "lib/color.slang"
 
 // Temporal anti-aliasing over the jittered HDR frame. History is reprojected
 // through the previous frame's projection and camera delta, clipped to the
@@ -6,7 +8,7 @@
 // bright specks settle instead of flickering. Depth only rejects history when
 // both frames saw a surface and disagree: a pixel that flips between a thin
 // rock and the sky keeps its history and lets the colour clip decide. Rock
-// splats (textures[31] marks their pixels, and they wrote their depth) are
+// splats (textures[TEX_SPLAT_MASK] marks their pixels, and they wrote their depth) are
 // reprojected exactly and keep their history unclipped: a sub-pixel feature in
 // motion never survives the neighbourhood clip, and the exact reprojection
 // makes the clip unnecessary.
@@ -17,9 +19,6 @@ static const float HISTORY_WEIGHT_MOVING = .80; // at one pixel of motion per fr
 static const float CLIP_SIGMA = 1.5;          // variance clip half-width, in standard deviations
 static const float SPLAT_WEIGHT_MOVING = .3;  // splat pixels at SPLAT_MOTION_PIXELS of motion and beyond: already filtered, so a short history keeps them sharp
 static const float SPLAT_MOTION_PIXELS = 4.0;
-
-float3 toYCoCg(float3 c) { return float3(.25 * c.r + .5 * c.g + .25 * c.b, .5 * c.r - .5 * c.b, -.25 * c.r + .5 * c.g - .25 * c.b); }
-float3 fromYCoCg(float3 c) { return float3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z); }
 
 // Moves the history colour to the nearest point of the neighbourhood box along
 // the line toward the box centre, which keeps hue better than a clamp.
@@ -46,11 +45,11 @@ float4 sampleHistory(float2 uv, float2 size)
     float2 w12 = w1 + w2;
     float2 offset12 = w2 / w12;
     float2 tc0 = (centre - 1.0) * texel, tc3 = (centre + 2.0) * texel, tc12 = (centre + offset12) * texel;
-    float4 result = textures[17].SampleLevel(samplers[0], float2(tc12.x, tc0.y), 0.0) * w12.x * w0.y
-                  + textures[17].SampleLevel(samplers[0], float2(tc0.x, tc12.y), 0.0) * w0.x * w12.y
-                  + textures[17].SampleLevel(samplers[0], float2(tc12.x, tc12.y), 0.0) * w12.x * w12.y
-                  + textures[17].SampleLevel(samplers[0], float2(tc3.x, tc12.y), 0.0) * w3.x * w12.y
-                  + textures[17].SampleLevel(samplers[0], float2(tc12.x, tc3.y), 0.0) * w12.x * w3.y;
+    float4 result = textures[TEX_HISTORY_B].SampleLevel(samplers[SAMPLER_CLAMP], float2(tc12.x, tc0.y), 0.0) * w12.x * w0.y
+                  + textures[TEX_HISTORY_B].SampleLevel(samplers[SAMPLER_CLAMP], float2(tc0.x, tc12.y), 0.0) * w0.x * w12.y
+                  + textures[TEX_HISTORY_B].SampleLevel(samplers[SAMPLER_CLAMP], float2(tc12.x, tc12.y), 0.0) * w12.x * w12.y
+                  + textures[TEX_HISTORY_B].SampleLevel(samplers[SAMPLER_CLAMP], float2(tc3.x, tc12.y), 0.0) * w3.x * w12.y
+                  + textures[TEX_HISTORY_B].SampleLevel(samplers[SAMPLER_CLAMP], float2(tc12.x, tc3.y), 0.0) * w12.x * w3.y;
     float weight = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
     return max(result / weight, float4(0.0, 0.0, 0.0, 0.0));
 }
@@ -61,13 +60,13 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     int2 size = int2(root.frame.options.xy);
     int2 pixel = clamp(int2(position.xy), int2(0, 0), size - 1);
     float2 uv = (float2(pixel) + .5) / float2(size);
-    float3 current = textures[0].Load(int3(pixel, 0)).rgb;
-    float deviceDepth = textures[18].Load(int3(pixel, 0)).r;
+    float3 current = textures[TEX_HDR].Load(int3(pixel, 0)).rgb;
+    float deviceDepth = textures[TEX_DEPTH].Load(int3(pixel, 0)).r;
     bool sky = deviceDepth >= .999999;
     float currentZ = sky ? FAR_Z : linearViewDepth(deviceDepth);
     if (root.frame.previous_camera_delta.w < .5 || root.frame.quality.x < .5) return float4(current, currentZ);
 
-    float3 rd = rayDirection(position.xy);
+    float3 rd = rayDirection(root.frame, position.xy);
     float4 previousClip;
     float predictedPreviousZ = FAR_Z;
     if (sky) {
@@ -85,7 +84,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     if (behind || outside || (!sky && predictedPreviousZ <= 0.0)) return float4(current, currentZ);
 
     float4 history = sampleHistory(previousUV, float2(size));
-    bool splat = textures[31].Load(int3(pixel, 0)).r > .5;
+    bool splat = textures[TEX_SPLAT_MASK].Load(int3(pixel, 0)).r > .5;
     // A disocclusion: both frames saw surfaces at clearly different depths.
     bool historySky = history.a >= FAR_Z * .999;
     if (!sky && !historySky && !splat) {
@@ -96,7 +95,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float3 mean = float3(0.0, 0.0, 0.0), meanSquare = float3(0.0, 0.0, 0.0);
     for (int y = -1; y <= 1; ++y) for (int x = -1; x <= 1; ++x) {
         int2 q = clamp(pixel + int2(x, y), int2(0, 0), size - 1);
-        float3 c = toYCoCg(textures[0].Load(int3(q, 0)).rgb);
+        float3 c = toYCoCg(textures[TEX_HDR].Load(int3(q, 0)).rgb);
         mean += c;
         meanSquare += c * c;
     }

@@ -1,29 +1,12 @@
+#pragma once
+#include "scene/bindings.slang"
+#include "scene/visibility.slang"
+
 // Belt lighting shared by the surface shaders and the culling pass, which
-// lights the sub-pixel splats once per rock. Included after the descriptor
-// arrays and the Frame layout; every function takes the frame explicitly.
+// lights the sub-pixel splats once per rock. Dependencies are declared here;
+// frame-dependent functions take the frame explicitly.
 
-static const int BELT_MAX_BODIES = 8; // Frame.bodies capacity; scene.x holds the live count
 static const float BELT_OUTER_TAIL = 1.5; // geometry::belt_outer_tail: the density tail ends here, in belt widths past the inner edge
-
-// Fraction of the sun's disc a point sees past the bodies, with a soft edge.
-float solarVisibility(Frame* frame, float3 point, int skip)
-{
-    float3 light = normalize(frame->sun.xyz - point);
-    float visibility = 1.0;
-    int bodyCount = int(frame->scene.x);
-    for (int i = 0; i < BELT_MAX_BODIES; ++i) if (i < bodyCount && i != skip)
-    {
-        float3 q = frame->bodies[i].xyz - point;
-        float t = dot(q, light);
-        if (t > 0.0)
-        {
-            float distanceToRay = length(q - light * t), radius = frame->bodies[i].w;
-            float penumbra = max(t * 0.007, 0.015);
-            visibility *= smoothstep(radius - penumbra, radius + penumbra, distanceToRay);
-        }
-    }
-    return visibility;
-}
 
 // Relative rock density across the belt (0 inner edge, 1 outer edge); mirrors
 // geometry::belt_ring_density: rings, a gap, a sharp inner edge and a fading tail.
@@ -88,7 +71,7 @@ float beltRockTransmittance(Frame* frame, float3 point)
     float4 clip = mul(frame->belt_light_projection, float4(point, 1.0));
     float2 uv = clip.xy * .5 + .5;
     if (any(uv < 0.0) || any(uv > 1.0)) return 1.0;
-    float4 coverage = textures[28].SampleLevel(samplers[0], uv, 0.0);
+    float4 coverage = textures[TEX_BELT_LIGHT_MAP].SampleLevel(samplers[SAMPLER_CLAMP], uv, 0.0);
     float3 n = frame->belt_normal.xyz;
     float3 q = point - frame->bodies[int(frame->scene.y)].xyz;
     float3 light = normalize(frame->sun.xyz - point);

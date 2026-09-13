@@ -1,3 +1,8 @@
+#include "scene/frame_bindings.slang"
+#include "scene/view.slang"
+#include "lib/math.slang"
+#include "lib/color.slang"
+
 // The Milky Way as a cloud of Gaussian splats on the sphere, fitted to ESO's
 // panorama by tools/bake-splats.py and summed here per pixel at a quarter of
 // the frame (the sum is smooth at a degree and more; the background reads it
@@ -12,7 +17,6 @@
 // the cost follows the splats in view rather than the cloud. Output: the
 // radiance and, in w, a dust depth: how much the dark splats take from the
 // bright ones, which the background redistributes into filaments.
-#include "common.slang"
 
 static const float MILKY_WAY_SCALE = .1; // HDR radiance of the fit's unit (the bulge) at the panel's 1
 // Equatorial J2000 (standard xyz: x toward the vernal equinox, z toward the celestial pole)
@@ -26,7 +30,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
     // This target is the frame over a divisor: the frame pixel under this one's centre.
     float2 pixel = position.xy * root.frame.options.xy / floor(root.frame.options.xy / root.frame.galaxy_more.z);
-    float3 rd = rayDirection(pixel);
+    float3 rd = rayDirection(root.frame, pixel);
     float3 g = mul(EQUATORIAL_TO_GALACTIC, float3(rd.x, rd.z, rd.y));
     float3 light = float3(0.0, 0.0, 0.0), dark = float3(0.0, 0.0, 0.0);
     // The cell table follows the records; the pass points root.instances at it.

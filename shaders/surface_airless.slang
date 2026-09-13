@@ -1,7 +1,13 @@
+#include "scene/frame_bindings.slang"
+#include "surface/lighting.slang"
+#include "surface/brdf.slang"
+#include "lib/math.slang"
+#include "lib/noise.slang"
+#include "lib/sampling.slang"
+
 // The airless bodies, the Moon and Mars: colour maps over NASA elevation
 // models baked into normal+height maps, with a short height trace for the
 // crater walls' self-shadowing.
-#include "surface_common.slang"
 
 static const float2 RELIEF_TEXELS = float2(4096.0, 2048.0); // Moon and Mars albedo and normal+height maps
 // Height range of the baked DEM alpha channel in radii (manifest height_min_m..height_max_m over the body radius).
@@ -18,12 +24,12 @@ float reliefShadow(Texture2D<float4> normalMap, float2 uv, float3 L, float3 N, f
     lightUV = normalize(lightUV + 1e-6);
     float2 texel = 1.0 / RELIEF_TEXELS;
     float arc = 2.0 * PI / RELIEF_TEXELS.x; // tangent distance of one texel, in radii
-    float h0 = normalMap.SampleLevel(samplers[1], uv, 1.0).a * heightRange;
+    float h0 = normalMap.SampleLevel(samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv, 1.0).a * heightRange;
     float shadow = 0.0;
     for (int s = 1; s <= 6; ++s)
     {
         float distance = float(s) * 1.5;
-        float h = normalMap.SampleLevel(samplers[1], uv + lightUV * texel * distance, 1.0).a * heightRange;
+        float h = normalMap.SampleLevel(samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv + lightUV * texel * distance, 1.0).a * heightRange;
         float rise = h - h0 - lightRise * distance * arc;
         shadow = max(shadow, rise / (distance * arc) * 6.0);
     }
@@ -38,11 +44,11 @@ Material reliefMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3
     float detail = magnification(uv, RELIEF_TEXELS);
     float3 T, B;
     tangentFrame(localN, rotate, N, T, B);
-    float3 mapN = sampleSphere(normalMap, uv).xyz * 2.0 - 1.0;
+    float3 mapN = sampleSphere(normalMap, samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).xyz * 2.0 - 1.0;
     Material m;
     m.N = normalize(T * mapN.x * strength + B * mapN.y * strength + N * max(mapN.z, .2));
     m.visibility = visibility * reliefShadow(normalMap, uv, L, N, T, B, heightRange);
-    m.albedo = sampleSphere(albedoMap, uv).rgb;
+    m.albedo = sampleSphere(albedoMap, samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).rgb;
     // Regolith grain where the 4K maps are magnified.
     m.albedo *= 1.0 + (fbm2(uv * float2(3072, 1536), 3) - .5) * .10 * detail;
     m.rough = .95;
@@ -52,13 +58,13 @@ Material reliefMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3
 
 Material moonMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility)
 {
-    return reliefMaterial(input, rotate, N, L, visibility, textures[10], textures[21], MOON_HEIGHT_RANGE, 1.0);
+    return reliefMaterial(input, rotate, N, L, visibility, textures[TEX_MOON_ALBEDO], textures[TEX_MOON_NORMAL], MOON_HEIGHT_RANGE, 1.0);
 }
 
 Material marsMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility)
 {
     // MOLA slopes are gentle at 5 km per texel; doubled so the relief reads.
-    Material m = reliefMaterial(input, rotate, N, L, visibility, textures[19], textures[20], MARS_HEIGHT_RANGE, 2.0);
+    Material m = reliefMaterial(input, rotate, N, L, visibility, textures[TEX_MARS_ALBEDO], textures[TEX_MARS_NORMAL], MARS_HEIGHT_RANGE, 2.0);
     m.rough = .9;
     return m;
 }
@@ -66,9 +72,9 @@ Material marsMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L
 [shader("fragment")]
 float4 fragmentMain(SurfaceVaryings input) : SV_Target0
 {
-    Surface s = surfaceAt(input, true);
+    Surface s = surfaceAt(root.frame, root.instances, input, true);
     float3x3 rotate = rotation(s.inst.rotation_kind.xyz);
     Material m = s.kind == KIND_MARS ? marsMaterial(input, rotate, s.N, s.L, s.visibility)
                                      : moonMaterial(input, rotate, s.N, s.L, s.visibility);
-    return float4(shadeSurface(m, s.L, s.V), 1);
+    return float4(shadeSurface(m, s.L, s.V, sunlight(root.frame), root.frame->earth.y), 1);
 }

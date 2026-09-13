@@ -22,62 +22,63 @@ namespace space::render {
 
 // Sampled texture descriptor slots; initialize the entire shader array, including reserved slots.
 enum class Slot : unsigned {
-    hdr = 0,
-    bloom_a = 1,
-    bloom_b = 2,
-    earth_albedo = 3,
-    gas_albedo = 4,
-    earth_clouds = 5,
-    final_image = 6,
-    earth_normal = 7,
-    earth_specular = 8,
-    earth_night = 9,
-    moon_albedo = 10,
-    rock_albedo = 11,
-    rock_normal = 12,
-    rock_roughness = 13,
-    hud = 14,
-    shadow_map = 15,
-    history_a = 16,
-    history_b = 17,
-    depth = 18,
-    mars_albedo = 19,
-    mars_normal = 20,
-    moon_normal = 21,
-    rock_face_albedo = 22, // second and third rock sets follow the first's albedo, normal+height, roughness order
-    rock_face_normal = 23,
-    rock_face_roughness = 24,
-    rock_boulder_albedo = 25,
-    rock_boulder_normal = 26,
-    rock_boulder_roughness = 27,
-    belt_light_map = 28,  // belt transmittance, blurred
-    belt_light_blur = 29, // scratch between the two blur directions
-    ldr = 30,             // tone-mapped image before FXAA
-    splat_mask = 31,      // pixels covered by rock splats, whose history the temporal pass keeps unclipped
-    smaa_area = 32,       // SMAA area lookup, 160x560
-    smaa_search = 33,     // SMAA search lookup, 64x16
-    smaa_edges = 34,      // SMAA edges of the tone-mapped image
-    smaa_weights = 35,    // SMAA blending weights
-    ui_font = 36,         // Dear ImGui font atlas
-    belt_dust = 37,       // half-resolution belt dust march, composited with a depth-aware upsample
-    belt_disc_light = 38, // far-belt map: sunlight reaching the belt plane, baked every few frames
-    belt_disc_rocks = 39, // far-belt map: rock coverage times albedo, splatted every few dozen frames
-    gas_flow = 40,        // gas giant wind flow map, baked by tools/bake-flow-map.py
-    gas_detail = 41,      // gas giant flow-aligned fine detail, baked alongside it
-    gas_relief = 42,      // gas giant cloud-top slopes and height, baked alongside it
-    gas_polar = 43,       // gas giant polar cap albedo atlas (north above south), baked alongside it
-    gas_polar_flow = 44,  // gas giant polar cap flow atlas
-    milky_way = 45,       // all-sky Milky Way as cubic B-spline coefficients, baked by tools/bake-milkyway.py
+    hdr = TEX_HDR,
+    bloom_a = TEX_BLOOM_A,
+    bloom_b = TEX_BLOOM_B,
+    earth_albedo = TEX_EARTH_ALBEDO,
+    gas_albedo = TEX_GAS_ALBEDO,
+    earth_clouds = TEX_EARTH_CLOUDS,
+    final_image = TEX_FINAL_IMAGE,
+    earth_normal = TEX_EARTH_NORMAL,
+    earth_specular = TEX_EARTH_SPECULAR,
+    earth_night = TEX_EARTH_NIGHT,
+    moon_albedo = TEX_MOON_ALBEDO,
+    rock_albedo = TEX_ROCK_ALBEDO,
+    rock_normal = TEX_ROCK_NORMAL,
+    rock_roughness = TEX_ROCK_ROUGHNESS,
+    hud = TEX_HUD,
+    shadow_map = TEX_SHADOW_MAP,
+    history_a = TEX_HISTORY_A,
+    history_b = TEX_HISTORY_B,
+    depth = TEX_DEPTH,
+    mars_albedo = TEX_MARS_ALBEDO,
+    mars_normal = TEX_MARS_NORMAL,
+    moon_normal = TEX_MOON_NORMAL,
+    rock_face_albedo =
+        TEX_ROCK_FACE_ALBEDO, // second and third rock sets follow the first's albedo, normal+height, roughness order
+    rock_face_normal = TEX_ROCK_FACE_NORMAL,
+    rock_face_roughness = TEX_ROCK_FACE_ROUGHNESS,
+    rock_boulder_albedo = TEX_ROCK_BOULDER_ALBEDO,
+    rock_boulder_normal = TEX_ROCK_BOULDER_NORMAL,
+    rock_boulder_roughness = TEX_ROCK_BOULDER_ROUGHNESS,
+    belt_light_map = TEX_BELT_LIGHT_MAP,   // belt transmittance, blurred
+    belt_light_blur = TEX_BELT_LIGHT_BLUR, // scratch between the two blur directions
+    ldr = TEX_LDR,                         // tone-mapped image before FXAA
+    splat_mask = TEX_SPLAT_MASK,     // pixels covered by rock splats, whose history the temporal pass keeps unclipped
+    smaa_area = TEX_SMAA_AREA,       // SMAA area lookup, 160x560
+    smaa_search = TEX_SMAA_SEARCH,   // SMAA search lookup, 64x16
+    smaa_edges = TEX_SMAA_EDGES,     // SMAA edges of the tone-mapped image
+    smaa_weights = TEX_SMAA_WEIGHTS, // SMAA blending weights
+    ui_font = TEX_UI_FONT,           // Dear ImGui font atlas
+    belt_dust = TEX_BELT_DUST,       // half-resolution belt dust march, composited with a depth-aware upsample
+    belt_disc_light = TEX_BELT_DISC_LIGHT, // far-belt map: sunlight reaching the belt plane, baked every few frames
+    belt_disc_rocks = TEX_BELT_DISC_ROCKS, // far-belt map: rock coverage times albedo, splatted every few dozen frames
+    gas_flow = TEX_GAS_FLOW,               // gas giant wind flow map, baked by tools/bake-flow-map.py
+    gas_detail = TEX_GAS_DETAIL,           // gas giant flow-aligned fine detail, baked alongside it
+    gas_relief = TEX_GAS_RELIEF,           // gas giant cloud-top slopes and height, baked alongside it
+    gas_polar = TEX_GAS_POLAR,             // gas giant polar cap albedo atlas (north above south), baked alongside it
+    gas_polar_flow = TEX_GAS_POLAR_FLOW,   // gas giant polar cap flow atlas
+    milky_way = TEX_MILKY_WAY, // all-sky Milky Way as cubic B-spline coefficients, baked by tools/bake-milkyway.py
     count = ORBITAL_TEXTURE_COUNT,
 };
 
 // Sampler descriptor slots (shaders/common.slang binds 4).
 enum class SamplerSlot : unsigned {
-    clamp = 0,
-    wrap_u_anisotropic = 1,
-    shadow_compare = 2,
-    wrap_anisotropic = 3,
-    count = 4
+    clamp = SAMPLER_CLAMP,
+    wrap_u_anisotropic = SAMPLER_WRAP_U_ANISOTROPIC,
+    shadow_compare = SAMPLER_SHADOW_COMPARE,
+    wrap_anisotropic = SAMPLER_WRAP_ANISOTROPIC,
+    count = ORBITAL_SAMPLER_COUNT
 };
 
 // Root.mode as interpreted by surface.slang.

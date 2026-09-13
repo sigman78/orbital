@@ -356,3 +356,12 @@ was tuned rather than derived.
   are the regression harness. Compare with identical flags, or the comparison measures the HUD.
 - When a rewrite touches a call site the formatter later reflows, anchor edits on a stable token,
   not on a whole line; several stage scripts failed on a reflowed line and had to be rerun.
+
+## Shader helpers
+
+Shader dependencies follow [shaders/README.md](../shaders/README.md). Pure utilities live in `lib/`
+and take their inputs explicitly; frame access and descriptor bindings belong in the scene or
+feature layer. Every reusable include declares its own dependencies and compiles independently.
+Do not restore an umbrella include or numeric texture/sampler indices. The compiler-generated
+depfile tracks consumers when a helper changes; run `python tools/check-shader-helpers.py` to check
+include independence and fixed-time capture comparisons to check rendering behavior.

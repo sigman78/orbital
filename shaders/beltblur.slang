@@ -1,4 +1,4 @@
-#include "common.slang"
+#include "scene/frame_bindings.slang"
 
 // Separable blur of the belt transmittance map: mode 0 reads the splat
 // target and writes the scratch map horizontally, mode 1 reads the scratch
@@ -18,7 +18,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     {
         float w = exp(-float(i * i) / (2.0 * BLUR_SIGMA * BLUR_SIGMA));
         int2 texel = int2(position.xy + step * float(i));
-        sum += (horizontal ? textures[28].Load(int3(texel, 0)) : textures[29].Load(int3(texel, 0))) * w;
+        sum += (horizontal ? textures[TEX_BELT_LIGHT_MAP].Load(int3(texel, 0)) : textures[TEX_BELT_LIGHT_BLUR].Load(int3(texel, 0))) * w;
         weights += w;
     }
     return sum / weights;

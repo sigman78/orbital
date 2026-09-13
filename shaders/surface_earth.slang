@@ -1,7 +1,14 @@
+#include "scene/frame_bindings.slang"
+#include "surface/lighting.slang"
+#include "surface/brdf.slang"
+#include "lib/math.slang"
+#include "lib/noise.slang"
+#include "lib/sampling.slang"
+#include "clouds.slang"
+
 // The Earth: day map with land grain, the sea's glint, the sourced normal map,
 // cloud shadows on the ground, city lights past the terminator; and the cloud
 // shell drawn over it in the cloud mode.
-#include "surface_common.slang"
 
 static const float EARTH_NORMAL_Y = 1.0;      // the sourced map is DirectX-style (green = south), matching B below
 static const float2 EARTH_TEXELS = float2(4096.0, 2048.0);
@@ -11,7 +18,7 @@ static const float2 EARTH_TEXELS = float2(4096.0, 2048.0);
 // Cloud coverage with fine structure added where the 4K mask is magnified.
 float cloudDensity(float2 uv, float t, float detail)
 {
-    float density = sampleSphere(textures[5], uv).a;
+    float density = sampleSphere(textures[TEX_EARTH_CLOUDS], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).a;
     density *= 1.0 + (fbm2(uv * float2(1024, 512) + t * .01, 3) - .5) * .6 * detail;
     return pow(saturate(density), 1.3);
 }
@@ -34,8 +41,8 @@ Material earthMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     float2 uv = sphereUV(localN);
     float detail = magnification(uv, EARTH_TEXELS);
     Material m;
-    m.albedo = sampleSphere(textures[3], uv).rgb;
-    m.water = sampleSphere(textures[8], uv).r;
+    m.albedo = sampleSphere(textures[TEX_EARTH_ALBEDO], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).rgb;
+    m.water = sampleSphere(textures[TEX_EARTH_SPECULAR], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).r;
     // Land grain where the 4K map is magnified; the sea stays smooth.
     m.albedo *= 1.0 + (fbm2(uv * float2(8192, 4096), 3) - .5) * .3 * detail * (1.0 - m.water * .7);
     // Sea state: the panel's roughness, patchy with a slow wind field so the glint
@@ -45,7 +52,7 @@ Material earthMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     m.rough = lerp(.85, max(earth.x * wind, .03), m.water);
     float3 T, B;
     tangentFrame(localN, rotate, N, T, B);
-    float3 mapN = sampleSphere(textures[7], uv).xyz * 2.0 - 1.0;
+    float3 mapN = sampleSphere(textures[TEX_EARTH_NORMAL], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).xyz * 2.0 - 1.0;
     mapN.y *= EARTH_NORMAL_Y;
     m.N = normalize(T * mapN.x * .55 + B * mapN.y * .55 + N * max(mapN.z, .2));
     // Cloud shadow: the cloud above this point along the sun direction.
@@ -59,13 +66,13 @@ Material earthMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
 [shader("fragment")]
 float4 fragmentMain(SurfaceVaryings input) : SV_Target0
 {
-    Surface s = surfaceAt(input, true);
+    Surface s = surfaceAt(root.frame, root.instances, input, true);
     if (root.mode == MODE_CLOUD) return shadeClouds(input, s.N, s.L, s.visibility, max(dot(s.N, s.L), 0.0));
     float3x3 rotate = rotation(s.inst.rotation_kind.xyz);
     Material m = earthMaterial(input, rotate, s.N, s.L, s.visibility);
-    float3 colour = shadeSurface(m, s.L, s.V);
+    float3 colour = shadeSurface(m, s.L, s.V, sunlight(root.frame), root.frame->earth.y);
     // City lights come up past the terminator.
     float2 uv = sphereUV(normalize(input.localNormal));
-    colour += sampleSphere(textures[9], uv).rgb * pow(1 - smoothstep(-.15, .1, dot(m.N, s.L)), 2.0) * .65;
+    colour += sampleSphere(textures[TEX_EARTH_NIGHT], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).rgb * pow(1 - smoothstep(-.15, .1, dot(m.N, s.L)), 2.0) * .65;
     return float4(colour, 1);
 }

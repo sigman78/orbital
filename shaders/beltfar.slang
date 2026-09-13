@@ -1,12 +1,21 @@
+#pragma once
+#include "scene/frame_bindings.slang"
+#include "scene/view.slang"
+#include "lib/math.slang"
+#include "lib/noise.slang"
+#include "lib/color.slang"
+#include "lib/scattering.slang"
+#include "belt.slang"
+
 // The belt dust and the far-belt disc share these: the medium's constants,
 // the sunlight bake over the belt plane, and the far tier's march through
 // the slab reading the baked maps. Included by dust.slang (which composites
 // the near march and the far tier in one blend) and disc.slang (the bake).
 //
 // The far tier: dust and rocks as one baked disc. Two maps over the belt
-// plane, in the orthographic disc frame of belt_disc_projection: textures[38]
+// plane, in the orthographic disc frame of belt_disc_projection: textures[TEX_BELT_DISC_LIGHT]
 // carries the sunlight reaching the plane through the belt and the planets'
-// shadows; textures[39] the small rocks' coverage times albedo, splatted by
+// shadows; textures[TEX_BELT_DISC_ROCKS] the small rocks' coverage times albedo, splatted by
 // discsplat.slang. farBelt marches the slab's thickness so a face-on view
 // integrates one or two samples and an edge-on view keeps the belt's visible
 // thickness: the analytic density for the dust, the vertical profile applied
@@ -28,7 +37,7 @@ float dustPhase(float c) { return lerp(henyeyGreenstein(c, DUST_FORWARD), 1.0 / 
 
 float sceneDepthAt(int2 pixel)
 {
-    float d = textures[18].Load(int3(pixel, 0)).r;
+    float d = textures[TEX_DEPTH].Load(int3(pixel, 0)).r;
     return d >= .999999 ? FAR_Z : linearViewDepth(d);
 }
 
@@ -44,6 +53,7 @@ float3 dustColour(Frame* frame)
 // above the slab and distance beyond the edge, for the distance ramp.
 bool beltSegment(Frame* frame, float3 rd, int2 depthPixel, out float t0, out float t1, out float aboveSlab, out float beyondEdge, out float halfHeight)
 {
+    aboveSlab = beyondEdge = 0.0; // defined even when the ray misses the slab
     float4 ring = frame->belt_ring;
     float3 n = frame->belt_normal.xyz;
     float3 q0 = -frame->bodies[int(frame->scene.y)].xyz; // the camera in the giant's frame
@@ -104,12 +114,12 @@ float4 bakeSunlight(float2 position)
 float4 rockMapAt(float2 uv, int taps)
 {
     float texels = root.frame->belt_disc.z;
-    if (taps <= 1) return textures[39].SampleLevel(samplers[0], uv, 0.0);
+    if (taps <= 1) return textures[TEX_BELT_DISC_ROCKS].SampleLevel(samplers[SAMPLER_CLAMP], uv, 0.0);
     float4 sum = float4(0.0, 0.0, 0.0, 0.0);
     float2 step = 1.0 / texels;
     for (int j = 0; j < taps; ++j)
         for (int i = 0; i < taps; ++i)
-            sum += textures[39].SampleLevel(samplers[0], uv + (float2(i, j) - .5 * float(taps - 1)) * step, 0.0);
+            sum += textures[TEX_BELT_DISC_ROCKS].SampleLevel(samplers[SAMPLER_CLAMP], uv + (float2(i, j) - .5 * float(taps - 1)) * step, 0.0);
     return sum / float(taps * taps);
 }
 
@@ -118,7 +128,7 @@ float4 farBelt(float2 position)
 {
     Frame* frame = root.frame;
     float4 ring = frame->belt_ring;
-    float3 rd = rayDirection(position);
+    float3 rd = rayDirection(root.frame, position);
     float3 n = frame->belt_normal.xyz;
     float3 giant = frame->bodies[int(frame->scene.y)].xyz;
     float t0, t1, aboveSlab, beyondEdge, halfHeight;
@@ -152,7 +162,7 @@ float4 farBelt(float2 position)
         float profile = vertical / (2.5066283 * scaleHeight); // normalised: the column integrates to one
         float density = beltDensity(q, ring, n) * ring.z;
         float2 uv = discUv(frame, p);
-        float3 baked = textures[38].SampleLevel(samplers[0], uv, 0.0).rgb;
+        float3 baked = textures[TEX_BELT_DISC_LIGHT].SampleLevel(samplers[SAMPLER_CLAMP], uv, 0.0).rgb;
         float dustSunlight = frame->sun.w * baked.r * baked.b, rockSunlight = frame->sun.w * baked.g * baked.b;
         float3 light = normalize(frame->sun.xyz - p);
 

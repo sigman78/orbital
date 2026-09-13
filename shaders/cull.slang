@@ -9,8 +9,7 @@
 //   pass 1  prefix   one thread turns counts into bases and draw arguments
 //   pass 2  scatter  each visible rock claims a slot and writes its instance
 
-[[vk::binding(0, 0)]] Texture2D<float4> textures[ORBITAL_TEXTURE_COUNT];
-[[vk::binding(1, 0)]] SamplerState samplers[4];
+#include "scene/bindings.slang"
 [[vk::push_constant]] ConstantBuffer<CullRoot> root;
 
 #include "belt.slang"
@@ -115,9 +114,9 @@ Placement placeRock(uint id, bool lightSplats)
         float phase = acos(clamp(dot(light, normalize(-position)), -1.0, 1.0));
         // The same scanned set the mesh material would lead with, at its coarsest mip.
         float seed = rockMaterialSeed(id);
-        float3 average = composition == CLASS_C ? textures[22].SampleLevel(samplers[1], float2(.5, .5), 10.0).rgb
-                       : seed < .5 ? textures[11].SampleLevel(samplers[1], float2(.5, .5), 10.0).rgb
-                                   : textures[25].SampleLevel(samplers[1], float2(.5, .5), 10.0).rgb;
+        float3 average = composition == CLASS_C ? textures[TEX_ROCK_FACE_ALBEDO].SampleLevel(samplers[SAMPLER_WRAP_U_ANISOTROPIC], float2(.5, .5), 10.0).rgb
+                       : seed < .5 ? textures[TEX_ROCK_ALBEDO].SampleLevel(samplers[SAMPLER_WRAP_U_ANISOTROPIC], float2(.5, .5), 10.0).rgb
+                                   : textures[TEX_ROCK_BOULDER_ALBEDO].SampleLevel(samplers[SAMPLER_WRAP_U_ANISOTROPIC], float2(.5, .5), 10.0).rgb;
         float3 albedo = average * colour * (.8 + .4 * frac(seed * 5.1));
         // Everything but the cosine term is per rock. Discs are shaded as sphere
         // impostors in the fragment (cosine per pixel), points take the disc average.

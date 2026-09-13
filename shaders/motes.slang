@@ -1,3 +1,7 @@
+#include "scene/frame_bindings.slang"
+#include "lib/projection.slang"
+#include "lib/noise.slang"
+
 // Motion cue: dust motes fixed in space around the camera, each drawn as a
 // soft streak from where it was last frame to where it is now, both seen
 // through this frame's view, so the streak is the mote's motion from the
@@ -6,7 +10,6 @@
 // since the motes are world-fixed points in a lattice that repeats around the
 // camera. Depth tested, so bodies occlude them; drawn into the HDR image
 // before the temporal pass, which reprojects them like any static point.
-#include "common.slang"
 
 static const uint MOTE_CELLS = 4;          // cells per axis around the camera
 static const uint MOTES_PER_CELL = 16;

@@ -1,4 +1,6 @@
-#include "common.slang"
+#include "scene/frame_bindings.slang"
+#include "scene/view.slang"
+#include "lib/noise.slang"
 #include "beltfar.slang"
 
 // Belt dust: the particulate matter between the rocks, too fine to draw, as a
@@ -10,7 +12,7 @@
 // against the sun and stays a faint haze away from it. What lies behind is
 // attenuated by the view transmittance (premultiplied output).
 //
-// Mode 0 marches at half resolution into textures[37], with the ray and the
+// Mode 0 marches at half resolution into textures[TEX_BELT_DUST], with the ray and the
 // scene depth taken at the even full-resolution pixel of each block. Mode 1
 // composites the frame: the march upsampled with a depth-aware 4-tap filter
 // so the haze does not bleed across rock silhouettes, mixed with the far-belt
@@ -41,7 +43,7 @@ float4 march(float2 fullResPixel, int2 depthPixel)
 {
     Frame* frame = root.frame;
     float4 ring = frame->belt_ring;
-    float3 rd = rayDirection(fullResPixel);
+    float3 rd = rayDirection(root.frame, fullResPixel);
     float3 n = frame->belt_normal.xyz;
     float3 giant = frame->bodies[int(frame->scene.y)].xyz;
     float t0, t1, aboveSlab, beyondEdge, halfHeight;
@@ -93,7 +95,7 @@ float4 upsampleNear(float2 position)
         {
             int2 tap = clamp(int2(base) + int2(i, j), int2(0, 0), int2(halfSize) - 1);
             float bilinear = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
-            float4 dust = textures[37].Load(int3(tap, 0));
+            float4 dust = textures[TEX_BELT_DUST].Load(int3(tap, 0));
             float tapDepth = sceneDepthAt(tap * 2);
             float relative = abs(tapDepth - depth) / max(min(tapDepth, depth), 1e-3);
             float weight = bilinear / (1.0 + relative / UPSAMPLE_DEPTH_TOLERANCE);

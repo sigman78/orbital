@@ -1,3 +1,4 @@
+#pragma once
 // Rock composition classes, shared by the culling pass (which colours the
 // meshes and splats) and the disc bake (which splats the rocks' albedo into
 // the far-belt map): silicate (S) rocks inside, dark carbonaceous (C) rocks

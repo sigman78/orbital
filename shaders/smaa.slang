@@ -1,9 +1,10 @@
-#include "common.slang"
+#include "scene/frame_bindings.slang"
+#include "lib/color.slang"
 
 // SMAA 1x, Jimenez et al. 2012, ported from SMAA.hlsl (see third_party/smaa/LICENSE.txt):
 // preset HIGH, luma edge detection, diagonal and corner patterns. Three
-// fullscreen passes over the tone-mapped image in textures[30]: edges into
-// textures[34] (mode 0), blending weights into textures[35] (mode 1, through
+// fullscreen passes over the tone-mapped image in textures[TEX_LDR]: edges into
+// textures[TEX_SMAA_EDGES] (mode 0), blending weights into textures[TEX_SMAA_WEIGHTS] (mode 1, through
 // the area texture in [32] and the search texture in [33]), and the
 // neighbourhood blend into the final image (mode 2). The vertex-side offsets
 // of the reference are computed here per pixel; everything else is the
@@ -22,12 +23,12 @@ static const float2 SMAA_SEARCHTEX_SIZE = float2(66.0, 33.0), SMAA_SEARCHTEX_PAC
 // rt.xy is the texel size, rt.zw the resolution (SMAA_RT_METRICS).
 static float4 rt;
 
-float4 colourAt(float2 uv) { return textures[30].SampleLevel(samplers[0], uv, 0.0); }
-float2 edgesAt(float2 uv) { return textures[34].SampleLevel(samplers[0], uv, 0.0).rg; }
-float2 edgesAt(float2 uv, int2 offset) { return textures[34].SampleLevel(samplers[0], uv + float2(offset) * rt.xy, 0.0).rg; } // texel offsets must be constants in SPIR-V; shift the coordinate instead
-float2 areaAt(float2 uv) { return textures[32].SampleLevel(samplers[0], uv, 0.0).rg; }
-float searchAt(float2 uv) { return textures[33].SampleLevel(samplers[0], uv, 0.0).r; }
-float4 weightsAt(float2 uv) { return textures[35].SampleLevel(samplers[0], uv, 0.0); }
+float4 colourAt(float2 uv) { return textures[TEX_LDR].SampleLevel(samplers[SAMPLER_CLAMP], uv, 0.0); }
+float2 edgesAt(float2 uv) { return textures[TEX_SMAA_EDGES].SampleLevel(samplers[SAMPLER_CLAMP], uv, 0.0).rg; }
+float2 edgesAt(float2 uv, int2 offset) { return textures[TEX_SMAA_EDGES].SampleLevel(samplers[SAMPLER_CLAMP], uv + float2(offset) * rt.xy, 0.0).rg; } // texel offsets must be constants in SPIR-V; shift the coordinate instead
+float2 areaAt(float2 uv) { return textures[TEX_SMAA_AREA].SampleLevel(samplers[SAMPLER_CLAMP], uv, 0.0).rg; }
+float searchAt(float2 uv) { return textures[TEX_SMAA_SEARCH].SampleLevel(samplers[SAMPLER_CLAMP], uv, 0.0).r; }
+float4 weightsAt(float2 uv) { return textures[TEX_SMAA_WEIGHTS].SampleLevel(samplers[SAMPLER_CLAMP], uv, 0.0); }
 
 // Luma of the gamma-encoded colour, as the edge detection expects; the image
 // is stored sRGB, so samples come back linear.

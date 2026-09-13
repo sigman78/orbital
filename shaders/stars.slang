@@ -1,10 +1,13 @@
+#include "scene/frame_bindings.slang"
+#include "lib/math.slang"
+#include "lib/projection.slang"
+
 // The Bright Star Catalogue as points at infinity: one instanced quad per
 // star, a Gaussian of about a pixel whose integrated energy is the star's
 // real flux, so the sky's brightness distribution is the catalogue's (counts
 // grow some three times per magnitude), the bright few bloom and the faint
 // thousands stay faint. Drawn additively over the background before the
 // bodies, which paint over them, and depth is left to the background.
-#include "common.slang"
 
 static const float STAR_SIGMA = .7;      // pixels
 static const float STAR_HALF_SIZE = 2.5; // quad half size in pixels
