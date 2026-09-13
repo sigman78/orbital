@@ -72,7 +72,7 @@ enum class Slot : unsigned {
     count = ORBITAL_TEXTURE_COUNT,
 };
 
-// Sampler descriptor slots (shaders/common.slang binds 4).
+// Sampler descriptor slots (shaders/scene/bindings.slang declares the array).
 enum class SamplerSlot : unsigned {
     clamp = SAMPLER_CLAMP,
     wrap_u_anisotropic = SAMPLER_WRAP_U_ANISOTROPIC,

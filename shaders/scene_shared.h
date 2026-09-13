@@ -77,7 +77,7 @@ struct Root {
     SHADER_UINT base, mode;
 };
 
-// --- GPU belt culling (shaders/cull.slang) ----------------------------------
+// --- GPU belt culling (shaders/belt/cull.slang) ----------------------------------
 
 #define ORBITAL_ROCK_LEVELS 6                            // geometry::rock_level_count
 #define ORBITAL_ROCK_GROUPS (16 * ORBITAL_ROCK_LEVELS)   // geometry::rock_shape_count * levels; group index = shape * levels + level
