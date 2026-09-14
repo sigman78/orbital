@@ -71,11 +71,17 @@ Between the rocks a half-resolution march through the same density field scatter
    TAA uses the reconstructed splat depth for reprojection and currently keeps splat history unclipped.
 6. Temporal anti-aliasing into a history target; transient motion streaks into reused HDR storage, added before
    area-prefiltered bloom with adjacent-texel separable blur at quarter resolution;
-   one shared 1×1 sun-visibility estimate for lens effects; exposure metering every
-   sixteenth frame from a 16x16 log-luminance image.
-7. The composite adds sun glare, aperture ghosts/starburst, a broad lens halo and a dispersed rainbow
-   crescent in HDR, using the shared sun visibility. Halo and crescent have independent strengths in
-   Sun & lens; their analytic shapes follow the projected sun and fade near the viewport cutoff.
+   one shared 1×1 sun-visibility estimate for lens effects; the soft part of the lens flare stack
+   (main ring, crescents, coloured ghosts, streak spindles) into a quarter-resolution target;
+   exposure metering every sixteenth frame from a 16x16 log-luminance image.
+7. The composite adds the sun glare, the aperture starburst and the thin axis streak at full
+   resolution and samples the flare stack target, all in HDR using the shared sun visibility. The
+   stack lies along the axis through the image centre and the projected sun; its major elements
+   fade as the sun leaves the frame while the ghosts brighten near the edge and persist while the
+   sun is just outside it. Each group has a strength in Sun & lens, and a Lens flare switch skips the
+   pass and every element while keeping the sun's glare. Dirty glass (Post FX, off by
+   default) blurs the view behind a baked film of dust, wipe residue and smears on a convex pane and
+   brightens the film where the sun's direction grazes the pane.
    Tone mapping (PBR Neutral, AgX or ACES filmic) with vignette, chromatic fringe and grain into an
    intermediate, then the spatial pass (SMAA or FXAA) into the final image.
 8. Present, with the HUD and the Dear ImGui panel drawn last into the swapchain.

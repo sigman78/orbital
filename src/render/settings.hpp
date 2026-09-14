@@ -12,6 +12,8 @@ enum class ToneCurve : unsigned { ACES = 0, AgX = 1, PbrNeutral = 2, Count };
 enum class SpatialAA : unsigned { Off = 0, FXAA = 1, SMAA = 2, Count };
 enum class SplatMode : unsigned { Off = 0, Pixels1_2 = 1, Pixels2_5 = 2, Pixels4 = 3, Count };
 enum class GalaxyResolution : unsigned { Full = 1, Half = 2, Quarter = 4 };
+// The flare stack's target over the frame; an eighth is a defocused stack, a sixteenth was too blurred.
+enum class FlareResolution : unsigned { Half = 2, Quarter = 4, Eighth = 8 };
 
 struct ToneSettings {
     float exposure = 1; // manual exposure multiplier
@@ -57,13 +59,22 @@ struct EarthSettings {
 
 struct SunSettings {
     float glare_intensity = 1.f;    // the glow around the sun
-    float ghost_strength = 1.f;     // ghost images down the lens axis
     float starburst_strength = 1.f; // aperture streaks through the sun
     int starburst_blades = 6;       // streak count, 0 for none
     float sun_disc_radius = .007f;  // angular radius of the solar disc, radians
     float sun_limb_darkening = .6f; // edge darkening of the disc, 0 flat
-    float halo_strength = 1.f;      // broad, soft lens reflection, 0 off
-    float rainbow_strength = 1.f;   // dispersed crescent reflection, 0 off
+    // The flare stack along the axis through the image centre and the sun (shaders/post/lens.slang); the switch
+    // skips its pass and every element, keeping the sun's glare; each strength is 0 off.
+    bool lens_flare = true;
+    float ring_strength = 1.f;          // the main ring: the large neutral lens image
+    float crescent_strength = 1.f;      // the big dispersed crescent on the far side of the centre
+    float mini_crescent_strength = 1.f; // the small dispersed arc facing the sun
+    float ghost_strength = 1.f;         // the coloured ghost discs
+    float ghost_spread = 1.f;           // scales the ghosts' offsets along the axis
+    float ghost_size = 1.f;             // scales the ghosts' radii
+    float streak_strength = 1.f;        // the axis streak and its spindle knots
+    float flare_saturation = 1.f;       // colour of the whole flare: 0 neutral, 1 as fitted, above exaggerates
+    FlareResolution flare_resolution = FlareResolution::Quarter; // coarser is softer, as a defocused stack
 };
 
 struct PostSettings {
@@ -77,6 +88,11 @@ struct PostSettings {
     float black_offset = .3f;     // the neutral tone curve's flare subtraction, 1 as published, 0 none
     bool motion_streaks = true;   // dust motes streaking past the moving camera
     float motion_streak_intensity = 1.f;
+    // Dirty glass: a baked film of dust, wipe residue and smears on a convex pane in front of the camera. The
+    // view is blurred behind the marks, and they brighten where the sun grazes the pane.
+    bool dirty_glass = false;
+    float dirt_light = 1.f; // how strongly grazing sunlight brings the marks up
+    float dirt_blur = 1.f;  // how much the marks blur what is seen through them
 };
 
 enum class GalaxyMode { Splats, TextureLayers, OriginalTexture, Count };

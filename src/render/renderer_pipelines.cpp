@@ -79,6 +79,7 @@ void Renderer::Impl::create_pipelines() {
     pso.belt.disc_splat = make("discsplat", "discsplat", Format::rgba16_float, false, Blend::additive);
     // Temporal, tone mapping and spatial anti-aliasing pipelines.
     pso.post.sun_visibility = make("fullscreen", "sun_visibility", Format::rgba16_float);
+    pso.post.flare = make("fullscreen", "flare", Format::rgba16_float);
     pso.post.bloom = make("fullscreen", "bloom", Format::rgba16_float);
     pso.post.composite = make("fullscreen", "composite", Format::rgba8_srgb);
     pso.post.present = make("fullscreen", "present", Format::bgra8_srgb);

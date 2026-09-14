@@ -186,13 +186,33 @@ void earth_controls(render::EarthSettings& settings) {
 }
 void sun_lens_controls(render::SunSettings& settings) {
     ImGui::SliderFloat("Glare", &settings.glare_intensity, 0.f, 4.f, "%.2f x");
-    ImGui::SliderFloat("Ghosts", &settings.ghost_strength, 0.f, 4.f, "%.2f x");
-    ImGui::SliderFloat("Lens halo", &settings.halo_strength, 0.f, 4.f, "%.2f x");
-    ImGui::SliderFloat("Rainbow crescent", &settings.rainbow_strength, 0.f, 4.f, "%.2f x");
     ImGui::SliderFloat("Starburst", &settings.starburst_strength, 0.f, 4.f, "%.2f x");
     ImGui::SliderInt("Starburst blades", &settings.starburst_blades, 0, 12);
     ImGui::SliderFloat("Disc radius", &settings.sun_disc_radius, .003f, .02f, "%.4f rad");
     ImGui::SliderFloat("Limb darkening", &settings.sun_limb_darkening, 0.f, 1.f, "%.2f");
+    // The flare stack: major elements with the sun in frame, ghosts as it nears and leaves the edge.
+    ImGui::Checkbox("Lens flare", &settings.lens_flare); // off skips the stack pass and every element; the glare stays
+    ImGui::BeginDisabled(!settings.lens_flare);
+    ImGui::TextDisabled("Flare stack");
+    ImGui::SliderFloat("Main ring", &settings.ring_strength, 0.f, 4.f, "%.2f x");
+    ImGui::SliderFloat("Mini crescent", &settings.mini_crescent_strength, 0.f, 4.f, "%.2f x");
+    ImGui::SliderFloat("Big crescent", &settings.crescent_strength, 0.f, 4.f, "%.2f x");
+    ImGui::SliderFloat("Streak", &settings.streak_strength, 0.f, 4.f, "%.2f x");
+    ImGui::SliderFloat("Ghosts", &settings.ghost_strength, 0.f, 4.f, "%.2f x");
+    ImGui::SliderFloat("Ghost spread", &settings.ghost_spread, .5f, 2.f, "%.2f x");
+    ImGui::SliderFloat("Ghost size", &settings.ghost_size, .5f, 2.f, "%.2f x");
+    ImGui::SliderFloat("Saturation", &settings.flare_saturation, 0.f, 2.f, "%.2f x");
+    {
+        const char* labels[] = {"half", "quarter", "eighth"};
+        int choice = settings.flare_resolution == render::FlareResolution::Eighth ? 2
+                     : settings.flare_resolution == render::FlareResolution::Half ? 0
+                                                                                  : 1;
+        if (ImGui::Combo("Stack resolution", &choice, labels, 3)) // coarser softens the stack, as defocus
+            settings.flare_resolution = choice == 2   ? render::FlareResolution::Eighth
+                                        : choice == 0 ? render::FlareResolution::Half
+                                                      : render::FlareResolution::Quarter;
+    }
+    ImGui::EndDisabled();
     if (ImGui::SmallButton("Reset sun"))
         settings = {};
 }
@@ -255,7 +275,12 @@ void post_fx_controls(render::PostSettings& settings) {
     ImGui::SliderFloat("Vignette", &settings.vignette, 0.f, .5f, "%.2f");
     ImGui::SliderFloat("Grain", &settings.grain, 0.f, .05f, "%.3f");
     ImGui::SliderFloat("Black offset", &settings.black_offset, 0.f, 1.f,
-                       "%.2f"); // the neutral curve\'s flare subtraction; 1 as published
+                       "%.2f");                            // the neutral curve\'s flare subtraction; 1 as published
+    ImGui::Checkbox("Dirty glass", &settings.dirty_glass); // a film on a convex pane: blurs, brightens at grazing sun
+    ImGui::BeginDisabled(!settings.dirty_glass);
+    ImGui::SliderFloat("Dirt light-up", &settings.dirt_light, 0.f, 4.f, "%.2f x");
+    ImGui::SliderFloat("Dirt blur", &settings.dirt_blur, 0.f, 2.f, "%.2f x");
+    ImGui::EndDisabled();
     ImGui::Checkbox("Motion streaks", &settings.motion_streaks); // dust motes streaking past the moving camera
     ImGui::BeginDisabled(!settings.motion_streaks);
     ImGui::SliderFloat("Streak intensity", &settings.motion_streak_intensity, 0.f, 4.f, "%.2f x");

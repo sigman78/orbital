@@ -39,7 +39,7 @@ private:
 
 // Replaced together on window resize, after a single GPU wait.
 struct FrameTargets {
-    GpuImage hdr, depth, sun_visibility, bloom_a, bloom_b, final_image, ldr;
+    GpuImage hdr, depth, sun_visibility, bloom_a, bloom_b, flare, final_image, ldr;
     GpuImage history[2], splat_mask, smaa_edges, smaa_weights, belt_dust, galaxy;
 };
 

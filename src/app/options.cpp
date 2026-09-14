@@ -98,6 +98,9 @@ std::optional<Options> parse_options(int argc, const char* const* argv) {
         else if (arg == "--galaxy-view") {
             auto& longitude = options.galaxy_view.emplace();
             ok = parse_number(value(), longitude) && longitude >= -180 && longitude <= 180;
+        } else if (arg == "--sun-at") {
+            auto& at = options.sun_at.emplace();
+            ok = parse_number(value(), at[0]) && parse_number(value(), at[1]);
         } else if (arg == "--galaxy")
             ok = parse_choice(value(), options.galaxy, unsigned(render::GalaxyMode::Count));
         else if (arg == "--splat")

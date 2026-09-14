@@ -357,6 +357,17 @@
         32,
         16
       ]
+    },
+    {
+      "file": "lens_dirt.png",
+      "width": 2048,
+      "height": 1152,
+      "color_space": "linear-data",
+      "license": "MIT",
+      "attribution": "Modelled by tools/bake-lens-dirt.py: dust, the uneven residue of cleaning strokes and smears, no photographed source",
+      "source": "procedural",
+      "layout": "grayscale coverage 0..1 stretched over the frame; the composite blurs behind it and lights it at grazing sun",
+      "seed": 7
     }
   ]
 }

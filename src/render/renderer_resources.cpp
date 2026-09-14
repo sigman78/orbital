@@ -254,13 +254,30 @@ void Renderer::Impl::resize_galaxy(unsigned divisor) {
     bind(Slot::milky_way, frame_targets.galaxy);
 }
 
-void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor) {
+// The flare stack target follows the panel's resolution choice; coarser reads as defocus.
+void Renderer::Impl::resize_flare(unsigned divisor) {
+    divisor = std::clamp(divisor, 2u, 8u);
+    if (divisor == flare_divisor || extent.width == 0)
+        return;
+    gpu::wait_idle(device);
+    flare_divisor = divisor;
+    frame_targets.flare.reset();
+    frame_targets.flare = create_image(
+        {.extent = {std::max(1u, extent.width / divisor), std::max(1u, extent.height / divisor)},
+         .format = gpu::Format::rgba16_float,
+         .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment});
+    bind(Slot::flare, frame_targets.flare);
+}
+
+void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor, unsigned flare) {
     divisor = std::clamp(divisor, 1u, 4u);
     if (extent == new_extent) {
         resize_galaxy(divisor);
+        resize_flare(flare);
         return;
     }
     galaxy_divisor = divisor;
+    flare_divisor = std::clamp(flare, 2u, 8u);
     gpu::wait_idle(device);
     log::info("Resizing frame targets {}x{} -> {}x{}", extent.width, extent.height, new_extent.width,
               new_extent.height);
@@ -280,6 +297,10 @@ void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor) {
         {.extent = {bloom_width, bloom_height}, .format = gpu::Format::rgba16_float, .usage = color_usage});
     frame_targets.bloom_b = create_image(
         {.extent = {bloom_width, bloom_height}, .format = gpu::Format::rgba16_float, .usage = color_usage});
+    frame_targets.flare = create_image(
+        {.extent = {std::max(1u, extent.width / flare_divisor), std::max(1u, extent.height / flare_divisor)},
+         .format = gpu::Format::rgba16_float,
+         .usage = color_usage});
     frame_targets.final_image = create_image({.extent = extent,
                                               .format = gpu::Format::rgba8_srgb,
                                               .usage = color_usage | gpu::TextureUsage::transfer_source});
@@ -304,6 +325,7 @@ void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor) {
     bind(Slot::sun_visibility, frame_targets.sun_visibility);
     bind(Slot::milky_way, frame_targets.galaxy);
     bind(Slot::bloom_b, frame_targets.bloom_b);
+    bind(Slot::flare, frame_targets.flare);
     bind(Slot::final_image, frame_targets.final_image);
     bind(Slot::ldr, frame_targets.ldr);
     bind(Slot::depth, frame_targets.depth);

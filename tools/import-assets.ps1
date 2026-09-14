@@ -271,6 +271,30 @@ if ($Only.Count -gt 0 -and $Only -notcontains $flowName) {
     }
 }
 
+# The dirty-glass mask, modelled by tools/bake-lens-dirt.py (no source to download).
+if ($Only.Count -gt 0 -and $Only -notcontains 'lens_dirt') {
+    $manifestEntries += ($existingManifest.assets | Where-Object { $_.file -eq 'lens_dirt.png' })
+} else {
+    $dirtScript = Join-Path $PSScriptRoot 'bake-lens-dirt.py'
+    $dirtOutput = Join-Path $OutputDirectory 'lens_dirt.png'
+    $json = & python $dirtScript --output $dirtOutput
+    if ($LASTEXITCODE -ne 0) { throw "bake-lens-dirt.py failed" }
+    $dirt = $json | ConvertFrom-Json
+    Write-Host ("{0,-20} {1}x{2} ({3:N1} MB)" -f 'lens_dirt.png', $dirt.width, $dirt.height,
+        ((Get-Item -LiteralPath $dirtOutput).Length / 1MB))
+    $manifestEntries += [pscustomobject][ordered]@{
+        file = 'lens_dirt.png'
+        width = $dirt.width
+        height = $dirt.height
+        color_space = 'linear-data'
+        license = 'MIT'
+        attribution = 'Modelled by tools/bake-lens-dirt.py: dust, the uneven residue of cleaning strokes and smears, no photographed source'
+        source = 'procedural'
+        layout = 'grayscale coverage 0..1 stretched over the frame; the composite blurs behind it and lights it at grazing sun'
+        seed = $dirt.seed
+    }
+}
+
 # The Bright Star Catalogue, baked into star records by tools/bake-stars.py.
 $starsAsset = @{ Name = 'stars_bsc5'; Source = 'bsc5.dat.gz'; Url = 'http://tdc-www.harvard.edu/catalogs/'; Hash = '0471CED07FC241E625613BAA689B2FA5F4B59FD733F731003E57D2D436036CDB' }
 if ($Only.Count -gt 0 -and $Only -notcontains $starsAsset.Name) {

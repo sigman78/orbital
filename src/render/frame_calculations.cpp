@@ -148,9 +148,11 @@ ScreenSun project_sun(const CameraView& camera, Vec3d sun, std::span<const BodyS
         const Vec3d v = body.position - camera.position;
         const double along = dot(v, sun_direction);
         if (along > 0 && length(v - sun_direction * along) < body.radius)
-            result.visible = false;
+            result.visible = result.lit = false;
     }
-    if (std::abs(result.x) > 1.3f || std::abs(result.y) > 1.3f)
+    // The flare stack's ghosts stay while the sun is just outside the frame (lens.slang fades them by 2.1).
+    constexpr float offscreen_reach = 2.2f;
+    if (std::abs(result.x) > offscreen_reach || std::abs(result.y) > offscreen_reach)
         result.visible = false;
     return result;
 }

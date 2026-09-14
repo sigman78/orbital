@@ -83,6 +83,8 @@ enum class Slot : unsigned {
     galaxy_filaments = TEX_GALAXY_FILAMENTS,
     galaxy_original = TEX_GALAXY_ORIGINAL,
     sun_visibility = TEX_SUN_VISIBILITY,
+    flare = TEX_FLARE,         // the soft lens flare stack at a fraction of the frame
+    lens_dirt = TEX_LENS_DIRT, // dirty-glass mask stretched over the frame, baked by tools/bake-lens-dirt.py
     count = ORBITAL_TEXTURE_COUNT,
 };
 
@@ -136,8 +138,8 @@ constexpr SurfaceKind surface_kind(BodyClass body_class) {
 // Culling counters and generated instances live in a separate device-only heap.
 struct HeapLayout {
     std::uint64_t dynamic_offset = 80ull << 20; // static mesh/rock records before this point
-    std::uint64_t cull_offset = 1024;           // FrameData, then culling parameters/counters
-    std::uint64_t instance_offset = 1024 + 8192;
+    std::uint64_t cull_offset = 1280;           // FrameData (1056 bytes, padded), then culling parameters/counters
+    std::uint64_t instance_offset = 1280 + 8192;
     std::uint64_t staging_budget = 64ull << 20; // bounded texture upload staging
     std::uint64_t ui_bytes = 4ull << 20;
     std::uint64_t instance_budget = (44ull << 20) - instance_offset; // retain the former instance limit
@@ -275,6 +277,7 @@ struct Renderer::Impl {
             gpu::PSO* bloom = nullptr;
             gpu::PSO* composite = nullptr;
             gpu::PSO* sun_visibility = nullptr;
+            gpu::PSO* flare = nullptr;
             gpu::PSO* present = nullptr;
             gpu::PSO* meter = nullptr;
             gpu::PSO* temporal = nullptr;
@@ -311,6 +314,7 @@ struct Renderer::Impl {
     Showcase showcase;
     unsigned body_count = 0;
     bool polar_caps = true;      // the gas giant's polar cap atlas loaded; the blend is skipped without it
+    bool lens_dirt = true;       // the dirty-glass mask loaded; the effect stays off without it
     std::uint64_t star_data = 0; // static heap address of the Bright Star Catalogue records, 0 when absent
     unsigned star_count = 0;
     std::uint64_t splat_data = 0; // static heap address of the Milky Way's splat records, 0 when absent
@@ -348,9 +352,10 @@ struct Renderer::Impl {
     void create_device(void* window);
     void create_samplers();
     void create_fixed_targets();
-    void resize(Extent2D new_extent, unsigned galaxy_divisor);
+    void resize(Extent2D new_extent, unsigned galaxy_divisor, unsigned flare_divisor);
     void resize_galaxy(unsigned divisor);
-    unsigned galaxy_divisor = 4;
+    void resize_flare(unsigned divisor);
+    unsigned galaxy_divisor = 4, flare_divisor = 4;
     std::uint64_t upload_static(ByteView bytes);
     GpuImage create_image(const ImageDesc& desc);
     void bind(Slot slot, const GpuImage& image);
@@ -407,7 +412,7 @@ struct Renderer::Impl {
     // Post-processing and exposure (renderer_post.cpp).
     void apply_metering();
     void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view, SpatialAA spatial_aa,
-                            bool bloom, bool motion_streaks, const ImDrawData* ui, std::uint8_t* ui_cpu,
+                            bool bloom, bool flare, bool motion_streaks, const ImDrawData* ui, std::uint8_t* ui_cpu,
                             std::uint64_t ui_gpu);
     void fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, gpu::PSO* pipeline, Root root,
                          bool preserve = false);

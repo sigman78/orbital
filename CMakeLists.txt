@@ -124,7 +124,7 @@ if(ORBITAL_BUILD_DEMO)
       surface/surface_rock sky/background sky/galaxy sky/stars
       belt/beltsplat belt/beltblur belt/dust belt/disc belt/discsplat
       aa/temporal aa/smaa aa/fxaa_pass
-      post/bloom post/composite post/meter post/present post/sun_visibility overlay/ui scene/motes)
+      post/bloom post/composite post/flare post/meter post/present post/sun_visibility overlay/ui scene/motes)
     get_filename_component(shader "${source}" NAME)
     orbital_compile_slang("shaders/${shader}.fragment.spv" "shaders/${source}.slang" fragmentMain fragment)
     list(APPEND ORBITAL_SHADER_OUTPUTS "${CMAKE_BINARY_DIR}/shaders/${shader}.fragment.spv")

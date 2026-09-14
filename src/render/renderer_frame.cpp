@@ -44,7 +44,7 @@ bool Renderer::draw(const FrameInput& supplied) {
     const auto drawable = gpu::get_drawable_extent(s.device);
     if (!drawable.x || !drawable.y)
         return false;
-    s.resize({drawable.x, drawable.y}, unsigned(input.sky.galaxy_resolution));
+    s.resize({drawable.x, drawable.y}, unsigned(input.sky.galaxy_resolution), unsigned(input.sun.flare_resolution));
     const auto swap = gpu::acquire(s.device);
     if (!swap.render_view)
         return false;
@@ -148,8 +148,9 @@ bool Renderer::draw(const FrameInput& supplied) {
         {
             GpuTimingScope timing(s.timings, GpuPass::Post);
             s.record_post_passes(cmd, root, swap.render_view, input.aa.spatial_aa,
-                                 input.post.bloom && input.post.bloom_intensity > 0, frame.camera_cell.w > 0, input.ui,
-                                 dynamic + heap_layout.ui_offset(), frame_address + heap_layout.ui_offset());
+                                 input.post.bloom && input.post.bloom_intensity > 0, input.sun.lens_flare,
+                                 frame.camera_cell.w > 0, input.ui, dynamic + heap_layout.ui_offset(),
+                                 frame_address + heap_layout.ui_offset());
         }
     }
     s.stats.prepare_ms =

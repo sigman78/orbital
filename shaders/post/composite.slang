@@ -20,6 +20,61 @@ float3 sampleAberrated(float2 uv, float2 p, float2 resolution)
     return float3(sampleHDR(uv + shift).r, sampleHDR(uv).g, sampleHDR(uv - shift).b);
 }
 
+// Cubic B-spline upsample as four bilinear taps: plain bilinear leaves a
+// diamond pattern when the coarse flare target is enlarged eight or sixteen
+// times, and this stays smooth across texel centres.
+float3 sampleCubic(Texture2D<float4> image, float2 uv, float2 size)
+{
+    float2 texel = uv * size - .5;
+    float2 f = frac(texel), centre = floor(texel) + .5;
+    float2 f2 = f * f, f3 = f2 * f;
+    float2 w0 = (-f3 + 3.0 * f2 - 3.0 * f + 1.0) / 6.0, w1 = (3.0 * f3 - 6.0 * f2 + 4.0) / 6.0;
+    float2 w2 = (-3.0 * f3 + 3.0 * f2 + 3.0 * f + 1.0) / 6.0, w3 = f3 / 6.0;
+    float2 g0 = w0 + w1, g1 = w2 + w3;
+    float2 h0 = (centre - 1.0 + w1 / g0) / size, h1 = (centre + 1.0 + w3 / g1) / size;
+    return (image.Sample(samplers[SAMPLER_CLAMP], float2(h0.x, h0.y)).rgb * g0.x
+            + image.Sample(samplers[SAMPLER_CLAMP], float2(h1.x, h0.y)).rgb * g1.x) * g0.y
+           + (image.Sample(samplers[SAMPLER_CLAMP], float2(h0.x, h1.y)).rgb * g0.x
+              + image.Sample(samplers[SAMPLER_CLAMP], float2(h1.x, h1.y)).rgb * g1.x) * g1.y;
+}
+
+// Dirty glass: a film of dust, wipe residue and smears on a convex pane in
+// front of the camera. Looking toward the light the marks are nearly
+// invisible and only blur what is seen through them; where the sun grazes
+// the pane they brighten. The pane's outward curvature tilts its normal
+// toward the frame edges, so the grazing band is a region of the frame that
+// moves as the camera turns, not the whole screen. The sun's true direction
+// drives this, so it works with the sun far outside the frame.
+static const float PANE_CURVATURE = .6; // the normal's tilt at the frame's edge, as a slope
+float3 dirtyGlass(float3 color, float3 bloom, float mask, float2 uv, float2 p, float2 pixel, float2 resolution, float2 aspect)
+{
+    float blur = saturate(mask * 2.5) * root.frame.lens_stack.w;
+    if (blur > 0.0) {
+        // A small disc of scene taps, its radius growing with the film's density;
+        // a per-pixel rotation of the fixed pattern hides its eight points.
+        float radius = 10.0 * saturate(mask * 2.0) * min(root.frame.lens_stack.w, 1.0) * resolution.y / REFERENCE_FRAME.y;
+        float rotation = hash(float3(pixel, 3.0)) * 2.0 * PI;
+        float3 sum = float3(0.0);
+        for (int i = 0; i < 8; ++i) {
+            float angle = rotation + float(i) * 2.399963;
+            float2 offset = float2(cos(angle), sin(angle)) * sqrt((float(i) + .5) / 8.0) * radius / resolution;
+            sum += sampleHDR(uv + offset);
+        }
+        color = lerp(color, sum / 8.0 + bloom * root.frame.post.x, saturate(blur));
+    }
+    if (root.frame.lens_stack.z > 0.0) {
+        float3 sun = normalize(root.frame.sun.xyz);
+        float3 light = float3(dot(sun, root.frame.right_tan.xyz), dot(sun, root.frame.up_aspect.xyz),
+                              dot(sun, root.frame.forward_exposure.xyz));
+        float3 normal = normalize(float3(p.x * aspect.x * PANE_CURVATURE, -p.y * PANE_CURVATURE, 1.0));
+        float incidence = dot(normal, light);
+        // Lit from outside only, brightest just past grazing, gone facing the sun.
+        float grazing = smoothstep(0.0, .12, incidence) * pow(1.0 - saturate(incidence), 3.0);
+        color += float3(1.0, .9, .78) * mask * (.06 * grazing + .4 * bloom) * root.frame.lens_stack.z;
+    }
+    return color;
+}
+
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
@@ -28,16 +83,30 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float2 p = uv * 2.0 - 1.0;
     float2 aspect = float2(resolution.x / resolution.y, 1.0);
     float3 color = sampleAberrated(uv, p, resolution);
-    if (root.frame.post.x > 0.0) color += textures[TEX_BLOOM_A].Sample(samplers[SAMPLER_CLAMP], uv).rgb * root.frame.post.x;
+    // The bloom is also the light that brings up the dirty glass, when on.
+    float3 bloom = root.frame.post.x > 0.0 ? textures[TEX_BLOOM_A].Sample(samplers[SAMPLER_CLAMP], uv).rgb : float3(0.0);
+    color += bloom * root.frame.post.x;
+    if (root.frame.lens_stack.z > 0.0 || root.frame.lens_stack.w > 0.0) {
+        float mask = textures[TEX_LENS_DIRT].Sample(samplers[SAMPLER_CLAMP], uv).r;
+        if (mask > .01) color = dirtyGlass(color, bloom, mask, uv, p, position.xy, resolution, aspect);
+    }
     float2 sun = root.frame.screen_sun.xy;
     float4 lens = root.frame.lens;
     float vis = root.frame.screen_sun.z * textures[TEX_SUN_VISIBILITY].Load(int3(0, 0, 0)).r;
     float dist = length((p - sun) * aspect);
-    color += float3(1.0, .6, .3) * vis * .014 * lens.x / (dist * dist + .012);
-    color += lensGhosts(p, sun, vis, aspect, int(lens.w + .5)) * lens.y;
-    color += starburst(p, sun, vis, aspect, int(lens.w + .5), lens.z);
-    color += lensHalo(p, sun, vis, aspect, root.frame.sun_disc.zw);
-    color = toneMap(color * root.frame.forward_exposure.w, uint(root.frame.quality.y + .5), root.frame.post_more.z);
+    // The lens veil: the sun's glare and the stack (starburst and streak here,
+    // the soft elements from flare.slang's fractional target), the panel's
+    // saturation scaling the stack's colour. Kept apart from the scene so the
+    // neutral curve's black offset does not react to it.
+    float3 flare = starburst(p, sun, vis, aspect, int(lens.w + .5), lens.z)
+                   + lensStreak(p, sun, vis, aspect, root.frame.lens_more.y)
+                   + (root.frame.lens_stack.x > 0.0 // the stack pass is skipped when the flare is off
+                          ? sampleCubic(textures[TEX_FLARE], uv, floor(resolution / root.frame.lens_stack.x))
+                          : float3(0.0));
+    float3 veil = float3(1.0, .6, .3) * vis * .014 * lens.x / (dist * dist + .012)
+                  + lerp(float3(luma709(flare)), flare, root.frame.lens_stack.y);
+    float exposure = root.frame.forward_exposure.w;
+    color = toneMap(color * exposure, veil * exposure, uint(root.frame.quality.y + .5), root.frame.post_more.z);
     color *= 1.0 - root.frame.post_more.x * pow(length(p * .65), 2.0);
     // Dither and grain in display-code space; linear-space noise is far too
     // bright in black space. Grain is strongest in the midtones.
