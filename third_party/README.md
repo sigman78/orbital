@@ -10,14 +10,23 @@ The copy carries local compatibility changes: an opt-in conventional Vulkan 1.3 
 without the experimental descriptor and address-command extensions. The public C++ API and shader entry-point names are unchanged.
 See [docs/FOUNDATION.md](../docs/FOUNDATION.md) for the investigation.
 
+The fork also adds the optional `NoGraphicsAPIUtility::commands` target, with render-pass
+and submission helpers in `commands.hpp` and heap/pipeline owners in `owners.hpp`.
+Its utility CMake wiring and library README changes are included in the same patch.
+
 `NoGraphicsAPI-compat.patch` is the full diff against the upstream commit. To regenerate it after
 editing the fork:
 
-```powershell
-git clone https://github.com/sebbbi/NoGraphicsAPI.git upstream
-git -C upstream checkout 8e414bd0a8010b9f721d06d470860e27aa69c071
-git diff --no-index --src-prefix=a/ --dst-prefix=b/ upstream NoGraphicsAPI > NoGraphicsAPI-compat.patch
-```
+Use a clean checkout at the pinned commit, copy the tracked files under `NoGraphicsAPI/`
+over their matching upstream paths, and remove any upstream files absent from the vendored
+tree. Include newly added files with `git add -N .`, then generate the patch from that
+checkout with `git diff --binary --src-prefix=a/ --dst-prefix=b/`. Save its output as
+UTF-8 without a BOM in `NoGraphicsAPI-compat.patch`. Do not copy build outputs or `.git`
+directories, and do not stage the modified files before generating the diff.
+
+Verify with `git apply --check` and `git apply` in a second clean checkout of the pinned
+commit. The resulting file set and contents must match the tracked vendored tree (allowing
+only CRLF/LF differences). Keep this patch synchronized whenever the fork changes.
 
 Vendored code keeps its upstream formatting (`NoGraphicsAPI/.clang-format`) and is excluded from
 the project's clang-format and clang-tidy runs.
