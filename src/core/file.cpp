@@ -24,6 +24,11 @@ struct File {
     File(const File&) = delete;
     File& operator=(const File&) = delete;
     explicit operator bool() const { return handle != nullptr; }
+    bool close() {
+        auto* closing = handle;
+        handle = nullptr;
+        return !closing || std::fclose(closing) == 0;
+    }
 };
 
 } // namespace
@@ -47,10 +52,14 @@ bool write(const std::filesystem::path& path, ByteView bytes) {
     std::error_code error;
     if (path.has_parent_path())
         std::filesystem::create_directories(path.parent_path(), error);
+    if (error)
+        return false;
     File file(path, "wb");
     if (!file)
         return false;
-    return bytes.empty() || std::fwrite(bytes.data(), 1, bytes.size(), file.handle) == bytes.size();
+    const bool written = bytes.empty() || std::fwrite(bytes.data(), 1, bytes.size(), file.handle) == bytes.size();
+    const bool closed = file.close();
+    return written && closed;
 }
 
 bool write_text(const std::filesystem::path& path, std::string_view text) {

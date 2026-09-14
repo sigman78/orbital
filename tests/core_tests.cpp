@@ -109,6 +109,11 @@ void test_files() {
     const auto text = file::read(path);
     assert(text && std::string_view(reinterpret_cast<const char*>(text->data()), text->size()) == "hello");
     assert(!file::read(path.parent_path() / "missing.bin"));
+    assert(!file::write(path / "cannot-be-a-child.bin", payload));
+#if defined(__linux__)
+    // A small buffered write succeeds at fwrite and fails when fclose flushes it.
+    assert(!file::write("/dev/full", payload));
+#endif
     std::filesystem::remove_all(path.parent_path().parent_path());
 }
 
