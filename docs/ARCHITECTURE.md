@@ -115,6 +115,17 @@ and moving transfers ownership while clearing the source. Handle accessors are b
 The renderer waits for GPU completion before resetting target groups and clears all
 image owners before destroying the device. RAII does not perform implicit GPU waits.
 
+Render passes use `gpu::RenderPassScope`; the closing brace ends rendering before subsequent
+barriers. `gpu::SubmissionTimeline` owns the semaphore and increments completion values only
+on explicit submit/present calls. The upload flush helper explicitly submits and waits before
+reusing staging bytes. Move-only heap owners form one resettable buffer group; pipeline owners
+are held in one vector, while pass-family handles remain borrowed. Shutdown waits idle, clears
+all resource groups, resets the timeline, and then destroys the device.
+
+`gpu_sync.hpp` names recurring stage/access pairs. These are global execution/memory
+dependencies, not resource-state tracking. Unusual compute/combined-stage barriers remain
+explicit, and no pass destructor inserts a barrier.
+
 
 An approximately 84 MiB host-visible heap holds static meshes/rock records, frame constants, staged
 culling parameters/body instances and 4 MiB of overlay space. GPU-written culling scratch, indirect

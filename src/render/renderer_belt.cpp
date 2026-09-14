@@ -99,13 +99,13 @@ void Renderer::Impl::record_belt_light_pass(gpu::CommandBuffer* cmd, const CullR
     // Coverage accumulates from zero in every slice, alpha included.
     gpu::ColorAttachment attachment{
         .render_view = fixed_targets.belt_light.view(), .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
-    gpu::begin_render_pass(cmd, {.colors = {&attachment, 1}});
-    gpu::bind_pso(cmd, pso.belt.splat);
-    gpu::draw(cmd, cull_root, 6, rock_limit);
-    stats.draw_calls++;
-    gpu::end_render_pass(cmd);
-    gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
-                 gpu::Access::shader_read);
+    {
+        gpu::RenderPassScope pass(cmd, {.colors = {&attachment, 1}});
+        gpu::bind_pso(cmd, pso.belt.splat);
+        gpu::draw(cmd, cull_root, 6, rock_limit);
+        stats.draw_calls++;
+    }
+    synchronize(cmd, access::color_write, access::fragment_sample);
     root.mode = 0;
     fullscreen_pass(cmd, fixed_targets.belt_light_blur, pso.belt.blur, root);
     root.mode = 1;
@@ -128,13 +128,13 @@ void Renderer::Impl::record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullR
     if (bake_rocks) {
         gpu::ColorAttachment attachment{
             .render_view = fixed_targets.belt_disc_rocks.view(), .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
-        gpu::begin_render_pass(cmd, {.colors = {&attachment, 1}});
-        gpu::bind_pso(cmd, pso.belt.disc_splat);
-        gpu::draw(cmd, cull_root, 6, rock_limit);
-        stats.draw_calls++;
-        gpu::end_render_pass(cmd);
-        gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
-                     gpu::Access::shader_read);
+        {
+            gpu::RenderPassScope pass(cmd, {.colors = {&attachment, 1}});
+            gpu::bind_pso(cmd, pso.belt.disc_splat);
+            gpu::draw(cmd, cull_root, 6, rock_limit);
+            stats.draw_calls++;
+        }
+        synchronize(cmd, access::color_write, access::fragment_sample);
     }
     belt_disc_baked = true;
 }
@@ -171,15 +171,17 @@ void Renderer::Impl::record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, 
     root.base = 0;
     gpu::ColorAttachment mask{
         .render_view = frame_targets.splat_mask.view(), .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
-    gpu::begin_render_pass(
-        cmd, {.colors = {&mask, 1}, .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});
-    gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
-    gpu::bind_pso(cmd, pso.belt.splat_mask);
-    gpu::draw_indirect(cmd, root,
-                       {reinterpret_cast<void*>(args_address + rock_group_count * sizeof(DrawArgs)), sizeof(DrawArgs)},
-                       1, sizeof(DrawArgs));
-    stats.draw_calls++;
-    gpu::end_render_pass(cmd);
+    {
+        gpu::RenderPassScope pass(
+            cmd,
+            {.colors = {&mask, 1}, .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});
+        gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
+        gpu::bind_pso(cmd, pso.belt.splat_mask);
+        gpu::draw_indirect(
+            cmd, root, {reinterpret_cast<void*>(args_address + rock_group_count * sizeof(DrawArgs)), sizeof(DrawArgs)},
+            1, sizeof(DrawArgs));
+        stats.draw_calls++;
+    }
 }
 
 void Renderer::Impl::record_belt_dust_passes(gpu::CommandBuffer* cmd, Root& root, bool enabled, float far_weight) {

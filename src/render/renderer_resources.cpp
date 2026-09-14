@@ -14,28 +14,34 @@ std::uint64_t padded_size(const assets::TextureMip& mip) {
     return (mip.bytes.size() + 15) & ~15ull;
 }
 
+void flush_upload(gpu::CommandBuffer*& cmd, std::uint64_t& offset, gpu::SubmissionTimeline& submissions) {
+    if (!cmd)
+        return;
+    synchronize(cmd, access::transfer_write, access::fragment_sample);
+    submissions.submit_and_wait({cmd});
+    cmd = nullptr;
+    offset = 0;
+}
+
 } // namespace
 
 Renderer::Impl::~Impl() {
     if (device)
         gpu::wait_idle(device);
-    for (auto* pipeline : pipelines)
-        gpu::destroy_pso(pipeline);
+    pipelines.clear();
     material_images.clear();
     frame_targets = {};
     fixed_targets = {};
-    for (auto* heap : {&data, &texture_descriptors, &sampler_descriptors, &luminance_readback, &timestamps,
-                       &cull_device, &cull_readback})
-        gpu::destroy_gpu_heap(*heap);
-    gpu::destroy_timeline_semaphore(timeline);
+    buffers = {};
+    submissions.reset();
     gpu::destroy_device(device);
 }
 
 std::uint64_t Renderer::Impl::upload_static(ByteView bytes) {
     static_cursor = (static_cursor + 15) & ~15ull;
     panic_if(static_cursor + bytes.size() > heap_layout.dynamic_offset, "static GPU heap exhausted");
-    const auto address = reinterpret_cast<std::uint64_t>(data.range.gpu) + static_cursor;
-    std::memcpy(data.range.cpu + static_cursor, bytes.data(), bytes.size());
+    const auto address = reinterpret_cast<std::uint64_t>(buffers.data.range().gpu) + static_cursor;
+    std::memcpy(buffers.data.range().cpu + static_cursor, bytes.data(), bytes.size());
     static_cursor += bytes.size();
     return address;
 }
@@ -47,8 +53,9 @@ GpuImage Renderer::Impl::create_image(const ImageDesc& desc) {
 void Renderer::Impl::bind(Slot slot, const GpuImage& image) {
     ORBITAL_ASSERT(slot < Slot::count);
     const auto& caps = gpu::get_device_caps(device);
-    gpu::write_texture_descriptor(device, texture_descriptors.range.cpu + unsigned(slot) * caps.texture_descriptor_size,
-                                  image.texture(), gpu::TextureDescriptorType::sampled);
+    gpu::write_texture_descriptor(
+        device, buffers.texture_descriptors.range().cpu + unsigned(slot) * caps.texture_descriptor_size,
+        image.texture(), gpu::TextureDescriptorType::sampled);
 }
 
 // Creates one sampled texture per upload and streams every mip through
@@ -74,39 +81,29 @@ void Renderer::Impl::upload_images(std::span<Upload> uploads) {
             bytes += padded_size(mip);
         largest = std::max(largest, bytes);
     }
-    auto staging = gpu::create_gpu_heap(device, std::max(largest, heap_layout.staging_budget));
-    panic_if(!staging.range.cpu, "texture staging allocation failed");
+    auto staging = gpu::UniqueGpuHeap::create(device, std::max(largest, heap_layout.staging_budget));
+    panic_if(!staging.range().cpu, "texture staging allocation failed");
     gpu::CommandBuffer* cmd = nullptr;
     std::uint64_t offset = 0;
-    const auto flush = [&] {
-        if (!cmd)
-            return;
-        gpu::barrier(cmd, gpu::Stage::transfer, gpu::Access::transfer_write, gpu::Stage::fragment,
-                     gpu::Access::shader_read);
-        gpu::submit({cmd}, {timeline, ++serial});
-        gpu::wait_timeline({timeline, serial});
-        cmd = nullptr;
-        offset = 0;
-    };
     for (std::size_t i = 0; i < uploads.size(); i++) {
         std::uint64_t bytes = 0;
         for (const auto& mip : uploads[i].data.mips)
             bytes += padded_size(mip);
-        if (offset + bytes > staging.range.size)
-            flush();
+        if (offset + bytes > staging.range().size)
+            flush_upload(cmd, offset, submissions);
         if (!cmd)
             cmd = gpu::begin_commands(device);
         for (unsigned level = 0; level < uploads[i].data.mips.size(); level++) {
             const auto& mip = uploads[i].data.mips[level];
-            std::memcpy(staging.range.cpu + offset, mip.bytes.data(), mip.bytes.size());
-            const auto source = reinterpret_cast<std::uint64_t>(staging.range.gpu) + offset;
+            std::memcpy(staging.range().cpu + offset, mip.bytes.data(), mip.bytes.size());
+            const auto source = reinterpret_cast<std::uint64_t>(staging.range().gpu) + offset;
             gpu::copy_memory_to_texture(cmd, {reinterpret_cast<void*>(source), mip.bytes.size()},
                                         material_images[first_image + i].texture(), {.mip_level = level});
             offset += padded_size(mip);
         }
     }
-    flush();
-    gpu::destroy_gpu_heap(staging);
+    flush_upload(cmd, offset, submissions);
+    staging.reset();
 }
 
 void Renderer::Impl::upload_rgba(Slot slot, assets::ImageView pixels) {
@@ -133,32 +130,33 @@ void Renderer::Impl::create_device(void* window) {
     log::info("GPU: {} | conventional NoGraphicsAPI backend", caps.device_name);
     panic_if(!caps.conventional_descriptor_backend,
              "the demo's shaders require the conventional descriptor backend build option");
-    timeline = gpu::create_timeline_semaphore(device);
-    data = gpu::create_gpu_heap(device, heap_layout.mapped_size());
-    cull_device = gpu::create_gpu_heap(
+    submissions.initialize(device);
+    buffers.data = gpu::UniqueGpuHeap::create(device, heap_layout.mapped_size());
+    buffers.cull_device = gpu::UniqueGpuHeap::create(
         device, heap_layout.cull_size(std::max(high_quality.belt_count, belt_count_override), body_count),
         gpu::MemoryType::gpu_only);
-    cull_readback = gpu::create_gpu_heap(device, sizeof(CullScratch), gpu::MemoryType::readback);
-    panic_if(!cull_device.range.gpu || !cull_readback.range.cpu, "culling heap allocation failed");
-    log::info("Buffer heaps: {} KiB mapped, {} KiB device-only culling", data.range.size / 1024,
-              cull_device.range.size / 1024);
-    texture_descriptors = gpu::create_gpu_heap(device, caps.texture_descriptor_size * unsigned(Slot::count),
-                                               gpu::MemoryType::texture_descriptor_heap);
-    sampler_descriptors = gpu::create_gpu_heap(device, caps.sampler_descriptor_size * unsigned(SamplerSlot::count),
-                                               gpu::MemoryType::sampler_descriptor_heap);
-    panic_if(!data.range.cpu || !texture_descriptors.range.cpu || !sampler_descriptors.range.cpu,
+    buffers.cull_readback = gpu::UniqueGpuHeap::create(device, sizeof(CullScratch), gpu::MemoryType::readback);
+    panic_if(!buffers.cull_device.range().gpu || !buffers.cull_readback.range().cpu, "culling heap allocation failed");
+    log::info("Buffer heaps: {} KiB mapped, {} KiB device-only culling", buffers.data.range().size / 1024,
+              buffers.cull_device.range().size / 1024);
+    buffers.texture_descriptors = gpu::UniqueGpuHeap::create(
+        device, caps.texture_descriptor_size * unsigned(Slot::count), gpu::MemoryType::texture_descriptor_heap);
+    buffers.sampler_descriptors = gpu::UniqueGpuHeap::create(
+        device, caps.sampler_descriptor_size * unsigned(SamplerSlot::count), gpu::MemoryType::sampler_descriptor_heap);
+    panic_if(!buffers.data.range().cpu || !buffers.texture_descriptors.range().cpu ||
+                 !buffers.sampler_descriptors.range().cpu,
              "GPU mapped heap allocation failed");
-    luminance_readback = gpu::create_gpu_heap(device, targets::meter_size * targets::meter_size * sizeof(Float4),
-                                              gpu::MemoryType::readback);
-    timestamps = gpu::create_gpu_heap(device, targets::timestamp_count * sizeof(std::uint64_t),
-                                      gpu::MemoryType::readback);
+    buffers.luminance_readback = gpu::UniqueGpuHeap::create(
+        device, targets::meter_size * targets::meter_size * sizeof(Float4), gpu::MemoryType::readback);
+    buffers.timestamps = gpu::UniqueGpuHeap::create(device, targets::timestamp_count * sizeof(std::uint64_t),
+                                                    gpu::MemoryType::readback);
 }
 
 void Renderer::Impl::create_samplers() {
     const auto& caps = gpu::get_device_caps(device);
     const auto write = [&](SamplerSlot slot, const gpu::SamplerDesc& desc) {
         gpu::write_sampler_descriptor(
-            device, sampler_descriptors.range.cpu + unsigned(slot) * caps.sampler_descriptor_size, desc);
+            device, buffers.sampler_descriptors.range().cpu + unsigned(slot) * caps.sampler_descriptor_size, desc);
     };
     using gpu::AddressMode;
     write(SamplerSlot::clamp, {.address_u = AddressMode::clamp_to_edge,

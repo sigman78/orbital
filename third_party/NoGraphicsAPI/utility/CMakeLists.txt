@@ -8,6 +8,11 @@ target_include_directories(NoGraphicsAPIUtility_types INTERFACE
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
+add_library(NoGraphicsAPIUtility_commands INTERFACE)
+add_library(NoGraphicsAPIUtility::commands ALIAS NoGraphicsAPIUtility_commands)
+set_target_properties(NoGraphicsAPIUtility_commands PROPERTIES EXPORT_NAME commands)
+target_link_libraries(NoGraphicsAPIUtility_commands INTERFACE NoGraphicsAPIUtility::types NoGraphicsAPI::NoGraphicsAPI)
+
 add_library(NoGraphicsAPIUtility_math INTERFACE)
 add_library(NoGraphicsAPIUtility::math ALIAS NoGraphicsAPIUtility_math)
 set_target_properties(NoGraphicsAPIUtility_math PROPERTIES EXPORT_NAME math)
@@ -62,10 +67,11 @@ endif()
 add_library(NoGraphicsAPIUtility_utility INTERFACE)
 add_library(NoGraphicsAPIUtility::utility ALIAS NoGraphicsAPIUtility_utility)
 set_target_properties(NoGraphicsAPIUtility_utility PROPERTIES EXPORT_NAME utility)
-target_link_libraries(NoGraphicsAPIUtility_utility INTERFACE NoGraphicsAPIUtility::math NoGraphicsAPIUtility::allocators NoGraphicsAPIUtility::textures)
+target_link_libraries(NoGraphicsAPIUtility_utility INTERFACE NoGraphicsAPIUtility::math NoGraphicsAPIUtility::allocators NoGraphicsAPIUtility::textures NoGraphicsAPIUtility::commands)
 
 install(TARGETS
         NoGraphicsAPIUtility_types
+        NoGraphicsAPIUtility_commands
         NoGraphicsAPIUtility_math
         NoGraphicsAPIUtility_allocators
         NoGraphicsAPIUtility_textures

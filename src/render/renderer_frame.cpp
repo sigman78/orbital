@@ -12,7 +12,7 @@ namespace space::render {
 void Renderer::Impl::read_gpu_timings() {
     if (!frame_index)
         return;
-    const auto* t = reinterpret_cast<const std::uint64_t*>(timestamps.range.cpu);
+    const auto* t = reinterpret_cast<const std::uint64_t*>(buffers.timestamps.range().cpu);
     const auto caps = gpu::get_device_caps(device);
     const float scale = float(caps.timestamp_period_ns * 1e-6);
     const auto elapsed = [&](unsigned begin, unsigned end) {
@@ -31,7 +31,8 @@ void Renderer::Impl::read_gpu_timings() {
 
 void Renderer::Impl::stamp(gpu::CommandBuffer* cmd, unsigned index) {
     ORBITAL_ASSERT(index < targets::timestamp_count);
-    gpu::write_timestamp(cmd, reinterpret_cast<gpu::uint64*>(timestamps.range.gpu + index * sizeof(std::uint64_t)));
+    gpu::write_timestamp(
+        cmd, reinterpret_cast<gpu::uint64*>(buffers.timestamps.range().gpu + index * sizeof(std::uint64_t)));
 }
 
 bool Renderer::draw(const FrameInput& supplied) {
@@ -42,7 +43,7 @@ bool Renderer::draw(const FrameInput& supplied) {
     ORBITAL_ASSERT(s.showcase.order_states(supplied.bodies, states));
     FrameInput input = supplied;
     input.bodies = states;
-    gpu::wait_timeline({s.timeline, s.serial});
+    s.submissions.wait_last();
     s.read_gpu_timings();
     s.apply_metering();
     const auto drawable = gpu::get_drawable_extent(s.device);
@@ -77,13 +78,13 @@ bool Renderer::draw(const FrameInput& supplied) {
 
     // CPU stages frame constants, culling parameters and body instances only.
     // The completed GPU scratch is read before preparing the next submission.
-    const auto frame_address = reinterpret_cast<std::uint64_t>(s.data.range.gpu) + heap_layout.dynamic_offset;
-    auto* dynamic = s.data.range.cpu + heap_layout.dynamic_offset;
+    const auto frame_address = reinterpret_cast<std::uint64_t>(s.buffers.data.range().gpu) + heap_layout.dynamic_offset;
+    auto* dynamic = s.buffers.data.range().cpu + heap_layout.dynamic_offset;
     auto* scratch = reinterpret_cast<CullScratch*>(dynamic + heap_layout.cull_offset);
     if (s.frame_index)
-        s.read_cull_counts(*reinterpret_cast<const CullScratch*>(s.cull_readback.range.cpu));
+        s.read_cull_counts(*reinterpret_cast<const CullScratch*>(s.buffers.cull_readback.range().cpu));
     std::memcpy(dynamic, &frame, sizeof frame);
-    const auto cull_address = reinterpret_cast<std::uint64_t>(s.cull_device.range.gpu);
+    const auto cull_address = reinterpret_cast<std::uint64_t>(s.buffers.cull_device.range().gpu);
     s.write_cull_scratch(input, frame, *scratch,
                          cull_address + heap_layout.instance_offset + s.body_count * sizeof(Instance));
     std::memcpy(dynamic + heap_layout.instance_offset, s.instances.data(), s.instances.size() * sizeof(Instance));
@@ -101,8 +102,8 @@ bool Renderer::draw(const FrameInput& supplied) {
 
     auto* cmd = gpu::begin_commands(s.device);
     s.stamp(cmd, 0);
-    gpu::set_texture_descriptor_heap(cmd, gpu::gpu_range(s.texture_descriptors));
-    gpu::set_sampler_descriptor_heap(cmd, gpu::gpu_range(s.sampler_descriptors));
+    gpu::set_texture_descriptor_heap(cmd, gpu::gpu_range(s.buffers.texture_descriptors.get()));
+    gpu::set_sampler_descriptor_heap(cmd, gpu::gpu_range(s.buffers.sampler_descriptors.get()));
     gpu::barrier(cmd, gpu::Stage::all_commands,
                  gpu::Access::shader_read | gpu::Access::color_write | gpu::Access::depth_stencil_write,
                  gpu::Stage::all_commands,
@@ -110,18 +111,18 @@ bool Renderer::draw(const FrameInput& supplied) {
     // Transfer the small CPU inputs; generated instances and atomic counters
     // stay device-only. The submission makes preceding host writes available.
     gpu::copy_memory(cmd, {reinterpret_cast<void*>(frame_address + heap_layout.cull_offset), sizeof(CullScratch)},
-                     {s.cull_device.range.gpu + heap_layout.cull_offset, sizeof(CullScratch)});
+                     {s.buffers.cull_device.range().gpu + heap_layout.cull_offset, sizeof(CullScratch)});
     gpu::copy_memory(
         cmd,
         {reinterpret_cast<void*>(frame_address + heap_layout.instance_offset), s.instances.size() * sizeof(Instance)},
-        {s.cull_device.range.gpu + heap_layout.instance_offset, s.instances.size() * sizeof(Instance)});
+        {s.buffers.cull_device.range().gpu + heap_layout.instance_offset, s.instances.size() * sizeof(Instance)});
     gpu::barrier(cmd, gpu::Stage::transfer, gpu::Access::transfer_write, gpu::Stage::compute | gpu::Stage::vertex,
                  gpu::Access::shader_read | gpu::Access::shader_write);
     s.record_cull_passes(cmd, cull_root);
     gpu::barrier(cmd, gpu::Stage::compute, gpu::Access::shader_write, gpu::Stage::transfer, gpu::Access::transfer_read);
-    gpu::copy_memory(cmd, {s.cull_device.range.gpu + heap_layout.cull_offset, sizeof(CullScratch)},
-                     gpu::gpu_range(s.cull_readback));
-    gpu::barrier(cmd, gpu::Stage::transfer, gpu::Access::transfer_write, gpu::Stage::host, gpu::Access::host_read);
+    gpu::copy_memory(cmd, {s.buffers.cull_device.range().gpu + heap_layout.cull_offset, sizeof(CullScratch)},
+                     gpu::gpu_range(s.buffers.cull_readback.get()));
+    synchronize(cmd, access::transfer_write, access::host_read);
     s.stamp(cmd, 1);
     s.record_shadow_pass(cmd, root);
     s.stamp(cmd, 2);
@@ -133,13 +134,10 @@ bool Renderer::draw(const FrameInput& supplied) {
     s.record_atmosphere_passes(cmd, root);
     s.record_belt_dust_passes(cmd, root, input.belt_dust.enabled, frame.belt_disc.y);
     // Coverage is also needed by sun visibility with TAA disabled.
-    gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,
-                 gpu::Access::depth_stencil_read);
+    synchronize(cmd, access::fragment_sample, access::depth_read);
     s.record_splat_mask_pass(cmd, root, args_address);
-    gpu::barrier(cmd, gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_read, gpu::Stage::fragment,
-                 gpu::Access::shader_read);
-    gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
-                 gpu::Access::shader_read);
+    synchronize(cmd, access::depth_read, access::fragment_sample);
+    synchronize(cmd, access::color_write, access::fragment_sample);
     s.stamp(cmd, 6);
     s.record_post_passes(cmd, root, swap.render_view, input.aa.spatial_aa,
                          input.post.bloom && input.post.bloom_intensity > 0, frame.camera_cell.w > 0, input.ui,
@@ -147,7 +145,7 @@ bool Renderer::draw(const FrameInput& supplied) {
     s.stamp(cmd, 7);
     s.stats.prepare_ms =
         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - prepare_start).count();
-    gpu::submit_and_present(s.device, {cmd}, {s.timeline, ++s.serial});
+    s.submissions.submit_and_present(s.device, {cmd});
 
     s.frame_index++;
     s.previous_frame = frame;
@@ -167,26 +165,24 @@ bool Renderer::capture(const std::filesystem::path& path) {
     auto& s = *impl_;
     if (s.extent.empty())
         return false;
-    gpu::wait_timeline({s.timeline, s.serial});
-    auto readback = gpu::create_gpu_heap(s.device, std::uint64_t(s.extent.width) * s.extent.height * 4,
-                                         gpu::MemoryType::readback);
-    if (!readback.range.cpu) {
+    s.submissions.wait_last();
+    auto readback = gpu::UniqueGpuHeap::create(s.device, std::uint64_t(s.extent.width) * s.extent.height * 4,
+                                               gpu::MemoryType::readback);
+    if (!readback.range().cpu) {
         log::error("screenshot readback allocation failed");
         return false;
     }
     auto* cmd = gpu::begin_commands(s.device);
-    gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::transfer,
-                 gpu::Access::transfer_read);
-    gpu::copy_texture_to_memory(cmd, s.frame_targets.final_image.texture(), gpu::gpu_range(readback));
-    gpu::barrier(cmd, gpu::Stage::transfer, gpu::Access::transfer_write, gpu::Stage::host, gpu::Access::host_read);
-    gpu::submit({cmd}, {s.timeline, ++s.serial});
-    gpu::wait_timeline({s.timeline, s.serial});
-    const auto* rgba = reinterpret_cast<const std::uint8_t*>(readback.range.cpu);
+    synchronize(cmd, access::color_write, access::transfer_read);
+    gpu::copy_texture_to_memory(cmd, s.frame_targets.final_image.texture(), gpu::gpu_range(readback.get()));
+    synchronize(cmd, access::transfer_write, access::host_read);
+    s.submissions.submit_and_wait({cmd});
+    const auto* rgba = reinterpret_cast<const std::uint8_t*>(readback.range().cpu);
     Bytes rgb(std::size_t(s.extent.width) * s.extent.height * 3);
     for (std::size_t i = 0; i < std::size_t(s.extent.width) * s.extent.height; i++)
         for (unsigned channel = 0; channel < 3; channel++)
             rgb[i * 3 + channel] = rgba[i * 4 + channel];
-    gpu::destroy_gpu_heap(readback);
+    readback.reset();
     return assets::save_png(path, {s.extent, assets::PixelLayout::Rgb8, rgb});
 }
 

@@ -43,7 +43,7 @@ gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
                  .color_targets = {&target, 1},
                  .depth_format = desc.has_depth_attachment ? gpu::Format::d32_float : gpu::Format::undefined});
     panic_if(!pipeline, "pipeline creation failed for {} + {}", desc.vertex_shader, desc.fragment_shader);
-    pipelines.push_back(pipeline);
+    pipelines.emplace_back(pipeline);
     return pipeline;
 }
 
@@ -92,7 +92,7 @@ void Renderer::Impl::create_pipelines() {
     pso.ui = make("ui", "ui", Format::bgra8_srgb, false, Blend::alpha);
     pso.belt.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
     panic_if(!pso.belt.cull, "compute pipeline creation failed: cull");
-    pipelines.push_back(pso.belt.cull);
+    pipelines.emplace_back(pso.belt.cull);
     // Depth-only shadow pass reuses the surface vertex shader with a slope bias.
     const auto shadow_vertex = read_spirv(directory / "shaders/surface.vertex.spv");
     pso.scene.shadow = gpu::create_graphics_pso(
@@ -100,7 +100,7 @@ void Renderer::Impl::create_pipelines() {
                  .depth_format = Format::d32_float,
                  .rasterization = {.depth_bias_constant = 1, .depth_bias_slope = 1.5f}});
     panic_if(!pso.scene.shadow, "shadow pipeline creation failed");
-    pipelines.push_back(pso.scene.shadow);
+    pipelines.emplace_back(pso.scene.shadow);
 }
 
 } // namespace space::render

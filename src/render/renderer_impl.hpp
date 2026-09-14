@@ -9,12 +9,15 @@
 #include "core/types.hpp"
 #include "post/bloom_shared.h"
 #include "render/gpu_image.hpp"
+#include "render/gpu_sync.hpp"
 #include "render/gpu_types.hpp"
 #include "render/showcase.hpp"
 #include "scene/geometry.hpp"
 #include "scene/system.hpp"
 
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
+#include <NoGraphicsAPIUtility/commands.hpp>
+#include <NoGraphicsAPIUtility/owners.hpp>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -234,15 +237,16 @@ static_assert(rock_group_count == ORBITAL_ROCK_GROUPS && geometry::rock_level_co
 struct Renderer::Impl {
     // Device and heaps.
     gpu::Device* device = nullptr;
-    gpu::TimelineSemaphore* timeline = nullptr;
-    std::uint64_t serial = 0;
-    gpu::GpuHeap data{}, texture_descriptors{}, sampler_descriptors{}, luminance_readback{}, timestamps{};
-    gpu::GpuHeap cull_device{}, cull_readback{}; // GPU output and completed scratch for CPU statistics
+    gpu::SubmissionTimeline submissions;
+    struct BufferResources {
+        gpu::UniqueGpuHeap data, texture_descriptors, sampler_descriptors, luminance_readback, timestamps;
+        gpu::UniqueGpuHeap cull_device, cull_readback; // GPU output and completed scratch for CPU statistics
+    } buffers;
     std::uint64_t static_cursor = 0;
 
     // Resources.
     std::vector<GpuImage> material_images;
-    std::vector<gpu::PSO*> pipelines;
+    std::vector<gpu::UniquePso> pipelines;
     FrameTargets frame_targets;
     FixedTargets fixed_targets;
     // Non-owning handles grouped by pass family; pipelines owns their lifetime.
