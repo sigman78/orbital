@@ -11,6 +11,7 @@
 #include "render/gpu_image.hpp"
 #include "render/gpu_owners.hpp"
 #include "render/gpu_sync.hpp"
+#include "render/gpu_timing.hpp"
 #include "render/gpu_types.hpp"
 #include "render/showcase.hpp"
 #include "scene/geometry.hpp"
@@ -155,18 +156,6 @@ static_assert(heap_layout.cull_offset >= sizeof(FrameData));
 static_assert(heap_layout.instance_offset >= heap_layout.cull_offset + sizeof(CullScratch));
 static_assert(heap_layout.instance_offset < heap_layout.ui_offset());
 
-enum class GpuCheckpoint : unsigned {
-    FrameStart,
-    AfterCulling,
-    AfterBodyShadows,
-    AfterBeltLight,
-    AfterBeltDiscs,
-    AfterSurface,
-    AfterAtmosphere,
-    AfterPost,
-    Count
-};
-
 // Sizes of the fixed GPU targets, created by the resources side and addressed by the frame side.
 namespace targets {
 inline constexpr Range<float> depth{0.02f, 2000.0f}; // near and far plane, camera-relative units
@@ -178,7 +167,6 @@ inline constexpr unsigned belt_disc_light_interval = 16, belt_disc_rock_interval
 inline constexpr unsigned meter_size = 16;             // luminance meter edge, texels of rgba32f
 inline constexpr unsigned mote_cell_size_units = 5;    // motion streak lattice cell, scene units
 inline constexpr unsigned mote_count = 4 * 4 * 4 * 16; // MOTE_CELLS^3 * MOTES_PER_CELL in motes.slang
-inline constexpr unsigned timestamp_count = unsigned(GpuCheckpoint::Count);
 } // namespace targets
 
 // What FrameInput::high_quality selects between.
@@ -247,7 +235,7 @@ struct Renderer::Impl {
     gpu::Device* device = nullptr;
     SubmissionTimeline submissions;
     struct BufferResources {
-        UniqueGpuHeap data, texture_descriptors, sampler_descriptors, luminance_readback, timestamps;
+        UniqueGpuHeap data, texture_descriptors, sampler_descriptors, luminance_readback;
         UniqueGpuHeap cull_device, cull_readback; // GPU output and completed scratch for CPU statistics
     } buffers;
     std::uint64_t static_cursor = 0;
@@ -333,6 +321,7 @@ struct Renderer::Impl {
     // Frame state.
     Extent2D extent{};
     unsigned frame_index = 0;
+    GpuTimings timings;
     Stats stats{};
     float adapted_exposure = 1, exposure_target = 1; // the filtered exposure and the meter's last target
     bool meter_pending = false;
@@ -428,7 +417,6 @@ struct Renderer::Impl {
 
     // Frame orchestration and readback (renderer_frame.cpp).
     void read_gpu_timings();
-    void stamp(gpu::CommandBuffer* cmd, GpuCheckpoint checkpoint);
 };
 
 } // namespace space::render

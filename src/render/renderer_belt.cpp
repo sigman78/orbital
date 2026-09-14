@@ -77,6 +77,7 @@ void Renderer::Impl::record_cull_passes(gpu::CommandBuffer* cmd, const CullRoot&
 void Renderer::Impl::record_belt_maps(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root,
                                       unsigned rock_limit, bool light_map, float far_weight) {
     if (light_map) {
+        GpuTimingScope timing(timings, GpuPass::BeltLight);
         // Only the size-tail rocks splat; their ids are sorted, so the tier limit is a prefix.
         const auto tail_end = std::upper_bound(rock_tail_ids.begin(), rock_tail_ids.end(), rock_limit - 1);
         const CullRoot splat_root{.frame = root.frame,
@@ -86,7 +87,6 @@ void Renderer::Impl::record_belt_maps(gpu::CommandBuffer* cmd, const CullRoot& c
                                   .unused = 0};
         record_belt_light_pass(cmd, splat_root, root, splat_root.pass);
     }
-    stamp(cmd, GpuCheckpoint::AfterBeltLight);
     {
         const CullRoot bake_root{
             .frame = root.frame, .rocks = rock_data, .scratch = cull_root.scratch, .pass = rock_limit, .unused = 0};
@@ -123,6 +123,9 @@ void Renderer::Impl::record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullR
         return;
     const bool bake_light = !belt_disc_baked || frame_index % targets::belt_disc_light_interval == 0;
     const bool bake_rocks = !belt_disc_baked || frame_index % targets::belt_disc_rock_interval == 0;
+    if (!bake_light && !bake_rocks)
+        return;
+    GpuTimingScope timing(timings, GpuPass::BeltDiscs);
     if (bake_light) {
         root.mode = 0;
         fullscreen_pass(cmd, fixed_targets.belt_disc_light, pso.belt.disc, root);

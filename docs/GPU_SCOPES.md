@@ -19,3 +19,24 @@ The upload flush is a named function receiving the command pointer, staging offs
 - A source comparison expands named dependencies back to raw barrier calls and confirms identical per-file arguments/order. All 33 runtime shader binaries are unchanged.
 - Six paired 1600x900 captures cover Earth, belt, tour, sun-through-belt, high quality and stopping the camera. Mean absolute RGBA differences range from 0.000012 to 0.000347 display codes; maxima are 1, 16, 1, 3, 10 and 5. These are near-identical, not bit-identical results. Commands, logs and metrics: `.scratch/gpu-scopes/captures/`.
 - Three-run belt GPU medians are 5.225 to 5.278 ms windowed and 14.441 to 14.528 ms fullscreen. No tracked metric crosses the combined 5% / 0.2 ms regression threshold against either the preceding executable or packed-culling baseline. This is not a zero-overhead proof. Reports: [before](performance/gpu-scopes-before.md), [after](performance/gpu-scopes-after.md), with adjacent JSON metadata. The before executable was saved from `79ccaad`; both reports were recorded while this refactor was uncommitted.
+
+## Scoped GPU timings
+
+`GpuTimings` owns its readback heap and timestamp conversion settings. Initialize it once with the device and reset it after GPU completion, before device destruction. Query-pool capacity is derived from `GpuTimings::timestamp_count`.
+
+```cpp
+{
+    GpuTimingFrame frame_timing(timings, cmd);
+    {
+        GpuTimingScope timing(timings, GpuPass::Culling);
+        // Record the work, including its copies and dependencies.
+    }
+}
+// Submit only after all timing scopes close.
+```
+
+The frame scope records total time and resets per-frame recording status. Each pass has its own two timestamp slots; enum order need not match recording order. Nested scopes cover the cull/shadow aggregate and individual sections. Scopes are noncopyable and nonmovable, close on early returns, and only record timestamps: they never submit or wait. Debug assertions reject duplicate pass IDs, use outside a timing frame, and closing a frame while a pass remains open.
+
+Read `milliseconds(pass)` after submission completion. It returns an optional result; unrecorded work has no duration, and the existing stats UI maps it to zero. Conditional belt lighting and periodic disc bakes record only when work runs, so skipped frames cannot reuse old samples. Other regions retain their prior command coverage. There are up to 18 timestamp writes per frame, versus eight shared checkpoints previously; the readback payload grows from 64 to 144 bytes. Adjacent section durations need not sum exactly to the independently timed totals.
+
+CPU wrapper tests exercise nested scopes, early return, timestamp wraparound, per-frame skipped-pass state and absence of implicit waits/submissions. Renderer validation checks real query usage across the existing scene, fullscreen and lifecycle cases.

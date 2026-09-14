@@ -33,6 +33,7 @@ Renderer::Impl::~Impl() {
     frame_targets = {};
     fixed_targets = {};
     buffers = {};
+    timings.reset();
     submissions.reset();
     gpu::destroy_device(device);
 }
@@ -118,8 +119,9 @@ void Renderer::Impl::upload_rgba(Slot slot, assets::ImageView pixels) {
 }
 
 void Renderer::Impl::create_device(void* window) {
-    const auto init = gpu::create_device(
-        {.window = window, .swapchain_format = gpu::Format::bgra8_srgb, .timestamp_query_count = 16});
+    const auto init = gpu::create_device({.window = window,
+                                          .swapchain_format = gpu::Format::bgra8_srgb,
+                                          .timestamp_query_count = GpuTimings::timestamp_count});
     device = init.device;
     panic_if(!device, "Vulkan device creation failed; check the console for missing features or driver errors");
     const auto& caps = gpu::get_device_caps(device);
@@ -144,8 +146,7 @@ void Renderer::Impl::create_device(void* window) {
              "GPU mapped heap allocation failed");
     buffers.luminance_readback = UniqueGpuHeap::create(
         device, targets::meter_size * targets::meter_size * sizeof(Float4), gpu::MemoryType::readback);
-    buffers.timestamps = UniqueGpuHeap::create(device, targets::timestamp_count * sizeof(std::uint64_t),
-                                               gpu::MemoryType::readback);
+    timings.initialize(device);
 }
 
 void Renderer::Impl::create_samplers() {

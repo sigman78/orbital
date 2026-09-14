@@ -77,7 +77,7 @@ Between the rocks a half-resolution march through the same density field scatter
    intermediate, then the spatial pass (SMAA or FXAA) into the final image.
 8. Present, with the HUD and the Dear ImGui panel drawn last into the swapchain.
 
-GPU timestamps separately bracket compute culling, body shadows, belt light maps, far-belt bakes, the scene,
+Scoped GPU timings separately bracket compute culling, body shadows, belt light maps, far-belt bakes, the scene,
 atmospheres with dust, and post-processing. The original cull/shadow aggregate is retained in the panel and CSV.
 
 ## Renderer implementation
