@@ -105,7 +105,8 @@ int main() {
     assert(file::write_text(bc7_path, "corrupt"));
     assert(load_texture_cache(source, desc, support)->format == TextureFormat::ASTC);
     assert(file::write(bc7_path, write_texture_cache(bc7, desc, hash + 1)));
-    assert(load_texture_cache(source, desc, support)->format == TextureFormat::BC7); // provenance does not affect priority
+    assert(load_texture_cache(source, desc, support)->format ==
+           TextureFormat::BC7);                                     // provenance does not affect priority
     assert(file::write(bc7_path, write_texture_cache(rgba, desc))); // mislabeled file
     assert(load_texture_cache(source, desc, support)->format == TextureFormat::ASTC);
     bc7.block_x = bc7.block_y = 6;

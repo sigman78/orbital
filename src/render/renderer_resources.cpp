@@ -229,13 +229,12 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
                 image.pixels[i * 4 + c] = bytes[i * channels + c];
         return image;
     };
-    upload_images(
-        {{.data = assets::texture_from_image(widen(assets::smaa_area(), assets::smaa_area_width,
-                                                   assets::smaa_area_height, assets::smaa_area_channels)),
-          .slot = Slot::smaa_area},
-         {.data = assets::texture_from_image(widen(assets::smaa_search(), assets::smaa_search_width,
-                                                   assets::smaa_search_height, assets::smaa_search_channels)),
-          .slot = Slot::smaa_search}});
+    upload_images({{.data = assets::texture_from_image(widen(assets::smaa_area(), assets::smaa_area_width,
+                                                             assets::smaa_area_height, assets::smaa_area_channels)),
+                    .slot = Slot::smaa_area},
+                   {.data = assets::texture_from_image(widen(assets::smaa_search(), assets::smaa_search_width,
+                                                             assets::smaa_search_height, assets::smaa_search_channels)),
+                    .slot = Slot::smaa_search}});
     create_pipelines();
     create_fixed_targets();
 }

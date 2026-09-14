@@ -1,7 +1,7 @@
 #include "assets/material_catalog.hpp"
 #include "assets/texture.hpp"
-#include "texture_hash.hpp"
 #include "core/file.hpp"
+#include "texture_hash.hpp"
 #include <cstdio>
 #include <format>
 

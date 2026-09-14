@@ -2,10 +2,10 @@
 // allocator overhead; direct malloc allocations are outside this measurement.
 #include "assets/material_catalog.hpp"
 #include "assets/texture.hpp"
-#include "texture_hash.hpp"
 #include "core/file.hpp"
 #include "core/panic.hpp"
 #include "scene/system.hpp"
+#include "texture_hash.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdio>

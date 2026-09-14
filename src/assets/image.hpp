@@ -1,6 +1,6 @@
 #pragma once
-#include "core/panic.hpp"
 #include "core/extent.hpp"
+#include "core/panic.hpp"
 #include "core/types.hpp"
 
 #include <optional>

@@ -1,5 +1,5 @@
-#include "render/renderer_impl.hpp"
 #include "assets/image_io.hpp"
+#include "render/renderer_impl.hpp"
 
 #include "assets/kernels.hpp"
 #include "assets/material_catalog.hpp"
