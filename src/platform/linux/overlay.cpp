@@ -1,6 +1,6 @@
 #include "platform/overlay.hpp"
 
-#include "core/panic.hpp"
+#include "core/panic_if.hpp"
 #include "platform/window.hpp"
 
 #include "backends/imgui_impl_sdl2.h"

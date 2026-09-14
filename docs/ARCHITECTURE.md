@@ -30,6 +30,21 @@ subdivision levels selected by projected size. The belt draws from a library of 
 levels (20 to 20k triangles), packed into one pooled vertex and index range so every level of every shape is
 a slice of the same buffers.
 
+The renderer's CPU-only `Showcase` binding is stricter than generic scene validation: exactly one
+terrestrial, gas giant, desert and rocky moon, optional moonlets within the eight-body limit, and one
+positive-thickness belt whose parent ID is the gas giant. It resolves these roles once before GPU setup.
+At draw entry, states are checked and copied by ID into description order using bounded stack storage;
+missing, duplicate, unknown or non-finite states are rejected. Materials, meshes, atmosphere anchors and
+belt placement therefore use the same body slots even when incoming states are reordered.
+
+Some description fields remain metadata: `scale_policy` is not applied as a multiplier;
+`atmosphere_scale` does not override the effect settings; star radius, temperature and intensity do not
+control the artistic sun or lighting. Star position does drive lighting. Moonlet geometry consumes
+`material_seed`; installed planetary maps remain assigned by body class. Giving the metadata rendering
+semantics is a separate visual change. App bookmarks still target the generated showcase's ordering.
+
+Frame preparation separates CPU geometry from shader packing. `frame_calculations` returns camera projection/history decisions, motion lattice coordinates, light boxes, belt LOD and sun visibility through typed values. `renderer_frame_data.cpp` packs these into the unchanged shader ABI alongside effect settings and resource availability. The calculation library has no backend or shader-header dependency and is tested in both MSVC and GCC CPU builds.
+
 ## Belt
 
 The belt is a population rather than a mesh list: `geometry` places 280k (baseline) or 520k (high) rocks in
@@ -52,23 +67,25 @@ Between the rocks a half-resolution march through the same density field scatter
 3. Scene pass into the HDR target: background, bodies, the pooled rock multi-draw, splats, clouds.
 4. Atmospheres, composited per body against depth; then the belt dust, marched at half resolution and
    composited with a depth-aware upsample.
-5. The splats write their depth and a mask, so the temporal pass reprojects them exactly and keeps their
-   history unclipped.
-6. Temporal anti-aliasing into a history target; area-prefiltered bloom with adjacent-texel separable blur at quarter resolution;
+5. Splats write fractional coverage and coverage-weighted depth into metadata; scene depth remains opaque-only.
+   TAA uses the reconstructed splat depth for reprojection and currently keeps splat history unclipped.
+6. Temporal anti-aliasing into a history target; transient motion streaks into reused HDR storage, added before
+   area-prefiltered bloom with adjacent-texel separable blur at quarter resolution;
    one shared 1×1 sun-visibility estimate for lens effects; exposure metering every
    sixteenth frame from a 16x16 log-luminance image.
 7. Tone mapping (PBR Neutral, AgX or ACES filmic) with vignette, chromatic fringe and grain into an
    intermediate, then the spatial pass (SMAA or FXAA) into the final image.
 8. Present, with the HUD and the Dear ImGui panel drawn last into the swapchain.
 
-GPU timestamps bracket the cull and shadow passes, the scene, the atmospheres with the dust, and the post
-passes; the title bar and the panel show them.
+GPU timestamps separately bracket compute culling, body shadows, belt light maps, far-belt bakes, the scene,
+atmospheres with dust, and post-processing. The original cull/shadow aggregate is retained in the panel and CSV.
 
 ## Renderer implementation
 
 `Renderer::Impl` owns the device, heaps, images and pipeline lifetime registry. The implementation
-is split by responsibility; pass files operate on that shared state without introducing separate
-resource owners or a render graph.
+is split by responsibility. Move-only `GpuImage` values own their texture allocation and
+attachment view; pass files borrow handles from frame-sized and fixed-size target groups.
+Pass ordering and synchronization remain explicit.
 
 | File in `src/render/` | Responsibility |
 | --- | --- |
@@ -76,7 +93,8 @@ resource owners or a render graph.
 | `renderer_frame_data.cpp` | Camera/light transforms, frame constants, body instances and culling inputs |
 | `renderer_pipelines.cpp` | Shader loading and pipeline creation, grouped into scene, belt, post and overlay |
 | `renderer_assets.cpp` | Mesh packing, material decode batches and sky catalogues |
-| `renderer_resources.cpp` | Device/heaps, generic uploads, image lifetime and resize |
+| `renderer_resources.cpp` | Device/heaps, bounded uploads and target-group reconciliation |
+| `gpu_image.hpp` / `gpu_image.cpp` | Move-only image ownership and frame/fixed target groups |
 | `renderer_belt.cpp` | Rock population, GPU culling, indirect rock batch, light/disc maps, splat mask and dust |
 | `renderer_scene.cpp` | Shadow, galaxy, bodies/clouds, atmospheres and motion streaks |
 | `renderer_post.cpp` | Temporal resolve, bloom, tone mapping, spatial AA, metering and presentation |
@@ -90,18 +108,54 @@ explicitly preserve the push-constant updates used by subsequent draws.
 
 ## Resources
 
-One 128 MiB host-visible heap holds everything: meshes and rock records appended from the front at startup,
-per-frame constants, cull scratch, the instance list and the overlay vertices in the back half. A separate
-64 MiB staging heap uploads textures. Descriptors are a fixed table of 40 sampled images and 4 samplers;
+`FrameTargets` owns the images replaced on resize; `FixedTargets` owns window-independent
+maps and metering targets. Material/font images have one owning vector. Each `GpuImage`
+releases its attachment view before its texture and allocation; copying is forbidden,
+and moving transfers ownership while clearing the source. Handle accessors are borrowed.
+The renderer waits for GPU completion before resetting target groups and clears all
+image owners before destroying the device. RAII does not perform implicit GPU waits.
+
+Render passes use `RenderPassScope`; the closing brace ends rendering before subsequent
+barriers. `SubmissionTimeline` owns the semaphore and increments completion values only
+on explicit submit/present calls. The upload flush helper explicitly submits and waits before
+reusing staging bytes. Move-only heap owners form one resettable buffer group; pipeline owners
+are held in one vector, while pass-family handles remain borrowed. Shutdown waits idle, clears
+all resource groups, resets the timeline, and then destroys the device.
+
+`gpu_sync.hpp` names recurring stage/access pairs. These are global execution/memory
+dependencies, not resource-state tracking. Unusual compute/combined-stage barriers remain
+explicit, and no pass destructor inserts a barrier.
+
+
+An approximately 84 MiB host-visible heap holds static meshes/rock records, frame constants, staged
+culling parameters/body instances and 4 MiB of overlay space. GPU-written culling scratch, indirect
+commands and generated instances use a separate device-only heap sized for the configured maximum
+rock count (about 16 MiB by default). A small readback heap returns completed culling statistics;
+only parameters and body instances are uploaded each frame. Rock-count overrides are checked against
+the supported instance capacity before allocation. Generated asteroids use 32-byte records,
+while the body prefix retains 48-byte instances. Mesh material data is reconstructed from
+packed identity; billboards store half-precision RGB/rim and full-precision coverage/ambient.
+Static asteroid records retain full-precision rotation and spin rates.
+A separate 64 MiB staging heap uploads textures. Descriptors are a fixed table of 40 sampled images and 4 samplers;
 `Slot` in `renderer_impl.hpp` names every entry. Push constants carry a 32-byte root per pipeline: the frame
 pointer and vertex or instance pointers for surfaces, the rock data and scratch pointers for culling, a
 vertex pointer and pixel scale for the overlay.
 
-Materials are PNG files decoded with Wuffs, mip-generated on the CPU with SIMD kernels and uploaded once;
+Materials are PNG files decoded with Wuffs into owning `Rgba8Image` values, mip-generated on the CPU with SIMD kernels and uploaded once;
 `tools/import-assets.ps1` records how each was derived from its upstream source. Frame targets are recreated
 on resize; history is invalidated for one frame.
 
 ## Application
+
+The app/render adapter copies pose, basis, vertical FOV and cut serial into a `CameraView`
+for each frame. Navigation and bookmark/orbit state remain in app; rendering uses the
+supplied basis without recomputing it. Bodies and UI remain borrowed for the draw call.
+App startup builds the HUD and supplies an image view to the renderer, which copies and
+uploads it during construction. HUD and font uploads share the RGBA view-to-texture path.
+The app releases its HUD pixels after construction. Renderer files include no app headers.
+`orbital_app_cpu` builds navigation separately from `orbital_scene`; only the executable
+and camera/app tests link it.
+
 
 `app/main.cpp` parses options, owns the frame loop and turns key presses into `AppState`. The camera has
 free flight, orbit and a scripted tour, with body-relative bookmarks for the six views. The control panel
@@ -135,7 +189,7 @@ helper on its own to catch accidental include-order dependencies.
 
 ## Tools and tests
 
-Seven CTest suites cover the CPU layers: core, system, geometry, camera, image, kernels and materials. They
+Ten CTest suites cover core, system, geometry, camera, image, kernels, materials, SMAA, texture and app boundaries. They
 use assertions as executable invariants and also run under GCC. `tools/check-gcc.ps1` runs that build
 locally; `tools/smoke-window.ps1` drives the window through resize, minimize and key transitions;
 `tools/check-stability.ps1` compares two fixed-time captures pixel by pixel.
@@ -148,3 +202,13 @@ An independent uncompressed original-map path supports full-resolution compariso
 The Sky selector and `--galaxy` choose splats, layers or original; all assets load
 at startup, while only the selected path renders. Texture modes share the splat
 sky's brightness/contrast but bypass its procedural dust. Splats remain the default.
+
+Checked borrowed `ImageView` values carry pixel layout, row stride and byte span across PNG output and font upload boundaries. Views support constant evaluation. Image types are separate from PNG I/O declarations in `assets/image_io.hpp`; shared asset validation permits 1 through 16,384 pixels on each axis.
+Optional desktop GPU correctness tests use the pinned local Vulkan layer; see [RENDER_VALIDATION.md](RENDER_VALIDATION.md).
+
+
+### App controls and options
+
+`ui.cpp` manages the ImGui context and backend lifecycle; `ui_panel.cpp` assembles sections whose controls take only the relevant settings (plus stats where shown). Section order and ImGui IDs remain stable. Camera navigation and capture requests share actions with keyboard/startup handlers; simple setting assignments remain direct. Orbit requests reject an absent selected body.
+
+`options.cpp` owns CLI parsing and validation in the CPU-only app target, separate from the window/render loop. Bounded enum/boolean choices share one parser. Numeric syntax, missing values, range checks and last-occurrence precedence are covered by CPU tests; non-finite floating-point values are rejected, including pan and LOD scale.

@@ -1,3 +1,4 @@
+#include "assets/image_io.hpp"
 #include "render/renderer_impl.hpp"
 
 #include "assets/kernels.hpp"
@@ -6,6 +7,7 @@
 #include "assets/texture.hpp"
 #include "core/file.hpp"
 #include "core/log.hpp"
+#include "core/small_vec.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -49,7 +51,6 @@ constexpr MaterialSource material_sources[] = {{"earth_albedo.png", Slot::earth_
                                                {"gas_polar.png", Slot::gas_polar, true},
                                                {"gas_polar_flow.png", Slot::gas_polar_flow, true}};
 constexpr std::size_t material_count = std::size(material_sources);
-static_assert(material_count <= inline_upload_count);
 
 void append_vertices(std::vector<Vertex>& out, const geometry::Mesh& mesh) {
     for (const auto& v : mesh.vertices)
@@ -129,9 +130,7 @@ void Renderer::Impl::load_materials() {
             device, texture_format(probe), gpu::TextureUsage::sampled | gpu::TextureUsage::transfer_destination);
     }
     std::atomic<unsigned> cached_count{0};
-    Uploads uploads;
-    for (std::size_t i = 0; i < material_count; i++)
-        uploads.emplace_back();
+    std::vector<Upload> uploads(material_count);
     std::atomic<std::size_t> next{0};
     SmallVec<std::future<void>, decode_workers_max> pool;
     for (std::size_t worker = 0; worker < workers; worker++)
@@ -150,13 +149,13 @@ void Renderer::Impl::load_materials() {
                     log::warn("{} is missing; run tools/import-assets.ps1 to bake it (its effect is off)", source.file);
                     if (source.slot == Slot::gas_polar)
                         polar_caps = false;
-                    assets::Image neutral{.extent = {4, 4}, .pixels = {}};
+                    assets::Rgba8Image neutral{.extent = {4, 4}, .pixels = {}};
                     neutral.pixels.resize(4 * 4 * 4);
                     for (std::size_t p = 0; p < 16; p++) {
                         neutral.pixels[p * 4] = neutral.pixels[p * 4 + 1] = 128; // zero signed flow
                         neutral.pixels[p * 4 + 3] = 255;
                     }
-                    uploads[i] = {.data = assets::texture_from_images({std::move(neutral)}), .slot = source.slot};
+                    uploads[i] = {.data = assets::texture_from_image(std::move(neutral)), .slot = source.slot};
                     continue;
                 }
                 uploads[i] = {.data = assets::texture_from_images(assets::load_material(path, desc)),
@@ -281,10 +280,8 @@ void Renderer::Impl::load_galaxy_original() {
         log::warn("Original Gaia texture unavailable; splat/procedural fallback remains active");
         return;
     }
-    std::array<Upload, 1> uploads{
-        {{.data = assets::texture_from_images(assets::prepare_material(std::move(*image), {})),
-          .slot = Slot::galaxy_original}}};
-    upload_images(uploads);
+    upload_images({{.data = assets::texture_from_images(assets::prepare_material(std::move(*image), {})),
+                    .slot = Slot::galaxy_original}});
     galaxy_original_available = true;
     log::info("Loaded original full-resolution Gaia texture (uncompressed)");
 }

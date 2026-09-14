@@ -3,6 +3,7 @@ project(Orbital VERSION 0.1.0 LANGUAGES CXX)
 include(CTest)
 set(CMAKE_CXX_EXTENSIONS OFF)
 option(ORBITAL_BUILD_DEMO "Build the native Vulkan demo" ON)
+option(ORBITAL_RENDER_TESTS "Enable desktop GPU tests requiring local Vulkan validation layers" OFF)
 
 if(MSVC)
   set(ORBITAL_WARNINGS /W4 /permissive- /EHsc)
@@ -12,16 +13,26 @@ endif()
 
 # CPU-only libraries (see docs/CODE_STYLE.md for the layering):
 #   orbital_core   logging, panic, file I/O, math
-#   orbital_scene  deterministic system generation, geometry, camera
+#   orbital_scene  deterministic system generation, geometry
+#   orbital_app_cpu app navigation and command-line parsing, independent of the renderer
+#   orbital_render_cpu showcase contract, state binding and frame calculations
 #   orbital_assets PNG I/O (vendored Wuffs decoder, stb writer), pixel kernels, materials
 add_library(orbital_core STATIC src/core/log.cpp src/core/panic.cpp src/core/file.cpp)
 target_include_directories(orbital_core PUBLIC src)
 target_compile_features(orbital_core PUBLIC cxx_std_20)
 target_compile_options(orbital_core PRIVATE ${ORBITAL_WARNINGS})
 
-add_library(orbital_scene STATIC src/scene/system.cpp src/scene/geometry.cpp src/app/camera.cpp)
+add_library(orbital_scene STATIC src/scene/system.cpp src/scene/geometry.cpp)
 target_link_libraries(orbital_scene PUBLIC orbital_core)
 target_compile_options(orbital_scene PRIVATE ${ORBITAL_WARNINGS})
+
+add_library(orbital_render_cpu STATIC src/render/showcase.cpp src/render/frame_calculations.cpp)
+target_link_libraries(orbital_render_cpu PUBLIC orbital_scene)
+target_compile_options(orbital_render_cpu PRIVATE ${ORBITAL_WARNINGS})
+
+add_library(orbital_app_cpu STATIC src/app/camera.cpp src/app/options.cpp)
+target_link_libraries(orbital_app_cpu PUBLIC orbital_scene)
+target_compile_options(orbital_app_cpu PRIVATE ${ORBITAL_WARNINGS})
 
 add_library(orbital_assets STATIC src/assets/image.cpp src/assets/kernels.cpp src/assets/materials.cpp src/assets/texture.cpp)
 set(smaa_source "${CMAKE_CURRENT_BINARY_DIR}/generated/smaa.cpp")
@@ -58,10 +69,32 @@ if(ORBITAL_BUILD_TEXTURE_TOOLS)
   add_custom_target(texture_tools DEPENDS texture_prepare astcenc-native bc7_compress)
 endif()
 
+# Opt-in measurement executable; its allocation instrumentation never enters the demo.
+add_executable(storage_profile EXCLUDE_FROM_ALL tools/storage_profile.cpp)
+target_link_libraries(storage_profile PRIVATE orbital_scene orbital_assets)
+target_compile_options(storage_profile PRIVATE ${ORBITAL_WARNINGS})
+
 if(BUILD_TESTING)
-  foreach(test IN ITEMS core system geometry camera image kernels materials smaa texture)
+  if(NOT MINGW) # NoGraphicsAPI headers explicitly exclude MinGW.
+    add_executable(gpu_scopes_tests tests/gpu_scopes_tests.cpp)
+    target_compile_features(gpu_scopes_tests PRIVATE cxx_std_20)
+    target_include_directories(gpu_scopes_tests PRIVATE src third_party/NoGraphicsAPI/include)
+    if(MSVC)
+      target_compile_options(gpu_scopes_tests PRIVATE ${ORBITAL_WARNINGS} /UNDEBUG)
+    else()
+      target_compile_options(gpu_scopes_tests PRIVATE ${ORBITAL_WARNINGS} -UNDEBUG)
+    endif()
+    add_test(NAME gpu_scopes COMMAND gpu_scopes_tests)
+  endif()
+  foreach(test IN ITEMS core system geometry camera image kernels materials smaa texture app showcase frame_calculations options)
     add_executable(${test}_tests tests/${test}_tests.cpp)
     target_link_libraries(${test}_tests PRIVATE orbital_scene orbital_assets)
+    if(test STREQUAL "showcase" OR test STREQUAL "frame_calculations")
+      target_link_libraries(${test}_tests PRIVATE orbital_render_cpu)
+    endif()
+    if(test STREQUAL "camera" OR test STREQUAL "app" OR test STREQUAL "options")
+      target_link_libraries(${test}_tests PRIVATE orbital_app_cpu)
+    endif()
     # These tests use assertions as executable invariants, including Release.
     if(MSVC)
       target_compile_options(${test}_tests PRIVATE ${ORBITAL_WARNINGS} /UNDEBUG)
@@ -123,10 +156,10 @@ if(ORBITAL_BUILD_DEMO)
   endif()
   target_compile_options(orbital_platform PRIVATE ${ORBITAL_WARNINGS})
 
-  add_executable(orbital src/app/main.cpp src/app/hud.cpp src/app/ui.cpp src/render/renderer_resources.cpp src/render/renderer_frame.cpp
+  add_executable(orbital src/app/main.cpp src/app/hud.cpp src/app/ui.cpp src/app/ui_panel.cpp src/render/renderer_resources.cpp src/render/gpu_image.cpp src/render/renderer_frame.cpp
     src/render/renderer_frame_data.cpp src/render/renderer_pipelines.cpp src/render/renderer_assets.cpp
     src/render/renderer_belt.cpp src/render/renderer_scene.cpp src/render/renderer_post.cpp src/render/renderer_overlay.cpp)
-  target_link_libraries(orbital PRIVATE orbital_scene orbital_assets orbital_platform NoGraphicsAPI::NoGraphicsAPI)
+  target_link_libraries(orbital PRIVATE orbital_scene orbital_app_cpu orbital_render_cpu orbital_assets orbital_platform NoGraphicsAPI)
   target_include_directories(orbital PRIVATE shaders) # scene_shared.h, the C++/shader layout
   target_compile_definitions(orbital PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
   target_compile_options(orbital PRIVATE ${ORBITAL_WARNINGS})
@@ -136,6 +169,16 @@ if(ORBITAL_BUILD_DEMO)
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets" "${CMAKE_BINARY_DIR}/assets"
     COMMENT "Synchronizing material assets")
   add_dependencies(orbital orbital_sync_assets)
+
+  if(BUILD_TESTING AND ORBITAL_RENDER_TESTS)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_executable(render_validation_probe tests/render_validation_probe.cpp src/render/gpu_image.cpp)
+    target_link_libraries(render_validation_probe PRIVATE orbital_core NoGraphicsAPI)
+    target_compile_options(render_validation_probe PRIVATE ${ORBITAL_WARNINGS})
+    add_test(NAME renderer_validation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check-renderer.py"
+      --build "$<TARGET_FILE_DIR:orbital>")
+    set_tests_properties(renderer_validation PROPERTIES LABELS "gpu;validation" RUN_SERIAL TRUE TIMEOUT 1800)
+  endif()
 
   install(TARGETS orbital RUNTIME DESTINATION .)
   install(DIRECTORY "${CMAKE_BINARY_DIR}/shaders" DESTINATION .)

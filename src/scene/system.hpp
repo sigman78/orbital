@@ -29,16 +29,18 @@ struct BodyDescription {
     BodyClass body_class = BodyClass::Terrestrial;
     double radius = 1.0;
     double axial_tilt = 0.0;
-    double rotation_period = 1.0;
+    double rotation_period = 1.0; // finite, nonnegative; zero means no spin
     double rotation_phase = 0.0;
     Vec3d orbit_offset{}; // local position at t=0, in the right-handed Y-up frame
     Vec3d orbit_axis{0.0, 1.0, 0.0};
     double orbit_angular_rate = 0.0; // radians per second; intentionally artistic scale
     std::uint64_t material_seed = 0;
-    double atmosphere_scale = 0.0;
+    double atmosphere_scale = 0.0; // descriptive metadata; showcase atmosphere comes from render settings
 };
 
 struct StarDescription {
+    // The showcase consumes position only; radius/temperature/intensity are
+    // descriptive metadata, not controls for its artistic sun and lighting.
     std::uint64_t id = 0;
     double radius = 1.0;
     double temperature = 5778.0;
@@ -62,7 +64,7 @@ struct SystemDescription {
     StarDescription star{};
     std::vector<BodyDescription> bodies;
     std::vector<BeltDescription> belts;
-    double scale_policy = 1.0; // artistic scene units; not a physical distance scale
+    double scale_policy = 1.0; // metadata; evaluation/rendering use scene units without applying this multiplier
 };
 
 struct BodyState {

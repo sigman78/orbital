@@ -13,11 +13,16 @@ See [docs/FOUNDATION.md](../docs/FOUNDATION.md) for the investigation.
 `NoGraphicsAPI-compat.patch` is the full diff against the upstream commit. To regenerate it after
 editing the fork:
 
-```powershell
-git clone https://github.com/sebbbi/NoGraphicsAPI.git upstream
-git -C upstream checkout 8e414bd0a8010b9f721d06d470860e27aa69c071
-git diff --no-index --src-prefix=a/ --dst-prefix=b/ upstream NoGraphicsAPI > NoGraphicsAPI-compat.patch
-```
+Use a clean checkout at the pinned commit, copy the tracked files under `NoGraphicsAPI/`
+over their matching upstream paths, and remove any upstream files absent from the vendored
+tree. Include newly added files with `git add -N .`, then generate the patch from that
+checkout with `git diff --binary --src-prefix=a/ --dst-prefix=b/`. Save its output as
+UTF-8 without a BOM in `NoGraphicsAPI-compat.patch`. Do not copy build outputs or `.git`
+directories, and do not stage the modified files before generating the diff.
+
+Verify with `git apply --check` and `git apply` in a second clean checkout of the pinned
+commit. The resulting file set and contents must match the tracked vendored tree (allowing
+only CRLF/LF differences). Keep this patch synchronized whenever the fork changes.
 
 Vendored code keeps its upstream formatting (`NoGraphicsAPI/.clang-format`) and is excluded from
 the project's clang-format and clang-tidy runs.
@@ -60,3 +65,10 @@ The default build does not compile it; the demo does not link it.
 MIT/public domain, with license notice in the source. See
 [vendoring details](bc7enc/ORBITAL.md). Only the optional `bc7_compress` executable
 links it; the demo has no encoder dependency.
+
+## Khronos Vulkan Validation Layers (optional development tool)
+
+Sources and dependencies are materialized in `.tools` by `tools/build-validation.ps1`,
+with exact revisions in `tools/validation-dependencies.json`. The local install retains
+the Apache-2.0 license and a binary hash manifest. It is not linked or shipped with the
+demo. See [renderer validation](../docs/RENDER_VALIDATION.md) for bootstrap and test commands.

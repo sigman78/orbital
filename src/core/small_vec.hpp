@@ -42,9 +42,9 @@ public:
     ~SmallVec() { clear(); }
 
     static constexpr std::size_t capacity() { return N; }
-    std::size_t size() const { return size_; }
-    bool empty() const { return size_ == 0; }
-    bool full() const { return size_ == N; }
+    constexpr std::size_t size() const { return size_; }
+    constexpr bool empty() const { return size_ == 0; }
+    constexpr bool full() const { return size_ == N; }
 
     T* data() { return std::launder(reinterpret_cast<T*>(storage_)); }
     const T* data() const { return std::launder(reinterpret_cast<const T*>(storage_)); }

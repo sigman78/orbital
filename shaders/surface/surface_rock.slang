@@ -168,10 +168,10 @@ float4 shadeBillboard(SurfaceVaryings input, Instance inst)
 [shader("fragment")]
 float4 fragmentMain(SurfaceVaryings input) : SV_Target0
 {
-    if (root.mode == MODE_BILLBOARD) return shadeBillboard(input, root.instances[input.instanceIndex]);
+    if (root.mode == MODE_BILLBOARD) return shadeBillboard(input, loadInstance(root.frame, root.instances, input.instanceIndex, true));
     if (root.mode == MODE_SPLAT_MASK)
     {
-        float coverage = shadeBillboard(input, root.instances[input.instanceIndex]).a;
+        float coverage = shadeBillboard(input, loadInstance(root.frame, root.instances, input.instanceIndex, true)).a;
         float z = dot(input.worldPosition, root.frame.forward_exposure.xyz);
         return float4(z * coverage, 0.0, 0.0, coverage);
     }

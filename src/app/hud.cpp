@@ -2,7 +2,7 @@
 
 #include "platform/text.hpp"
 
-namespace space::assets {
+namespace space::app {
 namespace {
 
 constexpr Extent2D hud_size{1024, 256};
@@ -19,8 +19,8 @@ constexpr platform::RuleItem hud_rules[] = {{.x0 = 6, .y = 94, .x1 = 256}};
 
 } // namespace
 
-Image make_hud() {
+assets::Rgba8Image make_hud() {
     return {hud_size, platform::rasterize_overlay({.size = hud_size, .text = hud_text, .rules = hud_rules})};
 }
 
-} // namespace space::assets
+} // namespace space::app

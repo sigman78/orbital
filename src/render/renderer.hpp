@@ -1,18 +1,25 @@
 #pragma once
-#include "app/camera.hpp"
+#include "render/camera_view.hpp"
 #include "render/settings.hpp"
-#include "scene/system.hpp"
 #include <filesystem>
 #include <memory>
 #include <span>
 
 struct ImDrawData;
+namespace space {
+struct BodyState;
+struct SystemDescription;
+} // namespace space
+namespace space::assets {
+class ImageView;
+}
 
 namespace space::render {
 
 struct Stats {
     float frame_ms = 0, gpu_ms = 0, shadow_ms = 0, surface_ms = 0, atmosphere_ms = 0,
-          post_ms = 0;    // shadow_ms includes the belt culling passes
+          post_ms = 0; // shadow_ms includes the belt culling passes
+    float cull_ms = 0, body_shadow_ms = 0, belt_light_ms = 0, belt_disc_ms = 0;
     float prepare_ms = 0; // CPU work between acquiring the swapchain image and submitting
     unsigned visible_asteroids = 0, triangles = 0,
              rock_triangles = 0;    // rock figures are from the previous frame's culling
@@ -21,10 +28,10 @@ struct Stats {
     float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc
 };
 
-// Everything the renderer needs for one frame; owned by the caller.
+// Camera/settings are copied values; body and UI storage is borrowed for draw().
 struct FrameInput {
-    const Camera& camera;
-    std::span<const BodyState> bodies; // at least the three major bodies, in system order
+    CameraView camera;
+    std::span<const BodyState> bodies; // exactly one state per configured body ID; any order
     double time = 0;                   // simulation seconds; drives belt spin and rock rotation
     bool high_quality = false;
     bool overlay = true;
@@ -47,8 +54,9 @@ struct RendererConfig {
 
 class Renderer {
 public:
+    // HUD pixels are copied/uploaded during construction; their storage is not retained.
     Renderer(void* window, const SystemDescription& system, const std::filesystem::path& directory,
-             const RendererConfig& config = {});
+             assets::ImageView hud, const RendererConfig& config = {});
     ~Renderer();
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
@@ -61,7 +69,7 @@ public:
     void set_vsync(bool vsync);
     Stats stats() const;
     // The Dear ImGui font atlas, RGBA8; uploaded once, before the first frame that draws the overlay.
-    void set_ui_font(const std::uint8_t* rgba, unsigned width, unsigned height);
+    void set_ui_font(assets::ImageView image);
 
 private:
     struct Impl;

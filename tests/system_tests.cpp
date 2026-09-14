@@ -1,6 +1,7 @@
 #include "scene/system.hpp"
 #include <cassert>
 #include <cmath>
+#include <limits>
 
 int main() {
     using namespace space;
@@ -31,5 +32,24 @@ int main() {
     auto invalid = a;
     invalid.bodies[0].radius = -1;
     assert(!validate_system(invalid).empty());
+    for (double value : {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
+        for (auto member :
+             {&BodyDescription::rotation_phase, &BodyDescription::rotation_period, &BodyDescription::axial_tilt}) {
+            invalid = a;
+            invalid.bodies[0].*member = value;
+            assert(!validate_system(invalid).empty());
+            assert(evaluate_system(invalid, 0).empty());
+        }
+        invalid = a;
+        invalid.belts[0].thickness = value;
+        assert(!validate_system(invalid).empty());
+    }
+    invalid = a;
+    invalid.bodies[0].rotation_period = -1;
+    assert(!validate_system(invalid).empty());
+    auto stationary = a;
+    stationary.bodies[0].rotation_period = 0;
+    assert(validate_system(stationary).empty());
+    assert(evaluate_system(stationary, 1000)[0].rotation_angle == stationary.bodies[0].rotation_phase);
     return 0;
 }

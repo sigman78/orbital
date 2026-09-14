@@ -19,6 +19,7 @@ struct UiRoot {
     std::uint32_t texture, unused;
 };
 static_assert(sizeof(UiVertex) == 32 && sizeof(UiRoot) == 32);
+static_assert(sizeof(ImDrawIdx) == 2, "The overlay pipeline requires 16-bit ImGui indices");
 
 } // namespace
 
@@ -82,14 +83,10 @@ void Renderer::Impl::record_ui(gpu::CommandBuffer* cmd, const ImDrawData* ui, st
     }
 }
 
-void Renderer::set_ui_font(const std::uint8_t* rgba, unsigned width, unsigned height) {
-    Uploads upload;
-    upload.emplace_back();
-    assets::Image image{.extent = {width, height}, .pixels = {}};
-    image.pixels.assign(rgba, rgba + std::size_t(width) * height * 4);
-    upload.back().data = assets::texture_from_images({std::move(image)});
-    upload.back().slot = Slot::ui_font;
-    impl_->upload_images(upload);
+void Renderer::set_ui_font(assets::ImageView pixels) {
+    ORBITAL_ASSERT(!impl_->ui_font_uploaded);
+    impl_->upload_rgba(Slot::ui_font, pixels);
+    impl_->ui_font_uploaded = true;
 }
 
 } // namespace space::render

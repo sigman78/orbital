@@ -1,0 +1,435 @@
+{
+  "recorded_utc": "2026-09-14T05:18:56.332082+00:00",
+  "revision": "073b2d2cc0b58d3aa07b2f96dfaf66be78796303",
+  "source_dirty": true,
+  "platform": "Windows-10-10.0.19045-SP0",
+  "processor": "Intel64 Family 6 Model 158 Stepping 12, GenuineIntel",
+  "scope": "Single-threaded operator new requested bytes; excludes preloaded source buffers, direct malloc, allocator overhead and GPU memory. Three runs; caches warm; not full-app startup or peak RSS.",
+  "payload_bytes": 207396272,
+  "mips": 320,
+  "sources": [
+    {
+      "path": "build\\release\\assets\\materials\\earth_albedo.bc7.otex",
+      "size": 11184912,
+      "sha256": "4f54d794fc3852d63c3b12bdad5f63a9576f2801aae6012f7786cc8e5cc47827"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\gas_albedo.bc7.otex",
+      "size": 8643936,
+      "sha256": "9a4fb2fcb49206b3a5dcf20a677b2b37c353c1baa7378dd8ad4f3149ebbdca01"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\earth_clouds.bc7.otex",
+      "size": 11184912,
+      "sha256": "392999c81319888d90cbcbf1259131332f6f490cfcf38b2eb26651849fc512d1"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\earth_normal.bc7.otex",
+      "size": 2796304,
+      "sha256": "78266ba23cacb84a66117b1cd3ba3583321c322b737f53e06c50bc4c16ee7e68"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\earth_specular.bc7.otex",
+      "size": 2796304,
+      "sha256": "539965155720abd4927afd0a0e70d702a960055848328f787703c9c8c62d62c5"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\earth_night.bc7.otex",
+      "size": 11184912,
+      "sha256": "6120a2c01b5333cab6f094e7574382490a4b927c7b1d4feb3057fc00adced329"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\moon_albedo.bc7.otex",
+      "size": 11184912,
+      "sha256": "b634c1aaa7eea33a4d4bc1128e9c98f53208db83618e892d76399ba0aad352a3"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_albedo.bc7.otex",
+      "size": 5592496,
+      "sha256": "02560df847cc97b94b460b77d9196eee754436bd957facd5b5727806e4648766"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_normal.bc7.otex",
+      "size": 5592496,
+      "sha256": "77bcc2b90c90a905f75c6df63488be05d9c35933520ac6a49724becd417947c2"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_roughness.bc7.otex",
+      "size": 5592496,
+      "sha256": "e4d3abdee677d1f2a67b9c826386106df25553cb2d889ecbf16b1b813fb9d216"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\mars_albedo.bc7.otex",
+      "size": 11184912,
+      "sha256": "bdfae3d8caed25529e75c3371b1a2dd95d3c4cddc2770ed490d37f830d6f8098"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\mars_normal.bc7.otex",
+      "size": 11184912,
+      "sha256": "25ea5130007883f892b640ce12b7a865505a11a465c6ab75fe0442774abe13d8"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\moon_normal.bc7.otex",
+      "size": 11184912,
+      "sha256": "db43f2733f706ab47fa9aaeac20f7e1908a39119c8bea77095ecaeef73de1fbf"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_face_albedo.bc7.otex",
+      "size": 5592496,
+      "sha256": "fcdc82382874f6a16693c08a5da033cfabe26d5c93eac1a7cf986f0ac0216e5c"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_face_normal.bc7.otex",
+      "size": 5592496,
+      "sha256": "b4c2a7eba1dd40ab7f7063e4c0ad4764b32ca08d73ebcd1f29a03e06bd95c0cc"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_face_roughness.bc7.otex",
+      "size": 5592496,
+      "sha256": "fdea75d996c8fd20e61fc2eb59fd3132a273d80d8f9781e6206beb7f2e20d68a"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_boulder_albedo.bc7.otex",
+      "size": 5592496,
+      "sha256": "0e8276def36dd983f889c766c8fc92195af766fe4099dcb4e9e8b17ec6bd8d60"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_boulder_normal.bc7.otex",
+      "size": 5592496,
+      "sha256": "dc95e66ee362f7bf3f9f1710380f99a81db9ccce0866743ed8a47359dd5462c5"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_boulder_roughness.bc7.otex",
+      "size": 5592496,
+      "sha256": "4ed14cb8e67b9f4f1a518024cf7b695fc6fac6a19981bf6876ba17d1242e9821"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\gas_flow.otex",
+      "size": 2796268,
+      "sha256": "7aa14c5878cc0a8507279b9f82987a7376d0ca0f1a638ab7f1511515b2cc116b"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\gas_detail.otex",
+      "size": 44739308,
+      "sha256": "3d94343aa0a8dfe67aa6ddff1d0633d4ac09ccc4ca8ac551d7ca2881440a4688"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\gas_relief.otex",
+      "size": 11184876,
+      "sha256": "f1b6257ff674ba0a5fb2e013383a6d7b241fd030be69166da6f567cdca23e270"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\gas_polar.bc7.otex",
+      "size": 2796304,
+      "sha256": "0d4b47cbe0e981361104f5923678e6537255e8746b1ebb8b9a76d004f4e44257"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\gas_polar_flow.otex",
+      "size": 2796268,
+      "sha256": "8ce16a767d6ce1a171b5d1e1efa64b8b384d55f4e960db2f020d3aedb3ce7ee1"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\galaxy_low.bc7.otex",
+      "size": 2832,
+      "sha256": "3dcd4e167536a4c3c388412aee4c6ec8cbdd740543d2ee1e67dad64df1af0772"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\galaxy_clouds.bc7.otex",
+      "size": 21968,
+      "sha256": "449a0ec4a6f31a3c939dbd8495d6a83e568d22fc69f018ab94f055c9e3c8f75c"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\galaxy_filaments.bc7.otex",
+      "size": 196784,
+      "sha256": "589b54da38ed1a0b6a159ab0021a6f4b8133f107837492a8ae52ade7eae17b4a"
+    }
+  ],
+  "summary": {
+    "msvc": {
+      "allocator-control": {
+        "operations": 1.0,
+        "ms": 0.0007,
+        "allocations": 2.0,
+        "allocated_bytes": 192.0,
+        "peak_live_bytes": 192.0
+      },
+      "scene-evaluate": {
+        "operations": 100000.0,
+        "ms": 45.591,
+        "allocations": 100000.0,
+        "allocated_bytes": 28800000.0,
+        "peak_live_bytes": 288.0
+      },
+      "scene-validate": {
+        "operations": 100000.0,
+        "ms": 22.8968,
+        "allocations": 0.0,
+        "allocated_bytes": 0.0,
+        "peak_live_bytes": 0.0
+      },
+      "cache-hash-only": {
+        "operations": 27.0,
+        "ms": 180.9849,
+        "allocations": 0.0,
+        "allocated_bytes": 0.0,
+        "peak_live_bytes": 0.0
+      },
+      "cache-parse-retained": {
+        "operations": 27.0,
+        "ms": 227.0146,
+        "allocations": 508.0,
+        "allocated_bytes": 207435007.0,
+        "peak_live_bytes": 207414271.0
+      },
+      "cache-slab-lower-bound": {
+        "operations": 27.0,
+        "ms": 222.3823,
+        "allocations": 28.0,
+        "allocated_bytes": 207397934.0,
+        "peak_live_bytes": 207397934.0
+      },
+      "cache-load-retained": {
+        "operations": 27.0,
+        "ms": 501.4521,
+        "allocations": 650.0,
+        "allocated_bytes": 578867793.0,
+        "peak_live_bytes": 235152009.0
+      },
+      "earth_albedo.png": {
+        "operations": 1.0,
+        "ms": 63.223,
+        "allocations": 18.0,
+        "allocated_bytes": 77403662.0,
+        "peak_live_bytes": 66217736.0
+      },
+      "earth_clouds.png": {
+        "operations": 1.0,
+        "ms": 77.3553,
+        "allocations": 18.0,
+        "allocated_bytes": 80050385.0,
+        "peak_live_bytes": 68864459.0
+      },
+      "earth_normal.png": {
+        "operations": 1.0,
+        "ms": 11.8564,
+        "allocations": 17.0,
+        "allocated_bytes": 17992908.0,
+        "peak_live_bytes": 15195693.0
+      }
+    },
+    "gcc": {
+      "allocator-control": {
+        "operations": 1.0,
+        "ms": 0.0009,
+        "allocations": 2.0,
+        "allocated_bytes": 192.0,
+        "peak_live_bytes": 192.0
+      },
+      "scene-evaluate": {
+        "operations": 100000.0,
+        "ms": 25.8347,
+        "allocations": 100000.0,
+        "allocated_bytes": 28800000.0,
+        "peak_live_bytes": 288.0
+      },
+      "scene-validate": {
+        "operations": 100000.0,
+        "ms": 4.2329,
+        "allocations": 0.0,
+        "allocated_bytes": 0.0,
+        "peak_live_bytes": 0.0
+      },
+      "cache-hash-only": {
+        "operations": 27.0,
+        "ms": 181.0973,
+        "allocations": 0.0,
+        "allocated_bytes": 0.0,
+        "peak_live_bytes": 0.0
+      },
+      "cache-parse-retained": {
+        "operations": 27.0,
+        "ms": 230.8667,
+        "allocations": 455.0,
+        "allocated_bytes": 207423624.0,
+        "peak_live_bytes": 207411160.0
+      },
+      "cache-slab-lower-bound": {
+        "operations": 27.0,
+        "ms": 225.8455,
+        "allocations": 28.0,
+        "allocated_bytes": 207396920.0,
+        "peak_live_bytes": 207396920.0
+      },
+      "cache-load-retained": {
+        "operations": 27.0,
+        "ms": 507.9053,
+        "allocations": 757.0,
+        "allocated_bytes": 578870452.0,
+        "peak_live_bytes": 235149356.0
+      },
+      "earth_albedo.png": {
+        "operations": 1.0,
+        "ms": 63.4917,
+        "allocations": 18.0,
+        "allocated_bytes": 77403499.0,
+        "peak_live_bytes": 66217619.0
+      },
+      "earth_clouds.png": {
+        "operations": 1.0,
+        "ms": 77.1701,
+        "allocations": 18.0,
+        "allocated_bytes": 80050222.0,
+        "peak_live_bytes": 68864342.0
+      },
+      "earth_normal.png": {
+        "operations": 1.0,
+        "ms": 12.0028,
+        "allocations": 17.0,
+        "allocated_bytes": 17992784.0,
+        "peak_live_bytes": 15195576.0
+      }
+    }
+  },
+  "executables": {
+    "msvc": "c4d1187f74e0232be4784aac54aed7407fdebf73136528e9eb9512e334b6df75",
+    "gcc": "5609f030fda8e7301f413279047f0b4c4250b9cda3b85d671dcac6c7e3205114"
+  },
+  "source_pngs": [
+    {
+      "path": "build\\release\\assets\\materials\\earth_albedo.png",
+      "size": 7495315,
+      "sha256": "421d2054025d5d40f54cd8abaac66ba2a9e9a99d0d47576f9601ee3e89dfd259"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\gas_albedo.png",
+      "size": 9279568,
+      "sha256": "9ce509aa29776b4a82e9959b1e98c0a6ea4859cde5ed2506cb2cbb69952888c9"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\earth_clouds.png",
+      "size": 10142038,
+      "sha256": "8797eb5c318592a53bd488640e47458f8d165b208e35026620c85303f9993d55"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\earth_normal.png",
+      "size": 514488,
+      "sha256": "fd9a0bfc1f15850e63b75d29c8dfa675335e414c8a32f55032a354f7a6bfdf9b"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\earth_specular.png",
+      "size": 264827,
+      "sha256": "f489845dc0ba8b4958adadf11ed559c852c1c5b63199d43485d0f653a3e7b89d"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\earth_night.png",
+      "size": 3520526,
+      "sha256": "028c5ba11f5c4e0a48fd9684e2b279e20e7bd855a3354036cea91b235390fe9f"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\moon_albedo.png",
+      "size": 14360479,
+      "sha256": "044177341f55cea0a110529472d9e30edb5f861dc7fa625238ac58011626ad75"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_albedo.png",
+      "size": 8575725,
+      "sha256": "f9c5dbecd68e90e1f94e136635ff47048a7f79e3bfad6158e5452b9d9f8bd610"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_normal.png",
+      "size": 8327520,
+      "sha256": "c3e43d506f2d2197fa9403fa5e2f1017b9357f219aa61acfbeed29520f314c00"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_roughness.png",
+      "size": 4008336,
+      "sha256": "c7d96567bfb305815e8c39b5588799ee35846e05d7bfc54a7bfd9bc9ecf5c2f7"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\mars_albedo.png",
+      "size": 17882394,
+      "sha256": "e98eb131f3361fe5e9426f00d24efff036e242702d3a87dc40cfa11ff9b20c73"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\mars_normal.png",
+      "size": 8606643,
+      "sha256": "1ae9b1205c73031bf858458ded93012a2b8bb4caa7541841f16937ae7c7b21fb"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\moon_normal.png",
+      "size": 15160506,
+      "sha256": "76fe7f6fae62e0b292f17fec997377e4b5582f9ce83861facfa2260fc657a1e9"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_face_albedo.png",
+      "size": 9019239,
+      "sha256": "9a5162cfd7d473b015ad336af8950e10d54a8f6480473efb022570595acc93f9"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_face_normal.png",
+      "size": 9782654,
+      "sha256": "6745a9c1b975828fb771b371879ab6d1a19a8fc0e7df69f85890561dd7b12328"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_face_roughness.png",
+      "size": 4505461,
+      "sha256": "b71dca89f2c8456c949fb119b3f5aa22ce102f15bbbcc35773df61fcb2f53d69"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_boulder_albedo.png",
+      "size": 8953929,
+      "sha256": "2cbbd3dad5b03de51a77b684b68fd6fb1b3500e02b465a6ada47df01dc2a456c"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_boulder_normal.png",
+      "size": 8100896,
+      "sha256": "2d8997e10ec609081c89eaf9f90de7e8c24a4b8560288018a99c1f55e06dab68"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\rock_boulder_roughness.png",
+      "size": 4744956,
+      "sha256": "776746df3e78bafe21d245e7d1831595fc4f31887ad7b0980b453f12dbf962c9"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\gas_flow.png",
+      "size": 226319,
+      "sha256": "3e6edce3ee3ff42db13fcda6f853dc8a8f0d2ed09900102af85c399a07bbfa81"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\gas_detail.png",
+      "size": 4455814,
+      "sha256": "7af4846c844ff2dcdd54668fe5115ea0e5f0bd40971392b1fefe8bf9ac9c51c5"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\gas_relief.png",
+      "size": 4278132,
+      "sha256": "5fc38f22317ebcc703c4b5c72248ec604c3ea8f3168d327b80510fef425fbc41"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\gas_polar.png",
+      "size": 1489316,
+      "sha256": "654ca80b95e138d7a10fb31a6233abd5f25e42b393e2d90a232b27ed5a17d09f"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\gas_polar_flow.png",
+      "size": 210530,
+      "sha256": "b7bf113667e6e43e5d2f95d773bec74197aa44fb8baf86a52dce5e0fc5d55ed3"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\galaxy_low.png",
+      "size": 1574,
+      "sha256": "e4791b2b2985db42a5700b1082979ac2155f05690deaeb8ab80b4533d4bae2f3"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\galaxy_clouds.png",
+      "size": 23126,
+      "sha256": "dd40f9024c8b150152f203a2af3f974bff4eb1cca07ba0d28d66427c955d1e1d"
+    },
+    {
+      "path": "build\\release\\assets\\materials\\galaxy_filaments.png",
+      "size": 94411,
+      "sha256": "42b11a6a8d92e5a3a0f5b78ddf5d4c789a1d4a463818c434e2760a9b3940bec7"
+    }
+  ],
+  "probe_source_sha256": "a40f114ab465e992224227cd5028a0fa5410da0c4a6d7893f0a300801b2c10da"
+}

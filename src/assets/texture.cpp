@@ -1,6 +1,7 @@
 #include "assets/texture.hpp"
 #include "core/file.hpp"
 #include "core/log.hpp"
+#include "core/panic.hpp"
 #include <algorithm>
 #include <limits>
 
@@ -23,19 +24,43 @@ std::uint64_t mip_size(Extent2D e, TextureFormat format, unsigned bx = 4, unsign
 }
 } // namespace
 
-TextureData texture_from_images(MipChain images) {
+TextureData texture_from_image(Rgba8Image image) {
+    ORBITAL_ASSERT(image.valid());
     TextureData result;
-    for (auto& image : images)
-        result.mips.push_back({image.extent, std::move(image.pixels)});
+    result.mips.push_back({image.extent, std::move(image.pixels)});
     return result;
 }
-std::uint64_t texture_hash(ByteView bytes) {
-    std::uint64_t hash = 14695981039346656037ull;
-    for (const auto byte : bytes) {
-        hash ^= byte;
-        hash *= 1099511628211ull;
+
+TextureData texture_from_images(MipChain images) {
+    TextureData result;
+    result.mips.reserve(images.size());
+    for (auto& image : images) {
+        ORBITAL_ASSERT(image.valid());
+        result.mips.push_back({image.extent, std::move(image.pixels)});
     }
-    return hash;
+    return result;
+}
+
+bool valid_texture(const TextureData& texture) {
+    if (texture.mips.empty() || (texture.format != TextureFormat::RGBA8 && texture.format != TextureFormat::BC7 &&
+                                 texture.format != TextureFormat::ASTC))
+        return false;
+    const unsigned block = texture.block_x;
+    if (block != texture.block_y || (block != 4 && block != 6 && block != 8 && block != 12) ||
+        (texture.format == TextureFormat::BC7 && block != 4))
+        return false;
+    Extent2D expected = texture.mips.front().extent;
+    if (!valid_image_extent(expected))
+        return false;
+    for (std::size_t level = 0; level < texture.mips.size(); ++level) {
+        const auto& mip = texture.mips[level];
+        if (mip.extent != expected || mip.bytes.size() != mip_size(expected, texture.format, block, block))
+            return false;
+        if (expected.width == 1 && expected.height == 1 && level + 1 != texture.mips.size())
+            return false;
+        expected = {std::max(1u, expected.width / 2), std::max(1u, expected.height / 2)};
+    }
+    return true;
 }
 std::uint32_t material_flags(const MaterialDesc& d) {
     return (d.encoding == MaterialEncoding::SRGB ? 1u : 0u) | (d.normal_map ? 2u : 0u) |
@@ -55,14 +80,9 @@ std::filesystem::path texture_cache_path(const std::filesystem::path& source, Te
     return result;
 }
 
-std::optional<TextureData> read_texture_cache(ByteView b, const MaterialDesc& desc,
-                                              std::optional<std::uint64_t> source_hash) {
+std::optional<TextureData> read_texture_cache(ByteView b, const MaterialDesc& desc) {
     if (b.size() < header_size || word(b, 0) != cache_magic || word(b, 4) != cache_version ||
         word(b, 32) != material_flags(desc))
-        return std::nullopt;
-    const auto source = std::uint64_t(word(b, 36)) | (std::uint64_t(word(b, 40)) << 32);
-    const auto checksum = std::uint64_t(word(b, 44)) | (std::uint64_t(word(b, 48)) << 32);
-    if ((source_hash && source != *source_hash) || checksum != texture_hash(b.subspan(header_size)))
         return std::nullopt;
     TextureData result;
     const auto format = word(b, 28);
@@ -71,7 +91,7 @@ std::optional<TextureData> read_texture_cache(ByteView b, const MaterialDesc& de
         return std::nullopt;
     result.format = TextureFormat(format);
     Extent2D extent{word(b, 8), word(b, 12)};
-    if (!extent.width || !extent.height || extent.width > 16384 || extent.height > 16384)
+    if (!valid_image_extent(extent))
         return std::nullopt;
     result.block_x = word(b, 20);
     result.block_y = word(b, 24);
@@ -100,7 +120,7 @@ std::optional<TextureData> read_texture_cache(ByteView b, const MaterialDesc& de
 }
 
 Bytes write_texture_cache(const TextureData& texture, const MaterialDesc& desc, std::uint64_t source_hash) {
-    if (texture.mips.empty())
+    if (!valid_texture(texture) || texture.mips.back().extent.width != 1 || texture.mips.back().extent.height != 1)
         return {};
     Bytes result(header_size);
     const auto base = texture.mips.front().extent;
@@ -117,9 +137,7 @@ Bytes write_texture_cache(const TextureData& texture, const MaterialDesc& desc, 
     put(result, 40, std::uint32_t(source_hash >> 32));
     for (const auto& mip : texture.mips)
         result.insert(result.end(), mip.bytes.begin(), mip.bytes.end());
-    const auto checksum = texture_hash(ByteView(result).subspan(header_size));
-    put(result, 44, std::uint32_t(checksum));
-    put(result, 48, std::uint32_t(checksum >> 32));
+    // Legacy checksum fields remain zero; runtime validates structure, not payload identity.
     return result;
 }
 
@@ -129,8 +147,6 @@ std::optional<TextureData> load_texture_cache(const std::filesystem::path& sourc
         return format == TextureFormat::RGBA8 || (format == TextureFormat::BC7 && support.bc7) ||
                (format == TextureFormat::ASTC && block < support.astc_blocks.size() && support.astc_blocks[block]);
     };
-    std::optional<std::uint64_t> source_hash;
-    bool checked_source = false;
     // The last candidate preserves caches generated before format-specific filenames.
     const std::array<std::optional<TextureFormat>, 4> candidates{TextureFormat::BC7, TextureFormat::ASTC,
                                                                  TextureFormat::RGBA8, std::nullopt};
@@ -149,14 +165,9 @@ std::optional<TextureData> load_texture_cache(const std::filesystem::path& sourc
             if ((candidate && format != *candidate) || !supported(format, word(*bytes, 20)))
                 continue;
         }
-        if (!checked_source) {
-            if (const auto original = file::read(source))
-                source_hash = texture_hash(*original);
-            checked_source = true;
-        }
-        if (auto result = read_texture_cache(*bytes, desc, source_hash))
+        if (auto result = read_texture_cache(*bytes, desc))
             return result;
-        log::warn("Ignoring stale or invalid texture cache: {}", path.string());
+        log::warn("Ignoring invalid texture cache: {}", path.string());
     }
     return std::nullopt;
 }

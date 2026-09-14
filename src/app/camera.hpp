@@ -1,13 +1,13 @@
 #pragma once
 
 #include "core/math.hpp"
-#include "scene/system.hpp"
 
 #include <cstddef>
 #include <span>
-#include <vector>
 
 namespace space {
+
+struct BodyState;
 
 enum class CameraMode { Free, Orbit, Tour };
 
@@ -29,12 +29,12 @@ struct Camera {
     double vertical_fov = pi<double> / 3; // 60 degrees
 
     Camera();
-    CameraMode mode() const { return mode_; }
+    constexpr CameraMode mode() const { return mode_; }
     // Explicit view discontinuities invalidate temporal history even for small jumps.
-    std::size_t cut_serial() const { return cut_serial_; }
-    Vec3d forward() const { return forward_; }
-    Vec3d right() const { return right_; }
-    Vec3d up() const { return up_; }
+    constexpr std::size_t cut_serial() const { return cut_serial_; }
+    constexpr Vec3d forward() const { return forward_; }
+    constexpr Vec3d right() const { return right_; }
+    constexpr Vec3d up() const { return up_; }
 
     // Advances navigation by dt. Simulation time is supplied separately so a
     // paused simulation does not pause camera input or the tour clock.
@@ -47,7 +47,7 @@ struct Camera {
     void set_tour_time(double seconds);
     void set_orbit_target(std::size_t index, double zoom = 0.0);
     void set_mode(CameraMode mode);
-    std::size_t orbit_target() const { return orbit_target_; }
+    constexpr std::size_t orbit_target() const { return orbit_target_; }
 
 private:
     struct Bookmark {

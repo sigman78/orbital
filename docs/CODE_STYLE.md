@@ -12,7 +12,9 @@ is about what the code does, not how it is indented.
   `if constexpr`.
 - Compile time first. Constants are `constexpr` with a name, tables are `static constexpr`, small
   helpers are `constexpr` so they can be used in both contexts. There are no runtime lookups for
-  values known at build time.
+  values known at build time. For core value types, make suitable constructors, factories and
+  accessors `constexpr`, and exercise representative uses with `static_assert`. Do not force
+  runtime I/O or raw-storage lifetime manipulation into constant evaluation.
 - Templates only where they remove duplication of a small, obvious piece of code: `Vec3<T>` and
   `Range<T>` in `core/math.hpp` and `parse_number<T>` in `main.cpp` are the models. No CRTP, no
   traits hierarchies, no expression templates, no SFINAE. A concept is acceptable when it replaces an
@@ -29,7 +31,7 @@ is about what the code does, not how it is indented.
   when one call site would otherwise repeat the same field names ten times.
 - Fields must be named in declaration order. Keep the order in the struct meaningful (identity,
   geometry, flags) so call sites read naturally.
-- A struct with a reference member (`FrameInput::camera`, `Session`) still initializes with
+- A struct with a reference member (`Session`) still initializes with
   designated syntax and is the right way to pass a bundle of context by reference. It is not
   assignable, which is fine for a value that lives for one call.
 
@@ -45,6 +47,17 @@ platform   window, events, process, text and ImGui overlays    platform/<os>/ im
 scene      system generation, geometry                         assets  image I/O, kernels, materials
 core       log, panic, file, math, types, small_vec            depends on nothing
 ```
+
+### Header dependencies and bounds
+
+- Include what a file directly uses. Keep headers self-contained; use forward declarations
+  for borrowed types where a definition is unnecessary. Avoid pulling math, formatting or
+  filesystem APIs into small value types through convenience includes. Image storage/view
+  types live in `assets/image.hpp`; PNG file operations live in `assets/image_io.hpp`.
+- Express input limits in domain terms, with a named shared policy. Images and texture
+  caches support dimensions from 1 to 16,384 per axis. This is the project's asset policy,
+  not a universal GPU limit. Keep byte-span/stride and external-library integer checks
+  where dimensions alone cannot establish safe addressing.
 
 ### Interfaces
 
@@ -303,7 +316,7 @@ was tuned rather than derived.
   `renderer_frame.cpp` coordinates the frame and capture. Frame data, pipelines, assets, belt, scene,
   post-processing and overlay live in separate implementation units (see `ARCHITECTURE.md`).
 - `src/app`: options, camera, HUD layout, frame loop, `main`. Depends on everything, calls no OS API.
-- Each directory is one CMake target with the same name prefix (`orbital_core`, `orbital_scene`,
+- CPU layers have CMake targets with the same name prefix (`orbital_core`, `orbital_scene`,
   `orbital_assets`, `orbital_platform`, `orbital`), and the target link graph mirrors the include
   graph above. A new include direction is a new link edge, and the reverse is a review finding.
 - Vendored code under `third_party/` keeps its own style and is never edited to match ours. It is
@@ -365,3 +378,11 @@ feature layer. Every reusable include declares its own dependencies and compiles
 Do not restore an umbrella include or numeric texture/sampler indices. The compiler-generated
 depfile tracks consumers when a helper changes; run `python tools/check-shader-helpers.py` to check
 include independence and fixed-time capture comparisons to check rendering behavior.
+
+App navigation and CLI parsing are built as `orbital_app_cpu`, used by the executable and camera/app/options tests. Scene tests do not link it. Renderer headers accept `CameraView` values and app-supplied HUD pixels; they do not include app headers.
+
+Renderer-specific scene restrictions live in `orbital_render_cpu`, which depends on the generic scene library. Keep them out of `validate_system`; the generic scene evaluator must remain usable without the showcase's required roles and belt configuration.
+
+Camera/history, lighting and belt LOD calculations also live in `orbital_render_cpu`. They accept explicit values and return typed results; shader component conventions stay in `renderer_frame_data.cpp`. Do not pass renderer `Impl` or GPU resources into these calculations.
+
+UI lifetime/backend integration stays in `ui.cpp`; `ui_panel.cpp` assembles effect-specific controls with narrow settings references. Camera/capture actions are shared through `actions.hpp`. CLI validation stays in the CPU-testable `options.cpp`; reject non-finite numbers before they reach app state.

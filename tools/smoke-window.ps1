@@ -24,7 +24,10 @@ Add-Type -TypeDefinition $native
 $capturePath = [IO.Path]::GetFullPath($Capture)
 $captureDir = Split-Path -Parent $capturePath
 New-Item -ItemType Directory -Force -Path $captureDir | Out-Null
-$proc = Start-Process -FilePath $Executable -ArgumentList "--duration 15 --width 960 --height 540 --capture `"$capturePath`"" -PassThru -WindowStyle Hidden
+$proc = Start-Process -FilePath $Executable -ArgumentList "--duration 15 --width 960 --height 540 --capture `"$capturePath`"" -PassThru -WindowStyle Hidden `
+    -RedirectStandardOutput ($capturePath + ".stdout.log") -RedirectStandardError ($capturePath + ".stderr.log")
+# Cache the native handle before exit so Windows PowerShell retains ExitCode.
+$processHandle = $proc.Handle
 try {
 $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
 $hwnd = [IntPtr]::Zero
@@ -52,6 +55,10 @@ foreach ($key in @(0x31,0x32,0x33,0x34,0x35,0x54,0x46,0x20,0x71)) {
 }
 if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) { $proc.Kill(); throw "Application did not exit within timeout." }
 if ($proc.ExitCode -ne 0) { throw "Application exited with code $($proc.ExitCode)." }
+$diagnostics = (Get-Content -LiteralPath ($capturePath + '.stdout.log'), ($capturePath + '.stderr.log') -Raw) -join "`n"
+if ($diagnostics -match 'Validation (Error|Warning)|SYNC-HAZARD-|VUID-|NoGraphicsAPI validation:') {
+    throw "Validation finding; see $capturePath.stdout.log and $capturePath.stderr.log"
+}
 if (-not (Test-Path -LiteralPath $capturePath)) { throw "Expected capture was not written: $capturePath" }
 $signature = [IO.File]::ReadAllBytes($capturePath) | Select-Object -First 4
 if ($signature.Count -lt 4 -or $signature[1] -ne 0x50 -or $signature[2] -ne 0x4E -or $signature[3] -ne 0x47) { throw "Capture is empty or not a PNG: $capturePath" }

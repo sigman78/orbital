@@ -8,8 +8,9 @@
 // camera's translation alone: it points along the movement, grows with speed,
 // and vanishes when the camera rests or only turns; the parallax is real,
 // since the motes are world-fixed points in a lattice that repeats around the
-// camera. Depth tested, so bodies occlude them; drawn into the HDR image
-// before the temporal pass, which reprojects them like any static point.
+// camera. Depth tested, so bodies occlude them. Drawn after temporal resolve
+// into reused HDR storage, then added before bloom/tone mapping; streaks never
+// enter history because their transient extent has no valid scene motion/depth.
 
 static const uint MOTE_CELLS = 4;          // cells per axis around the camera
 static const uint MOTES_PER_CELL = 16;

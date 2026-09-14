@@ -24,13 +24,12 @@ static const float SPLAT_AMBIENT = .004;
 static const float SPLAT_RIM = .12;       // forward-scatter rim the meshes' grazing specular gives at high phase angles
 
 static const uint BILLBOARD_GROUP = ORBITAL_ROCK_GROUPS;
-static const float KIND_ROCK = float(ORBITAL_KIND_ROCK); // SurfaceKind::rock, also SurfaceMode::billboard
 static const float BILLBOARD_VERTICES = 6.0;
 
 struct Placement {
     bool visible;
     uint group;
-    Instance instance;
+    AsteroidInstance instance;
 };
 
 // Composition classes, chosen by radius and chance like the main belt's
@@ -125,8 +124,13 @@ Placement placeRock(uint id, bool lightSplats)
         float irradiance = frame->sun.w / 3.141592653589793 * shadowing;
         result.group = BILLBOARD_GROUP;
         result.instance.center_radius = float4(position, radius * splatPixels / pixelRadius);
-        result.instance.rotation_kind = float4(disc ? 1.0 : 0.0, rim, SPLAT_AMBIENT / max(irradiance, 1e-6), KIND_ROCK);
-        result.instance.tint = float4(albedo * irradiance * (disc ? 1.0 : lambertSpherePhase(phase) + rim + SPLAT_AMBIENT / max(irradiance, 1e-6)), coverage);
+        float3 radiance = albedo * irradiance * (disc ? 1.0 : lambertSpherePhase(phase) + rim + SPLAT_AMBIENT / max(irradiance, 1e-6));
+        // RGB is bounded by the fixed sun irradiance and normalized belt materials.
+        // Keep ambient (large in deep shadow) and coverage in float32.
+        result.instance.payload[0] = packHalf2x16(radiance.xy);
+        result.instance.payload[1] = packHalf2x16(float2(radiance.z, rim)) | (disc ? 0x80000000u : 0u);
+        result.instance.payload[2] = asuint(SPLAT_AMBIENT / max(irradiance, 1e-6));
+        result.instance.payload[3] = asuint(coverage);
         return result;
     }
     uint level = 0;
@@ -138,8 +142,10 @@ Placement placeRock(uint id, bool lightSplats)
     result.group = variant * ORBITAL_ROCK_LEVELS + level;
     float3 rotation = rock.rotation_seed.xyz + rock.spin_group.xyz * p->view.w;
     result.instance.center_radius = float4(position, radius);
-    result.instance.rotation_kind = float4(rotation, KIND_ROCK);
-    result.instance.tint = float4(colour, float(composition) + rockMaterialSeed(id));
+    result.instance.payload[0] = asuint(rotation.x);
+    result.instance.payload[1] = asuint(rotation.y);
+    result.instance.payload[2] = asuint(rotation.z);
+    result.instance.payload[3] = id | (composition << 30);
     return result;
 }
 
@@ -192,6 +198,6 @@ void computeMain(uint3 thread : SV_DispatchThreadID)
     else
     {
         uint slot = scratch->cursors[placement.group].add(1);
-        scratch->instances[slot] = placement.instance;
+        scratch->instances[slot - scratch->params.body_count] = placement.instance;
     }
 }

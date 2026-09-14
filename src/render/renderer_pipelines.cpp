@@ -1,7 +1,7 @@
 #include "render/renderer_impl.hpp"
 
 #include "core/file.hpp"
-#include "core/panic.hpp"
+#include "core/panic_if.hpp"
 #include <cstring>
 #include <format>
 
@@ -41,20 +41,20 @@ gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
         device, {.vertex_spirv = vertex,
                  .fragment_spirv = fragment,
                  .color_targets = {&target, 1},
-                 .depth_format = desc.depth_test ? gpu::Format::d32_float : gpu::Format::undefined});
+                 .depth_format = desc.has_depth_attachment ? gpu::Format::d32_float : gpu::Format::undefined});
     panic_if(!pipeline, "pipeline creation failed for {} + {}", desc.vertex_shader, desc.fragment_shader);
-    pipelines.push_back(pipeline);
+    pipelines.emplace_back(pipeline);
     return pipeline;
 }
 
 void Renderer::Impl::create_pipelines() {
     using gpu::Format;
-    const auto make = [&](const char* vertex, const char* fragment, Format format, bool depth_test = false,
+    const auto make = [&](const char* vertex, const char* fragment, Format format, bool has_depth_attachment = false,
                           Blend blend = Blend::none) {
         return create_pipeline({.vertex_shader = vertex,
                                 .fragment_shader = fragment,
                                 .color_format = format,
-                                .depth_test = depth_test,
+                                .has_depth_attachment = has_depth_attachment,
                                 .blend = blend});
     };
     // Scene, sky and atmosphere pipelines.
@@ -67,7 +67,7 @@ void Renderer::Impl::create_pipelines() {
     pso.scene.galaxy = make("fullscreen", "galaxy", Format::rgba16_float);
     pso.scene.atmosphere = make("fullscreen", "atmosphere", Format::rgba16_float, false, Blend::alpha);
     pso.scene.motes = make("motes", "motes", Format::rgba16_float, true, Blend::additive);
-    pso.scene.stars = make("stars", "stars", Format::rgba16_float, false, Blend::additive);
+    pso.scene.stars = make("stars", "stars", Format::rgba16_float, true, Blend::additive);
     // Belt meshes, splats and dust pipelines.
     pso.belt.billboard = make("surface", "surface_rock", Format::rgba16_float, true, Blend::alpha);
     pso.belt.splat = make("beltsplat", "beltsplat", Format::rgba16_float, false, Blend::additive);
@@ -92,7 +92,7 @@ void Renderer::Impl::create_pipelines() {
     pso.ui = make("ui", "ui", Format::bgra8_srgb, false, Blend::alpha);
     pso.belt.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
     panic_if(!pso.belt.cull, "compute pipeline creation failed: cull");
-    pipelines.push_back(pso.belt.cull);
+    pipelines.emplace_back(pso.belt.cull);
     // Depth-only shadow pass reuses the surface vertex shader with a slope bias.
     const auto shadow_vertex = read_spirv(directory / "shaders/surface.vertex.spv");
     pso.scene.shadow = gpu::create_graphics_pso(
@@ -100,7 +100,7 @@ void Renderer::Impl::create_pipelines() {
                  .depth_format = Format::d32_float,
                  .rasterization = {.depth_bias_constant = 1, .depth_bias_slope = 1.5f}});
     panic_if(!pso.scene.shadow, "shadow pipeline creation failed");
-    pipelines.push_back(pso.scene.shadow);
+    pipelines.emplace_back(pso.scene.shadow);
 }
 
 } // namespace space::render

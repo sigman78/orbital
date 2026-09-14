@@ -1,8 +1,8 @@
-#include "assets/image.hpp"
+#include "assets/image_io.hpp"
 
 #include "core/file.hpp"
 #include "core/log.hpp"
-#include "core/panic.hpp"
+#include "core/panic_if.hpp"
 
 #include <climits>
 #include <format>
@@ -44,8 +44,6 @@
 namespace space::assets {
 namespace {
 
-constexpr std::uint64_t max_pixels = std::uint64_t{1} << 28;
-
 // Returns the Wuffs error text for a failed step, or nothing when it succeeded.
 std::optional<std::string> failure(const wuffs_base__status& status, const char* step) {
     if (wuffs_base__status__is_ok(&status))
@@ -53,7 +51,7 @@ std::optional<std::string> failure(const wuffs_base__status& status, const char*
     return std::format("{}: {}", step, wuffs_base__status__message(&status));
 }
 
-std::optional<Image> decode_png(MutableByteView bytes, std::string& error) {
+std::optional<Rgba8Image> decode_png(MutableByteView bytes, std::string& error) {
     auto decoder = wuffs_png__decoder::alloc();
     if (!decoder) {
         error = "decoder allocation failed";
@@ -67,14 +65,14 @@ std::optional<Image> decode_png(MutableByteView bytes, std::string& error) {
     }
     const Extent2D extent{wuffs_base__pixel_config__width(&config.pixcfg),
                           wuffs_base__pixel_config__height(&config.pixcfg)};
-    if (extent.empty() || std::uint64_t(extent.width) * extent.height > max_pixels) {
+    if (!valid_image_extent(extent)) {
         error = std::format("unsupported dimensions {}x{}", extent.width, extent.height);
         return std::nullopt;
     }
     // Decode straight into tightly packed, non-premultiplied RGBA8.
     wuffs_base__pixel_config__set(&config.pixcfg, WUFFS_BASE__PIXEL_FORMAT__RGBA_NONPREMUL,
                                   WUFFS_BASE__PIXEL_SUBSAMPLING__NONE, extent.width, extent.height);
-    Image image{extent, Bytes(static_cast<std::size_t>(extent.width) * extent.height * 4)};
+    Rgba8Image image{extent, Bytes(static_cast<std::size_t>(extent.width) * extent.height * 4)};
     wuffs_base__pixel_buffer pixels{};
     if (auto why = failure(
             wuffs_base__pixel_buffer__set_from_slice(
@@ -101,7 +99,7 @@ std::optional<Image> decode_png(MutableByteView bytes, std::string& error) {
 
 } // namespace
 
-std::optional<Image> try_load_png(const std::filesystem::path& path) {
+std::optional<Rgba8Image> try_load_png(const std::filesystem::path& path) {
     auto bytes = file::read(path);
     if (!bytes || bytes->empty()) {
         log::error("cannot read image file {}", path.string());
@@ -118,23 +116,29 @@ std::optional<Image> try_load_png(const std::filesystem::path& path) {
     return image;
 }
 
-Image load_png(const std::filesystem::path& path) {
+Rgba8Image load_png(const std::filesystem::path& path) {
     auto image = try_load_png(path);
     panic_if(!image, "required image is missing or unreadable: {}", path.string());
     return std::move(*image);
 }
 
-bool save_png(const std::filesystem::path& path, Extent2D extent, unsigned channels, ByteView pixels) {
-    ORBITAL_ASSERT(!extent.empty() && channels >= 1 && channels <= 4);
-    ORBITAL_ASSERT(pixels.size() == static_cast<std::size_t>(extent.width) * extent.height * channels);
+bool save_png(const std::filesystem::path& path, ImageView image) {
+    const auto extent = image.extent();
+    const auto channels = image.channels();
+    const auto pixels = image.bytes();
+    // stb indexes rows using signed int arithmetic, including the stride product.
+    if (image.row_stride() > std::size_t(INT_MAX) / extent.height) {
+        log::error("PNG dimensions exceed encoder limits: {}", path.string());
+        return false;
+    }
     Bytes encoded;
-    encoded.reserve(pixels.size() / 2);
+    encoded.reserve(std::size_t(extent.width) * extent.height * channels / 2);
     const auto append = [](void* context, void* data, int size) {
         auto* out = static_cast<Bytes*>(context);
         const auto* bytes = static_cast<const std::uint8_t*>(data);
         out->insert(out->end(), bytes, bytes + size);
     };
-    const int stride = static_cast<int>(extent.width * channels);
+    const int stride = static_cast<int>(image.row_stride());
     if (!stbi_write_png_to_func(append, &encoded, static_cast<int>(extent.width), static_cast<int>(extent.height),
                                 static_cast<int>(channels), pixels.data(), stride)) {
         log::error("PNG encode failed for {}", path.string());

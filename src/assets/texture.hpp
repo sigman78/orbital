@@ -21,15 +21,19 @@ struct TextureSupport {
     std::array<bool, 13> astc_blocks{};
 };
 
+// Validates format, dimensions and payload lengths. A valid chain may stop
+// before 1x1 (fonts and lookup tables); cache serialization requires all mips.
+bool valid_texture(const TextureData& texture);
+
+TextureData texture_from_image(Rgba8Image image);
 TextureData texture_from_images(MipChain images);
-std::uint64_t texture_hash(ByteView bytes);
 std::uint32_t material_flags(const MaterialDesc& desc);
 std::filesystem::path texture_cache_path(const std::filesystem::path& source);
 std::filesystem::path texture_cache_path(const std::filesystem::path& source, TextureFormat format);
-// Strictly validates our complete 2D texture cache, including source identity and payload checksum.
-std::optional<TextureData> read_texture_cache(ByteView bytes, const MaterialDesc& desc,
-                                              std::optional<std::uint64_t> source_hash);
-Bytes write_texture_cache(const TextureData& texture, const MaterialDesc& desc, std::uint64_t source_hash);
+// Validates the complete mip chain and header. Legacy source/checksum fields are ignored.
+std::optional<TextureData> read_texture_cache(ByteView bytes, const MaterialDesc& desc);
+// Empty result for invalid data or an incomplete chain. Source hash is optional build provenance.
+Bytes write_texture_cache(const TextureData& texture, const MaterialDesc& desc, std::uint64_t source_hash = 0);
 std::optional<TextureData> load_texture_cache(const std::filesystem::path& source, const MaterialDesc& desc,
                                               const TextureSupport& support = {});
 

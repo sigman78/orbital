@@ -1,11 +1,12 @@
 #pragma once
 #include "types.slang"
+#include "../scene/instances.slang"
 #include "../scene/shadows.slang"
 
 Surface surfaceAt(Frame* frame, Instance* instances, SurfaceVaryings input, bool shadowMap)
 {
     Surface s;
-    s.inst = instances[input.instanceIndex];
+    s.inst = loadInstance(frame, instances, input.instanceIndex, false);
     s.kind = int(s.inst.rotation_kind.w + .5);
     s.N = normalize(input.worldNormal);
     s.V = normalize(frame->camera_time.xyz - input.worldPosition);

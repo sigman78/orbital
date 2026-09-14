@@ -29,7 +29,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float3 g = galacticDirection(rd);
     float3 light = float3(0.0, 0.0, 0.0), dark = float3(0.0, 0.0, 0.0);
     // The cell table follows the records; the pass points root.instances at it.
-    uint* table = (uint*)(uint64_t(root.instances));
+    uint* table = (uint*)root.instances;
     uint cellsLon = table[0], cellsLat = table[1];
     float longitude = atan2(g.y, g.x), latitude = asin(clamp(g.z, -1.0, 1.0));
     uint i = min(uint((.5 - longitude / (2.0 * PI)) * float(cellsLon)), cellsLon - 1); // longitude increases to the left
