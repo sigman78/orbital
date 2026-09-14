@@ -67,12 +67,8 @@ void gpu_time_bar(const render::Stats& stats) {
             ImGui::SetTooltip("%s: %.2f ms (%.1f%%)", segment.label, segment.ms, 100 * segment.ms / total);
         x = end;
     }
-    if (ImGui::BeginTable("##gpu-passes", 3, ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("ms", ImGuiTableColumnFlags_WidthFixed, 62);
-        ImGui::TableSetupColumn("share", ImGuiTableColumnFlags_WidthFixed, 48);
+    if (ImGui::BeginTable("##gpu-passes", 2, ImGuiTableFlags_SizingStretchSame)) {
         for (const auto& segment : segments) {
-            ImGui::TableNextRow();
             ImGui::TableNextColumn();
             const auto swatch = ImGui::GetCursorScreenPos();
             ImGui::GetWindowDrawList()->AddRectFilled({swatch.x, swatch.y + 3}, {swatch.x + 9, swatch.y + 12},
@@ -80,10 +76,7 @@ void gpu_time_bar(const render::Stats& stats) {
             ImGui::Dummy({9, 12});
             ImGui::SameLine();
             ImGui::TextUnformatted(segment.label);
-            ImGui::TableNextColumn();
-            ImGui::Text("%.2f ms", segment.ms);
-            ImGui::TableNextColumn();
-            ImGui::Text("%.1f%%", 100 * segment.ms / total);
+            ImGui::TextDisabled("%.2f ms (%.1f%%)", segment.ms, 100 * segment.ms / total);
         }
         ImGui::EndTable();
     }
