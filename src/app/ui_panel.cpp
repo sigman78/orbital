@@ -4,6 +4,7 @@
 #include "render/renderer.hpp"
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <vector>
 
 namespace space::app {
@@ -261,12 +262,40 @@ void post_fx_controls(render::PostSettings& settings) {
     if (ImGui::SmallButton("Reset post"))
         settings = {};
 }
-void tone_controls(render::ToneSettings& settings) {
+void tone_controls(render::ToneSettings& settings, const render::ExposureStats& exposure) {
     static constexpr const char* curves[] = {"ACES filmic", "AgX", "PBR Neutral"};
     combo("Curve (F8)", settings.tone_curve, curves);
     ImGui::SliderFloat("Exposure (+/-)", &settings.exposure, exposure_keys::range.min, exposure_keys::range.max, "%.2f",
                        ImGuiSliderFlags_Logarithmic);
     ImGui::Checkbox("Auto exposure (X)", &settings.auto_exposure);
+    ImGui::Spacing();
+    if (!exposure.ready) {
+        ImGui::TextDisabled("Waiting for HDR measurement...");
+    } else {
+        if (exposure.has_samples)
+            ImGui::Text("HDR luminance: %.4g", exposure.luminance);
+        else
+            ImGui::TextDisabled("HDR luminance: below metering threshold");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Center-weighted geometric mean before exposure and bloom.\nVery dark samples do not "
+                              "contribute; this is scene-linear luminance, not nits.");
+        ImGui::Text("HDR peak (sampled): %.4g", exposure.peak_luminance);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(
+                "Brightest averaged cell in the 16 x 16 meter.\nThis is not the brightest full-resolution pixel.");
+        ImGui::Text("Adaptation: %.3f x -> %.3f x%s", exposure.adapted, exposure.target,
+                    exposure.limited ? " (limited)" : "");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Current automatic multiplier -> clamped target.\nMeter updates every 16 frames; "
+                              "adaptation follows over time.");
+    }
+    if (!exposure.automatic)
+        ImGui::TextDisabled("Auto adjustment bypassed");
+    ImGui::Text("Applied exposure: %.3f x (%+.2f stops)", exposure.applied,
+                std::log2(std::max(exposure.applied, 1e-6f)));
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Manual exposure x active auto adjustment x tone-curve calibration.\nStops are relative to a "
+                          "multiplier of 1; bloom is combined before this gain.");
 }
 void camera_controls(AppState& app) {
     for (std::size_t i = 0; i < bookmark_count; i++) {
@@ -344,7 +373,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::PopID();
     }
     if (section("Tone")) {
-        tone_controls(app.tone);
+        tone_controls(app.tone, stats.exposure);
         ImGui::PopID();
     }
     if (section("Camera")) {
