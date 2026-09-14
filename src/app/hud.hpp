@@ -2,8 +2,8 @@
 
 #include "assets/image.hpp"
 
-namespace space::assets {
+namespace space::app {
 
-Rgba8Image make_hud();
+assets::Rgba8Image make_hud();
 
-} // namespace space::assets
+} // namespace space::app

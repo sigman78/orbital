@@ -4,8 +4,17 @@
 
 namespace space::app {
 
+constexpr render::CameraView make_camera_view(const Camera& camera) {
+    return {.position = camera.position,
+            .forward = camera.forward(),
+            .right = camera.right(),
+            .up = camera.up(),
+            .vertical_fov = camera.vertical_fov,
+            .cut_serial = camera.cut_serial()};
+}
+
 inline render::FrameInput make_frame_input(const AppState& app, double time, const ImDrawData* ui) {
-    return {.camera = app.camera,
+    return {.camera = make_camera_view(app.camera),
             .bodies = app.bodies,
             .time = time,
             .high_quality = app.high,

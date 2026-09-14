@@ -149,7 +149,7 @@ bool Renderer::draw(const FrameInput& input) {
     s.previous_frame = frame;
     s.previous_camera = input.camera.position;
     s.previous_vertical_fov = input.camera.vertical_fov;
-    s.previous_camera_cut = input.camera.cut_serial();
+    s.previous_camera_cut = input.camera.cut_serial;
     s.history_valid = true;
     s.stats.frame_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count();
     return true;

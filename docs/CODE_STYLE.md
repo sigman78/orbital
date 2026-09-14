@@ -31,7 +31,7 @@ is about what the code does, not how it is indented.
   when one call site would otherwise repeat the same field names ten times.
 - Fields must be named in declaration order. Keep the order in the struct meaningful (identity,
   geometry, flags) so call sites read naturally.
-- A struct with a reference member (`FrameInput::camera`, `Session`) still initializes with
+- A struct with a reference member (`Session`) still initializes with
   designated syntax and is the right way to pass a bundle of context by reference. It is not
   assignable, which is fine for a value that lives for one call.
 
@@ -316,7 +316,7 @@ was tuned rather than derived.
   `renderer_frame.cpp` coordinates the frame and capture. Frame data, pipelines, assets, belt, scene,
   post-processing and overlay live in separate implementation units (see `ARCHITECTURE.md`).
 - `src/app`: options, camera, HUD layout, frame loop, `main`. Depends on everything, calls no OS API.
-- Each directory is one CMake target with the same name prefix (`orbital_core`, `orbital_scene`,
+- CPU layers have CMake targets with the same name prefix (`orbital_core`, `orbital_scene`,
   `orbital_assets`, `orbital_platform`, `orbital`), and the target link graph mirrors the include
   graph above. A new include direction is a new link edge, and the reverse is a review finding.
 - Vendored code under `third_party/` keeps its own style and is never edited to match ours. It is
@@ -378,3 +378,5 @@ feature layer. Every reusable include declares its own dependencies and compiles
 Do not restore an umbrella include or numeric texture/sampler indices. The compiler-generated
 depfile tracks consumers when a helper changes; run `python tools/check-shader-helpers.py` to check
 include independence and fixed-time capture comparisons to check rendering behavior.
+
+The app camera controller is built as `orbital_camera`, used by the executable and camera/app tests. Scene tests do not link it. Renderer headers accept `CameraView` values and app-supplied HUD pixels; they do not include app headers.

@@ -104,8 +104,8 @@ BeltTransform belt_transform(const BeltDescription& description, float angle) {
     return transform;
 }
 
-void write_projection(FrameData& frame, const Camera& camera, float aspect) {
-    const Vec3f right = to_float(camera.right()), up = to_float(camera.up()), forward = to_float(camera.forward());
+void write_projection(FrameData& frame, const CameraView& camera, float aspect) {
+    const Vec3f right = to_float(camera.right), up = to_float(camera.up), forward = to_float(camera.forward);
     const float tan_half = float(std::tan(camera.vertical_fov * .5));
     const Mat4 view_projection = perspective_matrix(tan_half, aspect, targets::depth.min, targets::depth.max) *
                                  view_matrix(right, up, forward);
@@ -169,7 +169,7 @@ void write_light_projection(float* m, const LightFrame& light) {
 } // namespace
 
 FrameData Renderer::Impl::build_frame(const FrameInput& input) {
-    const Camera& camera = input.camera;
+    const CameraView& camera = input.camera;
     FrameData frame{};
     write_projection(frame, camera, extent.aspect());
     const Float4 jitter = input.aa.temporal_aa ? jitter_sequence[frame_index % jitter_count] : Float4{};
@@ -186,8 +186,8 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     const Vec3d previous_forward{previous_frame.forward_exposure.x, previous_frame.forward_exposure.y,
                                  previous_frame.forward_exposure.z};
     if (input.aa.temporal_aa != (previous_frame.quality.x > .5f) || camera.vertical_fov != previous_vertical_fov ||
-        camera.cut_serial() != previous_camera_cut || length(camera.position - previous_camera) > history::max_jump ||
-        dot(camera.forward(), previous_forward) < history::min_forward_dot)
+        camera.cut_serial != previous_camera_cut || length(camera.position - previous_camera) > history::max_jump ||
+        dot(camera.forward, previous_forward) < history::min_forward_dot)
         frame.previous_camera_delta.w = 0;
     frame.camera_time = {0, 0, 0, float(input.time)};
     {
@@ -310,12 +310,11 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
 
     // Sun position in screen space for the lens flare, hidden when a body covers it.
     const Vec3d sun_direction = normalized(system.star.position - camera.position);
-    const double forward = dot(sun_direction, camera.forward());
+    const double forward = dot(sun_direction, camera.forward);
     const double view_depth = std::max(forward, .001);
-    frame.screen_sun = {
-        float(dot(sun_direction, camera.right()) / (view_depth * frame.right_tan.w * frame.up_aspect.w)),
-        float(-dot(sun_direction, camera.up()) / (view_depth * frame.right_tan.w)), forward > 0 ? 1.f : 0.f,
-        sun_flare::screen_size};
+    frame.screen_sun = {float(dot(sun_direction, camera.right) / (view_depth * frame.right_tan.w * frame.up_aspect.w)),
+                        float(-dot(sun_direction, camera.up) / (view_depth * frame.right_tan.w)),
+                        forward > 0 ? 1.f : 0.f, sun_flare::screen_size};
     for (const auto& body : input.bodies) {
         const Vec3d v = body.position - camera.position;
         const double along = dot(v, sun_direction);
@@ -348,14 +347,14 @@ void Renderer::Impl::write_body_instances(const FrameInput& input, const FrameDa
 // expanded tiny billboards.
 void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
                                         std::uint64_t instance_address) {
-    const Camera& camera = input.camera;
+    const CameraView& camera = input.camera;
     const float tan_y = frame.right_tan.w, tan_x = tan_y * frame.up_aspect.w;
     const BeltTransform transform = belt_transform(system.belts[0], float(input.time * belt_culling::spin_rate));
     CullParams& p = scratch.params;
     p = {};
-    p.right = f4(to_float(camera.right()), tan_x);
-    p.up = f4(to_float(camera.up()), tan_y);
-    p.forward = f4(to_float(camera.forward()), tan_y * 4 / float(extent.height));
+    p.right = f4(to_float(camera.right), tan_x);
+    p.up = f4(to_float(camera.up), tan_y);
+    p.forward = f4(to_float(camera.forward), tan_y * 4 / float(extent.height));
     p.view = {float(extent.height) / (2 * frame.right_tan.w), std::sqrt(1 + tan_x * tan_x),
               std::sqrt(1 + tan_y * tan_y), float(input.time * belt_culling::rock_spin_rate)};
     p.giant = f4(input.bodies[giant_index].position - camera.position);

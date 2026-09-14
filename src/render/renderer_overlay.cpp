@@ -85,18 +85,7 @@ void Renderer::Impl::record_ui(gpu::CommandBuffer* cmd, const ImDrawData* ui, st
 
 void Renderer::set_ui_font(assets::ImageView pixels) {
     ORBITAL_ASSERT(!impl_->ui_font_uploaded);
-    ORBITAL_ASSERT(pixels.layout() == assets::PixelLayout::Rgba8);
-    Uploads upload;
-    upload.emplace_back();
-    assets::Rgba8Image image{.extent = pixels.extent(), .pixels = {}};
-    image.pixels.reserve(image.pixel_count() * 4);
-    for (unsigned y = 0; y < image.extent.height; ++y) {
-        const auto row = pixels.row(y);
-        image.pixels.insert(image.pixels.end(), row.begin(), row.end());
-    }
-    upload.back().data = assets::texture_from_images({std::move(image)});
-    upload.back().slot = Slot::ui_font;
-    impl_->upload_images(upload);
+    impl_->upload_rgba(Slot::ui_font, pixels);
     impl_->ui_font_uploaded = true;
 }
 

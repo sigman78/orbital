@@ -1,6 +1,5 @@
 #include "render/renderer_impl.hpp"
 
-#include "app/hud.hpp"
 #include "assets/smaa.hpp"
 #include "core/log.hpp"
 #include "core/panic_if.hpp"
@@ -110,6 +109,21 @@ void Renderer::Impl::upload_images(std::span<Upload> uploads) {
     gpu::destroy_gpu_heap(staging);
 }
 
+void Renderer::Impl::upload_rgba(Slot slot, assets::ImageView pixels) {
+    ORBITAL_ASSERT(pixels.layout() == assets::PixelLayout::Rgba8);
+    Uploads upload;
+    upload.emplace_back();
+    assets::Rgba8Image image{.extent = pixels.extent(), .pixels = {}};
+    image.pixels.reserve(image.pixel_count() * 4);
+    for (unsigned y = 0; y < image.extent.height; ++y) {
+        const auto row = pixels.row(y);
+        image.pixels.insert(image.pixels.end(), row.begin(), row.end());
+    }
+    upload.back().data = assets::texture_from_images({std::move(image)});
+    upload.back().slot = slot;
+    upload_images(upload);
+}
+
 void Renderer::Impl::create_device(void* window) {
     const auto init = gpu::create_device(
         {.window = window, .swapchain_format = gpu::Format::bgra8_srgb, .timestamp_query_count = 16});
@@ -193,7 +207,8 @@ void Renderer::Impl::create_fixed_targets() {
 }
 
 void Renderer::Impl::init(void* window, const SystemDescription& description,
-                          const std::filesystem::path& base_directory, const RendererConfig& config) {
+                          const std::filesystem::path& base_directory, assets::ImageView hud,
+                          const RendererConfig& config) {
     system = description;
     directory = base_directory;
     belt_count_override = config.belt_count;
@@ -217,11 +232,7 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     build_belt(system.belts[0]);
     log::info("Loading planetary maps and scanned rock PBR materials...");
     load_materials();
-    Uploads hud;
-    hud.emplace_back();
-    hud.back().data = assets::texture_from_images({assets::make_hud()});
-    hud.back().slot = Slot::hud;
-    upload_images(hud);
+    upload_rgba(Slot::hud, hud);
     // Embedded SMAA lookup tables, widened to RGBA8 for the upload path.
     const auto widen = [](std::span<const unsigned char> bytes, unsigned width, unsigned height, unsigned channels) {
         assets::Rgba8Image image{.extent = {width, height}, .pixels = {}};
@@ -319,9 +330,9 @@ void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor) {
 }
 
 Renderer::Renderer(void* window, const SystemDescription& system, const std::filesystem::path& directory,
-                   const RendererConfig& config)
+                   assets::ImageView hud, const RendererConfig& config)
     : impl_(std::make_unique<Impl>()) {
-    impl_->init(window, system, directory, config);
+    impl_->init(window, system, directory, hud, config);
 }
 
 Renderer::~Renderer() = default;

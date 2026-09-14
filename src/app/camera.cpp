@@ -1,4 +1,5 @@
 #include "app/camera.hpp"
+#include "scene/system.hpp"
 
 #include <algorithm>
 #include <cmath>

@@ -11,6 +11,7 @@
 #include "render/gpu_image.hpp"
 #include "render/gpu_types.hpp"
 #include "scene/geometry.hpp"
+#include "scene/system.hpp"
 
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
 #include <array>
@@ -340,7 +341,7 @@ struct Renderer::Impl {
 
     // Device, shared heaps, uploads and target lifetime (renderer_resources.cpp).
     void init(void* window, const SystemDescription& description, const std::filesystem::path& base_directory,
-              const RendererConfig& config);
+              assets::ImageView hud, const RendererConfig& config);
     void create_device(void* window);
     void create_samplers();
     void create_fixed_targets();
@@ -351,6 +352,7 @@ struct Renderer::Impl {
     GpuImage create_image(const ImageDesc& desc);
     void bind(Slot slot, const GpuImage& image);
     void upload_images(std::span<Upload> uploads);
+    void upload_rgba(Slot slot, assets::ImageView pixels);
 
     // Pipeline creation and ownership registration (renderer_pipelines.cpp).
     void create_pipelines();

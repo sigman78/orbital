@@ -1,13 +1,18 @@
 #pragma once
-#include "app/camera.hpp"
+#include "render/camera_view.hpp"
 #include "render/settings.hpp"
-#include "scene/system.hpp"
 #include <filesystem>
 #include <memory>
 #include <span>
 
 struct ImDrawData;
-namespace space::assets { class ImageView; }
+namespace space {
+struct BodyState;
+struct SystemDescription;
+} // namespace space
+namespace space::assets {
+class ImageView;
+}
 
 namespace space::render {
 
@@ -23,9 +28,9 @@ struct Stats {
     float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc
 };
 
-// Everything the renderer needs for one frame; owned by the caller.
+// Camera/settings are copied values; body and UI storage is borrowed for draw().
 struct FrameInput {
-    const Camera& camera;
+    CameraView camera;
     std::span<const BodyState> bodies; // at least the three major bodies, in system order
     double time = 0;                   // simulation seconds; drives belt spin and rock rotation
     bool high_quality = false;
@@ -49,8 +54,9 @@ struct RendererConfig {
 
 class Renderer {
 public:
+    // HUD pixels are copied/uploaded during construction; their storage is not retained.
     Renderer(void* window, const SystemDescription& system, const std::filesystem::path& directory,
-             const RendererConfig& config = {});
+             assets::ImageView hud, const RendererConfig& config = {});
     ~Renderer();
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;

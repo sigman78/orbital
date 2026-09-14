@@ -2,6 +2,7 @@
 #include "app/camera.hpp"
 #include "core/math.hpp"
 #include "render/settings.hpp"
+#include "scene/system.hpp"
 
 #include <filesystem>
 #include <string_view>

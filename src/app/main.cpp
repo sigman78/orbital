@@ -1,13 +1,14 @@
 #include "app/app_state.hpp"
 #include "app/frame_input.hpp"
+#include "app/hud.hpp"
 #include "app/ui.hpp"
+#include "assets/image.hpp"
 #include "core/file.hpp"
 #include "core/log.hpp"
 #include "core/math.hpp"
 #include "platform/process.hpp"
 #include "platform/window.hpp"
 #include "render/renderer.hpp"
-#include "assets/image.hpp"
 
 #include <algorithm>
 #include <array>
@@ -486,7 +487,9 @@ int run(const Options& options) {
     platform::init_process();
     AppState app = initial_state(options, system);
     const auto window = platform::Window::create({.client_size = options.size, .title = window_title});
-    render::Renderer renderer(window->native_handle(), system, directory, {.belt_count = options.rocks});
+    auto hud = make_hud();
+    render::Renderer renderer(window->native_handle(), system, directory, hud.view(), {.belt_count = options.rocks});
+    hud = {}; // The renderer has copied/uploaded the pixels.
     Ui ui(*window);
     const auto atlas = ui.font_atlas();
     renderer.set_ui_font({{atlas.width, atlas.height},

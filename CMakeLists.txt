@@ -13,16 +13,21 @@ endif()
 
 # CPU-only libraries (see docs/CODE_STYLE.md for the layering):
 #   orbital_core   logging, panic, file I/O, math
-#   orbital_scene  deterministic system generation, geometry, camera
+#   orbital_scene  deterministic system generation, geometry
+#   orbital_camera app navigation/controller, independent of the renderer
 #   orbital_assets PNG I/O (vendored Wuffs decoder, stb writer), pixel kernels, materials
 add_library(orbital_core STATIC src/core/log.cpp src/core/panic.cpp src/core/file.cpp)
 target_include_directories(orbital_core PUBLIC src)
 target_compile_features(orbital_core PUBLIC cxx_std_20)
 target_compile_options(orbital_core PRIVATE ${ORBITAL_WARNINGS})
 
-add_library(orbital_scene STATIC src/scene/system.cpp src/scene/geometry.cpp src/app/camera.cpp)
+add_library(orbital_scene STATIC src/scene/system.cpp src/scene/geometry.cpp)
 target_link_libraries(orbital_scene PUBLIC orbital_core)
 target_compile_options(orbital_scene PRIVATE ${ORBITAL_WARNINGS})
+
+add_library(orbital_camera STATIC src/app/camera.cpp)
+target_link_libraries(orbital_camera PUBLIC orbital_scene)
+target_compile_options(orbital_camera PRIVATE ${ORBITAL_WARNINGS})
 
 add_library(orbital_assets STATIC src/assets/image.cpp src/assets/kernels.cpp src/assets/materials.cpp src/assets/texture.cpp)
 set(smaa_source "${CMAKE_CURRENT_BINARY_DIR}/generated/smaa.cpp")
@@ -63,6 +68,9 @@ if(BUILD_TESTING)
   foreach(test IN ITEMS core system geometry camera image kernels materials smaa texture app)
     add_executable(${test}_tests tests/${test}_tests.cpp)
     target_link_libraries(${test}_tests PRIVATE orbital_scene orbital_assets)
+    if(test STREQUAL "camera" OR test STREQUAL "app")
+      target_link_libraries(${test}_tests PRIVATE orbital_camera)
+    endif()
     # These tests use assertions as executable invariants, including Release.
     if(MSVC)
       target_compile_options(${test}_tests PRIVATE ${ORBITAL_WARNINGS} /UNDEBUG)
@@ -127,7 +135,7 @@ if(ORBITAL_BUILD_DEMO)
   add_executable(orbital src/app/main.cpp src/app/hud.cpp src/app/ui.cpp src/render/renderer_resources.cpp src/render/gpu_image.cpp src/render/renderer_frame.cpp
     src/render/renderer_frame_data.cpp src/render/renderer_pipelines.cpp src/render/renderer_assets.cpp
     src/render/renderer_belt.cpp src/render/renderer_scene.cpp src/render/renderer_post.cpp src/render/renderer_overlay.cpp)
-  target_link_libraries(orbital PRIVATE orbital_scene orbital_assets orbital_platform NoGraphicsAPI::NoGraphicsAPI)
+  target_link_libraries(orbital PRIVATE orbital_scene orbital_camera orbital_assets orbital_platform NoGraphicsAPI::NoGraphicsAPI)
   target_include_directories(orbital PRIVATE shaders) # scene_shared.h, the C++/shader layout
   target_compile_definitions(orbital PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
   target_compile_options(orbital PRIVATE ${ORBITAL_WARNINGS})

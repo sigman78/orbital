@@ -121,6 +121,16 @@ on resize; history is invalidated for one frame.
 
 ## Application
 
+The app/render adapter copies pose, basis, vertical FOV and cut serial into a `CameraView`
+for each frame. Navigation and bookmark/orbit state remain in app; rendering uses the
+supplied basis without recomputing it. Bodies and UI remain borrowed for the draw call.
+App startup builds the HUD and supplies an image view to the renderer, which copies and
+uploads it during construction. HUD and font uploads share the RGBA view-to-texture path.
+The app releases its HUD pixels after construction. Renderer files include no app headers.
+`orbital_camera` builds navigation separately from `orbital_scene`; only the executable
+and camera/app tests link it.
+
+
 `app/main.cpp` parses options, owns the frame loop and turns key presses into `AppState`. The camera has
 free flight, orbit and a scripted tour, with body-relative bookmarks for the six views. The control panel
 (`app/ui.cpp`) edits the same `AppState` the hotkeys do, so the two never disagree.
