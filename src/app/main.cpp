@@ -3,6 +3,7 @@
 #include "app/frame_input.hpp"
 #include "app/hud.hpp"
 #include "app/options.hpp"
+#include "app/timing_average.hpp"
 #include "app/ui.hpp"
 #include "assets/image.hpp"
 #include "core/file.hpp"
@@ -225,6 +226,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
     auto previous = std::chrono::steady_clock::now();
     double simulation_time = 0, elapsed = 0, title_clock = 0;
     unsigned frames = 0;
+    TimingAverage timing_average;
     while (app.running && window.pump_events()) {
         for (const Key key : window.key_presses()) {
             if (key == Key::alt_enter)
@@ -257,7 +259,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
         ui.begin_frame();
         if (app.show_ui) {
             const std::size_t recent = std::min(times.cpu_ms.size(), window_limits::timing_history_frames);
-            draw_panel(app, renderer.stats(), std::span<const float>(times.cpu_ms).last(recent));
+            draw_panel(app, timing_average.apply(renderer.stats()), std::span<const float>(times.cpu_ms).last(recent));
         }
         const ImDrawData* ui_draw = ui.end_frame();
 
@@ -270,6 +272,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
             if (options.fullscreen_at && frames == options.fullscreen_at)
                 window.toggle_fullscreen();
             const auto stats = renderer.stats();
+            timing_average.add(stats);
             if (options.benchmark.empty() && times.cpu_ms.size() == window_limits::timing_history_frames)
                 times.cpu_ms.erase(times.cpu_ms.begin());
             times.cpu_ms.push_back(stats.frame_ms);

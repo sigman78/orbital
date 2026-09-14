@@ -36,6 +36,7 @@ void frame_controls(const render::Stats& stats, std::span<const float> recent_fr
     ImGui::Text("%d FPS   %.1f ms (p95 %.1f)", int(1000 / std::max(stats.frame_ms, .1f)), stats.frame_ms, p95);
     ImGui::PlotLines("##frame", recent_frame_ms.data(), int(recent_frame_ms.size()), 0, nullptr, 0, peak * 1.1f,
                      {-1, 60});
+    ImGui::TextDisabled("Timings: 0.5 s average | graph: raw frames");
     ImGui::Text("GPU %.2f ms", stats.gpu_ms);
     ImGui::Indent();
     ImGui::Text("cull + shadow %.2f   surface %.2f", stats.shadow_ms, stats.surface_ms);

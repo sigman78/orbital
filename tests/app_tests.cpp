@@ -1,10 +1,27 @@
 #include "app/actions.hpp"
 #include "app/frame_input.hpp"
+#include "app/timing_average.hpp"
 #include <cassert>
 
 int main() {
     using namespace space;
     using namespace space::app;
+    TimingAverage average;
+    render::Stats sample;
+    sample.frame_ms = 250;
+    sample.gpu_ms = 10;
+    average.add(sample);
+    sample.gpu_ms = 30;
+    average.add(sample);
+    sample.draw_calls = 123;
+    assert(average.apply(sample).gpu_ms == 20 && average.apply(sample).draw_calls == 123);
+    sample.gpu_ms = 50;
+    average.add(sample);
+    assert(average.apply(sample).gpu_ms == 40); // oldest frame leaves the half-second window
+    sample.frame_ms = 1000;
+    sample.gpu_ms = 70;
+    average.add(sample);
+    assert(average.apply(sample).gpu_ms == 70); // a long frame stands alone
     AppState app;
     app.bodies = evaluate_system(generate_system(showcase_seed), 0);
     app.belt_dust = {
