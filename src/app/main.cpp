@@ -44,7 +44,8 @@ constexpr std::string_view window_title = "ORBITAL  /  Procedural worlds";
 constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
     "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..5\n"
-    "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --rocks N\n"
+    "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --pan-stop-frame N "
+    "--rocks N\n"
     "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --disc 0|1 --lod-scale X --vsync 0|1 --splat 0..3 --tone "
     "0|1|2 "
     "--maximize-at N "
@@ -78,6 +79,7 @@ struct Options {
     unsigned galaxy = unsigned(render::SkySettings{}.galaxy_mode);
     unsigned splat = unsigned(render::BeltSettings{}.splat_mode); // initial splat cut-off index
     unsigned tone = unsigned(render::ToneSettings{}.tone_curve);  // initial tone curve (PBR Neutral)
+    unsigned pan_stop_frame = 0;                                  // deterministic movement-to-rest regression
     float pan = 0;            // lateral drift as a fraction of the flight speed, stepped at a fixed 60 Hz for captures
     unsigned maximize_at = 0; // > 0 maximizes the window after this many frames, to test resizing in captures
     unsigned fullscreen_at = 0; // > 0 enters borderless fullscreen after this many frames
@@ -152,6 +154,8 @@ std::optional<Options> parse_options(int argc, char** argv) {
             ok = parse_number(value(), options.taa) && options.taa <= 1;
         else if (arg == "--spatial")
             ok = parse_number(value(), options.spatial) && options.spatial < unsigned(render::SpatialAA::Count);
+        else if (arg == "--pan-stop-frame")
+            ok = parse_number(value(), options.pan_stop_frame);
         else if (arg == "--pan")
             ok = parse_number(value(), options.pan);
         else if (arg == "--maximize-at")
@@ -297,16 +301,19 @@ void update_title(platform::Window& window, const render::Stats& stats, const Ap
 
 struct FrameTimes {
     std::vector<float> cpu_ms, gpu_ms, prepare_ms;
+    std::vector<float> cull_ms, body_shadow_ms, belt_light_ms, belt_disc_ms;
     std::vector<float> cull_shadow_ms, surface_ms, atmosphere_ms, post_ms; // GPU pass timings
 };
 
 void write_benchmark(const std::filesystem::path& path, const FrameTimes& times) {
-    std::string csv = "frame,cpu_submit_and_wait_ms,gpu_ms,cpu_prepare_ms,gpu_cull_shadow_ms,gpu_surface_ms,"
-                      "gpu_atmosphere_ms,gpu_post_ms\n";
+    std::string csv =
+        "frame,cpu_submit_and_wait_ms,gpu_ms,cpu_prepare_ms,gpu_cull_shadow_ms,gpu_surface_ms,"
+        "gpu_atmosphere_ms,gpu_post_ms,gpu_cull_ms,gpu_body_shadow_ms,gpu_belt_light_ms,gpu_belt_disc_ms\n";
     for (std::size_t i = 0; i < times.cpu_ms.size(); i++)
-        std::format_to(std::back_inserter(csv), "{},{},{},{},{},{},{},{}\n", i, times.cpu_ms[i], times.gpu_ms[i],
-                       times.prepare_ms[i], times.cull_shadow_ms[i], times.surface_ms[i], times.atmosphere_ms[i],
-                       times.post_ms[i]);
+        std::format_to(std::back_inserter(csv), "{},{},{},{},{},{},{},{},{},{},{},{}\n", i, times.cpu_ms[i],
+                       times.gpu_ms[i], times.prepare_ms[i], times.cull_shadow_ms[i], times.surface_ms[i],
+                       times.atmosphere_ms[i], times.post_ms[i], times.cull_ms[i], times.body_shadow_ms[i],
+                       times.belt_light_ms[i], times.belt_disc_ms[i]);
     if (!file::write_text(path, csv))
         log::error("cannot write benchmark {}", path.string());
     auto sorted = times.cpu_ms;
@@ -409,8 +416,10 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
         if (options.fixed_time >= 0)
             simulation_time = options.fixed_time;
         app.bodies = evaluate_system(session.system, simulation_time);
+        if (options.pan_stop_frame && frames >= options.pan_stop_frame)
+            app.pan = 0;
         // A panning capture steps the camera at a fixed rate so runs are comparable.
-        app.camera.step(app.pan != 0 ? 1.0 / 60 : dt, elapsed, gather_input(window, app, !ui.wants_keyboard()),
+        app.camera.step(options.pan != 0 ? 1.0 / 60 : dt, elapsed, gather_input(window, app, !ui.wants_keyboard()),
                         app.bodies);
         // The overlay is built every frame so its input state stays current; the panel itself is optional.
         ui.begin_frame();
@@ -436,6 +445,10 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                 times.gpu_ms.push_back(stats.gpu_ms);
                 times.prepare_ms.push_back(stats.prepare_ms);
                 times.cull_shadow_ms.push_back(stats.shadow_ms);
+                times.cull_ms.push_back(stats.cull_ms);
+                times.body_shadow_ms.push_back(stats.body_shadow_ms);
+                times.belt_light_ms.push_back(stats.belt_light_ms);
+                times.belt_disc_ms.push_back(stats.belt_disc_ms);
                 times.surface_ms.push_back(stats.surface_ms);
                 times.atmosphere_ms.push_back(stats.atmosphere_ms);
                 times.post_ms.push_back(stats.post_ms);
@@ -486,6 +499,10 @@ int run(const Options& options) {
         times.gpu_ms.reserve(times.cpu_ms.capacity());
         times.prepare_ms.reserve(times.cpu_ms.capacity());
         times.cull_shadow_ms.reserve(times.cpu_ms.capacity());
+        times.cull_ms.reserve(times.cpu_ms.capacity());
+        times.body_shadow_ms.reserve(times.cpu_ms.capacity());
+        times.belt_light_ms.reserve(times.cpu_ms.capacity());
+        times.belt_disc_ms.reserve(times.cpu_ms.capacity());
         times.surface_ms.reserve(times.cpu_ms.capacity());
         times.atmosphere_ms.reserve(times.cpu_ms.capacity());
         times.post_ms.reserve(times.cpu_ms.capacity());

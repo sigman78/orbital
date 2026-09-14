@@ -199,7 +199,10 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
         frame.camera_lattice = {float(camera.position.x - index.x * cell), float(camera.position.y - index.y * cell),
                                 float(camera.position.z - index.z * cell), float(cell)};
         frame.camera_cell = {float(index.x), float(index.y), float(index.z),
-                             input.post.motion_streaks ? input.post.motion_streak_intensity : 0.f};
+                             input.post.motion_streaks && frame.previous_camera_delta.w > .5f &&
+                                     length(camera.position - previous_camera) > 1e-9
+                                 ? input.post.motion_streak_intensity
+                                 : 0.f};
     }
     frame.forward_exposure.w =
         input.tone.exposure * (input.tone.auto_exposure ? adapted_exposure : 1) * tone_curves::base_gain *

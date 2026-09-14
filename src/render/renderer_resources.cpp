@@ -29,7 +29,8 @@ Renderer::Impl::~Impl() {
                         &history[1],   &belt_light, &belt_light_blur, &splat_mask,      &smaa_edges,
                         &smaa_weights, &belt_dust,  &belt_disc_light, &belt_disc_rocks, &galaxy})
         destroy(*image);
-    for (auto* heap : {&data, &texture_descriptors, &sampler_descriptors, &luminance_readback, &timestamps})
+    for (auto* heap : {&data, &texture_descriptors, &sampler_descriptors, &luminance_readback, &timestamps,
+                       &cull_device, &cull_readback})
         gpu::destroy_gpu_heap(*heap);
     gpu::destroy_timeline_semaphore(timeline);
     gpu::destroy_device(device);
@@ -144,7 +145,14 @@ void Renderer::Impl::create_device(void* window) {
     panic_if(!caps.conventional_descriptor_backend,
              "the demo's shaders require the conventional descriptor backend build option");
     timeline = gpu::create_timeline_semaphore(device);
-    data = gpu::create_gpu_heap(device, heap_layout.static_heap);
+    data = gpu::create_gpu_heap(device, heap_layout.mapped_size());
+    cull_device = gpu::create_gpu_heap(
+        device, heap_layout.cull_size(std::max(high_quality.belt_count, belt_count_override), body_count),
+        gpu::MemoryType::gpu_only);
+    cull_readback = gpu::create_gpu_heap(device, sizeof(CullScratch), gpu::MemoryType::readback);
+    panic_if(!cull_device.range.gpu || !cull_readback.range.cpu, "culling heap allocation failed");
+    log::info("Buffer heaps: {} KiB mapped, {} KiB device-only culling", data.range.size / 1024,
+              cull_device.range.size / 1024);
     texture_descriptors = gpu::create_gpu_heap(device, caps.texture_descriptor_size * unsigned(Slot::count),
                                                gpu::MemoryType::texture_descriptor_heap);
     sampler_descriptors = gpu::create_gpu_heap(device, caps.sampler_descriptor_size * unsigned(SamplerSlot::count),
@@ -153,7 +161,8 @@ void Renderer::Impl::create_device(void* window) {
              "GPU mapped heap allocation failed");
     luminance_readback = gpu::create_gpu_heap(device, targets::meter_size * targets::meter_size * sizeof(Float4),
                                               gpu::MemoryType::readback);
-    timestamps = gpu::create_gpu_heap(device, 64, gpu::MemoryType::readback);
+    timestamps = gpu::create_gpu_heap(device, targets::timestamp_count * sizeof(std::uint64_t),
+                                      gpu::MemoryType::readback);
 }
 
 void Renderer::Impl::create_samplers() {
@@ -212,6 +221,8 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     panic_if(system.bodies.empty() || system.bodies.size() > max_body_count || system.belts.empty(),
              "the renderer needs 1 to {} bodies and a belt", max_body_count);
     body_count = unsigned(system.bodies.size());
+    panic_if(std::max(high_quality.belt_count, belt_count_override) > heap_layout.instance_capacity() - body_count,
+             "belt count exceeds culling capacity (maximum {} rocks)", heap_layout.instance_capacity() - body_count);
     const auto find_class = [&](BodyClass body_class, const char* name) {
         for (unsigned i = 0; i < body_count; i++)
             if (system.bodies[i].body_class == body_class)

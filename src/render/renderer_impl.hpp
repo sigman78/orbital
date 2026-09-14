@@ -125,23 +125,28 @@ constexpr SurfaceKind surface_kind(BodyClass body_class) {
 
 // --- Shared heap layout and limits ------------------------------------------
 
-// One host-visible heap: meshes are appended from the front at startup, the
-// per-frame FrameData and instance list live in the back half.
+// CPU-written static data and a small per-frame upload region are host-visible.
+// Culling counters and generated instances live in a separate device-only heap.
 struct HeapLayout {
-    std::uint64_t static_heap = 128ull << 20;   // with the 64 MiB upload staging this stays inside the BAR window
-    std::uint64_t dynamic_offset = 80ull << 20; // meshes and rock records before, per-frame data after
-    std::uint64_t cull_offset = 1024;           // FrameData, then the culling scratch, then the instances
+    std::uint64_t dynamic_offset = 80ull << 20; // static mesh/rock records before this point
+    std::uint64_t cull_offset = 1024;           // FrameData, then culling parameters/counters
     std::uint64_t instance_offset = 1024 + 8192;
-    std::uint64_t staging_budget = 64ull << 20; // texture upload staging, see upload_images
-    std::uint64_t ui_bytes = 4ull << 20;        // overlay vertices and indices, at the end of the dynamic half
+    std::uint64_t staging_budget = 64ull << 20; // bounded texture upload staging
+    std::uint64_t ui_bytes = 4ull << 20;
+    std::uint64_t instance_budget = (44ull << 20) - instance_offset; // retain the former instance limit
 
-    constexpr std::uint64_t ui_offset() const { return static_heap - dynamic_offset - ui_bytes; }
-    constexpr std::uint64_t instance_capacity() const { return (ui_offset() - instance_offset) / sizeof(Instance); }
+    constexpr std::uint64_t ui_offset() const { return instance_offset + max_body_count * sizeof(Instance); }
+    constexpr std::uint64_t mapped_size() const { return dynamic_offset + ui_offset() + ui_bytes; }
+    constexpr std::uint64_t instance_capacity() const { return instance_budget / sizeof(Instance); }
+    constexpr std::uint64_t cull_size(unsigned rocks, unsigned bodies) const {
+        return instance_offset + std::uint64_t(bodies) * sizeof(Instance) +
+               std::uint64_t(rocks) * sizeof(AsteroidInstance);
+    }
 };
 inline constexpr HeapLayout heap_layout{};
+static_assert(heap_layout.instance_capacity() < (1ull << 30)); // packed asteroid id
 static_assert(heap_layout.cull_offset >= sizeof(FrameData));
 static_assert(heap_layout.instance_offset >= heap_layout.cull_offset + sizeof(CullScratch));
-static_assert(heap_layout.dynamic_offset + heap_layout.instance_offset < heap_layout.static_heap);
 static_assert(heap_layout.instance_offset < heap_layout.ui_offset());
 
 // Sizes of the fixed GPU targets, created by the resources side and addressed by the frame side.
@@ -155,7 +160,7 @@ inline constexpr unsigned belt_disc_light_interval = 16, belt_disc_rock_interval
 inline constexpr unsigned meter_size = 16;             // luminance meter edge, texels of rgba32f
 inline constexpr unsigned mote_cell_size_units = 5;    // motion streak lattice cell, scene units
 inline constexpr unsigned mote_count = 4 * 4 * 4 * 16; // MOTE_CELLS^3 * MOTES_PER_CELL in motes.slang
-inline constexpr unsigned timestamp_count = 5;         // frame start, after shadow, surface, atmosphere, post
+inline constexpr unsigned timestamp_count = 8; // start, cull, shadow, belt light, belt disc, surface, atmosphere, post
 } // namespace targets
 
 // What FrameInput::high_quality selects between.
@@ -201,7 +206,7 @@ struct PipelineDesc {
     const char* vertex_shader;   // shaders/<name>.vertex.spv
     const char* fragment_shader; // shaders/<name>.fragment.spv
     gpu::Format color_format;
-    bool depth_test = false;
+    bool has_depth_attachment = false;
     Blend blend = Blend::none;
 };
 
@@ -242,6 +247,7 @@ struct Renderer::Impl {
     gpu::TimelineSemaphore* timeline = nullptr;
     std::uint64_t serial = 0;
     gpu::GpuHeap data{}, texture_descriptors{}, sampler_descriptors{}, luminance_readback{}, timestamps{};
+    gpu::GpuHeap cull_device{}, cull_readback{}; // GPU output and completed scratch for CPU statistics
     std::uint64_t static_cursor = 0;
 
     // Resources.
@@ -402,13 +408,14 @@ struct Renderer::Impl {
     void record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input, const FrameData& frame,
                            std::uint64_t args_address);
     void record_atmosphere_passes(gpu::CommandBuffer* cmd, Root& root);
-    void record_motion_streaks(gpu::CommandBuffer* cmd, Root& root, const PostSettings& settings);
+    void record_motion_streaks(gpu::CommandBuffer* cmd, Root& root);
     void draw_mesh(gpu::CommandBuffer* cmd, Root& root, const GpuMesh& mesh, unsigned base, unsigned instance_count);
 
     // Post-processing and exposure (renderer_post.cpp).
     void apply_metering();
     void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view, SpatialAA spatial_aa,
-                            bool bloom, const ImDrawData* ui, std::uint8_t* ui_cpu, std::uint64_t ui_gpu);
+                            bool bloom, bool motion_streaks, const ImDrawData* ui, std::uint8_t* ui_cpu,
+                            std::uint64_t ui_gpu);
     void fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, gpu::PSO* pipeline, Root root,
                          bool preserve = false);
 
@@ -417,6 +424,7 @@ struct Renderer::Impl {
 
     // Frame orchestration and readback (renderer_frame.cpp).
     void read_gpu_timings();
+    void stamp(gpu::CommandBuffer* cmd, unsigned index);
 };
 
 } // namespace space::render

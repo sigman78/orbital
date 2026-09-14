@@ -60,3 +60,10 @@ The default build does not compile it; the demo does not link it.
 MIT/public domain, with license notice in the source. See
 [vendoring details](bc7enc/ORBITAL.md). Only the optional `bc7_compress` executable
 links it; the demo has no encoder dependency.
+
+## Khronos Vulkan Validation Layers (optional development tool)
+
+Sources and dependencies are materialized in `.tools` by `tools/build-validation.ps1`,
+with exact revisions in `tools/validation-dependencies.json`. The local install retains
+the Apache-2.0 license and a binary hash manifest. It is not linked or shipped with the
+demo. See [renderer validation](../docs/RENDER_VALIDATION.md) for bootstrap and test commands.

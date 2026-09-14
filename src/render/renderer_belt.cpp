@@ -84,6 +84,7 @@ void Renderer::Impl::record_belt_maps(gpu::CommandBuffer* cmd, const CullRoot& c
                                   .unused = 0};
         record_belt_light_pass(cmd, splat_root, root, splat_root.pass);
     }
+    stamp(cmd, 3);
     {
         const CullRoot bake_root{
             .frame = root.frame, .rocks = rock_data, .scratch = cull_root.scratch, .pass = rock_limit, .unused = 0};

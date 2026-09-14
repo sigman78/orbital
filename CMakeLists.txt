@@ -3,6 +3,7 @@ project(Orbital VERSION 0.1.0 LANGUAGES CXX)
 include(CTest)
 set(CMAKE_CXX_EXTENSIONS OFF)
 option(ORBITAL_BUILD_DEMO "Build the native Vulkan demo" ON)
+option(ORBITAL_RENDER_TESTS "Enable desktop GPU tests requiring local Vulkan validation layers" OFF)
 
 if(MSVC)
   set(ORBITAL_WARNINGS /W4 /permissive- /EHsc)
@@ -136,6 +137,16 @@ if(ORBITAL_BUILD_DEMO)
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets" "${CMAKE_BINARY_DIR}/assets"
     COMMENT "Synchronizing material assets")
   add_dependencies(orbital orbital_sync_assets)
+
+  if(BUILD_TESTING AND ORBITAL_RENDER_TESTS)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_executable(render_validation_probe tests/render_validation_probe.cpp)
+    target_link_libraries(render_validation_probe PRIVATE orbital_core NoGraphicsAPI::NoGraphicsAPI)
+    target_compile_options(render_validation_probe PRIVATE ${ORBITAL_WARNINGS})
+    add_test(NAME renderer_validation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check-renderer.py"
+      --build "$<TARGET_FILE_DIR:orbital>")
+    set_tests_properties(renderer_validation PROPERTIES LABELS "gpu;validation" RUN_SERIAL TRUE TIMEOUT 1800)
+  endif()
 
   install(TARGETS orbital RUNTIME DESTINATION .)
   install(DIRECTORY "${CMAKE_BINARY_DIR}/shaders" DESTINATION .)

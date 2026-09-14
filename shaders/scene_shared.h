@@ -29,6 +29,13 @@ using ShaderMatrix4 = float[16];
 #define ORBITAL_KIND_MARS 4
 
 struct Instance { SHADER_FLOAT4 center_radius; SHADER_FLOAT4 rotation_kind; SHADER_FLOAT4 tint; };
+// GPU-generated asteroid record. Bodies retain the full Instance representation.
+// Mesh payload: float32 Euler angles, then 30-bit rock id + 2-bit composition.
+// Billboard payload: half RGB/rim, float32 ambient and coverage; rim sign tags discs.
+struct AsteroidInstance {
+    SHADER_FLOAT4 center_radius;
+    SHADER_UINT payload[4];
+};
 struct Vertex { SHADER_FLOAT4 position; SHADER_FLOAT4 normal; };
 struct Frame {
     SHADER_MATRIX4 view_projection;
@@ -114,14 +121,15 @@ struct CullParams {
 };
 
 // Per-frame scratch the culling passes read and write; the CPU fills params,
-// the instance pointer and zeroes the counters before each frame.
+// the asteroid-only instance pointer and zeroes the counters before each frame.
+// Indirect first-instance indices still include the full-size body prefix.
 struct CullScratch {
     CullParams params;
 #ifdef __cplusplus
     SHADER_ADDRESS instances;
     SHADER_UINT counts[ORBITAL_ROCK_GROUPS + 1], cursors[ORBITAL_ROCK_GROUPS + 1];
 #else
-    SHADER_ADDRESS(Instance) instances;
+    SHADER_ADDRESS(AsteroidInstance) instances;
     Atomic<uint> counts[ORBITAL_ROCK_GROUPS + 1];
     Atomic<uint> cursors[ORBITAL_ROCK_GROUPS + 1];
 #endif

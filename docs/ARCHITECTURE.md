@@ -52,17 +52,18 @@ Between the rocks a half-resolution march through the same density field scatter
 3. Scene pass into the HDR target: background, bodies, the pooled rock multi-draw, splats, clouds.
 4. Atmospheres, composited per body against depth; then the belt dust, marched at half resolution and
    composited with a depth-aware upsample.
-5. The splats write their depth and a mask, so the temporal pass reprojects them exactly and keeps their
-   history unclipped.
-6. Temporal anti-aliasing into a history target; area-prefiltered bloom with adjacent-texel separable blur at quarter resolution;
+5. Splats write fractional coverage and coverage-weighted depth into metadata; scene depth remains opaque-only.
+   TAA uses the reconstructed splat depth for reprojection and currently keeps splat history unclipped.
+6. Temporal anti-aliasing into a history target; transient motion streaks into reused HDR storage, added before
+   area-prefiltered bloom with adjacent-texel separable blur at quarter resolution;
    one shared 1×1 sun-visibility estimate for lens effects; exposure metering every
    sixteenth frame from a 16x16 log-luminance image.
 7. Tone mapping (PBR Neutral, AgX or ACES filmic) with vignette, chromatic fringe and grain into an
    intermediate, then the spatial pass (SMAA or FXAA) into the final image.
 8. Present, with the HUD and the Dear ImGui panel drawn last into the swapchain.
 
-GPU timestamps bracket the cull and shadow passes, the scene, the atmospheres with the dust, and the post
-passes; the title bar and the panel show them.
+GPU timestamps separately bracket compute culling, body shadows, belt light maps, far-belt bakes, the scene,
+atmospheres with dust, and post-processing. The original cull/shadow aggregate is retained in the panel and CSV.
 
 ## Renderer implementation
 
@@ -90,9 +91,16 @@ explicitly preserve the push-constant updates used by subsequent draws.
 
 ## Resources
 
-One 128 MiB host-visible heap holds everything: meshes and rock records appended from the front at startup,
-per-frame constants, cull scratch, the instance list and the overlay vertices in the back half. A separate
-64 MiB staging heap uploads textures. Descriptors are a fixed table of 40 sampled images and 4 samplers;
+An approximately 84 MiB host-visible heap holds static meshes/rock records, frame constants, staged
+culling parameters/body instances and 4 MiB of overlay space. GPU-written culling scratch, indirect
+commands and generated instances use a separate device-only heap sized for the configured maximum
+rock count (about 16 MiB by default). A small readback heap returns completed culling statistics;
+only parameters and body instances are uploaded each frame. Rock-count overrides are checked against
+the supported instance capacity before allocation. Generated asteroids use 32-byte records,
+while the body prefix retains 48-byte instances. Mesh material data is reconstructed from
+packed identity; billboards store half-precision RGB/rim and full-precision coverage/ambient.
+Static asteroid records retain full-precision rotation and spin rates.
+A separate 64 MiB staging heap uploads textures. Descriptors are a fixed table of 40 sampled images and 4 samplers;
 `Slot` in `renderer_impl.hpp` names every entry. Push constants carry a 32-byte root per pipeline: the frame
 pointer and vertex or instance pointers for surfaces, the rock data and scratch pointers for culling, a
 vertex pointer and pixel scale for the overlay.
@@ -135,7 +143,7 @@ helper on its own to catch accidental include-order dependencies.
 
 ## Tools and tests
 
-Seven CTest suites cover the CPU layers: core, system, geometry, camera, image, kernels and materials. They
+Ten CTest suites cover core, system, geometry, camera, image, kernels, materials, SMAA, texture and app boundaries. They
 use assertions as executable invariants and also run under GCC. `tools/check-gcc.ps1` runs that build
 locally; `tools/smoke-window.ps1` drives the window through resize, minimize and key transitions;
 `tools/check-stability.ps1` compares two fixed-time captures pixel by pixel.
@@ -148,3 +156,5 @@ An independent uncompressed original-map path supports full-resolution compariso
 The Sky selector and `--galaxy` choose splats, layers or original; all assets load
 at startup, while only the selected path renders. Texture modes share the splat
 sky's brightness/contrast but bypass its procedural dust. Splats remain the default.
+
+Optional desktop GPU correctness tests use the pinned local Vulkan layer; see [RENDER_VALIDATION.md](RENDER_VALIDATION.md).

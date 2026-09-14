@@ -101,6 +101,8 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::Text("GPU %.2f ms", stats.gpu_ms);
         ImGui::Indent();
         ImGui::Text("cull + shadow %.2f   surface %.2f", stats.shadow_ms, stats.surface_ms);
+        ImGui::Text("  cull %.2f   body shadow %.2f", stats.cull_ms, stats.body_shadow_ms);
+        ImGui::Text("  belt light %.2f   disc bake %.2f", stats.belt_light_ms, stats.belt_disc_ms);
         ImGui::Text("atmosphere %.2f   post %.2f", stats.atmosphere_ms, stats.post_ms);
         ImGui::Unindent();
         ImGui::Text("CPU prepare %.2f ms", stats.prepare_ms);

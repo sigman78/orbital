@@ -41,7 +41,7 @@ gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
         device, {.vertex_spirv = vertex,
                  .fragment_spirv = fragment,
                  .color_targets = {&target, 1},
-                 .depth_format = desc.depth_test ? gpu::Format::d32_float : gpu::Format::undefined});
+                 .depth_format = desc.has_depth_attachment ? gpu::Format::d32_float : gpu::Format::undefined});
     panic_if(!pipeline, "pipeline creation failed for {} + {}", desc.vertex_shader, desc.fragment_shader);
     pipelines.push_back(pipeline);
     return pipeline;
@@ -49,12 +49,12 @@ gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
 
 void Renderer::Impl::create_pipelines() {
     using gpu::Format;
-    const auto make = [&](const char* vertex, const char* fragment, Format format, bool depth_test = false,
+    const auto make = [&](const char* vertex, const char* fragment, Format format, bool has_depth_attachment = false,
                           Blend blend = Blend::none) {
         return create_pipeline({.vertex_shader = vertex,
                                 .fragment_shader = fragment,
                                 .color_format = format,
-                                .depth_test = depth_test,
+                                .has_depth_attachment = has_depth_attachment,
                                 .blend = blend});
     };
     // Scene, sky and atmosphere pipelines.
@@ -67,7 +67,7 @@ void Renderer::Impl::create_pipelines() {
     pso.scene.galaxy = make("fullscreen", "galaxy", Format::rgba16_float);
     pso.scene.atmosphere = make("fullscreen", "atmosphere", Format::rgba16_float, false, Blend::alpha);
     pso.scene.motes = make("motes", "motes", Format::rgba16_float, true, Blend::additive);
-    pso.scene.stars = make("stars", "stars", Format::rgba16_float, false, Blend::additive);
+    pso.scene.stars = make("stars", "stars", Format::rgba16_float, true, Blend::additive);
     // Belt meshes, splats and dust pipelines.
     pso.belt.billboard = make("surface", "surface_rock", Format::rgba16_float, true, Blend::alpha);
     pso.belt.splat = make("beltsplat", "beltsplat", Format::rgba16_float, false, Blend::additive);

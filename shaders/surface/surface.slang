@@ -1,5 +1,6 @@
 #include "../scene/frame_bindings.slang"
 #include "types.slang"
+#include "../scene/instances.slang"
 #include "../planets/cloud_geometry.slang"
 #include "../lib/math.slang"
 
@@ -16,7 +17,8 @@ SurfaceVaryings vertexMain(uint vertexIndex : SV_VertexID, uint firstVertex : SV
     vertexIndex += firstVertex;
     SurfaceVaryings output;
     output.instanceIndex = root.base + firstInstance + instanceId;
-    Instance inst = root.instances[output.instanceIndex];
+    Instance inst = loadInstance(root.frame, root.instances, output.instanceIndex,
+                                 root.mode == MODE_BILLBOARD || root.mode == MODE_SPLAT_MASK);
     if (root.mode == MODE_BILLBOARD || root.mode == MODE_SPLAT_MASK)
     {
         const float2 corners[6] = {float2(-1,-1),float2(1,-1),float2(1,1),float2(-1,-1),float2(1,1),float2(-1,1)};

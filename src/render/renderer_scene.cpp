@@ -85,25 +85,26 @@ void Renderer::Impl::record_atmosphere_passes(gpu::CommandBuffer* cmd, Root& roo
     }
 }
 
-void Renderer::Impl::record_motion_streaks(gpu::CommandBuffer* cmd, Root& root, const PostSettings& settings) {
-    // Motion streaks: world-fixed motes streak past by their own screen motion, depth tested against the scene.
-    if (settings.motion_streaks && settings.motion_streak_intensity > 0) {
-        gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,
-                     gpu::Access::depth_stencil_read);
-        gpu::ColorAttachment color{.render_view = hdr.view, .load = gpu::LoadOp::load};
-        gpu::begin_render_pass(
-            cmd, {.colors = {&color, 1}, .depth = {.render_view = depth.view, .load = gpu::LoadOp::load}});
-        gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
-        gpu::bind_pso(cmd, pso.scene.motes);
-        root.mode = 0;
-        gpu::draw(cmd, root, 6, targets::mote_count);
-        stats.draw_calls++;
-        gpu::end_render_pass(cmd);
-        gpu::barrier(cmd, gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_read, gpu::Stage::fragment,
-                     gpu::Access::shader_read);
-        gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
-                     gpu::Access::shader_read);
-    }
+void Renderer::Impl::record_motion_streaks(gpu::CommandBuffer* cmd, Root& root) {
+    // TAA has consumed scene HDR. Reuse it for this frame's transient streaks,
+    // retaining scene depth but keeping the effect out of temporal history.
+    gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::color_output,
+                 gpu::Access::color_write);
+    gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,
+                 gpu::Access::depth_stencil_read);
+    gpu::ColorAttachment color{.render_view = hdr.view, .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
+    gpu::begin_render_pass(cmd,
+                           {.colors = {&color, 1}, .depth = {.render_view = depth.view, .load = gpu::LoadOp::load}});
+    gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
+    gpu::bind_pso(cmd, pso.scene.motes);
+    root.mode = 0;
+    gpu::draw(cmd, root, 6, targets::mote_count);
+    stats.draw_calls++;
+    gpu::end_render_pass(cmd);
+    gpu::barrier(cmd, gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_read, gpu::Stage::fragment,
+                 gpu::Access::shader_read);
+    gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
+                 gpu::Access::shader_read);
 }
 
 } // namespace space::render

@@ -17,11 +17,20 @@ void Renderer::Impl::read_gpu_timings() {
     const auto elapsed = [&](unsigned begin, unsigned end) {
         return float(timestamp_ticks(t[begin], t[end], caps.timestamp_valid_bits)) * scale;
     };
-    stats.gpu_ms = elapsed(0, 4);
-    stats.shadow_ms = elapsed(0, 1);
-    stats.surface_ms = elapsed(1, 2);
-    stats.atmosphere_ms = elapsed(2, 3);
-    stats.post_ms = elapsed(3, 4);
+    stats.gpu_ms = elapsed(0, 7);
+    stats.shadow_ms = elapsed(0, 4);
+    stats.cull_ms = elapsed(0, 1);
+    stats.body_shadow_ms = elapsed(1, 2);
+    stats.belt_light_ms = elapsed(2, 3);
+    stats.belt_disc_ms = elapsed(3, 4);
+    stats.surface_ms = elapsed(4, 5);
+    stats.atmosphere_ms = elapsed(5, 6);
+    stats.post_ms = elapsed(6, 7);
+}
+
+void Renderer::Impl::stamp(gpu::CommandBuffer* cmd, unsigned index) {
+    ORBITAL_ASSERT(index < targets::timestamp_count);
+    gpu::write_timestamp(cmd, reinterpret_cast<gpu::uint64*>(timestamps.range.gpu + index * sizeof(std::uint64_t)));
 }
 
 bool Renderer::draw(const FrameInput& input) {
@@ -61,51 +70,63 @@ bool Renderer::draw(const FrameInput& input) {
     s.stats.triangles = 0;
     s.stats.draw_calls = 0;
 
-    // Per-frame constants, culling scratch and instances live in the dynamic
-    // half of the static heap; the previous frame's culling counts are read
-    // before the scratch is reset.
+    // CPU stages frame constants, culling parameters and body instances only.
+    // The completed GPU scratch is read before preparing the next submission.
     const auto frame_address = reinterpret_cast<std::uint64_t>(s.data.range.gpu) + heap_layout.dynamic_offset;
     auto* dynamic = s.data.range.cpu + heap_layout.dynamic_offset;
     auto* scratch = reinterpret_cast<CullScratch*>(dynamic + heap_layout.cull_offset);
-    s.read_cull_counts(*scratch);
+    if (s.frame_index)
+        s.read_cull_counts(*reinterpret_cast<const CullScratch*>(s.cull_readback.range.cpu));
     std::memcpy(dynamic, &frame, sizeof frame);
-    s.write_cull_scratch(input, frame, *scratch, frame_address + heap_layout.instance_offset);
+    const auto cull_address = reinterpret_cast<std::uint64_t>(s.cull_device.range.gpu);
+    s.write_cull_scratch(input, frame, *scratch,
+                         cull_address + heap_layout.instance_offset + s.body_count * sizeof(Instance));
     std::memcpy(dynamic + heap_layout.instance_offset, s.instances.data(), s.instances.size() * sizeof(Instance));
     Root root{.frame = frame_address,
               .vertices = 0,
-              .instances = frame_address + heap_layout.instance_offset,
+              .instances = cull_address + heap_layout.instance_offset,
               .base = 0,
               .mode = 0};
     const CullRoot cull_root{.frame = frame_address,
                              .rocks = s.rock_data,
-                             .scratch = frame_address + heap_layout.cull_offset,
+                             .scratch = cull_address + heap_layout.cull_offset,
                              .pass = 0,
                              .unused = 0};
-    const std::uint64_t args_address = frame_address + heap_layout.cull_offset + offsetof(CullScratch, args);
+    const std::uint64_t args_address = cull_address + heap_layout.cull_offset + offsetof(CullScratch, args);
 
     auto* cmd = gpu::begin_commands(s.device);
-    const auto stamp = [&](unsigned index) {
-        ORBITAL_ASSERT(index < targets::timestamp_count);
-        gpu::write_timestamp(cmd,
-                             reinterpret_cast<gpu::uint64*>(s.timestamps.range.gpu + index * sizeof(std::uint64_t)));
-    };
-    stamp(0);
+    s.stamp(cmd, 0);
     gpu::set_texture_descriptor_heap(cmd, gpu::gpu_range(s.texture_descriptors));
     gpu::set_sampler_descriptor_heap(cmd, gpu::gpu_range(s.sampler_descriptors));
     gpu::barrier(cmd, gpu::Stage::all_commands,
                  gpu::Access::shader_read | gpu::Access::color_write | gpu::Access::depth_stencil_write,
                  gpu::Stage::all_commands,
                  gpu::Access::color_write | gpu::Access::depth_stencil_write | gpu::Access::shader_read);
+    // Transfer the small CPU inputs; generated instances and atomic counters
+    // stay device-only. The submission makes preceding host writes available.
+    gpu::copy_memory(cmd, {reinterpret_cast<void*>(frame_address + heap_layout.cull_offset), sizeof(CullScratch)},
+                     {s.cull_device.range.gpu + heap_layout.cull_offset, sizeof(CullScratch)});
+    gpu::copy_memory(
+        cmd,
+        {reinterpret_cast<void*>(frame_address + heap_layout.instance_offset), s.instances.size() * sizeof(Instance)},
+        {s.cull_device.range.gpu + heap_layout.instance_offset, s.instances.size() * sizeof(Instance)});
+    gpu::barrier(cmd, gpu::Stage::transfer, gpu::Access::transfer_write, gpu::Stage::compute | gpu::Stage::vertex,
+                 gpu::Access::shader_read | gpu::Access::shader_write);
     s.record_cull_passes(cmd, cull_root);
+    gpu::barrier(cmd, gpu::Stage::compute, gpu::Access::shader_write, gpu::Stage::transfer, gpu::Access::transfer_read);
+    gpu::copy_memory(cmd, {s.cull_device.range.gpu + heap_layout.cull_offset, sizeof(CullScratch)},
+                     gpu::gpu_range(s.cull_readback));
+    gpu::barrier(cmd, gpu::Stage::transfer, gpu::Access::transfer_write, gpu::Stage::host, gpu::Access::host_read);
+    s.stamp(cmd, 1);
     s.record_shadow_pass(cmd, root);
+    s.stamp(cmd, 2);
     s.record_belt_maps(cmd, cull_root, root, scratch->params.rock_limit, input.belt.light_map, frame.belt_disc.y);
-    stamp(1);
+    s.stamp(cmd, 4);
     s.record_galaxy_pass(cmd, root, frame);
     s.record_scene_pass(cmd, root, input, frame, args_address);
-    stamp(2);
+    s.stamp(cmd, 5);
     s.record_atmosphere_passes(cmd, root);
     s.record_belt_dust_passes(cmd, root, input.belt_dust.enabled, frame.belt_disc.y);
-    s.record_motion_streaks(cmd, root, input.post);
     // Coverage is also needed by sun visibility with TAA disabled.
     gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,
                  gpu::Access::depth_stencil_read);
@@ -114,11 +135,11 @@ bool Renderer::draw(const FrameInput& input) {
                  gpu::Access::shader_read);
     gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
                  gpu::Access::shader_read);
-    stamp(3);
+    s.stamp(cmd, 6);
     s.record_post_passes(cmd, root, swap.render_view, input.aa.spatial_aa,
-                         input.post.bloom && input.post.bloom_intensity > 0, input.ui,
+                         input.post.bloom && input.post.bloom_intensity > 0, frame.camera_cell.w > 0, input.ui,
                          dynamic + heap_layout.ui_offset(), frame_address + heap_layout.ui_offset());
-    stamp(4);
+    s.stamp(cmd, 7);
     s.stats.prepare_ms =
         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - prepare_start).count();
     gpu::submit_and_present(s.device, {cmd}, {s.timeline, ++s.serial});

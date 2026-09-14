@@ -60,11 +60,13 @@ void Renderer::Impl::fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, 
 }
 
 void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view,
-                                        SpatialAA spatial_aa, bool bloom, const ImDrawData* ui, std::uint8_t* ui_cpu,
-                                        std::uint64_t ui_gpu) {
+                                        SpatialAA spatial_aa, bool bloom, bool motion_streaks, const ImDrawData* ui,
+                                        std::uint8_t* ui_cpu, std::uint64_t ui_gpu) {
     const unsigned history_write = frame_index % 2;
     root.mode = 0;
     fullscreen_pass(cmd, history[history_write], pso.post.temporal, root);
+    if (motion_streaks)
+        record_motion_streaks(cmd, root);
     if (bloom) { // off, the composite does not read the halo, so its images may hold stale content
         root.mode = std::uint32_t(BloomMode::prefilter);
         fullscreen_pass(cmd, bloom_a, pso.post.bloom, root);
