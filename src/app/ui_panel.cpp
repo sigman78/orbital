@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 namespace space::app {
@@ -77,7 +78,11 @@ void gpu_time_bar(const render::Stats& stats) {
             ImGui::SameLine();
             ImGui::TextUnformatted(segment.label);
             ImGui::SameLine(0, ImGui::CalcTextSize(" ").x);
-            ImGui::TextColored({.55f, .8f, 1.f, 1.f}, "%.2f ms", segment.ms);
+            char reading[64];
+            std::snprintf(reading, sizeof(reading), "%.2f ms", segment.ms);
+            const float padding = ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(reading).x;
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(padding, 0.f));
+            ImGui::TextColored({.55f, .8f, 1.f, 1.f}, "%s", reading);
         }
         ImGui::EndTable();
     }
