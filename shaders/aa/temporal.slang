@@ -83,11 +83,23 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     if (behind || outside || (!sky && predictedPreviousZ <= 0.0)) return float4(current, currentZ);
 
     float4 history = reconstruct(textures[TEX_HISTORY_B], previousUV, float2(size));
-    // A disocclusion: both frames saw surfaces at clearly different depths.
-    bool historySky = history.a >= FAR_Z * .999;
-    if (!sky && !historySky && !splat) {
+    // Depth is metadata, not colour: Catmull-Rom can overshoot at silhouettes
+    // and invent a surface between foreground and background. Compare against
+    // the unfiltered depths within one pixel of the reprojected sample. This
+    // covers the shift in coverage between jitter phases while rejecting disocclusions
+    // where every history sample lies clearly in front of or behind the surface.
+    if (!sky && !splat) {
+        int2 historyPixel = int2(previousUV * float2(size));
+        float minDepth = FAR_Z, maxDepth = 0.0;
+        for (int y = -1; y <= 1; ++y) for (int x = -1; x <= 1; ++x) {
+            int2 q = clamp(historyPixel + int2(x, y), int2(0, 0), size - 1);
+            float z = textures[TEX_HISTORY_B].Load(int3(q, 0)).a;
+            minDepth = min(minDepth, z);
+            maxDepth = max(maxDepth, z);
+        }
         float tolerance = .05 * max(predictedPreviousZ, 0.0) + .1;
-        if (abs(history.a - predictedPreviousZ) > tolerance) return float4(current, currentZ);
+        if (predictedPreviousZ < minDepth - tolerance || predictedPreviousZ > maxDepth + tolerance)
+            return float4(current, currentZ);
     }
 
     float3 mean = float3(0.0, 0.0, 0.0), meanSquare = float3(0.0, 0.0, 0.0);
