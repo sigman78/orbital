@@ -18,7 +18,7 @@
 //                  spindle knots, white near the centre and blue at .48
 //   ghosts         soft coloured discs from .5 to -.8, each rim brighter than
 //                  its body and the body brighter than its core
-//   big crescent   a wide dispersed arc on the far side, convex toward the sun
+//   big crescent   a wide dispersed arc on the far side, its arc turned away from the sun
 //
 // Major elements (ring and crescents) show with the sun in frame and fade as
 // it leaves; the minor ones (ghosts) are lost in the glare until the sun nears
@@ -116,10 +116,11 @@ float3 lensStack(float2 p, float2 sun, float vis, float2 aspect, float4 strength
                  * .025 * oblique * strengths.z * major;
     }
     if (major > 0.0 && strengths.y > 0.0) {
-        // Centred far beyond the centre so its near side crosses the frame just
-        // past the sun's mirror point; the band scales with the arc.
+        // Centred past the sun's mirror point with its arc turned away from the
+        // sun, so the arc lies near the far edge of the frame; the band scales
+        // with the arc.
         float radius = .25 + .42 * offAxis;
-        color += dispersedArc(q + s * 1.6, axis, radius, .12 * radius, .14 * radius, 2.0) * float3(1.0, .95, .9)
+        color += dispersedArc(q + s * .6, -axis, radius, .12 * radius, .14 * radius, 2.0) * float3(1.0, .95, .9)
                  * .014 * oblique * strengths.y * major;
     }
     if (weights.y > 0.0 && strengths.w > 0.0) {
