@@ -36,6 +36,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     color += float3(1.0, .6, .3) * vis * .014 * lens.x / (dist * dist + .012);
     color += lensGhosts(p, sun, vis, aspect, int(lens.w + .5)) * lens.y;
     color += starburst(p, sun, vis, aspect, int(lens.w + .5), lens.z);
+    color += lensHalo(p, sun, vis, aspect, root.frame.sun_disc.zw);
     color = toneMap(color * root.frame.forward_exposure.w, uint(root.frame.quality.y + .5), root.frame.post_more.z);
     color *= 1.0 - root.frame.post_more.x * pow(length(p * .65), 2.0);
     // Dither and grain in display-code space; linear-space noise is far too

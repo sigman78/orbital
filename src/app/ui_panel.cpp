@@ -187,6 +187,8 @@ void earth_controls(render::EarthSettings& settings) {
 void sun_lens_controls(render::SunSettings& settings) {
     ImGui::SliderFloat("Glare", &settings.glare_intensity, 0.f, 4.f, "%.2f x");
     ImGui::SliderFloat("Ghosts", &settings.ghost_strength, 0.f, 4.f, "%.2f x");
+    ImGui::SliderFloat("Lens halo", &settings.halo_strength, 0.f, 4.f, "%.2f x");
+    ImGui::SliderFloat("Rainbow crescent", &settings.rainbow_strength, 0.f, 4.f, "%.2f x");
     ImGui::SliderFloat("Starburst", &settings.starburst_strength, 0.f, 4.f, "%.2f x");
     ImGui::SliderInt("Starburst blades", &settings.starburst_blades, 0, 12);
     ImGui::SliderFloat("Disc radius", &settings.sun_disc_radius, .003f, .02f, "%.4f rad");

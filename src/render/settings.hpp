@@ -62,6 +62,8 @@ struct SunSettings {
     int starburst_blades = 6;       // streak count, 0 for none
     float sun_disc_radius = .007f;  // angular radius of the solar disc, radians
     float sun_limb_darkening = .6f; // edge darkening of the disc, 0 flat
+    float halo_strength = 1.f;      // broad, soft lens reflection, 0 off
+    float rainbow_strength = 1.f;   // dispersed crescent reflection, 0 off
 };
 
 struct PostSettings {

@@ -73,7 +73,10 @@ Between the rocks a half-resolution march through the same density field scatter
    area-prefiltered bloom with adjacent-texel separable blur at quarter resolution;
    one shared 1×1 sun-visibility estimate for lens effects; exposure metering every
    sixteenth frame from a 16x16 log-luminance image.
-7. Tone mapping (PBR Neutral, AgX or ACES filmic) with vignette, chromatic fringe and grain into an
+7. The composite adds sun glare, aperture ghosts/starburst, a broad lens halo and a dispersed rainbow
+   crescent in HDR, using the shared sun visibility. Halo and crescent have independent strengths in
+   Sun & lens; their analytic shapes follow the projected sun and fade near the viewport cutoff.
+   Tone mapping (PBR Neutral, AgX or ACES filmic) with vignette, chromatic fringe and grain into an
    intermediate, then the spatial pass (SMAA or FXAA) into the final image.
 8. Present, with the HUD and the Dear ImGui panel drawn last into the swapchain.
 

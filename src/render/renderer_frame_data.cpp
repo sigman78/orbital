@@ -140,7 +140,8 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.earth_more = {input.earth.sea_patchiness, input.earth.cloud_opacity, 0, 0};
     frame.lens = {input.sun.glare_intensity, input.sun.ghost_strength, input.sun.starburst_strength,
                   float(std::clamp(input.sun.starburst_blades, 0, 12))};
-    frame.sun_disc = {input.sun.sun_disc_radius, input.sun.sun_limb_darkening, 0, 0};
+    frame.sun_disc = {input.sun.sun_disc_radius, input.sun.sun_limb_darkening, input.sun.halo_strength,
+                      input.sun.rainbow_strength};
     frame.post = {input.post.bloom ? input.post.bloom_intensity : 0.f, input.post.bloom_threshold,
                   input.post.bloom_knee, input.post.aberration};
     frame.post_more = {input.post.vignette, input.post.grain, input.post.black_offset, 0};

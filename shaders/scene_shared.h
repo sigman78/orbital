@@ -60,7 +60,7 @@ struct Frame {
     SHADER_FLOAT4 earth;                 // ocean roughness, glint intensity, cloud shadow strength, cloud shadow softness (mip bias)
     SHADER_FLOAT4 earth_more;            // sea wind patchiness, cloud opacity, unused x2
     SHADER_FLOAT4 lens;                  // glare intensity, ghost strength, starburst strength, starburst blades
-    SHADER_FLOAT4 sun_disc;              // angular radius (radians), limb darkening, unused x2
+    SHADER_FLOAT4 sun_disc;              // angular radius (radians), limb darkening, broad halo strength, rainbow crescent strength
     SHADER_FLOAT4 post;                  // bloom intensity (0 off), bloom threshold, bloom knee, chromatic aberration scale
     SHADER_FLOAT4 post_more;             // vignette, film grain, black offset of the neutral tone curve, unused
     SHADER_FLOAT4 giant;                 // flow time scale (x real), advection cycle (seconds), turbulence, flow map on

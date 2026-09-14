@@ -1,9 +1,6 @@
 #pragma once
 #include "../lib/math.slang"
 
-// Lens ghosts: a few soft, faintly tinted ellipses spaced along the axis from
-// the sun through the frame centre, stretched across that axis, plus a very
-// faint anamorphic streak. Everything scales with the sun's visibility.
 // Ghost images down the lens axis: the sun's image reflected between lens
 // elements lands as a few dim, soft-edged copies of the aperture (the blade
 // polygon, or a circle with no blades), lightly tinted by the coatings and a
@@ -55,5 +52,52 @@ float3 starburst(float2 p, float2 sun, float vis, float2 aspect, int blades, flo
         color += tint * streak;
     }
     return color * vis * .012 * strength;
+}
+
+// Artistic approximation of two internal lens reflections, not a traced lens
+// prescription. All distances use image-height units so circles stay circular
+// on wide frames. Separate from lateral aberration of the scene itself.
+float3 lensHalo(float2 p, float2 sun, float vis, float2 aspect, float2 strengths)
+{
+    float edge = max(abs(sun.x), abs(sun.y));
+    // Finish fading before project_sun's off-screen cutoff, including when the
+    // sun is just outside the viewport and no depth samples are available.
+    float visibility = vis * (1.0 - smoothstep(1.0, 1.3, edge));
+    if (visibility <= 0.0 || all(strengths <= 0.0)) return float3(0.0);
+
+    float2 source = sun * aspect;
+    float offAxis = length(source);
+    // Regularized direction makes the axial limit continuous, without a sudden
+    // rotation or division by zero when the sun passes through the image centre.
+    float2 axis = source / max(offAxis, .001);
+    float oblique = smoothstep(.05, .65, offAxis);
+    float3 color = float3(0.0);
+    if (strengths.x > 0.0) {
+        float2 d = p * aspect - source * .55;
+        float radius = .62 + .08 * saturate(offAxis);
+        float r = length(d);
+        float facing = dot(d / max(r, .001), axis);
+        float width = .075 + .035 * (.5 + .5 * facing) * oblique;
+        float ring = exp(-.5 * pow((r - radius) / width, 2.0));
+        float veil = exp(-.5 * pow(r / (radius * .8), 2.0));
+        // Broad shoulders and a dim interior prevent a hard doughnut silhouette.
+        color += float3(1.0, .94, .83) * (.022 * ring * (1.0 - .45 * facing * oblique)
+                                         + .003 * veil) * strengths.x;
+    }
+    if (strengths.y > 0.0) {
+        float2 d = p * aspect - source * .28;
+        float r = length(d);
+        // Brighten the arc on the side away from the sun.
+        float facing = saturate(-dot(d / max(r, .001), axis));
+        float arc = pow(facing, 4.0) * oblique;
+        float radius = .36 + .09 * saturate(offAxis);
+        // Overlapping RGB profiles approximate dispersion: blue inside, red
+        // outside, mixed hues between. No hue wheel painted along the arc.
+        float dispersion = .026 * (.5 + .5 * oblique);
+        float3 distance = (r - radius - float3(dispersion, 0.0, -dispersion)) / .024;
+        float3 spectrum = exp(-.5 * distance * distance);
+        color += spectrum * float3(1.0, .92, .82) * arc * .055 * strengths.y;
+    }
+    return color * visibility;
 }
 
