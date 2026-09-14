@@ -1,5 +1,5 @@
 param([ValidateSet('release','debug')][string]$Preset = 'release',
-      [ValidateSet('all','texture_tools')][string]$Target = 'all',
+      [ValidateSet('all','texture_tools','storage_profile')][string]$Target = 'all',
       [switch]$RenderTests)
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path

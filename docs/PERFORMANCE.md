@@ -1,5 +1,7 @@
 # Render performance tracking
 
+CPU allocation and startup-storage measurements are recorded separately in [STORAGE_PROFILE.md](STORAGE_PROFILE.md). They do not replace the GPU scene baselines below.
+
 Run the same fixed workload before and after renderer changes. Keep the summary JSON/Markdown for each accepted milestone in `docs/performance/`; raw per-frame CSVs and launch logs stay under `.scratch/performance/`. Compare with both the preceding milestone and the original baseline to expose cumulative costs.
 
 ```powershell

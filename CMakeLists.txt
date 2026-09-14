@@ -69,6 +69,11 @@ if(ORBITAL_BUILD_TEXTURE_TOOLS)
   add_custom_target(texture_tools DEPENDS texture_prepare astcenc-native bc7_compress)
 endif()
 
+# Opt-in measurement executable; its allocation instrumentation never enters the demo.
+add_executable(storage_profile EXCLUDE_FROM_ALL tools/storage_profile.cpp)
+target_link_libraries(storage_profile PRIVATE orbital_scene orbital_assets)
+target_compile_options(storage_profile PRIVATE ${ORBITAL_WARNINGS})
+
 if(BUILD_TESTING)
   foreach(test IN ITEMS core system geometry camera image kernels materials smaa texture app showcase frame_calculations options)
     add_executable(${test}_tests tests/${test}_tests.cpp)
