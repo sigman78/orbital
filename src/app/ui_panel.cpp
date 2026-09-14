@@ -75,7 +75,9 @@ void gpu_time_bar(const render::Stats& stats) {
                                                       segment.color);
             ImGui::Dummy({9, 12});
             ImGui::SameLine();
-            ImGui::Text("%s %.2f ms", segment.label, segment.ms);
+            ImGui::TextUnformatted(segment.label);
+            ImGui::SameLine(0, ImGui::CalcTextSize(" ").x);
+            ImGui::TextColored({.55f, .8f, 1.f, 1.f}, "%.2f ms", segment.ms);
         }
         ImGui::EndTable();
     }
