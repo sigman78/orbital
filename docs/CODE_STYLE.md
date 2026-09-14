@@ -12,7 +12,9 @@ is about what the code does, not how it is indented.
   `if constexpr`.
 - Compile time first. Constants are `constexpr` with a name, tables are `static constexpr`, small
   helpers are `constexpr` so they can be used in both contexts. There are no runtime lookups for
-  values known at build time.
+  values known at build time. For core value types, make suitable constructors, factories and
+  accessors `constexpr`, and exercise representative uses with `static_assert`. Do not force
+  runtime I/O or raw-storage lifetime manipulation into constant evaluation.
 - Templates only where they remove duplication of a small, obvious piece of code: `Vec3<T>` and
   `Range<T>` in `core/math.hpp` and `parse_number<T>` in `main.cpp` are the models. No CRTP, no
   traits hierarchies, no expression templates, no SFINAE. A concept is acceptable when it replaces an
@@ -45,6 +47,17 @@ platform   window, events, process, text and ImGui overlays    platform/<os>/ im
 scene      system generation, geometry                         assets  image I/O, kernels, materials
 core       log, panic, file, math, types, small_vec            depends on nothing
 ```
+
+### Header dependencies and bounds
+
+- Include what a file directly uses. Keep headers self-contained; use forward declarations
+  for borrowed types where a definition is unnecessary. Avoid pulling math, formatting or
+  filesystem APIs into small value types through convenience includes. Image storage/view
+  types live in `assets/image.hpp`; PNG file operations live in `assets/image_io.hpp`.
+- Express input limits in domain terms, with a named shared policy. Images and texture
+  caches support dimensions from 1 to 16,384 per axis. This is the project's asset policy,
+  not a universal GPU limit. Keep byte-span/stride and external-library integer checks
+  where dimensions alone cannot establish safe addressing.
 
 ### Interfaces
 

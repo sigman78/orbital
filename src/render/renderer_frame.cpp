@@ -1,4 +1,5 @@
 #include "render/renderer_impl.hpp"
+#include "assets/image_io.hpp"
 
 #include "core/log.hpp"
 #include "core/panic.hpp"
@@ -182,7 +183,7 @@ bool Renderer::capture(const std::filesystem::path& path) {
         for (unsigned channel = 0; channel < 3; channel++)
             rgb[i * 3 + channel] = rgba[i * 4 + channel];
     gpu::destroy_gpu_heap(readback);
-    return assets::save_png(path, s.extent, 3, rgb);
+    return assets::save_png(path, {s.extent, assets::PixelLayout::Rgb8, rgb});
 }
 
 } // namespace space::render

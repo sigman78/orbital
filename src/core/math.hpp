@@ -1,4 +1,5 @@
 #pragma once
+#include "core/extent.hpp"
 #include <cmath>
 #include <cstddef>
 
@@ -18,15 +19,6 @@ template <class T> struct Range {
     constexpr bool contains(T value) const { return value >= min && value <= max; }
     constexpr T clamp(T value) const { return value < min ? min : (value > max ? max : value); }
     constexpr bool operator==(const Range&) const = default;
-};
-
-// Width and height of an image, window or render target.
-struct Extent2D {
-    unsigned width = 0, height = 0;
-
-    constexpr float aspect() const { return static_cast<float>(width) / static_cast<float>(height); }
-    constexpr bool empty() const { return width == 0 || height == 0; }
-    constexpr bool operator==(const Extent2D&) const = default;
 };
 
 template <class T> struct Vec3 {

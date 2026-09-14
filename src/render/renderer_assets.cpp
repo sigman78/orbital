@@ -1,4 +1,5 @@
 #include "render/renderer_impl.hpp"
+#include "assets/image_io.hpp"
 
 #include "assets/kernels.hpp"
 #include "assets/material_catalog.hpp"
@@ -150,7 +151,7 @@ void Renderer::Impl::load_materials() {
                     log::warn("{} is missing; run tools/import-assets.ps1 to bake it (its effect is off)", source.file);
                     if (source.slot == Slot::gas_polar)
                         polar_caps = false;
-                    assets::Image neutral{.extent = {4, 4}, .pixels = {}};
+                    assets::Rgba8Image neutral{.extent = {4, 4}, .pixels = {}};
                     neutral.pixels.resize(4 * 4 * 4);
                     for (std::size_t p = 0; p < 16; p++) {
                         neutral.pixels[p * 4] = neutral.pixels[p * 4 + 1] = 128; // zero signed flow

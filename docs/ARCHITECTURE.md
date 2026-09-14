@@ -105,7 +105,7 @@ A separate 64 MiB staging heap uploads textures. Descriptors are a fixed table o
 pointer and vertex or instance pointers for surfaces, the rock data and scratch pointers for culling, a
 vertex pointer and pixel scale for the overlay.
 
-Materials are PNG files decoded with Wuffs, mip-generated on the CPU with SIMD kernels and uploaded once;
+Materials are PNG files decoded with Wuffs into owning `Rgba8Image` values, mip-generated on the CPU with SIMD kernels and uploaded once;
 `tools/import-assets.ps1` records how each was derived from its upstream source. Frame targets are recreated
 on resize; history is invalidated for one frame.
 
@@ -157,4 +157,5 @@ The Sky selector and `--galaxy` choose splats, layers or original; all assets lo
 at startup, while only the selected path renders. Texture modes share the splat
 sky's brightness/contrast but bypass its procedural dust. Splats remain the default.
 
+Checked borrowed `ImageView` values carry pixel layout, row stride and byte span across PNG output and font upload boundaries. Views support constant evaluation. Image types are separate from PNG I/O declarations in `assets/image_io.hpp`; shared asset validation permits 1 through 16,384 pixels on each axis.
 Optional desktop GPU correctness tests use the pinned local Vulkan layer; see [RENDER_VALIDATION.md](RENDER_VALIDATION.md).

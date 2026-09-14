@@ -7,6 +7,7 @@
 #include <span>
 
 struct ImDrawData;
+namespace space::assets { class ImageView; }
 
 namespace space::render {
 
@@ -62,7 +63,7 @@ public:
     void set_vsync(bool vsync);
     Stats stats() const;
     // The Dear ImGui font atlas, RGBA8; uploaded once, before the first frame that draws the overlay.
-    void set_ui_font(const std::uint8_t* rgba, unsigned width, unsigned height);
+    void set_ui_font(assets::ImageView image);
 
 private:
     struct Impl;

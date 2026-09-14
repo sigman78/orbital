@@ -1,4 +1,5 @@
 #include "assets/texture.hpp"
+#include "assets/image_io.hpp"
 #include "assets/material_catalog.hpp"
 #include "core/file.hpp"
 #include <algorithm>
@@ -12,14 +13,14 @@ int main() {
                            ("orbital-texture-" +
                             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     const auto source = directory / "earth_normal.png";
-    Image image{{7, 5}, Bytes(7 * 5 * 4)};
+    Rgba8Image image{{7, 5}, Bytes(7 * 5 * 4)};
     for (std::size_t i = 0; i < image.pixel_count(); ++i) {
         image.pixels[i * 4] = 128;
         image.pixels[i * 4 + 1] = 128;
         image.pixels[i * 4 + 2] = 255;
         image.pixels[i * 4 + 3] = std::uint8_t(i * 7);
     }
-    assert(save_png(source, image.extent, 4, image.pixels));
+    assert(save_png(source, image.view()));
     const auto desc = material_description("earth_normal.png");
     assert(desc.normal_map);
     assert(material_description("earth_albedo.png").encoding == MaterialEncoding::SRGB);
@@ -106,7 +107,7 @@ int main() {
         std::filesystem::remove(path);
     assert(!load_texture_cache(source, desc)); // legacy ASTC unsupported
     image.pixels[0] = 42;
-    assert(save_png(source, image.extent, 4, image.pixels));
+    assert(save_png(source, image.view()));
     assert(!load_texture_cache(source, desc, support)); // stale source
     std::filesystem::remove(source);
     assert(load_texture_cache(source, desc, support)); // cache-only distribution

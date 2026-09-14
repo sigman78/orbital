@@ -1,6 +1,6 @@
 #include "platform/process.hpp"
 
-#include "core/panic.hpp"
+#include "core/panic_if.hpp"
 
 #include <windows.h>
 

@@ -1,7 +1,7 @@
 #include "render/renderer_impl.hpp"
 
 #include "core/file.hpp"
-#include "core/panic.hpp"
+#include "core/panic_if.hpp"
 #include <cstring>
 #include <format>
 

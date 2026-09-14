@@ -3,7 +3,7 @@
 #include "app/hud.hpp"
 #include "assets/smaa.hpp"
 #include "core/log.hpp"
-#include "core/panic.hpp"
+#include "core/panic_if.hpp"
 #include <algorithm>
 #include <cstring>
 #include <format>
@@ -245,7 +245,7 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     upload_images(hud);
     // Embedded SMAA lookup tables, widened to RGBA8 for the upload path.
     const auto widen = [](std::span<const unsigned char> bytes, unsigned width, unsigned height, unsigned channels) {
-        assets::Image image{.extent = {width, height}, .pixels = {}};
+        assets::Rgba8Image image{.extent = {width, height}, .pixels = {}};
         image.pixels.resize(std::size_t(width) * height * 4);
         for (std::size_t i = 0; i < std::size_t(width) * height; i++)
             for (unsigned c = 0; c < channels; c++)

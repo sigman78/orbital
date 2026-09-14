@@ -43,7 +43,7 @@ bool valid_texture(const TextureData& texture) {
         (texture.format == TextureFormat::BC7 && block != 4))
         return false;
     Extent2D expected = texture.mips.front().extent;
-    if (expected.empty() || expected.width > 16384 || expected.height > 16384)
+    if (!valid_image_extent(expected))
         return false;
     for (std::size_t level = 0; level < texture.mips.size(); ++level) {
         const auto& mip = texture.mips[level];
@@ -97,7 +97,7 @@ std::optional<TextureData> read_texture_cache(ByteView b, const MaterialDesc& de
         return std::nullopt;
     result.format = TextureFormat(format);
     Extent2D extent{word(b, 8), word(b, 12)};
-    if (!extent.width || !extent.height || extent.width > 16384 || extent.height > 16384)
+    if (!valid_image_extent(extent))
         return std::nullopt;
     result.block_x = word(b, 20);
     result.block_y = word(b, 24);

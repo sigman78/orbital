@@ -1,7 +1,7 @@
 #include "platform/window.hpp"
 #include "platform/win32/window_access.hpp"
 
-#include "core/panic.hpp"
+#include "core/panic_if.hpp"
 #include "core/small_vec.hpp"
 
 #include <windows.h>

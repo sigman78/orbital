@@ -68,6 +68,14 @@ The release configuration in `build/refactor` passed all 11 CTest suites, includ
 core/synchronization validation and lifecycle tests. The separate GPU-assisted scene
 suite passed. GCC/MinGW passed all ten CPU suites; all 29 shader helpers compile.
 
+The image API migration introduces owning `Rgba8Image` and checked borrowed `ImageView`
+with layout, extent, stride and bytes. PNG/font boundaries use views; per-mip ownership
+is unchanged. Layout/stride round trips, malformed views and material/kernel tests pass.
+Fixed-time 1600x900 Earth/belt/tour comparisons against the pre-refactor fix build had
+mean absolute RGBA differences of 0.000035, 0.000348 and 0.000032 display codes (maxima
+1, 14 and 1). These are not bit-identical comparisons. Evidence:
+`.scratch/refactor-image/report.json`.
+
 ## Motion cues
 
 Motion cues previously entered TAA history without writing their own depth. TAA therefore

@@ -1,6 +1,6 @@
 #include "platform/text.hpp"
 
-#include "core/panic.hpp"
+#include "core/panic_if.hpp"
 
 #include <fontconfig/fontconfig.h>
 #include <ft2build.h>

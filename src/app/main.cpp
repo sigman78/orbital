@@ -7,6 +7,7 @@
 #include "platform/process.hpp"
 #include "platform/window.hpp"
 #include "render/renderer.hpp"
+#include "assets/image.hpp"
 
 #include <algorithm>
 #include <array>
@@ -488,7 +489,9 @@ int run(const Options& options) {
     render::Renderer renderer(window->native_handle(), system, directory, {.belt_count = options.rocks});
     Ui ui(*window);
     const auto atlas = ui.font_atlas();
-    renderer.set_ui_font(atlas.rgba, atlas.width, atlas.height);
+    renderer.set_ui_font({{atlas.width, atlas.height},
+                          assets::PixelLayout::Rgba8,
+                          {atlas.rgba, std::size_t(atlas.width) * atlas.height * 4}});
     log::info(
         "Ready. RMB + WASD: fly | 1-6: views | T: tour | F12: control panel | F10: capture | --help for all controls");
     FrameTimes times;

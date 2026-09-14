@@ -1,6 +1,6 @@
 #include "platform/window.hpp"
 
-#include "core/panic.hpp"
+#include "core/panic_if.hpp"
 #include "core/small_vec.hpp"
 
 #include "backends/imgui_impl_sdl2.h"
