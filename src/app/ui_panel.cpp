@@ -16,8 +16,8 @@ static_assert(std::size(bookmark_names) == bookmark_count);
 
 // A collapsing section with its own ID scope: headers push none, so labels
 // could otherwise collide across sections (the "Belt" header and button did).
-bool section(const char* title) {
-    const bool open = ImGui::CollapsingHeader(title, ImGuiTreeNodeFlags_DefaultOpen);
+bool section(const char* title, bool default_open = false) {
+    const bool open = ImGui::CollapsingHeader(title, default_open ? ImGuiTreeNodeFlags_DefaultOpen : 0);
     if (open)
         ImGui::PushID(title);
     return open;
@@ -336,7 +336,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         return;
     }
     ImGui::PushItemWidth(150); // leaves room for the labels beside combos and sliders
-    if (section("Frame")) {
+    if (section("Frame", true)) {
         frame_controls(stats, recent_frame_ms, app.vsync);
         ImGui::PopID();
     }
