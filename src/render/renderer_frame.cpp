@@ -9,6 +9,13 @@
 
 namespace space::render {
 
+namespace {
+constexpr AccessScope frame_render_access{
+    gpu::Stage::all_commands, gpu::Access::shader_read | gpu::Access::color_write | gpu::Access::depth_stencil_write};
+constexpr AccessScope cull_input_access{gpu::Stage::compute | gpu::Stage::vertex,
+                                        gpu::Access::shader_read | gpu::Access::shader_write};
+} // namespace
+
 void Renderer::Impl::read_gpu_timings() {
     if (!frame_index)
         return;
@@ -104,10 +111,7 @@ bool Renderer::draw(const FrameInput& supplied) {
     s.stamp(cmd, 0);
     gpu::set_texture_descriptor_heap(cmd, gpu::gpu_range(s.buffers.texture_descriptors.get()));
     gpu::set_sampler_descriptor_heap(cmd, gpu::gpu_range(s.buffers.sampler_descriptors.get()));
-    gpu::barrier(cmd, gpu::Stage::all_commands,
-                 gpu::Access::shader_read | gpu::Access::color_write | gpu::Access::depth_stencil_write,
-                 gpu::Stage::all_commands,
-                 gpu::Access::color_write | gpu::Access::depth_stencil_write | gpu::Access::shader_read);
+    synchronize(cmd, frame_render_access, frame_render_access);
     // Transfer the small CPU inputs; generated instances and atomic counters
     // stay device-only. The submission makes preceding host writes available.
     gpu::copy_memory(cmd, {reinterpret_cast<void*>(frame_address + heap_layout.cull_offset), sizeof(CullScratch)},
@@ -116,10 +120,9 @@ bool Renderer::draw(const FrameInput& supplied) {
         cmd,
         {reinterpret_cast<void*>(frame_address + heap_layout.instance_offset), s.instances.size() * sizeof(Instance)},
         {s.buffers.cull_device.range().gpu + heap_layout.instance_offset, s.instances.size() * sizeof(Instance)});
-    gpu::barrier(cmd, gpu::Stage::transfer, gpu::Access::transfer_write, gpu::Stage::compute | gpu::Stage::vertex,
-                 gpu::Access::shader_read | gpu::Access::shader_write);
+    synchronize(cmd, access::transfer_write, cull_input_access);
     s.record_cull_passes(cmd, cull_root);
-    gpu::barrier(cmd, gpu::Stage::compute, gpu::Access::shader_write, gpu::Stage::transfer, gpu::Access::transfer_read);
+    synchronize(cmd, access::compute_write, access::transfer_read);
     gpu::copy_memory(cmd, {s.buffers.cull_device.range().gpu + heap_layout.cull_offset, sizeof(CullScratch)},
                      gpu::gpu_range(s.buffers.cull_readback.get()));
     synchronize(cmd, access::transfer_write, access::host_read);

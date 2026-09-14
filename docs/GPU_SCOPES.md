@@ -6,7 +6,7 @@ The renderer owns these helpers in `src/render/gpu_commands.hpp` and `gpu_owners
 - `SubmissionTimeline` owns the semaphore and advances completion values on explicit submit/present calls. Waiting remains explicit, including the blocking `submit_and_wait` convenience. Its destructor never submits or waits.
 - `UniqueGpuHeap` and `UniquePso` are move-only owners with borrowed accessors. Reset, move replacement and destruction release immediately, so GPU use must already be complete. Existing `GpuImage` ownership follows the same policy.
 - Persistent heaps form a resettable buffer group; pipelines have an owning vector and borrowed pass-family aliases. Shutdown waits idle, clears all resource groups, resets the timeline and destroys the device last. Temporary upload/readback heaps are released after their explicit completion waits.
-- `gpu_sync.hpp` names recurring source/destination stage-access pairs. These are global dependencies, not tracked texture state. Unusual combined-stage and compute barriers stay explicit.
+- `gpu_sync.hpp` names recurring source/destination stage-access pairs. All renderer barriers use `synchronize`; combinations specific to a pass use file-local `constexpr AccessScope` values. These are global dependencies, not tracked texture state.
 
 The upload flush is a named function receiving the command pointer, staging offset and submission timeline. It retains the transfer-write-to-fragment-read dependency, submits and waits, then clears the command pointer and offset before staging reuse. It does not flush mapped host caches or silently submit at scope exit.
 

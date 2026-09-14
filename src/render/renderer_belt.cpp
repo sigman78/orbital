@@ -5,6 +5,11 @@
 
 namespace space::render {
 
+namespace {
+constexpr AccessScope culled_draw_access{gpu::Stage::indirect | gpu::Stage::vertex | gpu::Stage::fragment,
+                                         gpu::Access::indirect_read | gpu::Access::shader_read};
+} // namespace
+
 // Uploads the static per-rock records the GPU culling pass places each frame.
 // The seeded belt order defines quality tiers, so records keep their ids.
 void Renderer::Impl::build_belt(const BeltDescription& description) {
@@ -65,10 +70,7 @@ void Renderer::Impl::record_cull_passes(gpu::CommandBuffer* cmd, const CullRoot&
         pass_root.pass = pass;
         gpu::dispatch(cmd, pass_root, {pass == prefix_pass ? 1u : groups, 1, 1});
         const bool last = pass + 1 == pass_count;
-        gpu::barrier(cmd, gpu::Stage::compute, gpu::Access::shader_write,
-                     last ? gpu::Stage::indirect | gpu::Stage::vertex | gpu::Stage::fragment : gpu::Stage::compute,
-                     last ? gpu::Access::indirect_read | gpu::Access::shader_read
-                          : gpu::Access::shader_read | gpu::Access::shader_write);
+        synchronize(cmd, access::compute_write, last ? culled_draw_access : access::compute_read_write);
     }
 }
 
