@@ -43,17 +43,15 @@ float3 agx(float3 c)
 // is meant for well-exposed product shots; on a scene that is mostly dark
 // sky it crushes dim neutrals threefold and inflates the tint of anything
 // faint, so the panel scales it (post_more.z; 1 is the published curve).
-// `veil` is light added in the lens (the flare stack, the sun's glare): the
-// offset is a flare subtraction, so it is taken from the scene alone and the
-// veil goes in after it. With the veil inside, the darkest channel switched
-// wherever a coloured flare band crossed a dark surface, and the offset's
-// kink there drew creases through the gradient that read as posterization.
-float3 pbrNeutral(float3 c, float3 veil, float blackOffset)
+// The lens veil (glare and flare) is part of the input on purpose: the offset
+// is a flare subtraction, and taking it from the scene alone left the sun's
+// glare over night sides that the published curve is meant to crush.
+float3 pbrNeutral(float3 c, float blackOffset)
 {
     const float startCompression = 0.8 - 0.04, desaturation = 0.15;
     float x = min(c.r, min(c.g, c.b));
     float offset = (x < 0.08 ? x - 6.25 * x * x : 0.04) * blackOffset;
-    c = c - offset + veil;
+    c -= offset;
     float peak = max(c.r, max(c.g, c.b));
     if (peak < startCompression) return c;
     const float d = 1.0 - startCompression;
@@ -63,12 +61,10 @@ float3 pbrNeutral(float3 c, float3 veil, float blackOffset)
     return lerp(c, newPeak.xxx, g);
 }
 
-// The scene and the lens veil (flare and glare) separately: only the neutral
-// curve's black offset tells them apart.
-float3 toneMap(float3 c, float3 veil, uint curve, float blackOffset)
+float3 toneMap(float3 c, uint curve, float blackOffset)
 {
-    if (curve == TONE_AGX) return agx(c + veil);
-    if (curve == TONE_NEUTRAL) return pbrNeutral(c, veil, blackOffset);
-    return acesFilmic(c + veil);
+    if (curve == TONE_AGX) return agx(c);
+    if (curve == TONE_NEUTRAL) return pbrNeutral(c, blackOffset);
+    return acesFilmic(c);
 }
 
