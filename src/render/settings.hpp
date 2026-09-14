@@ -19,6 +19,9 @@ struct ToneSettings {
     float exposure = 1; // manual exposure multiplier
     bool auto_exposure = true;
     ToneCurve tone_curve = ToneCurve::PbrNeutral; // 0 ACES filmic, 1 AgX, 2 Khronos PBR Neutral (F8)
+    float meter_key = .18f;                       // the metered luminance the auto exposure maps to (middle grey)
+    float adapt_min = .6f, adapt_max = 1.8f;      // the auto exposure's range of multipliers
+    float curve_trim[3] = {1.f, .37f, .75f}; // exposure trim per curve (ACES, AgX, PBR Neutral), fitted on captures
 };
 
 struct AntiAliasingSettings {
@@ -85,8 +88,9 @@ struct PostSettings {
     float aberration = 1.f;       // chromatic aberration scale
     float vignette = .17f;        // corner darkening
     float grain = .010f;          // film grain amplitude in display space
-    float black_offset = .3f;     // the neutral tone curve's flare subtraction, 1 as published, 0 none
-    bool motion_streaks = true;   // dust motes streaking past the moving camera
+    float black_offset =
+        1.f; // the neutral tone curve's flare subtraction, 1 as published, 0 none; 0.3 lifted the belt haze
+    bool motion_streaks = true; // dust motes streaking past the moving camera
     float motion_streak_intensity = 1.f;
     // Dirty glass: a baked film of dust, wipe residue and smears on a convex pane in front of the camera. The
     // view is blurred behind the marks, and they brighten where the sun grazes the pane.

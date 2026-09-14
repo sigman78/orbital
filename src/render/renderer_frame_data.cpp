@@ -17,7 +17,6 @@ namespace {
 // than brightness.
 namespace tone_curves {
 inline constexpr float base_gain = 1.5f;
-inline constexpr float exposure_trim[3] = {1.f, .37f, .75f}; // ACES filmic, AgX, Khronos PBR Neutral
 } // namespace tone_curves
 
 // Sun disc and lens flare, read by build_frame.
@@ -98,7 +97,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
                                                   : 0.f);
     frame.forward_exposure.w =
         input.tone.exposure * (input.tone.auto_exposure ? adapted_exposure : 1) * tone_curves::base_gain *
-        tone_curves::exposure_trim[std::min(unsigned(input.tone.tone_curve), unsigned(ToneCurve::Count) - 1)];
+        input.tone.curve_trim[std::min(unsigned(input.tone.tone_curve), unsigned(ToneCurve::Count) - 1)];
     stats.exposure.applied = frame.forward_exposure.w;
     stats.exposure.automatic = input.tone.auto_exposure;
     frame.sun = f4(system.star.position - camera.position, sun_flare::disc_radius);

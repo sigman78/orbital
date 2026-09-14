@@ -40,7 +40,7 @@ bool Renderer::draw(const FrameInput& supplied) {
     input.bodies = states;
     s.submissions.wait_last();
     s.read_gpu_timings();
-    s.apply_metering();
+    s.apply_metering(input.tone);
     const auto drawable = gpu::get_drawable_extent(s.device);
     if (!drawable.x || !drawable.y)
         return false;

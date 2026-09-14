@@ -410,7 +410,7 @@ struct Renderer::Impl {
     void draw_mesh(gpu::CommandBuffer* cmd, Root& root, const GpuMesh& mesh, unsigned base, unsigned instance_count);
 
     // Post-processing and exposure (renderer_post.cpp).
-    void apply_metering();
+    void apply_metering(const ToneSettings& tone);
     void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view, SpatialAA spatial_aa,
                             bool bloom, bool flare, bool motion_streaks, const ImDrawData* ui, std::uint8_t* ui_cpu,
                             std::uint64_t ui_gpu);

@@ -10,14 +10,12 @@ namespace {
 namespace exposure_meter {
 inline constexpr unsigned interval = 16;                               // frames between readbacks
 inline constexpr float min_luminance = 0.004f;                         // darker texels (space) do not vote
-inline constexpr float key = 0.18f;                                    // middle gray
 inline constexpr float brighten_seconds = 2.5f, darken_seconds = 0.6f; // time constants of the exposure change
 inline constexpr float max_step_seconds = 1.f;                         // a stalled frame does not snap the adaptation
-inline constexpr Range<float> adapted{0.6f, 1.8f};
 } // namespace exposure_meter
 } // namespace
 
-void Renderer::Impl::apply_metering() {
+void Renderer::Impl::apply_metering(const ToneSettings& tone) {
     if (meter_pending) {
         // Each meter texel holds log luminance, luminance and its centre weight.
         const auto* values = reinterpret_cast<const float*>(buffers.luminance_readback.range().cpu);
@@ -33,8 +31,8 @@ void Renderer::Impl::apply_metering() {
         stats.exposure.ready = true;
         stats.exposure.has_samples = weight_sum > 0;
         stats.exposure.luminance = weight_sum > 0 ? std::exp(log_sum / weight_sum) : 0;
-        const float requested = weight_sum > 0 ? exposure_meter::key / stats.exposure.luminance : 1.f;
-        exposure_target = exposure_meter::adapted.clamp(requested);
+        const float requested = weight_sum > 0 ? tone.meter_key / stats.exposure.luminance : 1.f;
+        exposure_target = std::clamp(requested, tone.adapt_min, std::max(tone.adapt_min, tone.adapt_max));
         stats.exposure.target = exposure_target;
         stats.exposure.limited = requested != exposure_target;
         meter_pending = false;
