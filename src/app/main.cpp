@@ -1,6 +1,8 @@
+#include "app/actions.hpp"
 #include "app/app_state.hpp"
 #include "app/frame_input.hpp"
 #include "app/hud.hpp"
+#include "app/options.hpp"
 #include "app/ui.hpp"
 #include "assets/image.hpp"
 #include "core/file.hpp"
@@ -12,13 +14,11 @@
 
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <format>
 #include <iterator>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,8 +30,6 @@ using namespace space::app;
 using platform::Key;
 
 namespace window_limits {
-inline constexpr Extent2D default_size{1600, 900};
-inline constexpr Range<unsigned> width{320, 7680}, height{200, 4320};
 inline constexpr double title_refresh_seconds = 0.5;
 inline constexpr std::size_t timing_history_frames = 240; // recent CPU samples for the panel and title
 } // namespace window_limits
@@ -43,168 +41,6 @@ inline constexpr std::size_t expected_frames = 36000; // reserve for an open-end
 
 constexpr std::string_view window_title = "ORBITAL  /  Procedural worlds";
 
-constexpr std::string_view usage =
-    "ORBITAL - NoGraphicsAPI space demo\n"
-    "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..5\n"
-    "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --pan-stop-frame N "
-    "--rocks N\n"
-    "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --disc 0|1 --lod-scale X --vsync 0|1 --splat 0..3 --tone "
-    "0|1|2 "
-    "--maximize-at N "
-    "--fullscreen-at "
-    "N\n"
-    "--galaxy 0|1|2 (splats, texture layers, original full resolution) --galaxy-view -180..180 (longitude, sky-only "
-    "view)\n"
-    "--belt-sun-view (sun through the gas giant's belt, for bloom/occlusion checks)\n"
-    "Controls: RMB mouse look; WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F free;\n"
-    "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
-    "F5 temporal AA; F6 rock splat cut-off; F7 splat lighting in both cull passes; F8 tone curve;\n"
-    "F9 spatial AA (off, FXAA, SMAA); Alt+Enter borderless fullscreen;\n"
-    "F10 capture; F11 belt dust; F12 control panel (--ui shows it at start); Esc exit.";
-
-struct Options {
-    std::uint64_t seed = showcase_seed;
-    unsigned frame_limit = 0;
-    Extent2D size = window_limits::default_size;
-    double fixed_time = -1; // >= 0 freezes simulation and exposure adaptation at this time
-    double duration = 0;    // > 0 exits after this many wall-clock seconds
-    int bookmark = -1;
-    float exposure = render::ToneSettings{}.exposure;
-    unsigned rocks = 0; // belt override for benchmarks; 0 keeps the quality tiers
-    int vsync = -1;     // -1 default: on, except off for benchmarks
-    unsigned taa = render::AntiAliasingSettings{}.temporal_aa;              // temporal anti-aliasing on
-    unsigned dust = render::BeltDustSettings{}.enabled;                     // volumetric belt dust
-    unsigned disc = render::BeltSettings{}.disc;                            // far-belt disc LOD
-    float lod_scale = render::BeltSettings{}.lod_scale;                     // far-belt fade distance scale
-    unsigned spatial = unsigned(render::AntiAliasingSettings{}.spatial_aa); // spatial pass: 0 off, 1 FXAA, 2 SMAA
-    std::optional<double> galaxy_view; // galactic longitude in degrees; absent means normal camera
-    unsigned galaxy = unsigned(render::SkySettings{}.galaxy_mode);
-    unsigned splat = unsigned(render::BeltSettings{}.splat_mode); // initial splat cut-off index
-    unsigned tone = unsigned(render::ToneSettings{}.tone_curve);  // initial tone curve (PBR Neutral)
-    unsigned pan_stop_frame = 0;                                  // deterministic movement-to-rest regression
-    float pan = 0;            // lateral drift as a fraction of the flight speed, stepped at a fixed 60 Hz for captures
-    unsigned maximize_at = 0; // > 0 maximizes the window after this many frames, to test resizing in captures
-    unsigned fullscreen_at = 0; // > 0 enters borderless fullscreen after this many frames
-    bool tour = false, high = false, no_hud = false, help = false;
-    bool ui = false;            // start with the control panel shown
-    bool belt_sun_view = false; // repeatable view through the gas giant's belt toward the sun
-    std::filesystem::path capture, benchmark;
-};
-
-template <class T> bool parse_number(std::optional<std::string_view> text, T& out) {
-    if (!text)
-        return false;
-    const char* end = text->data() + text->size();
-    const auto result = std::from_chars(text->data(), end, out);
-    return result.ec == std::errc{} && result.ptr == end;
-}
-
-bool parse_path(std::optional<std::string_view> text, std::filesystem::path& out) {
-    if (!text || text->empty())
-        return false;
-    out = *text;
-    return true;
-}
-
-bool options_valid(const Options& options) {
-    const bool size_ok = window_limits::width.contains(options.size.width) &&
-                         window_limits::height.contains(options.size.height);
-    const bool time_ok = std::isfinite(options.fixed_time) && options.fixed_time >= -1 &&
-                         std::isfinite(options.duration) && options.duration >= 0;
-    const bool exposure_ok = std::isfinite(options.exposure) && options.exposure > 0;
-    const bool bookmark_ok = options.bookmark >= -1 && options.bookmark < int(bookmark_count);
-    return size_ok && time_ok && exposure_ok && bookmark_ok;
-}
-
-std::optional<Options> parse_options(int argc, char** argv) {
-    Options options;
-    for (int i = 1; i < argc; ++i) {
-        const std::string_view arg = argv[i];
-        const auto value = [&]() -> std::optional<std::string_view> {
-            if (i + 1 >= argc)
-                return std::nullopt;
-            return std::string_view(argv[++i]);
-        };
-        bool ok = true;
-        if (arg == "--help")
-            options.help = true;
-        else if (arg == "--tour")
-            options.tour = true;
-        else if (arg == "--ui")
-            options.ui = true;
-        else if (arg == "--belt-sun-view")
-            options.belt_sun_view = true;
-        else if (arg == "--high")
-            options.high = true;
-        else if (arg == "--no-hud")
-            options.no_hud = true;
-        else if (arg == "--seed")
-            ok = parse_number(value(), options.seed);
-        else if (arg == "--frames")
-            ok = parse_number(value(), options.frame_limit);
-        else if (arg == "--rocks")
-            ok = parse_number(value(), options.rocks);
-        else if (arg == "--lod-scale")
-            ok = parse_number(value(), options.lod_scale) && options.lod_scale > 0;
-        else if (arg == "--disc")
-            ok = parse_number(value(), options.disc) && options.disc <= 1;
-        else if (arg == "--dust")
-            ok = parse_number(value(), options.dust) && options.dust <= 1;
-        else if (arg == "--vsync")
-            ok = parse_number(value(), options.vsync) && options.vsync >= 0 && options.vsync <= 1;
-        else if (arg == "--taa")
-            ok = parse_number(value(), options.taa) && options.taa <= 1;
-        else if (arg == "--spatial")
-            ok = parse_number(value(), options.spatial) && options.spatial < unsigned(render::SpatialAA::Count);
-        else if (arg == "--pan-stop-frame")
-            ok = parse_number(value(), options.pan_stop_frame);
-        else if (arg == "--pan")
-            ok = parse_number(value(), options.pan);
-        else if (arg == "--maximize-at")
-            ok = parse_number(value(), options.maximize_at);
-        else if (arg == "--fullscreen-at")
-            ok = parse_number(value(), options.fullscreen_at);
-        else if (arg == "--tone")
-            ok = parse_number(value(), options.tone) && options.tone < unsigned(render::ToneCurve::Count);
-        else if (arg == "--galaxy-view") {
-            auto& longitude = options.galaxy_view.emplace();
-            ok = parse_number(value(), longitude) && longitude >= -180 && longitude <= 180;
-        } else if (arg == "--galaxy")
-            ok = parse_number(value(), options.galaxy) && options.galaxy < unsigned(render::GalaxyMode::Count);
-        else if (arg == "--splat")
-            ok = parse_number(value(), options.splat) && options.splat < render::BeltSettings::splat_radii.size();
-        else if (arg == "--width")
-            ok = parse_number(value(), options.size.width);
-        else if (arg == "--height")
-            ok = parse_number(value(), options.size.height);
-        else if (arg == "--time")
-            ok = parse_number(value(), options.fixed_time);
-        else if (arg == "--duration")
-            ok = parse_number(value(), options.duration);
-        else if (arg == "--bookmark")
-            ok = parse_number(value(), options.bookmark);
-        else if (arg == "--exposure")
-            ok = parse_number(value(), options.exposure);
-        else if (arg == "--capture")
-            ok = parse_path(value(), options.capture);
-        else if (arg == "--benchmark")
-            ok = parse_path(value(), options.benchmark);
-        else {
-            log::error("unknown option {}", arg);
-            return std::nullopt;
-        }
-        if (!ok) {
-            log::error("missing or invalid value for {}", arg);
-            return std::nullopt;
-        }
-    }
-    if (!options_valid(options)) {
-        log::error("invalid dimensions, time, duration, exposure, or bookmark (expected 0..{})", bookmark_count - 1);
-        return std::nullopt;
-    }
-    return options;
-}
-
 void handle_key(AppState& app, Key key) {
     switch (key) {
     case Key::escape: app.running = false; break;
@@ -214,19 +50,11 @@ void handle_key(AppState& app, Key key) {
     case Key::f3: app.belt.light_map = !app.belt.light_map; break;
     case Key::f4: app.belt.extinction = !app.belt.extinction; break;
     case Key::f5: app.aa.temporal_aa = !app.aa.temporal_aa; break;
-    case Key::f9:
-        app.aa.spatial_aa = render::SpatialAA((unsigned(app.aa.spatial_aa) + 1) % unsigned(render::SpatialAA::Count));
-        break;
-    case Key::f6:
-        app.belt.splat_mode = render::SplatMode((unsigned(app.belt.splat_mode) + 1) %
-                                                unsigned(render::SplatMode::Count));
-        break;
+    case Key::f9: cycle_choice(app.aa.spatial_aa); break;
+    case Key::f6: cycle_choice(app.belt.splat_mode); break;
     case Key::f7: app.belt.splat_light_twice = !app.belt.splat_light_twice; break;
-    case Key::f8:
-        app.tone.tone_curve = render::ToneCurve((unsigned(app.tone.tone_curve) + 1) %
-                                                unsigned(render::ToneCurve::Count));
-        break;
-    case Key::f10: app.capture_request = hotkey_capture_path; break;
+    case Key::f8: cycle_choice(app.tone.tone_curve); break;
+    case Key::f10: request_capture(app); break;
     case Key::f11: app.belt_dust.enabled = !app.belt_dust.enabled; break;
     case Key::f12: app.show_ui = !app.show_ui; break;
     case Key::plus: app.tone.exposure = exposure_keys::range.clamp(app.tone.exposure * exposure_keys::step); break;
@@ -234,12 +62,11 @@ void handle_key(AppState& app, Key key) {
     default: break;
     }
     if (key == platform::letter_key('T'))
-        app.camera.toggle_tour();
+        toggle_tour(app);
     else if (key == platform::letter_key('O'))
-        app.camera.set_orbit_target(app.selected_body,
-                                    app.bodies[app.selected_body].radius * control::orbit_zoom_radii);
+        orbit_selected(app);
     else if (key == platform::letter_key('F'))
-        app.camera.set_mode(CameraMode::Free);
+        free_camera(app);
     else if (key == platform::letter_key('X'))
         app.tone.auto_exposure = !app.tone.auto_exposure;
     else if (const auto digit = platform::digit_of(key); digit && *digit >= 1 && *digit <= bookmark_count) {
@@ -266,7 +93,7 @@ Input gather_input(platform::Window& window, AppState& app, bool keyboard_free) 
     input.mouse_dy = mouse.dy;
     const bool moving = input.move_forward != 0 || input.move_right != 0 || input.move_up != 0;
     if ((moving || window.mouse_look_began()) && app.camera.mode() == CameraMode::Tour)
-        app.camera.set_mode(CameraMode::Free);
+        free_camera(app);
     return input;
 }
 
@@ -353,14 +180,14 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
         if (options.fixed_time >= 0)
             app.camera.set_tour_time(options.fixed_time);
         else
-            app.camera.toggle_tour();
+            toggle_tour(app);
     }
     if (options.galaxy_view) {
         const double longitude = *options.galaxy_view * pi<double> / 180;
         const double c = std::cos(longitude), s = std::sin(longitude);
         const Vec3d direction{-.054876 * c + .494109 * s, -.483835 * c + .746982 * s, -.873437 * c - .444830 * s};
         app.camera.look_at({0, 1000, 0}, Vec3d{0, 1000, 0} + direction);
-        app.camera.set_mode(CameraMode::Free);
+        free_camera(app);
     }
     if (options.belt_sun_view && app.bodies.size() > 1 && !system.belts.empty()) {
         const auto& belt = system.belts.front();
@@ -373,7 +200,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
         const Vec3d toward_sun = normalized(system.star.position - ring_point);
         // Behind the belt plane: the centre ray crosses its middle, clear of the planet.
         app.camera.look_at(ring_point - toward_sun * 12.0, system.star.position);
-        app.camera.set_mode(CameraMode::Free);
+        free_camera(app);
     }
     return app;
 }

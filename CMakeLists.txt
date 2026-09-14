@@ -14,7 +14,7 @@ endif()
 # CPU-only libraries (see docs/CODE_STYLE.md for the layering):
 #   orbital_core   logging, panic, file I/O, math
 #   orbital_scene  deterministic system generation, geometry
-#   orbital_camera app navigation/controller, independent of the renderer
+#   orbital_app_cpu app navigation and command-line parsing, independent of the renderer
 #   orbital_render_cpu showcase contract, state binding and frame calculations
 #   orbital_assets PNG I/O (vendored Wuffs decoder, stb writer), pixel kernels, materials
 add_library(orbital_core STATIC src/core/log.cpp src/core/panic.cpp src/core/file.cpp)
@@ -30,9 +30,9 @@ add_library(orbital_render_cpu STATIC src/render/showcase.cpp src/render/frame_c
 target_link_libraries(orbital_render_cpu PUBLIC orbital_scene)
 target_compile_options(orbital_render_cpu PRIVATE ${ORBITAL_WARNINGS})
 
-add_library(orbital_camera STATIC src/app/camera.cpp)
-target_link_libraries(orbital_camera PUBLIC orbital_scene)
-target_compile_options(orbital_camera PRIVATE ${ORBITAL_WARNINGS})
+add_library(orbital_app_cpu STATIC src/app/camera.cpp src/app/options.cpp)
+target_link_libraries(orbital_app_cpu PUBLIC orbital_scene)
+target_compile_options(orbital_app_cpu PRIVATE ${ORBITAL_WARNINGS})
 
 add_library(orbital_assets STATIC src/assets/image.cpp src/assets/kernels.cpp src/assets/materials.cpp src/assets/texture.cpp)
 set(smaa_source "${CMAKE_CURRENT_BINARY_DIR}/generated/smaa.cpp")
@@ -70,14 +70,14 @@ if(ORBITAL_BUILD_TEXTURE_TOOLS)
 endif()
 
 if(BUILD_TESTING)
-  foreach(test IN ITEMS core system geometry camera image kernels materials smaa texture app showcase frame_calculations)
+  foreach(test IN ITEMS core system geometry camera image kernels materials smaa texture app showcase frame_calculations options)
     add_executable(${test}_tests tests/${test}_tests.cpp)
     target_link_libraries(${test}_tests PRIVATE orbital_scene orbital_assets)
     if(test STREQUAL "showcase" OR test STREQUAL "frame_calculations")
       target_link_libraries(${test}_tests PRIVATE orbital_render_cpu)
     endif()
-    if(test STREQUAL "camera" OR test STREQUAL "app")
-      target_link_libraries(${test}_tests PRIVATE orbital_camera)
+    if(test STREQUAL "camera" OR test STREQUAL "app" OR test STREQUAL "options")
+      target_link_libraries(${test}_tests PRIVATE orbital_app_cpu)
     endif()
     # These tests use assertions as executable invariants, including Release.
     if(MSVC)
@@ -140,10 +140,10 @@ if(ORBITAL_BUILD_DEMO)
   endif()
   target_compile_options(orbital_platform PRIVATE ${ORBITAL_WARNINGS})
 
-  add_executable(orbital src/app/main.cpp src/app/hud.cpp src/app/ui.cpp src/render/renderer_resources.cpp src/render/gpu_image.cpp src/render/renderer_frame.cpp
+  add_executable(orbital src/app/main.cpp src/app/hud.cpp src/app/ui.cpp src/app/ui_panel.cpp src/render/renderer_resources.cpp src/render/gpu_image.cpp src/render/renderer_frame.cpp
     src/render/renderer_frame_data.cpp src/render/renderer_pipelines.cpp src/render/renderer_assets.cpp
     src/render/renderer_belt.cpp src/render/renderer_scene.cpp src/render/renderer_post.cpp src/render/renderer_overlay.cpp)
-  target_link_libraries(orbital PRIVATE orbital_scene orbital_camera orbital_render_cpu orbital_assets orbital_platform NoGraphicsAPI::NoGraphicsAPI)
+  target_link_libraries(orbital PRIVATE orbital_scene orbital_app_cpu orbital_render_cpu orbital_assets orbital_platform NoGraphicsAPI::NoGraphicsAPI)
   target_include_directories(orbital PRIVATE shaders) # scene_shared.h, the C++/shader layout
   target_compile_definitions(orbital PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
   target_compile_options(orbital PRIVATE ${ORBITAL_WARNINGS})

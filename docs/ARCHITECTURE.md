@@ -142,7 +142,7 @@ supplied basis without recomputing it. Bodies and UI remain borrowed for the dra
 App startup builds the HUD and supplies an image view to the renderer, which copies and
 uploads it during construction. HUD and font uploads share the RGBA view-to-texture path.
 The app releases its HUD pixels after construction. Renderer files include no app headers.
-`orbital_camera` builds navigation separately from `orbital_scene`; only the executable
+`orbital_app_cpu` builds navigation separately from `orbital_scene`; only the executable
 and camera/app tests link it.
 
 
@@ -194,3 +194,10 @@ sky's brightness/contrast but bypass its procedural dust. Splats remain the defa
 
 Checked borrowed `ImageView` values carry pixel layout, row stride and byte span across PNG output and font upload boundaries. Views support constant evaluation. Image types are separate from PNG I/O declarations in `assets/image_io.hpp`; shared asset validation permits 1 through 16,384 pixels on each axis.
 Optional desktop GPU correctness tests use the pinned local Vulkan layer; see [RENDER_VALIDATION.md](RENDER_VALIDATION.md).
+
+
+### App controls and options
+
+`ui.cpp` manages the ImGui context and backend lifecycle; `ui_panel.cpp` assembles sections whose controls take only the relevant settings (plus stats where shown). Section order and ImGui IDs remain stable. Camera navigation and capture requests share actions with keyboard/startup handlers; simple setting assignments remain direct. Orbit requests reject an absent selected body.
+
+`options.cpp` owns CLI parsing and validation in the CPU-only app target, separate from the window/render loop. Bounded enum/boolean choices share one parser. Numeric syntax, missing values, range checks and last-occurrence precedence are covered by CPU tests; non-finite floating-point values are rejected, including pan and LOD scale.

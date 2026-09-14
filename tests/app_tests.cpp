@@ -1,3 +1,4 @@
+#include "app/actions.hpp"
 #include "app/frame_input.hpp"
 #include <cassert>
 
@@ -53,7 +54,16 @@ int main() {
         assert(app.camera.orbit_target() == Camera::bookmark_body(index));
     }
     const auto selected = app.selected_body;
+    assert(orbit_selected(app) && app.camera.orbit_target() == selected);
+    free_camera(app);
+    assert(app.camera.mode() == CameraMode::Free);
+    request_capture(app);
+    assert(app.capture_request == hotkey_capture_path);
+    app.aa.spatial_aa = render::SpatialAA(unsigned(render::SpatialAA::Count) - 1);
+    cycle_choice(app.aa.spatial_aa);
+    assert(unsigned(app.aa.spatial_aa) == 0);
     assert(!select_bookmark(app, bookmark_count) && app.selected_body == selected);
     app.bodies.clear();
+    assert(!orbit_selected(app));
     assert(!select_bookmark(app, 0));
 }

@@ -1,6 +1,4 @@
 #pragma once
-#include "app/app_state.hpp"
-#include "render/renderer.hpp"
 
 #include <cstdint>
 #include <span>
@@ -11,7 +9,12 @@ namespace space::platform {
 class Window;
 }
 
+namespace space::render {
+struct Stats;
+}
+
 namespace space::app {
+struct AppState;
 
 // Dear ImGui over the platform window: input arrives through the window's
 // message hook, the draw lists go to the renderer with the frame.

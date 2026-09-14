@@ -379,8 +379,10 @@ Do not restore an umbrella include or numeric texture/sampler indices. The compi
 depfile tracks consumers when a helper changes; run `python tools/check-shader-helpers.py` to check
 include independence and fixed-time capture comparisons to check rendering behavior.
 
-The app camera controller is built as `orbital_camera`, used by the executable and camera/app tests. Scene tests do not link it. Renderer headers accept `CameraView` values and app-supplied HUD pixels; they do not include app headers.
+App navigation and CLI parsing are built as `orbital_app_cpu`, used by the executable and camera/app/options tests. Scene tests do not link it. Renderer headers accept `CameraView` values and app-supplied HUD pixels; they do not include app headers.
 
 Renderer-specific scene restrictions live in `orbital_render_cpu`, which depends on the generic scene library. Keep them out of `validate_system`; the generic scene evaluator must remain usable without the showcase's required roles and belt configuration.
 
 Camera/history, lighting and belt LOD calculations also live in `orbital_render_cpu`. They accept explicit values and return typed results; shader component conventions stay in `renderer_frame_data.cpp`. Do not pass renderer `Impl` or GPU resources into these calculations.
+
+UI lifetime/backend integration stays in `ui.cpp`; `ui_panel.cpp` assembles effect-specific controls with narrow settings references. Camera/capture actions are shared through `actions.hpp`. CLI validation stays in the CPU-testable `options.cpp`; reject non-finite numbers before they reach app state.
