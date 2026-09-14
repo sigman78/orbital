@@ -1,5 +1,5 @@
-#include "render/renderer_impl.hpp"
 #include "assets/image_io.hpp"
+#include "render/renderer_impl.hpp"
 
 #include "core/log.hpp"
 #include "core/panic.hpp"
@@ -64,8 +64,8 @@ bool Renderer::draw(const FrameInput& input) {
     const auto prepare_start = std::chrono::steady_clock::now();
 
     const unsigned history_write = s.frame_index % 2;
-    s.bind(Slot::history_a, s.history[history_write]);
-    s.bind(Slot::history_b, s.history[1 - history_write]);
+    s.bind(Slot::history_a, s.frame_targets.history[history_write]);
+    s.bind(Slot::history_b, s.frame_targets.history[1 - history_write]);
     const FrameData frame = s.build_frame(input);
     s.write_body_instances(input, frame);
     s.stats.triangles = 0;
@@ -173,7 +173,7 @@ bool Renderer::capture(const std::filesystem::path& path) {
     auto* cmd = gpu::begin_commands(s.device);
     gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::transfer,
                  gpu::Access::transfer_read);
-    gpu::copy_texture_to_memory(cmd, s.final_image.texture, gpu::gpu_range(readback));
+    gpu::copy_texture_to_memory(cmd, s.frame_targets.final_image.texture(), gpu::gpu_range(readback));
     gpu::barrier(cmd, gpu::Stage::transfer, gpu::Access::transfer_write, gpu::Stage::host, gpu::Access::host_read);
     gpu::submit({cmd}, {s.timeline, ++s.serial});
     gpu::wait_timeline({s.timeline, s.serial});

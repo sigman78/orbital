@@ -124,7 +124,7 @@ if(ORBITAL_BUILD_DEMO)
   endif()
   target_compile_options(orbital_platform PRIVATE ${ORBITAL_WARNINGS})
 
-  add_executable(orbital src/app/main.cpp src/app/hud.cpp src/app/ui.cpp src/render/renderer_resources.cpp src/render/renderer_frame.cpp
+  add_executable(orbital src/app/main.cpp src/app/hud.cpp src/app/ui.cpp src/render/renderer_resources.cpp src/render/gpu_image.cpp src/render/renderer_frame.cpp
     src/render/renderer_frame_data.cpp src/render/renderer_pipelines.cpp src/render/renderer_assets.cpp
     src/render/renderer_belt.cpp src/render/renderer_scene.cpp src/render/renderer_post.cpp src/render/renderer_overlay.cpp)
   target_link_libraries(orbital PRIVATE orbital_scene orbital_assets orbital_platform NoGraphicsAPI::NoGraphicsAPI)
@@ -140,7 +140,7 @@ if(ORBITAL_BUILD_DEMO)
 
   if(BUILD_TESTING AND ORBITAL_RENDER_TESTS)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    add_executable(render_validation_probe tests/render_validation_probe.cpp)
+    add_executable(render_validation_probe tests/render_validation_probe.cpp src/render/gpu_image.cpp)
     target_link_libraries(render_validation_probe PRIVATE orbital_core NoGraphicsAPI::NoGraphicsAPI)
     target_compile_options(render_validation_probe PRIVATE ${ORBITAL_WARNINGS})
     add_test(NAME renderer_validation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check-renderer.py"

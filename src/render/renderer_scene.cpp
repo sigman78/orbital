@@ -16,7 +16,8 @@ void Renderer::Impl::draw_mesh(gpu::CommandBuffer* cmd, Root& root, const GpuMes
 
 void Renderer::Impl::record_shadow_pass(gpu::CommandBuffer* cmd, Root root) {
     root.mode = std::uint32_t(SurfaceMode::shadow);
-    gpu::begin_render_pass(cmd, {.depth = {.render_view = shadow_map.view, .load = gpu::LoadOp::clear}});
+    gpu::begin_render_pass(cmd,
+                           {.depth = {.render_view = fixed_targets.shadow_map.view(), .load = gpu::LoadOp::clear}});
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
     gpu::bind_pso(cmd, pso.scene.shadow);
     const unsigned triangles_before = stats.triangles;
@@ -35,16 +36,16 @@ void Renderer::Impl::record_galaxy_pass(gpu::CommandBuffer* cmd, Root root, cons
         galaxy_root.vertices = splat_data;
         galaxy_root.instances = splat_data + std::uint64_t(splat_count) * 64; // the cell table after the records
         galaxy_root.base = std::uint32_t(frame.galaxy.x);                     // the splats drawn, the first n by energy
-        fullscreen_pass(cmd, galaxy, pso.scene.galaxy, galaxy_root);
+        fullscreen_pass(cmd, frame_targets.galaxy, pso.scene.galaxy, galaxy_root);
     }
 }
 
 void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input,
                                        const FrameData& frame, std::uint64_t args_address) {
     root.mode = std::uint32_t(SurfaceMode::opaque);
-    gpu::ColorAttachment color{.render_view = hdr.view, .load = gpu::LoadOp::clear};
-    gpu::begin_render_pass(cmd,
-                           {.colors = {&color, 1}, .depth = {.render_view = depth.view, .load = gpu::LoadOp::clear}});
+    gpu::ColorAttachment color{.render_view = frame_targets.hdr.view(), .load = gpu::LoadOp::clear};
+    gpu::begin_render_pass(
+        cmd, {.colors = {&color, 1}, .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::clear}});
     gpu::bind_pso(cmd, pso.scene.background);
     gpu::draw(cmd, root, 3);
     stats.draw_calls++;
@@ -81,7 +82,7 @@ void Renderer::Impl::record_atmosphere_passes(gpu::CommandBuffer* cmd, Root& roo
     root.mode = 0;
     for (unsigned body : {giant_index, mars_index, earth_index}) {
         root.base = body;
-        fullscreen_pass(cmd, hdr, pso.scene.atmosphere, root, true);
+        fullscreen_pass(cmd, frame_targets.hdr, pso.scene.atmosphere, root, true);
     }
 }
 
@@ -92,9 +93,10 @@ void Renderer::Impl::record_motion_streaks(gpu::CommandBuffer* cmd, Root& root) 
                  gpu::Access::color_write);
     gpu::barrier(cmd, gpu::Stage::fragment, gpu::Access::shader_read, gpu::Stage::depth_stencil_tests,
                  gpu::Access::depth_stencil_read);
-    gpu::ColorAttachment color{.render_view = hdr.view, .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
-    gpu::begin_render_pass(cmd,
-                           {.colors = {&color, 1}, .depth = {.render_view = depth.view, .load = gpu::LoadOp::load}});
+    gpu::ColorAttachment color{
+        .render_view = frame_targets.hdr.view(), .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
+    gpu::begin_render_pass(
+        cmd, {.colors = {&color, 1}, .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
     gpu::bind_pso(cmd, pso.scene.motes);
     root.mode = 0;

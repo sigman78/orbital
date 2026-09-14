@@ -8,6 +8,7 @@
 #include "core/small_vec.hpp"
 #include "core/types.hpp"
 #include "post/bloom_shared.h"
+#include "render/gpu_image.hpp"
 #include "render/gpu_types.hpp"
 #include "scene/geometry.hpp"
 
@@ -181,23 +182,10 @@ inline constexpr float map_caster_min_radius =
 
 // --- GPU-side records ---------------------------------------------------------
 
-struct GpuImage {
-    gpu::TextureHeap heap{};
-    gpu::Texture* texture = nullptr;
-    gpu::RenderView* view = nullptr;
-};
-
 struct GpuMesh {
     std::uint64_t vertices = 0, indices = 0; // GPU addresses in the static heap
     unsigned index_count = 0;
     unsigned first_index = 0, vertex_offset = 0; // position inside a pooled buffer, zero for standalone meshes
-};
-
-struct ImageDesc {
-    Extent2D extent{1, 1};
-    gpu::Format format = gpu::Format::rgba8_unorm;
-    gpu::TextureUsage usage = gpu::TextureUsage::sampled;
-    unsigned mips = 1;
 };
 
 enum class Blend { none, alpha, additive, premultiplied };
@@ -253,10 +241,8 @@ struct Renderer::Impl {
     // Resources.
     std::vector<GpuImage> material_images;
     std::vector<gpu::PSO*> pipelines;
-    GpuImage sun_visibility{}; // one shared solar-disc visibility estimate per frame
-    GpuImage hdr{}, depth{}, bloom_a{}, bloom_b{}, final_image{}, ldr{}, shadow_map{}, luminance{}, history[2]{};
-    GpuImage splat_mask{}, smaa_edges{}, smaa_weights{}, belt_dust{}, belt_disc_light{}, belt_disc_rocks{};
-    GpuImage belt_light{}, belt_light_blur{}, galaxy{}; // galaxy: the Milky Way's splat sum at a quarter of the frame
+    FrameTargets frame_targets;
+    FixedTargets fixed_targets;
     // Non-owning handles grouped by pass family; pipelines owns their lifetime.
     struct {
         struct {
@@ -361,7 +347,6 @@ struct Renderer::Impl {
     void resize(Extent2D new_extent, unsigned galaxy_divisor);
     void resize_galaxy(unsigned divisor);
     unsigned galaxy_divisor = 4;
-    void destroy(GpuImage& image);
     std::uint64_t upload_static(ByteView bytes);
     GpuImage create_image(const ImageDesc& desc);
     void bind(Slot slot, const GpuImage& image);

@@ -97,7 +97,8 @@ void Renderer::Impl::record_belt_maps(gpu::CommandBuffer* cmd, const CullRoot& c
 void Renderer::Impl::record_belt_light_pass(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root,
                                             unsigned rock_limit) {
     // Coverage accumulates from zero in every slice, alpha included.
-    gpu::ColorAttachment attachment{.render_view = belt_light.view, .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
+    gpu::ColorAttachment attachment{
+        .render_view = fixed_targets.belt_light.view(), .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
     gpu::begin_render_pass(cmd, {.colors = {&attachment, 1}});
     gpu::bind_pso(cmd, pso.belt.splat);
     gpu::draw(cmd, cull_root, 6, rock_limit);
@@ -106,9 +107,9 @@ void Renderer::Impl::record_belt_light_pass(gpu::CommandBuffer* cmd, const CullR
     gpu::barrier(cmd, gpu::Stage::color_output, gpu::Access::color_write, gpu::Stage::fragment,
                  gpu::Access::shader_read);
     root.mode = 0;
-    fullscreen_pass(cmd, belt_light_blur, pso.belt.blur, root);
+    fullscreen_pass(cmd, fixed_targets.belt_light_blur, pso.belt.blur, root);
     root.mode = 1;
-    fullscreen_pass(cmd, belt_light, pso.belt.blur, root);
+    fullscreen_pass(cmd, fixed_targets.belt_light, pso.belt.blur, root);
 }
 
 // Far-belt maps: the sunlight over the belt plane every few frames, and the
@@ -122,11 +123,11 @@ void Renderer::Impl::record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullR
     const bool bake_rocks = !belt_disc_baked || frame_index % targets::belt_disc_rock_interval == 0;
     if (bake_light) {
         root.mode = 0;
-        fullscreen_pass(cmd, belt_disc_light, pso.belt.disc, root);
+        fullscreen_pass(cmd, fixed_targets.belt_disc_light, pso.belt.disc, root);
     }
     if (bake_rocks) {
         gpu::ColorAttachment attachment{
-            .render_view = belt_disc_rocks.view, .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
+            .render_view = fixed_targets.belt_disc_rocks.view(), .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
         gpu::begin_render_pass(cmd, {.colors = {&attachment, 1}});
         gpu::bind_pso(cmd, pso.belt.disc_splat);
         gpu::draw(cmd, cull_root, 6, rock_limit);
@@ -168,9 +169,10 @@ void Renderer::Impl::draw_rock_batch(gpu::CommandBuffer* cmd, Root& root, std::u
 void Renderer::Impl::record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, std::uint64_t args_address) {
     root.mode = std::uint32_t(SurfaceMode::splat_mask);
     root.base = 0;
-    gpu::ColorAttachment mask{.render_view = splat_mask.view, .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
-    gpu::begin_render_pass(cmd,
-                           {.colors = {&mask, 1}, .depth = {.render_view = depth.view, .load = gpu::LoadOp::load}});
+    gpu::ColorAttachment mask{
+        .render_view = frame_targets.splat_mask.view(), .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
+    gpu::begin_render_pass(
+        cmd, {.colors = {&mask, 1}, .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
     gpu::bind_pso(cmd, pso.belt.splat_mask);
     gpu::draw_indirect(cmd, root,
@@ -187,11 +189,11 @@ void Renderer::Impl::record_belt_dust_passes(gpu::CommandBuffer* cmd, Root& root
     const bool near_dust = enabled && far_weight < 1;
     if (near_dust) {
         root.mode = 0;
-        fullscreen_pass(cmd, belt_dust, pso.belt.dust, root);
+        fullscreen_pass(cmd, frame_targets.belt_dust, pso.belt.dust, root);
     }
     if (near_dust || far_weight > 0) {
         root.mode = 1;
-        fullscreen_pass(cmd, hdr, pso.belt.dust_blend, root, true);
+        fullscreen_pass(cmd, frame_targets.hdr, pso.belt.dust_blend, root, true);
     }
 }
 

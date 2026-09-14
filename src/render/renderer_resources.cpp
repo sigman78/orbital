@@ -22,25 +22,14 @@ Renderer::Impl::~Impl() {
         gpu::wait_idle(device);
     for (auto* pipeline : pipelines)
         gpu::destroy_pso(pipeline);
-    for (auto& image : material_images)
-        destroy(image);
-    for (auto* image : {&hdr,          &depth,      &sun_visibility,  &bloom_a,         &bloom_b,
-                        &final_image,  &ldr,        &shadow_map,      &luminance,       &history[0],
-                        &history[1],   &belt_light, &belt_light_blur, &splat_mask,      &smaa_edges,
-                        &smaa_weights, &belt_dust,  &belt_disc_light, &belt_disc_rocks, &galaxy})
-        destroy(*image);
+    material_images.clear();
+    frame_targets = {};
+    fixed_targets = {};
     for (auto* heap : {&data, &texture_descriptors, &sampler_descriptors, &luminance_readback, &timestamps,
                        &cull_device, &cull_readback})
         gpu::destroy_gpu_heap(*heap);
     gpu::destroy_timeline_semaphore(timeline);
     gpu::destroy_device(device);
-}
-
-void Renderer::Impl::destroy(GpuImage& image) {
-    gpu::destroy_render_view(image.view);
-    gpu::destroy_texture(image.texture);
-    gpu::destroy_texture_heap(image.heap);
-    image = {};
 }
 
 std::uint64_t Renderer::Impl::upload_static(ByteView bytes) {
@@ -53,28 +42,14 @@ std::uint64_t Renderer::Impl::upload_static(ByteView bytes) {
 }
 
 GpuImage Renderer::Impl::create_image(const ImageDesc& desc) {
-    const gpu::TextureDesc texture_desc{.extent = {desc.extent.width, desc.extent.height, 1},
-                                        .mip_levels = desc.mips,
-                                        .format = desc.format,
-                                        .usage = desc.usage};
-    const auto size = gpu::get_texture_size_align(device, texture_desc);
-    GpuImage result;
-    result.heap = gpu::create_texture_heap(device, size.size);
-    result.texture = gpu::create_texture(device, texture_desc, result.heap, 0);
-    panic_if(!result.texture, "texture allocation failed ({}x{}, {} mips)", desc.extent.width, desc.extent.height,
-             desc.mips);
-    const auto attachment_bits = static_cast<unsigned>(gpu::TextureUsage::color_attachment |
-                                                       gpu::TextureUsage::depth_stencil_attachment);
-    if (static_cast<unsigned>(desc.usage) & attachment_bits)
-        result.view = gpu::create_render_view(result.texture);
-    return result;
+    return GpuImage::create(device, desc);
 }
 
 void Renderer::Impl::bind(Slot slot, const GpuImage& image) {
     ORBITAL_ASSERT(slot < Slot::count);
     const auto& caps = gpu::get_device_caps(device);
     gpu::write_texture_descriptor(device, texture_descriptors.range.cpu + unsigned(slot) * caps.texture_descriptor_size,
-                                  image.texture, gpu::TextureDescriptorType::sampled);
+                                  image.texture(), gpu::TextureDescriptorType::sampled);
 }
 
 // Creates one sampled texture per upload and streams every mip through
@@ -83,18 +58,18 @@ void Renderer::Impl::bind(Slot slot, const GpuImage& image) {
 // instead of sized to the whole set. Textures are created before
 // begin_commands so the backend records their layout initialization first.
 void Renderer::Impl::upload_images(std::span<Upload> uploads) {
-    std::vector<GpuImage> images;
-    images.reserve(uploads.size());
+    const auto first_image = material_images.size();
+    material_images.reserve(first_image + uploads.size());
     std::uint64_t largest = 0;
     for (const auto& upload : uploads) {
         ORBITAL_ASSERT(assets::valid_texture(upload.data));
         const auto& base = upload.data.mips.front();
-        images.push_back(create_image({.extent = base.extent,
-                                       .format = texture_format(upload.data),
-                                       .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::transfer_destination,
-                                       .mips = unsigned(upload.data.mips.size())}));
-        material_images.push_back(images.back());
-        bind(upload.slot, images.back());
+        material_images.push_back(
+            create_image({.extent = base.extent,
+                          .format = texture_format(upload.data),
+                          .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::transfer_destination,
+                          .mips = unsigned(upload.data.mips.size())}));
+        bind(upload.slot, material_images.back());
         std::uint64_t bytes = 0;
         for (const auto& mip : upload.data.mips)
             bytes += padded_size(mip);
@@ -126,8 +101,8 @@ void Renderer::Impl::upload_images(std::span<Upload> uploads) {
             const auto& mip = uploads[i].data.mips[level];
             std::memcpy(staging.range.cpu + offset, mip.bytes.data(), mip.bytes.size());
             const auto source = reinterpret_cast<std::uint64_t>(staging.range.gpu) + offset;
-            gpu::copy_memory_to_texture(cmd, {reinterpret_cast<void*>(source), mip.bytes.size()}, images[i].texture,
-                                        {.mip_level = level});
+            gpu::copy_memory_to_texture(cmd, {reinterpret_cast<void*>(source), mip.bytes.size()},
+                                        material_images[first_image + i].texture(), {.mip_level = level});
             offset += padded_size(mip);
         }
     }
@@ -190,27 +165,31 @@ void Renderer::Impl::create_samplers() {
 }
 
 void Renderer::Impl::create_fixed_targets() {
-    shadow_map = create_image({.extent = {targets::shadow_map_size, targets::shadow_map_size},
-                               .format = gpu::Format::d32_float,
-                               .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::depth_stencil_attachment});
-    bind(Slot::shadow_map, shadow_map);
-    for (auto* map : {&belt_light, &belt_light_blur})
+    fixed_targets.shadow_map = create_image(
+        {.extent = {targets::shadow_map_size, targets::shadow_map_size},
+         .format = gpu::Format::d32_float,
+         .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::depth_stencil_attachment});
+    bind(Slot::shadow_map, fixed_targets.shadow_map);
+    for (auto* map : {&fixed_targets.belt_light, &fixed_targets.belt_light_blur})
         *map = create_image({.extent = {targets::belt_light_map_size, targets::belt_light_map_size},
                              .format = gpu::Format::rgba16_float,
                              .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment});
-    bind(Slot::belt_light_map, belt_light);
-    bind(Slot::belt_light_blur, belt_light_blur);
-    belt_disc_light = create_image({.extent = {targets::belt_disc_map_size, targets::belt_disc_map_size},
-                                    .format = gpu::Format::rgba16_float,
-                                    .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment});
-    belt_disc_rocks = create_image({.extent = {targets::belt_disc_rock_map_size, targets::belt_disc_rock_map_size},
-                                    .format = gpu::Format::rgba16_float,
-                                    .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment});
-    bind(Slot::belt_disc_light, belt_disc_light);
-    bind(Slot::belt_disc_rocks, belt_disc_rocks);
-    luminance = create_image({.extent = {targets::meter_size, targets::meter_size},
-                              .format = gpu::Format::rgba32_float,
-                              .usage = gpu::TextureUsage::color_attachment | gpu::TextureUsage::transfer_source});
+    bind(Slot::belt_light_map, fixed_targets.belt_light);
+    bind(Slot::belt_light_blur, fixed_targets.belt_light_blur);
+    fixed_targets.belt_disc_light = create_image(
+        {.extent = {targets::belt_disc_map_size, targets::belt_disc_map_size},
+         .format = gpu::Format::rgba16_float,
+         .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment});
+    fixed_targets.belt_disc_rocks = create_image(
+        {.extent = {targets::belt_disc_rock_map_size, targets::belt_disc_rock_map_size},
+         .format = gpu::Format::rgba16_float,
+         .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment});
+    bind(Slot::belt_disc_light, fixed_targets.belt_disc_light);
+    bind(Slot::belt_disc_rocks, fixed_targets.belt_disc_rocks);
+    fixed_targets.luminance = create_image(
+        {.extent = {targets::meter_size, targets::meter_size},
+         .format = gpu::Format::rgba32_float,
+         .usage = gpu::TextureUsage::color_attachment | gpu::TextureUsage::transfer_source});
 }
 
 void Renderer::Impl::init(void* window, const SystemDescription& description,
@@ -272,11 +251,12 @@ void Renderer::Impl::resize_galaxy(unsigned divisor) {
         return;
     gpu::wait_idle(device);
     galaxy_divisor = divisor;
-    destroy(galaxy);
-    galaxy = create_image({.extent = {std::max(1u, extent.width / divisor), std::max(1u, extent.height / divisor)},
-                           .format = gpu::Format::rgba16_float,
-                           .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment});
-    bind(Slot::milky_way, galaxy);
+    frame_targets.galaxy.reset();
+    frame_targets.galaxy = create_image(
+        {.extent = {std::max(1u, extent.width / divisor), std::max(1u, extent.height / divisor)},
+         .format = gpu::Format::rgba16_float,
+         .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment});
+    bind(Slot::milky_way, frame_targets.galaxy);
 }
 
 void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor) {
@@ -289,51 +269,53 @@ void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor) {
     gpu::wait_idle(device);
     log::info("Resizing frame targets {}x{} -> {}x{}", extent.width, extent.height, new_extent.width,
               new_extent.height);
-    for (auto* image : {&hdr, &depth, &sun_visibility, &bloom_a, &bloom_b, &final_image, &ldr, &history[0], &history[1],
-                        &splat_mask, &smaa_edges, &smaa_weights, &belt_dust, &galaxy})
-        destroy(*image);
+    frame_targets = {};
     extent = new_extent;
     history_valid = false;
     const auto color_usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment;
     const unsigned bloom_width = std::max(1u, extent.width / 4), bloom_height = std::max(1u, extent.height / 4);
-    hdr = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
-    depth = create_image({.extent = extent,
-                          .format = gpu::Format::d32_float,
-                          .usage = gpu::TextureUsage::depth_stencil_attachment | gpu::TextureUsage::sampled});
-    sun_visibility = create_image({.extent = {1, 1}, .format = gpu::Format::rgba16_float, .usage = color_usage});
-    bloom_a = create_image(
+    frame_targets.hdr = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
+    frame_targets.depth = create_image(
+        {.extent = extent,
+         .format = gpu::Format::d32_float,
+         .usage = gpu::TextureUsage::depth_stencil_attachment | gpu::TextureUsage::sampled});
+    frame_targets.sun_visibility = create_image(
+        {.extent = {1, 1}, .format = gpu::Format::rgba16_float, .usage = color_usage});
+    frame_targets.bloom_a = create_image(
         {.extent = {bloom_width, bloom_height}, .format = gpu::Format::rgba16_float, .usage = color_usage});
-    bloom_b = create_image(
+    frame_targets.bloom_b = create_image(
         {.extent = {bloom_width, bloom_height}, .format = gpu::Format::rgba16_float, .usage = color_usage});
-    final_image = create_image({.extent = extent,
-                                .format = gpu::Format::rgba8_srgb,
-                                .usage = color_usage | gpu::TextureUsage::transfer_source});
-    ldr = create_image({.extent = extent, .format = gpu::Format::rgba8_srgb, .usage = color_usage});
-    for (auto& image : history)
+    frame_targets.final_image = create_image({.extent = extent,
+                                              .format = gpu::Format::rgba8_srgb,
+                                              .usage = color_usage | gpu::TextureUsage::transfer_source});
+    frame_targets.ldr = create_image({.extent = extent, .format = gpu::Format::rgba8_srgb, .usage = color_usage});
+    for (auto& image : frame_targets.history)
         image = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
-    splat_mask = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
-    smaa_edges = create_image({.extent = extent, .format = gpu::Format::rg8_unorm, .usage = color_usage});
-    smaa_weights = create_image({.extent = extent, .format = gpu::Format::rgba8_unorm, .usage = color_usage});
-    belt_dust = create_image({.extent = {std::max(1u, extent.width / 2), std::max(1u, extent.height / 2)},
-                              .format = gpu::Format::rgba16_float,
-                              .usage = color_usage});
+    frame_targets.splat_mask = create_image(
+        {.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
+    frame_targets.smaa_edges = create_image({.extent = extent, .format = gpu::Format::rg8_unorm, .usage = color_usage});
+    frame_targets.smaa_weights = create_image(
+        {.extent = extent, .format = gpu::Format::rgba8_unorm, .usage = color_usage});
+    frame_targets.belt_dust = create_image({.extent = {std::max(1u, extent.width / 2), std::max(1u, extent.height / 2)},
+                                            .format = gpu::Format::rgba16_float,
+                                            .usage = color_usage});
     // The Milky Way's splat sum is smooth at its narrowest splat, so a fraction of the frame resolves it.
-    galaxy = create_image(
+    frame_targets.galaxy = create_image(
         {.extent = {std::max(1u, extent.width / galaxy_divisor), std::max(1u, extent.height / galaxy_divisor)},
          .format = gpu::Format::rgba16_float,
          .usage = color_usage});
-    bind(Slot::hdr, hdr);
-    bind(Slot::bloom_a, bloom_a);
-    bind(Slot::sun_visibility, sun_visibility);
-    bind(Slot::milky_way, galaxy);
-    bind(Slot::bloom_b, bloom_b);
-    bind(Slot::final_image, final_image);
-    bind(Slot::ldr, ldr);
-    bind(Slot::depth, depth);
-    bind(Slot::splat_mask, splat_mask);
-    bind(Slot::smaa_edges, smaa_edges);
-    bind(Slot::smaa_weights, smaa_weights);
-    bind(Slot::belt_dust, belt_dust);
+    bind(Slot::hdr, frame_targets.hdr);
+    bind(Slot::bloom_a, frame_targets.bloom_a);
+    bind(Slot::sun_visibility, frame_targets.sun_visibility);
+    bind(Slot::milky_way, frame_targets.galaxy);
+    bind(Slot::bloom_b, frame_targets.bloom_b);
+    bind(Slot::final_image, frame_targets.final_image);
+    bind(Slot::ldr, frame_targets.ldr);
+    bind(Slot::depth, frame_targets.depth);
+    bind(Slot::splat_mask, frame_targets.splat_mask);
+    bind(Slot::smaa_edges, frame_targets.smaa_edges);
+    bind(Slot::smaa_weights, frame_targets.smaa_weights);
+    bind(Slot::belt_dust, frame_targets.belt_dust);
 }
 
 Renderer::Renderer(void* window, const SystemDescription& system, const std::filesystem::path& directory,

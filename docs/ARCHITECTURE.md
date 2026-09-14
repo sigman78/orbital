@@ -68,8 +68,9 @@ atmospheres with dust, and post-processing. The original cull/shadow aggregate i
 ## Renderer implementation
 
 `Renderer::Impl` owns the device, heaps, images and pipeline lifetime registry. The implementation
-is split by responsibility; pass files operate on that shared state without introducing separate
-resource owners or a render graph.
+is split by responsibility. Move-only `GpuImage` values own their texture allocation and
+attachment view; pass files borrow handles from frame-sized and fixed-size target groups.
+Pass ordering and synchronization remain explicit.
 
 | File in `src/render/` | Responsibility |
 | --- | --- |
@@ -77,7 +78,8 @@ resource owners or a render graph.
 | `renderer_frame_data.cpp` | Camera/light transforms, frame constants, body instances and culling inputs |
 | `renderer_pipelines.cpp` | Shader loading and pipeline creation, grouped into scene, belt, post and overlay |
 | `renderer_assets.cpp` | Mesh packing, material decode batches and sky catalogues |
-| `renderer_resources.cpp` | Device/heaps, generic uploads, image lifetime and resize |
+| `renderer_resources.cpp` | Device/heaps, bounded uploads and target-group reconciliation |
+| `gpu_image.hpp` / `gpu_image.cpp` | Move-only image ownership and frame/fixed target groups |
 | `renderer_belt.cpp` | Rock population, GPU culling, indirect rock batch, light/disc maps, splat mask and dust |
 | `renderer_scene.cpp` | Shadow, galaxy, bodies/clouds, atmospheres and motion streaks |
 | `renderer_post.cpp` | Temporal resolve, bloom, tone mapping, spatial AA, metering and presentation |
@@ -90,6 +92,14 @@ inside the scene pass, and `record_ui` records inside the presentation pass. Hel
 explicitly preserve the push-constant updates used by subsequent draws.
 
 ## Resources
+
+`FrameTargets` owns the images replaced on resize; `FixedTargets` owns window-independent
+maps and metering targets. Material/font images have one owning vector. Each `GpuImage`
+releases its attachment view before its texture and allocation; copying is forbidden,
+and moving transfers ownership while clearing the source. Handle accessors are borrowed.
+The renderer waits for GPU completion before resetting target groups and clears all
+image owners before destroying the device. RAII does not perform implicit GPU waits.
+
 
 An approximately 84 MiB host-visible heap holds static meshes/rock records, frame constants, staged
 culling parameters/body instances and 4 MiB of overlay space. GPU-written culling scratch, indirect
