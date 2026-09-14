@@ -43,6 +43,8 @@ control the artistic sun or lighting. Star position does drive lighting. Moonlet
 `material_seed`; installed planetary maps remain assigned by body class. Giving the metadata rendering
 semantics is a separate visual change. App bookmarks still target the generated showcase's ordering.
 
+Frame preparation separates CPU geometry from shader packing. `frame_calculations` returns camera projection/history decisions, motion lattice coordinates, light boxes, belt LOD and sun visibility through typed values. `renderer_frame_data.cpp` packs these into the unchanged shader ABI alongside effect settings and resource availability. The calculation library has no backend or shader-header dependency and is tested in both MSVC and GCC CPU builds.
+
 ## Belt
 
 The belt is a population rather than a mesh list: `geometry` places 280k (baseline) or 520k (high) rocks in

@@ -381,4 +381,6 @@ include independence and fixed-time capture comparisons to check rendering behav
 
 The app camera controller is built as `orbital_camera`, used by the executable and camera/app tests. Scene tests do not link it. Renderer headers accept `CameraView` values and app-supplied HUD pixels; they do not include app headers.
 
-Renderer-specific scene restrictions live in `orbital_render_scene`, which depends on the generic scene library. Keep them out of `validate_system`; the generic scene evaluator must remain usable without the showcase's required roles and belt configuration.
+Renderer-specific scene restrictions live in `orbital_render_cpu`, which depends on the generic scene library. Keep them out of `validate_system`; the generic scene evaluator must remain usable without the showcase's required roles and belt configuration.
+
+Camera/history, lighting and belt LOD calculations also live in `orbital_render_cpu`. They accept explicit values and return typed results; shader component conventions stay in `renderer_frame_data.cpp`. Do not pass renderer `Impl` or GPU resources into these calculations.
