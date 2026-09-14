@@ -22,21 +22,22 @@ void Renderer::Impl::read_gpu_timings() {
     const auto* t = reinterpret_cast<const std::uint64_t*>(buffers.timestamps.range().cpu);
     const auto caps = gpu::get_device_caps(device);
     const float scale = float(caps.timestamp_period_ns * 1e-6);
-    const auto elapsed = [&](unsigned begin, unsigned end) {
-        return float(timestamp_ticks(t[begin], t[end], caps.timestamp_valid_bits)) * scale;
+    const auto elapsed = [&](GpuCheckpoint begin, GpuCheckpoint end) {
+        return float(timestamp_ticks(t[unsigned(begin)], t[unsigned(end)], caps.timestamp_valid_bits)) * scale;
     };
-    stats.gpu_ms = elapsed(0, 7);
-    stats.shadow_ms = elapsed(0, 4);
-    stats.cull_ms = elapsed(0, 1);
-    stats.body_shadow_ms = elapsed(1, 2);
-    stats.belt_light_ms = elapsed(2, 3);
-    stats.belt_disc_ms = elapsed(3, 4);
-    stats.surface_ms = elapsed(4, 5);
-    stats.atmosphere_ms = elapsed(5, 6);
-    stats.post_ms = elapsed(6, 7);
+    stats.gpu_ms = elapsed(GpuCheckpoint::FrameStart, GpuCheckpoint::AfterPost);
+    stats.shadow_ms = elapsed(GpuCheckpoint::FrameStart, GpuCheckpoint::AfterBeltDiscs);
+    stats.cull_ms = elapsed(GpuCheckpoint::FrameStart, GpuCheckpoint::AfterCulling);
+    stats.body_shadow_ms = elapsed(GpuCheckpoint::AfterCulling, GpuCheckpoint::AfterBodyShadows);
+    stats.belt_light_ms = elapsed(GpuCheckpoint::AfterBodyShadows, GpuCheckpoint::AfterBeltLight);
+    stats.belt_disc_ms = elapsed(GpuCheckpoint::AfterBeltLight, GpuCheckpoint::AfterBeltDiscs);
+    stats.surface_ms = elapsed(GpuCheckpoint::AfterBeltDiscs, GpuCheckpoint::AfterSurface);
+    stats.atmosphere_ms = elapsed(GpuCheckpoint::AfterSurface, GpuCheckpoint::AfterAtmosphere);
+    stats.post_ms = elapsed(GpuCheckpoint::AfterAtmosphere, GpuCheckpoint::AfterPost);
 }
 
-void Renderer::Impl::stamp(gpu::CommandBuffer* cmd, unsigned index) {
+void Renderer::Impl::stamp(gpu::CommandBuffer* cmd, GpuCheckpoint checkpoint) {
+    const auto index = unsigned(checkpoint);
     ORBITAL_ASSERT(index < targets::timestamp_count);
     gpu::write_timestamp(
         cmd, reinterpret_cast<gpu::uint64*>(buffers.timestamps.range().gpu + index * sizeof(std::uint64_t)));
@@ -108,7 +109,7 @@ bool Renderer::draw(const FrameInput& supplied) {
     const std::uint64_t args_address = cull_address + heap_layout.cull_offset + offsetof(CullScratch, args);
 
     auto* cmd = gpu::begin_commands(s.device);
-    s.stamp(cmd, 0);
+    s.stamp(cmd, GpuCheckpoint::FrameStart);
     gpu::set_texture_descriptor_heap(cmd, gpu::gpu_range(s.buffers.texture_descriptors.get()));
     gpu::set_sampler_descriptor_heap(cmd, gpu::gpu_range(s.buffers.sampler_descriptors.get()));
     synchronize(cmd, frame_render_access, frame_render_access);
@@ -126,14 +127,14 @@ bool Renderer::draw(const FrameInput& supplied) {
     gpu::copy_memory(cmd, {s.buffers.cull_device.range().gpu + heap_layout.cull_offset, sizeof(CullScratch)},
                      gpu::gpu_range(s.buffers.cull_readback.get()));
     synchronize(cmd, access::transfer_write, access::host_read);
-    s.stamp(cmd, 1);
+    s.stamp(cmd, GpuCheckpoint::AfterCulling);
     s.record_shadow_pass(cmd, root);
-    s.stamp(cmd, 2);
+    s.stamp(cmd, GpuCheckpoint::AfterBodyShadows);
     s.record_belt_maps(cmd, cull_root, root, scratch->params.rock_limit, input.belt.light_map, frame.belt_disc.y);
-    s.stamp(cmd, 4);
+    s.stamp(cmd, GpuCheckpoint::AfterBeltDiscs);
     s.record_galaxy_pass(cmd, root, frame);
     s.record_scene_pass(cmd, root, input, frame, args_address);
-    s.stamp(cmd, 5);
+    s.stamp(cmd, GpuCheckpoint::AfterSurface);
     s.record_atmosphere_passes(cmd, root);
     s.record_belt_dust_passes(cmd, root, input.belt_dust.enabled, frame.belt_disc.y);
     // Coverage is also needed by sun visibility with TAA disabled.
@@ -141,11 +142,11 @@ bool Renderer::draw(const FrameInput& supplied) {
     s.record_splat_mask_pass(cmd, root, args_address);
     synchronize(cmd, access::depth_read, access::fragment_sample);
     synchronize(cmd, access::color_write, access::fragment_sample);
-    s.stamp(cmd, 6);
+    s.stamp(cmd, GpuCheckpoint::AfterAtmosphere);
     s.record_post_passes(cmd, root, swap.render_view, input.aa.spatial_aa,
                          input.post.bloom && input.post.bloom_intensity > 0, frame.camera_cell.w > 0, input.ui,
                          dynamic + heap_layout.ui_offset(), frame_address + heap_layout.ui_offset());
-    s.stamp(cmd, 7);
+    s.stamp(cmd, GpuCheckpoint::AfterPost);
     s.stats.prepare_ms =
         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - prepare_start).count();
     s.submissions.submit_and_present(s.device, {cmd});
