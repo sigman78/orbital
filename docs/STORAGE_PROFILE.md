@@ -1,5 +1,8 @@
 # Storage and scene evaluation measurements
 
+Historical measurement: these results predate the 2026-09-14 runtime cache-policy change. The reader no longer verifies source hashes or payload checksums. The standalone hash probe remains for comparison; rerun the load/parse measurements before using these numbers for current startup costs. The earlier checksum-preservation recommendation below is superseded by the policy in [ASSETS.md](ASSETS.md#prepared-texture-selection).
+
+
 Stage 6 decision: defer contiguous mip storage and a validated immutable scene/evaluation API. The measured benefit of these representation changes is small for the installed workload. Runtime code and cache format remain unchanged.
 
 ## Reproduction and scope

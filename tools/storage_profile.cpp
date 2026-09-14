@@ -2,6 +2,7 @@
 // allocator overhead; direct malloc allocations are outside this measurement.
 #include "assets/material_catalog.hpp"
 #include "assets/texture.hpp"
+#include "texture_hash.hpp"
 #include "core/file.hpp"
 #include "core/panic.hpp"
 #include "scene/system.hpp"
@@ -129,12 +130,12 @@ int main(int argc, char** argv) {
         auto bytes = file::read(texture_cache_path(path, TextureFormat::BC7));
         if (!bytes)
             bytes = file::read(texture_cache_path(path));
-        ORBITAL_ASSERT(bytes && read_texture_cache(*bytes, entry.desc, std::nullopt));
+        ORBITAL_ASSERT(bytes && read_texture_cache(*bytes, entry.desc));
         sources.push_back({path, entry.desc, std::move(*bytes)});
     }
     std::size_t payload = 0, mips = 0;
     for (const auto& source : sources) {
-        const auto texture = read_texture_cache(source.cache, source.desc, std::nullopt);
+        const auto texture = read_texture_cache(source.cache, source.desc);
         mips += texture->mips.size();
         for (const auto& mip : texture->mips)
             payload += mip.bytes.size();
@@ -164,13 +165,13 @@ int main(int argc, char** argv) {
         });
         measure("cache-hash-only", repeat, unsigned(sources.size()), [&] {
             for (const auto& source : sources)
-                sink = double(texture_hash(ByteView(source.cache).subspan(64)));
+                sink = double(tooling::texture_hash(ByteView(source.cache).subspan(64)));
         });
         measure("cache-parse-retained", repeat, unsigned(sources.size()), [&] {
             std::vector<TextureData> textures;
             textures.reserve(sources.size());
             for (const auto& source : sources) {
-                auto texture = read_texture_cache(source.cache, source.desc, std::nullopt);
+                auto texture = read_texture_cache(source.cache, source.desc);
                 ORBITAL_ASSERT(texture);
                 textures.push_back(std::move(*texture));
             }
@@ -182,7 +183,7 @@ int main(int argc, char** argv) {
             std::vector<Bytes> slabs;
             slabs.reserve(sources.size());
             for (const auto& source : sources) {
-                sink = double(texture_hash(ByteView(source.cache).subspan(64)));
+                sink = double(tooling::texture_hash(ByteView(source.cache).subspan(64)));
                 slabs.emplace_back(source.cache.begin() + 64, source.cache.end());
             }
         });

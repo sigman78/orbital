@@ -62,14 +62,6 @@ bool valid_texture(const TextureData& texture) {
     }
     return true;
 }
-std::uint64_t texture_hash(ByteView bytes) {
-    std::uint64_t hash = 14695981039346656037ull;
-    for (const auto byte : bytes) {
-        hash ^= byte;
-        hash *= 1099511628211ull;
-    }
-    return hash;
-}
 std::uint32_t material_flags(const MaterialDesc& d) {
     return (d.encoding == MaterialEncoding::SRGB ? 1u : 0u) | (d.normal_map ? 2u : 0u) |
            (d.luminance_to_alpha ? 4u : 0u);
@@ -88,14 +80,9 @@ std::filesystem::path texture_cache_path(const std::filesystem::path& source, Te
     return result;
 }
 
-std::optional<TextureData> read_texture_cache(ByteView b, const MaterialDesc& desc,
-                                              std::optional<std::uint64_t> source_hash) {
+std::optional<TextureData> read_texture_cache(ByteView b, const MaterialDesc& desc) {
     if (b.size() < header_size || word(b, 0) != cache_magic || word(b, 4) != cache_version ||
         word(b, 32) != material_flags(desc))
-        return std::nullopt;
-    const auto source = std::uint64_t(word(b, 36)) | (std::uint64_t(word(b, 40)) << 32);
-    const auto checksum = std::uint64_t(word(b, 44)) | (std::uint64_t(word(b, 48)) << 32);
-    if ((source_hash && source != *source_hash) || checksum != texture_hash(b.subspan(header_size)))
         return std::nullopt;
     TextureData result;
     const auto format = word(b, 28);
@@ -150,9 +137,7 @@ Bytes write_texture_cache(const TextureData& texture, const MaterialDesc& desc, 
     put(result, 40, std::uint32_t(source_hash >> 32));
     for (const auto& mip : texture.mips)
         result.insert(result.end(), mip.bytes.begin(), mip.bytes.end());
-    const auto checksum = texture_hash(ByteView(result).subspan(header_size));
-    put(result, 44, std::uint32_t(checksum));
-    put(result, 48, std::uint32_t(checksum >> 32));
+    // Legacy checksum fields remain zero; runtime validates structure, not payload identity.
     return result;
 }
 
@@ -162,8 +147,6 @@ std::optional<TextureData> load_texture_cache(const std::filesystem::path& sourc
         return format == TextureFormat::RGBA8 || (format == TextureFormat::BC7 && support.bc7) ||
                (format == TextureFormat::ASTC && block < support.astc_blocks.size() && support.astc_blocks[block]);
     };
-    std::optional<std::uint64_t> source_hash;
-    bool checked_source = false;
     // The last candidate preserves caches generated before format-specific filenames.
     const std::array<std::optional<TextureFormat>, 4> candidates{TextureFormat::BC7, TextureFormat::ASTC,
                                                                  TextureFormat::RGBA8, std::nullopt};
@@ -182,14 +165,9 @@ std::optional<TextureData> load_texture_cache(const std::filesystem::path& sourc
             if ((candidate && format != *candidate) || !supported(format, word(*bytes, 20)))
                 continue;
         }
-        if (!checked_source) {
-            if (const auto original = file::read(source))
-                source_hash = texture_hash(*original);
-            checked_source = true;
-        }
-        if (auto result = read_texture_cache(*bytes, desc, source_hash))
+        if (auto result = read_texture_cache(*bytes, desc))
             return result;
-        log::warn("Ignoring stale or invalid texture cache: {}", path.string());
+        log::warn("Ignoring invalid texture cache: {}", path.string());
     }
     return std::nullopt;
 }

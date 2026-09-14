@@ -1,6 +1,14 @@
 # Material assets
 
-The runtime textures live in `assets/materials/` as PNG files and are tracked in git. Each map is stored at the resolution the renderer uploads (at most 4096 pixels wide); the renderer generates the full mip chain on the CPU at load time. `manifest.json` records, per file, the stored dimensions, colour space, license, attribution, the upstream source URL, its SHA-256 hash and its original dimensions.
+Texture sources and prepared variants live in `assets/materials/` and are tracked in git. The renderer loads prepared mip chains when available and generates mips on the CPU for PNG fallback. `manifest.json` records, per file, the stored dimensions, colour space, license, attribution, the upstream source URL, its SHA-256 hash and its original dimensions.
+
+## Prepared texture selection
+
+PNGs are authoring sources; `.otex` variants are generated runtime assets associated by filename stem. The loader prefers supported BC7, then ASTC, then RGBA8, then a supported legacy `.otex`. Missing or structurally invalid variants fall through to the next candidate; the renderer prepares the PNG when no usable cache exists. Cache-only installations are supported.
+
+Runtime loading does not read the PNG to verify freshness and does not hash texture payloads. It validates the cache version, material flags, format, dimensions, block geometry, complete mip chain and exact payload length. Source-hash and checksum fields in the existing 64-byte header are ignored. Same-size pixel corruption is therefore not detected by the runtime reader. The C++ serializer writes zero checksum fields; existing tool-generated files with checksums remain compatible.
+
+After editing a PNG or conversion settings, regenerate the prepared variants with the asset tools (or remove them to exercise PNG fallback). This is currently an explicit preparation step, not automatic timestamp-based build invalidation. Preparation tools retain source hashing as provenance and to catch edits during conversion. No hashes are added to PNG metadata or filenames.
 
 `tools/import-assets.ps1` regenerates the whole set: it downloads (or reuses from `.tools/asset-sources/`) the hash-verified upstream files, converts images to PNG with GDI+ high-quality bicubic downscaling where needed, bakes the NASA elevation models into normal+height PNGs through `tools/bake-normal-map.py` (Python 3 with numpy and Pillow), and rewrites `manifest.json`. The committed PNGs are canonical; the scripts document how they were derived and let the set be rebuilt from the same sources.
 

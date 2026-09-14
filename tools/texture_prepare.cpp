@@ -1,5 +1,6 @@
 #include "assets/material_catalog.hpp"
 #include "assets/texture.hpp"
+#include "texture_hash.hpp"
 #include "core/file.hpp"
 #include <cstdio>
 #include <format>
@@ -19,7 +20,7 @@ int main(int argc, char** argv) {
     const auto original = file::read(source);
     if (!original)
         return 1;
-    const auto hash = assets::texture_hash(*original);
+    const auto hash = tooling::texture_hash(*original);
     const auto desc = assets::material_description(source.filename().string());
     const auto mips = assets::load_material(source, desc);
     const auto base = mips.front().extent;
@@ -43,7 +44,7 @@ int main(int argc, char** argv) {
         }
     }
     const auto after = file::read(source);
-    if (!after || assets::texture_hash(*after) != hash) {
+    if (!after || tooling::texture_hash(*after) != hash) {
         std::fprintf(stderr, "Source changed during preparation\n");
         return 1;
     }
