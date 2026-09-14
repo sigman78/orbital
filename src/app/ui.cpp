@@ -289,9 +289,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
             if (i % 3)
                 ImGui::SameLine();
             if (ImGui::Button(bookmark_names[i], {104, 0})) {
-                app.camera.set_bookmark(i, app.bodies);
-                app.selected_body = unsigned(std::min(Camera::bookmark_body(i), app.bodies.size() - 1));
-                app.camera.set_mode(CameraMode::Free);
+                select_bookmark(app, i);
             }
         }
         if (ImGui::Button("Tour (T)", {104, 0}))

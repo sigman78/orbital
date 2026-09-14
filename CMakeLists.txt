@@ -59,7 +59,7 @@ if(ORBITAL_BUILD_TEXTURE_TOOLS)
 endif()
 
 if(BUILD_TESTING)
-  foreach(test IN ITEMS core system geometry camera image kernels materials smaa texture)
+  foreach(test IN ITEMS core system geometry camera image kernels materials smaa texture app)
     add_executable(${test}_tests tests/${test}_tests.cpp)
     target_link_libraries(${test}_tests PRIVATE orbital_scene orbital_assets)
     # These tests use assertions as executable invariants, including Release.

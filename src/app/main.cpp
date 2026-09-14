@@ -1,4 +1,5 @@
 #include "app/app_state.hpp"
+#include "app/frame_input.hpp"
 #include "app/ui.hpp"
 #include "core/file.hpp"
 #include "core/log.hpp"
@@ -237,9 +238,7 @@ void handle_key(AppState& app, Key key) {
         app.tone.auto_exposure = !app.tone.auto_exposure;
     else if (const auto digit = platform::digit_of(key); digit && *digit >= 1 && *digit <= bookmark_count) {
         const std::size_t index = *digit - 1;
-        app.camera.set_bookmark(index, app.bodies);
-        app.selected_body = unsigned(std::min(Camera::bookmark_body(index), app.bodies.size() - 1));
-        app.camera.set_mode(CameraMode::Free);
+        select_bookmark(app, index);
     }
 }
 
@@ -340,7 +339,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.tone.auto_exposure = options.fixed_time < 0;
     app.bodies = evaluate_system(system, std::max(0.0, options.fixed_time));
     if (options.bookmark >= 0)
-        app.camera.set_bookmark(unsigned(options.bookmark), app.bodies);
+        select_bookmark(app, unsigned(options.bookmark));
     if (options.tour) {
         if (options.fixed_time >= 0)
             app.camera.set_tour_time(options.fixed_time);
@@ -421,21 +420,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
         }
         const ImDrawData* ui_draw = ui.end_frame();
 
-        const render::FrameInput frame_input{.camera = app.camera,
-                                             .bodies = app.bodies,
-                                             .time = simulation_time,
-                                             .high_quality = app.high,
-                                             .overlay = app.overlay,
-                                             .ui = ui_draw,
-                                             .tone = app.tone,
-                                             .aa = app.aa,
-                                             .belt = app.belt,
-                                             .belt_dust = app.belt_dust.enabled,
-                                             .earth = app.earth,
-                                             .sun = app.sun,
-                                             .post = app.post,
-                                             .sky = app.sky,
-                                             .gas = app.gas};
+        const auto frame_input = make_frame_input(app, simulation_time, ui_draw);
         renderer.set_vsync(app.vsync);
         if (renderer.draw(frame_input)) {
             frames++;

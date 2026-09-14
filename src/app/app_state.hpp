@@ -43,4 +43,14 @@ struct AppState {
     std::filesystem::path capture_request;
 };
 
+// Startup, hotkeys and panel buttons must select the same camera and orbit target.
+inline bool select_bookmark(AppState& app, std::size_t index) {
+    if (index >= bookmark_count || Camera::bookmark_body(index) >= app.bodies.size())
+        return false;
+    app.camera.set_bookmark(index, app.bodies);
+    app.selected_body = unsigned(Camera::bookmark_body(index));
+    app.camera.set_mode(CameraMode::Free);
+    return true;
+}
+
 } // namespace space::app
