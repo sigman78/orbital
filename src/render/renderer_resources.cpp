@@ -63,7 +63,7 @@ void Renderer::Impl::bind(Slot slot, const GpuImage& image) {
 // (BAR) memory on this backend, so the heap is capped and flushed in batches
 // instead of sized to the whole set. Textures are created before
 // begin_commands so the backend records their layout initialization first.
-void Renderer::Impl::upload_images(std::span<Upload> uploads) {
+void Renderer::Impl::upload_images(std::span<const Upload> uploads) {
     const auto first_image = material_images.size();
     material_images.reserve(first_image + uploads.size());
     std::uint64_t largest = 0;
@@ -108,17 +108,13 @@ void Renderer::Impl::upload_images(std::span<Upload> uploads) {
 
 void Renderer::Impl::upload_rgba(Slot slot, assets::ImageView pixels) {
     ORBITAL_ASSERT(pixels.layout() == assets::PixelLayout::Rgba8);
-    Uploads upload;
-    upload.emplace_back();
     assets::Rgba8Image image{.extent = pixels.extent(), .pixels = {}};
     image.pixels.reserve(image.pixel_count() * 4);
     for (unsigned y = 0; y < image.extent.height; ++y) {
         const auto row = pixels.row(y);
         image.pixels.insert(image.pixels.end(), row.begin(), row.end());
     }
-    upload.back().data = assets::texture_from_images({std::move(image)});
-    upload.back().slot = slot;
-    upload_images(upload);
+    upload_images({{.data = assets::texture_from_images({std::move(image)}), .slot = slot}});
 }
 
 void Renderer::Impl::create_device(void* window) {
@@ -233,16 +229,13 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
                 image.pixels[i * 4 + c] = bytes[i * channels + c];
         return image;
     };
-    Uploads smaa;
-    smaa.emplace_back();
-    smaa.back().data = assets::texture_from_images(
-        {widen(assets::smaa_area(), assets::smaa_area_width, assets::smaa_area_height, assets::smaa_area_channels)});
-    smaa.back().slot = Slot::smaa_area;
-    smaa.emplace_back();
-    smaa.back().data = assets::texture_from_images({widen(assets::smaa_search(), assets::smaa_search_width,
-                                                          assets::smaa_search_height, assets::smaa_search_channels)});
-    smaa.back().slot = Slot::smaa_search;
-    upload_images(smaa);
+    upload_images(
+        {{.data = assets::texture_from_images({widen(assets::smaa_area(), assets::smaa_area_width,
+                                                    assets::smaa_area_height, assets::smaa_area_channels)}),
+          .slot = Slot::smaa_area},
+         {.data = assets::texture_from_images({widen(assets::smaa_search(), assets::smaa_search_width,
+                                                    assets::smaa_search_height, assets::smaa_search_channels)}),
+          .slot = Slot::smaa_search}});
     create_pipelines();
     create_fixed_targets();
 }

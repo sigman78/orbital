@@ -5,7 +5,6 @@
 
 #include "assets/image.hpp"
 #include "assets/texture.hpp"
-#include "core/small_vec.hpp"
 #include "core/types.hpp"
 #include "post/bloom_shared.h"
 #include "render/gpu_image.hpp"
@@ -21,6 +20,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <initializer_list>
 #include <span>
 #include <vector>
 
@@ -221,10 +221,6 @@ struct Upload {
     Slot slot;
 };
 
-// Uploads and their GPU images are created a handful at a time.
-constexpr std::size_t inline_upload_count = 28;
-using Uploads = SmallVec<Upload, inline_upload_count>;
-
 // One draw group per (shape, level) pair of the rock library; the GPU
 // culling pass appends the billboard list as one more group.
 constexpr unsigned rock_group_count = geometry::rock_shape_count * geometry::rock_level_count;
@@ -357,7 +353,10 @@ struct Renderer::Impl {
     std::uint64_t upload_static(ByteView bytes);
     GpuImage create_image(const ImageDesc& desc);
     void bind(Slot slot, const GpuImage& image);
-    void upload_images(std::span<Upload> uploads);
+    void upload_images(std::span<const Upload> uploads);
+    void upload_images(std::initializer_list<Upload> uploads) {
+        upload_images(std::span<const Upload>(uploads.begin(), uploads.size()));
+    }
     void upload_rgba(Slot slot, assets::ImageView pixels);
 
     // Pipeline creation and ownership registration (renderer_pipelines.cpp).
