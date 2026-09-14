@@ -166,8 +166,8 @@ bool Renderer::capture(const std::filesystem::path& path) {
     if (s.extent.empty())
         return false;
     s.submissions.wait_last();
-    auto readback = gpu::UniqueGpuHeap::create(s.device, std::uint64_t(s.extent.width) * s.extent.height * 4,
-                                               gpu::MemoryType::readback);
+    auto readback = UniqueGpuHeap::create(s.device, std::uint64_t(s.extent.width) * s.extent.height * 4,
+                                          gpu::MemoryType::readback);
     if (!readback.range().cpu) {
         log::error("screenshot readback allocation failed");
         return false;

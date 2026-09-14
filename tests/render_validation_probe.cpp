@@ -1,8 +1,8 @@
 #include "core/panic.hpp"
+#include "render/gpu_commands.hpp"
 #include "render/gpu_image.hpp"
+#include "render/gpu_owners.hpp"
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
-#include <NoGraphicsAPIUtility/commands.hpp>
-#include <NoGraphicsAPIUtility/owners.hpp>
 #include <cstring>
 #include <type_traits>
 
@@ -12,7 +12,7 @@ static_assert(std::is_nothrow_move_assignable_v<space::render::FrameTargets>);
 
 static void clear_pass(gpu::CommandBuffer* cmd, gpu::RenderView* view) {
     gpu::ColorAttachment color{.render_view = view, .load = gpu::LoadOp::clear, .clear = {1, 0, 0, 1}};
-    gpu::RenderPassScope pass(cmd, {.colors = {&color, 1}});
+    space::render::RenderPassScope pass(cmd, {.colors = {&color, 1}});
     return; // The subsequent transfer must be outside rendering.
 }
 
@@ -33,11 +33,11 @@ int main(int argc, char** argv) {
     ORBITAL_ASSERT(!first.texture() && !first.view());
     ORBITAL_ASSERT(moved.texture() == texture && moved.view() == view);
     auto replacement = GpuImage::create(init.device, image_desc);
-    auto source_owner = gpu::UniqueGpuHeap::create(init.device, 16);
+    auto source_owner = space::render::UniqueGpuHeap::create(init.device, 16);
     auto moved_heap = std::move(source_owner);
     ORBITAL_ASSERT(!source_owner.range().gpu);
-    auto target_owner = gpu::UniqueGpuHeap::create(init.device, 16, gpu::MemoryType::readback);
-    auto image_readback = gpu::UniqueGpuHeap::create(init.device, 16 * 16 * 4, gpu::MemoryType::readback);
+    auto target_owner = space::render::UniqueGpuHeap::create(init.device, 16, gpu::MemoryType::readback);
+    auto image_readback = space::render::UniqueGpuHeap::create(init.device, 16 * 16 * 4, gpu::MemoryType::readback);
     const auto source = moved_heap.get(), target = target_owner.get();
     ORBITAL_ASSERT(source.range.cpu && target.range.cpu);
     std::memset(source.range.cpu, 42, 16);
@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
                      gpu::Access::transfer_write);
     gpu::copy_memory(cmd, gpu::gpu_range(source), gpu::gpu_range(target));
     gpu::barrier(cmd, gpu::Stage::transfer, gpu::Access::transfer_write, gpu::Stage::host, gpu::Access::host_read);
-    gpu::SubmissionTimeline timeline;
+    space::render::SubmissionTimeline timeline;
     timeline.initialize(init.device);
     timeline.submit_and_wait({cmd});
     ORBITAL_ASSERT(timeline.last_submission().value == 1);

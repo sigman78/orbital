@@ -10,10 +10,6 @@ The copy carries local compatibility changes: an opt-in conventional Vulkan 1.3 
 without the experimental descriptor and address-command extensions. The public C++ API and shader entry-point names are unchanged.
 See [docs/FOUNDATION.md](../docs/FOUNDATION.md) for the investigation.
 
-The fork also adds the optional `NoGraphicsAPIUtility::commands` target, with render-pass
-and submission helpers in `commands.hpp` and heap/pipeline owners in `owners.hpp`.
-Its utility CMake wiring and library README changes are included in the same patch.
-
 `NoGraphicsAPI-compat.patch` is the full diff against the upstream commit. To regenerate it after
 editing the fork:
 

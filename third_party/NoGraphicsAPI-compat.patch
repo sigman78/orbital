@@ -1,7 +1,6 @@
-diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 6aebbe7..4d6700b 100644
---- a/CMakeLists.txt
-+++ b/CMakeLists.txt
+diff --git i/CMakeLists.txt w/CMakeLists.txt
+--- i/CMakeLists.txt
++++ w/CMakeLists.txt
 @@ -14,6 +14,8 @@ include(CMakePackageConfigHelpers)
  
  option(NOGRAPHICSAPI_BUILD_EXAMPLES "Build NoGraphicsAPI examples" OFF)
@@ -29,27 +28,9 @@ index 6aebbe7..4d6700b 100644
  
  if(MSVC)
      target_compile_options(NoGraphicsAPI PRIVATE /W4 /permissive-)
-diff --git a/README.md b/README.md
-index 3105b49..be364fe 100644
---- a/README.md
-+++ b/README.md
-@@ -153,6 +153,12 @@ timeline-driven `DeleteQueue`. These are optional application-side policies; NoG
- depend on them. The queue delays allocator reuse and resource destruction until the application
- timeline completes. `BumpAllocator::allocate_atomic()` supports relaxed-atomic concurrent reservations from worker threads.
- 
-+`NoGraphicsAPIUtility::commands` provides `RenderPassScope` and `SubmissionTimeline` in
-+`commands.hpp`, plus move-only `UniqueGpuHeap` and `UniquePso` owners in `owners.hpp`.
-+Pass scopes end rendering at scope exit. Submission and waiting remain explicit; resource
-+owners destroy immediately and must be reset after GPU completion, before destroying the device.
-+This target does not depend on the utility math or allocator libraries.
-+
- For repository development on Windows, enable the examples and tests explicitly. Building examples
- requires the Slang and SPIR-V Tools versions listed above.
- 
-diff --git a/cmake/NoGraphicsAPIConfig.cmake.in b/cmake/NoGraphicsAPIConfig.cmake.in
-index e24d864..324c960 100644
---- a/cmake/NoGraphicsAPIConfig.cmake.in
-+++ b/cmake/NoGraphicsAPIConfig.cmake.in
+diff --git i/cmake/NoGraphicsAPIConfig.cmake.in w/cmake/NoGraphicsAPIConfig.cmake.in
+--- i/cmake/NoGraphicsAPIConfig.cmake.in
++++ w/cmake/NoGraphicsAPIConfig.cmake.in
 @@ -2,6 +2,9 @@
  
  include(CMakeFindDependencyMacro)
@@ -60,10 +41,9 @@ index e24d864..324c960 100644
  
  include("${CMAKE_CURRENT_LIST_DIR}/NoGraphicsAPITargets.cmake")
  
-diff --git a/include/NoGraphicsAPI/NoGraphicsAPI.hpp b/include/NoGraphicsAPI/NoGraphicsAPI.hpp
-index 5d9e398..a1033ce 100644
---- a/include/NoGraphicsAPI/NoGraphicsAPI.hpp
-+++ b/include/NoGraphicsAPI/NoGraphicsAPI.hpp
+diff --git i/include/NoGraphicsAPI/NoGraphicsAPI.hpp w/include/NoGraphicsAPI/NoGraphicsAPI.hpp
+--- i/include/NoGraphicsAPI/NoGraphicsAPI.hpp
++++ w/include/NoGraphicsAPI/NoGraphicsAPI.hpp
 @@ -135,6 +135,9 @@ enum class Format : uint8
      eac_rg,
      astc_4x4_srgb,
@@ -141,10 +121,9 @@ index 5d9e398..a1033ce 100644
  void dispatch(CommandBuffer* commands, ByteSpan root, uint32x3 group_count) noexcept;
  void dispatch_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments) noexcept;
  void draw_meshlets(CommandBuffer* commands, ByteSpan root, uint32x3 group_count) noexcept;
-diff --git a/src/NoGraphicsAPI.cpp b/src/NoGraphicsAPI.cpp
-index fab3a6b..41776eb 100644
---- a/src/NoGraphicsAPI.cpp
-+++ b/src/NoGraphicsAPI.cpp
+diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
+--- i/src/NoGraphicsAPI.cpp
++++ w/src/NoGraphicsAPI.cpp
 @@ -12,6 +12,10 @@
  #endif
  
@@ -1147,10 +1126,9 @@ index fab3a6b..41776eb 100644
      const VkDeviceMemoryImageCopyKHR region = make_texture_copy_region(*source, copy, destination);
      const VkCopyDeviceMemoryImageInfoKHR info{
          .sType = VK_STRUCTURE_TYPE_COPY_DEVICE_MEMORY_IMAGE_INFO_KHR,
-diff --git a/tests/api_test.cpp b/tests/api_test.cpp
-index 4cb44ee..1ac53e4 100644
---- a/tests/api_test.cpp
-+++ b/tests/api_test.cpp
+diff --git i/tests/api_test.cpp w/tests/api_test.cpp
+--- i/tests/api_test.cpp
++++ w/tests/api_test.cpp
 @@ -256,7 +256,7 @@ constexpr gpu::Format texture_formats[]{
      gpu::Format::rgb32_float,   gpu::Format::rgba32_float,  gpu::Format::rgb10a2_unorm,
      gpu::Format::rg11b10_float, gpu::Format::d16_unorm,     gpu::Format::d24_unorm_s8_uint,
@@ -1177,231 +1155,3 @@ index 4cb44ee..1ac53e4 100644
  static_assert(gpu::get_texture_format_info(gpu::Format::rgba8_unorm).bytes_per_block == 4);
  static_assert(gpu::get_texture_format_info(gpu::Format::astc_4x4_unorm).block_extent.x == 4);
  static_assert(gpu::get_texture_format_info(gpu::Format::bc6h_ufloat).block_extent.x == 4 &&
-diff --git a/utility/CMakeLists.txt b/utility/CMakeLists.txt
-index 31bb60a..c3847a3 100644
---- a/utility/CMakeLists.txt
-+++ b/utility/CMakeLists.txt
-@@ -8,6 +8,11 @@ target_include_directories(NoGraphicsAPIUtility_types INTERFACE
-     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
- )
- 
-+add_library(NoGraphicsAPIUtility_commands INTERFACE)
-+add_library(NoGraphicsAPIUtility::commands ALIAS NoGraphicsAPIUtility_commands)
-+set_target_properties(NoGraphicsAPIUtility_commands PROPERTIES EXPORT_NAME commands)
-+target_link_libraries(NoGraphicsAPIUtility_commands INTERFACE NoGraphicsAPIUtility::types NoGraphicsAPI::NoGraphicsAPI)
-+
- add_library(NoGraphicsAPIUtility_math INTERFACE)
- add_library(NoGraphicsAPIUtility::math ALIAS NoGraphicsAPIUtility_math)
- set_target_properties(NoGraphicsAPIUtility_math PROPERTIES EXPORT_NAME math)
-@@ -62,10 +67,11 @@ endif()
- add_library(NoGraphicsAPIUtility_utility INTERFACE)
- add_library(NoGraphicsAPIUtility::utility ALIAS NoGraphicsAPIUtility_utility)
- set_target_properties(NoGraphicsAPIUtility_utility PROPERTIES EXPORT_NAME utility)
--target_link_libraries(NoGraphicsAPIUtility_utility INTERFACE NoGraphicsAPIUtility::math NoGraphicsAPIUtility::allocators NoGraphicsAPIUtility::textures)
-+target_link_libraries(NoGraphicsAPIUtility_utility INTERFACE NoGraphicsAPIUtility::math NoGraphicsAPIUtility::allocators NoGraphicsAPIUtility::textures NoGraphicsAPIUtility::commands)
- 
- install(TARGETS
-         NoGraphicsAPIUtility_types
-+        NoGraphicsAPIUtility_commands
-         NoGraphicsAPIUtility_math
-         NoGraphicsAPIUtility_allocators
-         NoGraphicsAPIUtility_textures
-diff --git a/utility/include/NoGraphicsAPIUtility/commands.hpp b/utility/include/NoGraphicsAPIUtility/commands.hpp
-new file mode 100644
-index 0000000..1cb4213
---- /dev/null
-+++ b/utility/include/NoGraphicsAPIUtility/commands.hpp
-@@ -0,0 +1,89 @@
-+#pragma once
-+#include <NoGraphicsAPI/NoGraphicsAPI.hpp>
-+#include <assert.h>
-+
-+namespace gpu {
-+
-+    class [[nodiscard]] RenderPassScope
-+    {
-+      public:
-+        RenderPassScope(CommandBuffer* commands, const RenderingDesc& desc) noexcept : commands_(commands)
-+        {
-+            begin_render_pass(commands_, desc);
-+        }
-+        ~RenderPassScope() noexcept
-+        {
-+            end_render_pass(commands_);
-+        }
-+        RenderPassScope(const RenderPassScope&) = delete;
-+        RenderPassScope& operator=(const RenderPassScope&) = delete;
-+        RenderPassScope(RenderPassScope&&) = delete;
-+        RenderPassScope& operator=(RenderPassScope&&) = delete;
-+
-+      private:
-+        CommandBuffer* commands_;
-+    };
-+
-+    // Submission is explicit; destruction never submits or waits. Complete all uses
-+    // before reset/destruction, and destroy this owner before its device.
-+    class SubmissionTimeline
-+    {
-+      public:
-+        constexpr SubmissionTimeline() noexcept = default;
-+        ~SubmissionTimeline() noexcept
-+        {
-+            reset();
-+        }
-+        SubmissionTimeline(const SubmissionTimeline&) = delete;
-+        SubmissionTimeline& operator=(const SubmissionTimeline&) = delete;
-+        SubmissionTimeline(SubmissionTimeline&&) = delete;
-+        SubmissionTimeline& operator=(SubmissionTimeline&&) = delete;
-+
-+        void initialize(Device* device) noexcept
-+        {
-+            assert(!timeline_);
-+            timeline_ = create_timeline_semaphore(device);
-+        }
-+        void reset() noexcept
-+        {
-+            destroy_timeline_semaphore(timeline_);
-+            timeline_ = nullptr;
-+            serial_ = 0;
-+        }
-+        constexpr TimelinePoint last_submission() const noexcept
-+        {
-+            return { timeline_, serial_ };
-+        }
-+        [[nodiscard]] TimelinePoint submit(Span<CommandBuffer* const> commands) noexcept
-+        {
-+            assert(timeline_);
-+            ++serial_;
-+            gpu::submit(commands, last_submission());
-+            return last_submission();
-+        }
-+        void submit_and_present(Device* device, Span<CommandBuffer* const> commands) noexcept
-+        {
-+            assert(timeline_);
-+            ++serial_;
-+            gpu::submit_and_present(device, commands, last_submission());
-+        }
-+        void wait(TimelinePoint point) const noexcept
-+        {
-+            assert(point.semaphore == timeline_ && point.value <= serial_);
-+            wait_timeline(point);
-+        }
-+        void wait_last() const noexcept
-+        {
-+            wait(last_submission());
-+        }
-+        void submit_and_wait(Span<CommandBuffer* const> commands) noexcept
-+        {
-+            wait(submit(commands));
-+        }
-+
-+      private:
-+        TimelineSemaphore* timeline_ = nullptr;
-+        uint64 serial_ = 0;
-+    };
-+
-+} // namespace gpu
-diff --git a/utility/include/NoGraphicsAPIUtility/owners.hpp b/utility/include/NoGraphicsAPIUtility/owners.hpp
-new file mode 100644
-index 0000000..59b64a3
---- /dev/null
-+++ b/utility/include/NoGraphicsAPIUtility/owners.hpp
-@@ -0,0 +1,98 @@
-+#pragma once
-+#include <NoGraphicsAPI/NoGraphicsAPI.hpp>
-+
-+namespace gpu {
-+
-+    // Immediate destruction: complete recorded/submitted GPU uses before replacing
-+    // or destroying an owner. Borrowed handles/ranges do not extend its lifetime.
-+    class UniqueGpuHeap
-+    {
-+      public:
-+        constexpr UniqueGpuHeap() noexcept = default;
-+        explicit constexpr UniqueGpuHeap(GpuHeap heap) noexcept : heap_(heap)
-+        {
-+        }
-+        ~UniqueGpuHeap() noexcept
-+        {
-+            reset();
-+        }
-+        UniqueGpuHeap(const UniqueGpuHeap&) = delete;
-+        UniqueGpuHeap& operator=(const UniqueGpuHeap&) = delete;
-+        constexpr UniqueGpuHeap(UniqueGpuHeap&& other) noexcept : heap_(other.heap_)
-+        {
-+            other.heap_ = {};
-+        }
-+        UniqueGpuHeap& operator=(UniqueGpuHeap&& other) noexcept
-+        {
-+            if (this != &other)
-+            {
-+                reset();
-+                heap_ = other.heap_;
-+                other.heap_ = {};
-+            }
-+            return *this;
-+        }
-+        [[nodiscard]] static UniqueGpuHeap create(Device* device, uint64 bytes, MemoryType memory = MemoryType::cpu_visible) noexcept
-+        {
-+            return UniqueGpuHeap(create_gpu_heap(device, bytes, memory));
-+        }
-+        constexpr GpuHeap get() const noexcept
-+        {
-+            return heap_;
-+        }
-+        constexpr GpuCpuRange<byte> range() const noexcept
-+        {
-+            return heap_.range;
-+        }
-+        void reset() noexcept
-+        {
-+            destroy_gpu_heap(heap_);
-+            heap_ = {};
-+        }
-+
-+      private:
-+        GpuHeap heap_{};
-+    };
-+
-+    class UniquePso
-+    {
-+      public:
-+        constexpr UniquePso() noexcept = default;
-+        explicit constexpr UniquePso(PSO* pipeline) noexcept : pipeline_(pipeline)
-+        {
-+        }
-+        ~UniquePso() noexcept
-+        {
-+            reset();
-+        }
-+        UniquePso(const UniquePso&) = delete;
-+        UniquePso& operator=(const UniquePso&) = delete;
-+        constexpr UniquePso(UniquePso&& other) noexcept : pipeline_(other.pipeline_)
-+        {
-+            other.pipeline_ = nullptr;
-+        }
-+        UniquePso& operator=(UniquePso&& other) noexcept
-+        {
-+            if (this != &other)
-+            {
-+                reset();
-+                pipeline_ = other.pipeline_;
-+                other.pipeline_ = nullptr;
-+            }
-+            return *this;
-+        }
-+        constexpr PSO* get() const noexcept
-+        {
-+            return pipeline_;
-+        }
-+        void reset() noexcept
-+        {
-+            destroy_pso(pipeline_);
-+            pipeline_ = nullptr;
-+        }
-+
-+      private:
-+        PSO* pipeline_ = nullptr;
-+    };
-+
-+} // namespace gpu

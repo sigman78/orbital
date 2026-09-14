@@ -115,8 +115,8 @@ and moving transfers ownership while clearing the source. Handle accessors are b
 The renderer waits for GPU completion before resetting target groups and clears all
 image owners before destroying the device. RAII does not perform implicit GPU waits.
 
-Render passes use `gpu::RenderPassScope`; the closing brace ends rendering before subsequent
-barriers. `gpu::SubmissionTimeline` owns the semaphore and increments completion values only
+Render passes use `RenderPassScope`; the closing brace ends rendering before subsequent
+barriers. `SubmissionTimeline` owns the semaphore and increments completion values only
 on explicit submit/present calls. The upload flush helper explicitly submits and waits before
 reusing staging bytes. Move-only heap owners form one resettable buffer group; pipeline owners
 are held in one vector, while pass-family handles remain borrowed. Shutdown waits idle, clears

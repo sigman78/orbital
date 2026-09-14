@@ -17,8 +17,8 @@ void Renderer::Impl::draw_mesh(gpu::CommandBuffer* cmd, Root& root, const GpuMes
 void Renderer::Impl::record_shadow_pass(gpu::CommandBuffer* cmd, Root root) {
     root.mode = std::uint32_t(SurfaceMode::shadow);
     {
-        gpu::RenderPassScope pass(
-            cmd, {.depth = {.render_view = fixed_targets.shadow_map.view(), .load = gpu::LoadOp::clear}});
+        RenderPassScope pass(cmd,
+                             {.depth = {.render_view = fixed_targets.shadow_map.view(), .load = gpu::LoadOp::clear}});
         gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
         gpu::bind_pso(cmd, pso.scene.shadow);
         const unsigned triangles_before = stats.triangles;
@@ -45,9 +45,8 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
     root.mode = std::uint32_t(SurfaceMode::opaque);
     gpu::ColorAttachment color{.render_view = frame_targets.hdr.view(), .load = gpu::LoadOp::clear};
     {
-        gpu::RenderPassScope pass(
-            cmd,
-            {.colors = {&color, 1}, .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::clear}});
+        RenderPassScope pass(cmd, {.colors = {&color, 1},
+                                   .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::clear}});
         gpu::bind_pso(cmd, pso.scene.background);
         gpu::draw(cmd, root, 3);
         stats.draw_calls++;
@@ -95,9 +94,8 @@ void Renderer::Impl::record_motion_streaks(gpu::CommandBuffer* cmd, Root& root) 
     gpu::ColorAttachment color{
         .render_view = frame_targets.hdr.view(), .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
     {
-        gpu::RenderPassScope pass(
-            cmd,
-            {.colors = {&color, 1}, .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});
+        RenderPassScope pass(cmd, {.colors = {&color, 1},
+                                   .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});
         gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
         gpu::bind_pso(cmd, pso.scene.motes);
         root.mode = 0;

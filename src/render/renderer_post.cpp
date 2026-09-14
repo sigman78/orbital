@@ -51,7 +51,7 @@ void Renderer::Impl::fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, 
     gpu::ColorAttachment attachment{.render_view = target.view(),
                                     .load = preserve ? gpu::LoadOp::load : gpu::LoadOp::clear};
     {
-        gpu::RenderPassScope pass(cmd, {.colors = {&attachment, 1}});
+        RenderPassScope pass(cmd, {.colors = {&attachment, 1}});
         gpu::bind_pso(cmd, pipeline);
         gpu::draw(cmd, root, 3);
         stats.draw_calls++;
@@ -103,7 +103,7 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
     }
     gpu::ColorAttachment color{.render_view = swapchain_view, .load = gpu::LoadOp::clear};
     {
-        gpu::RenderPassScope pass(cmd, {.colors = {&color, 1}});
+        RenderPassScope pass(cmd, {.colors = {&color, 1}});
         gpu::bind_pso(cmd, pso.post.present);
         gpu::draw(cmd, root, 3);
         record_ui(cmd, ui, ui_cpu, ui_gpu);

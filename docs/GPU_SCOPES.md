@@ -1,6 +1,6 @@
 # GPU scopes and ownership helpers
 
-The renderer uses the optional `NoGraphicsAPIUtility::commands` target. The core GPU API stays unchanged.
+The renderer owns these helpers in `src/render/gpu_commands.hpp` and `gpu_owners.hpp`, in the `space::render` namespace. They depend only on the core NoGraphicsAPI target; the vendored library has no local utility additions.
 
 - `RenderPassScope` consumes a rendering description immediately and ends the pass at scope exit. It cannot be copied or moved. Barriers remain outside the scope; the destructor adds no synchronization.
 - `SubmissionTimeline` owns the semaphore and advances completion values on explicit submit/present calls. Waiting remains explicit, including the blocking `submit_and_wait` convenience. Its destructor never submits or waits.

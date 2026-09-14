@@ -153,12 +153,6 @@ timeline-driven `DeleteQueue`. These are optional application-side policies; NoG
 depend on them. The queue delays allocator reuse and resource destruction until the application
 timeline completes. `BumpAllocator::allocate_atomic()` supports relaxed-atomic concurrent reservations from worker threads.
 
-`NoGraphicsAPIUtility::commands` provides `RenderPassScope` and `SubmissionTimeline` in
-`commands.hpp`, plus move-only `UniqueGpuHeap` and `UniquePso` owners in `owners.hpp`.
-Pass scopes end rendering at scope exit. Submission and waiting remain explicit; resource
-owners destroy immediately and must be reset after GPU completion, before destroying the device.
-This target does not depend on the utility math or allocator libraries.
-
 For repository development on Windows, enable the examples and tests explicitly. Building examples
 requires the Slang and SPIR-V Tools versions listed above.
 

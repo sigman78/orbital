@@ -14,7 +14,7 @@ std::uint64_t padded_size(const assets::TextureMip& mip) {
     return (mip.bytes.size() + 15) & ~15ull;
 }
 
-void flush_upload(gpu::CommandBuffer*& cmd, std::uint64_t& offset, gpu::SubmissionTimeline& submissions) {
+void flush_upload(gpu::CommandBuffer*& cmd, std::uint64_t& offset, SubmissionTimeline& submissions) {
     if (!cmd)
         return;
     synchronize(cmd, access::transfer_write, access::fragment_sample);
@@ -81,7 +81,7 @@ void Renderer::Impl::upload_images(std::span<const Upload> uploads) {
             bytes += padded_size(mip);
         largest = std::max(largest, bytes);
     }
-    auto staging = gpu::UniqueGpuHeap::create(device, std::max(largest, heap_layout.staging_budget));
+    auto staging = UniqueGpuHeap::create(device, std::max(largest, heap_layout.staging_budget));
     panic_if(!staging.range().cpu, "texture staging allocation failed");
     gpu::CommandBuffer* cmd = nullptr;
     std::uint64_t offset = 0;
@@ -127,25 +127,25 @@ void Renderer::Impl::create_device(void* window) {
     panic_if(!caps.conventional_descriptor_backend,
              "the demo's shaders require the conventional descriptor backend build option");
     submissions.initialize(device);
-    buffers.data = gpu::UniqueGpuHeap::create(device, heap_layout.mapped_size());
-    buffers.cull_device = gpu::UniqueGpuHeap::create(
+    buffers.data = UniqueGpuHeap::create(device, heap_layout.mapped_size());
+    buffers.cull_device = UniqueGpuHeap::create(
         device, heap_layout.cull_size(std::max(high_quality.belt_count, belt_count_override), body_count),
         gpu::MemoryType::gpu_only);
-    buffers.cull_readback = gpu::UniqueGpuHeap::create(device, sizeof(CullScratch), gpu::MemoryType::readback);
+    buffers.cull_readback = UniqueGpuHeap::create(device, sizeof(CullScratch), gpu::MemoryType::readback);
     panic_if(!buffers.cull_device.range().gpu || !buffers.cull_readback.range().cpu, "culling heap allocation failed");
     log::info("Buffer heaps: {} KiB mapped, {} KiB device-only culling", buffers.data.range().size / 1024,
               buffers.cull_device.range().size / 1024);
-    buffers.texture_descriptors = gpu::UniqueGpuHeap::create(
-        device, caps.texture_descriptor_size * unsigned(Slot::count), gpu::MemoryType::texture_descriptor_heap);
-    buffers.sampler_descriptors = gpu::UniqueGpuHeap::create(
+    buffers.texture_descriptors = UniqueGpuHeap::create(device, caps.texture_descriptor_size * unsigned(Slot::count),
+                                                        gpu::MemoryType::texture_descriptor_heap);
+    buffers.sampler_descriptors = UniqueGpuHeap::create(
         device, caps.sampler_descriptor_size * unsigned(SamplerSlot::count), gpu::MemoryType::sampler_descriptor_heap);
     panic_if(!buffers.data.range().cpu || !buffers.texture_descriptors.range().cpu ||
                  !buffers.sampler_descriptors.range().cpu,
              "GPU mapped heap allocation failed");
-    buffers.luminance_readback = gpu::UniqueGpuHeap::create(
+    buffers.luminance_readback = UniqueGpuHeap::create(
         device, targets::meter_size * targets::meter_size * sizeof(Float4), gpu::MemoryType::readback);
-    buffers.timestamps = gpu::UniqueGpuHeap::create(device, targets::timestamp_count * sizeof(std::uint64_t),
-                                                    gpu::MemoryType::readback);
+    buffers.timestamps = UniqueGpuHeap::create(device, targets::timestamp_count * sizeof(std::uint64_t),
+                                               gpu::MemoryType::readback);
 }
 
 void Renderer::Impl::create_samplers() {

@@ -1,5 +1,5 @@
-#include <NoGraphicsAPIUtility/commands.hpp>
-#include <NoGraphicsAPIUtility/owners.hpp>
+#include "render/gpu_commands.hpp"
+#include "render/gpu_owners.hpp"
 #include <cassert>
 #include <type_traits>
 
@@ -48,14 +48,14 @@ void wait_timeline(TimelinePoint point) noexcept {
 }
 } // namespace gpu
 
-static_assert(!std::is_copy_constructible_v<gpu::RenderPassScope>);
-static_assert(!std::is_move_constructible_v<gpu::RenderPassScope>);
-static_assert(!std::is_copy_constructible_v<gpu::UniqueGpuHeap>);
-static_assert(std::is_nothrow_move_constructible_v<gpu::UniqueGpuHeap>);
-static_assert(std::is_nothrow_move_constructible_v<gpu::UniquePso>);
+static_assert(!std::is_copy_constructible_v<space::render::RenderPassScope>);
+static_assert(!std::is_move_constructible_v<space::render::RenderPassScope>);
+static_assert(!std::is_copy_constructible_v<space::render::UniqueGpuHeap>);
+static_assert(std::is_nothrow_move_constructible_v<space::render::UniqueGpuHeap>);
+static_assert(std::is_nothrow_move_constructible_v<space::render::UniquePso>);
 
 void early_return() {
-    gpu::RenderPassScope pass(nullptr, {});
+    space::render::RenderPassScope pass(nullptr, {});
     assert(begun == 1 && ended == 0);
     return;
 }
@@ -64,33 +64,33 @@ int main() {
     early_return();
     assert(ended == 1);
     {
-        auto first = gpu::UniqueGpuHeap::create(nullptr, 16);
-        auto moved = static_cast<gpu::UniqueGpuHeap&&>(first);
+        auto first = space::render::UniqueGpuHeap::create(nullptr, 16);
+        auto moved = static_cast<space::render::UniqueGpuHeap&&>(first);
         assert(first.range().size == 0 && moved.range().size == 16 && heaps_destroyed == 0);
-        auto replacement = gpu::UniqueGpuHeap::create(nullptr, 32);
-        replacement = static_cast<gpu::UniqueGpuHeap&&>(moved);
+        auto replacement = space::render::UniqueGpuHeap::create(nullptr, 32);
+        replacement = static_cast<space::render::UniqueGpuHeap&&>(moved);
         assert(moved.range().size == 0 && replacement.range().size == 16 && heaps_destroyed == 1);
         auto& same = replacement;
-        replacement = static_cast<gpu::UniqueGpuHeap&&>(same);
+        replacement = static_cast<space::render::UniqueGpuHeap&&>(same);
         assert(heaps_destroyed == 1);
         replacement.reset();
         replacement.reset();
     }
     assert(heaps_destroyed == 2 && waits == 0);
     {
-        gpu::UniquePso first(reinterpret_cast<gpu::PSO*>(1));
-        gpu::UniquePso moved(static_cast<gpu::UniquePso&&>(first));
-        gpu::UniquePso replacement(reinterpret_cast<gpu::PSO*>(2));
-        replacement = static_cast<gpu::UniquePso&&>(moved);
+        space::render::UniquePso first(reinterpret_cast<gpu::PSO*>(1));
+        space::render::UniquePso moved(static_cast<space::render::UniquePso&&>(first));
+        space::render::UniquePso replacement(reinterpret_cast<gpu::PSO*>(2));
+        replacement = static_cast<space::render::UniquePso&&>(moved);
         assert(!first.get() && !moved.get() && replacement.get() && psos_destroyed == 1);
         auto& same = replacement;
-        replacement = static_cast<gpu::UniquePso&&>(same);
+        replacement = static_cast<space::render::UniquePso&&>(same);
         replacement.reset();
         replacement.reset();
     }
     assert(psos_destroyed == 2 && waits == 0);
     {
-        gpu::SubmissionTimeline timeline;
+        space::render::SubmissionTimeline timeline;
         timeline.initialize(nullptr);
         const auto first = timeline.submit({});
         assert(first.value == 1 && submissions == 1 && signaled == 1 && waits == 0);

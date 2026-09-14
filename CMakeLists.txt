@@ -78,7 +78,7 @@ if(BUILD_TESTING)
   if(NOT MINGW) # NoGraphicsAPI headers explicitly exclude MinGW.
     add_executable(gpu_scopes_tests tests/gpu_scopes_tests.cpp)
     target_compile_features(gpu_scopes_tests PRIVATE cxx_std_20)
-    target_include_directories(gpu_scopes_tests PRIVATE third_party/NoGraphicsAPI/include third_party/NoGraphicsAPI/utility/include)
+    target_include_directories(gpu_scopes_tests PRIVATE src third_party/NoGraphicsAPI/include)
     if(MSVC)
       target_compile_options(gpu_scopes_tests PRIVATE ${ORBITAL_WARNINGS} /UNDEBUG)
     else()
@@ -159,7 +159,7 @@ if(ORBITAL_BUILD_DEMO)
   add_executable(orbital src/app/main.cpp src/app/hud.cpp src/app/ui.cpp src/app/ui_panel.cpp src/render/renderer_resources.cpp src/render/gpu_image.cpp src/render/renderer_frame.cpp
     src/render/renderer_frame_data.cpp src/render/renderer_pipelines.cpp src/render/renderer_assets.cpp
     src/render/renderer_belt.cpp src/render/renderer_scene.cpp src/render/renderer_post.cpp src/render/renderer_overlay.cpp)
-  target_link_libraries(orbital PRIVATE orbital_scene orbital_app_cpu orbital_render_cpu orbital_assets orbital_platform NoGraphicsAPIUtility::commands)
+  target_link_libraries(orbital PRIVATE orbital_scene orbital_app_cpu orbital_render_cpu orbital_assets orbital_platform NoGraphicsAPI)
   target_include_directories(orbital PRIVATE shaders) # scene_shared.h, the C++/shader layout
   target_compile_definitions(orbital PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
   target_compile_options(orbital PRIVATE ${ORBITAL_WARNINGS})
@@ -173,7 +173,7 @@ if(ORBITAL_BUILD_DEMO)
   if(BUILD_TESTING AND ORBITAL_RENDER_TESTS)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_executable(render_validation_probe tests/render_validation_probe.cpp src/render/gpu_image.cpp)
-    target_link_libraries(render_validation_probe PRIVATE orbital_core NoGraphicsAPIUtility::commands)
+    target_link_libraries(render_validation_probe PRIVATE orbital_core NoGraphicsAPI)
     target_compile_options(render_validation_probe PRIVATE ${ORBITAL_WARNINGS})
     add_test(NAME renderer_validation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check-renderer.py"
       --build "$<TARGET_FILE_DIR:orbital>")
