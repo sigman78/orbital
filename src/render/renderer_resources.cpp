@@ -295,7 +295,7 @@ void Renderer::Impl::resize(Extent2D new_extent) {
     ldr = create_image({.extent = extent, .format = gpu::Format::rgba8_srgb, .usage = color_usage});
     for (auto& image : history)
         image = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
-    splat_mask = create_image({.extent = extent, .format = gpu::Format::r8_unorm, .usage = color_usage});
+    splat_mask = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
     smaa_edges = create_image({.extent = extent, .format = gpu::Format::rg8_unorm, .usage = color_usage});
     smaa_weights = create_image({.extent = extent, .format = gpu::Format::rgba8_unorm, .usage = color_usage});
     belt_dust = create_image({.extent = {std::max(1u, extent.width / 2), std::max(1u, extent.height / 2)},

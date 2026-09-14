@@ -171,8 +171,9 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     if (root.mode == MODE_BILLBOARD) return shadeBillboard(input, root.instances[input.instanceIndex]);
     if (root.mode == MODE_SPLAT_MASK)
     {
-        // Depth and mask over the whole quad, since the Gaussian footprint fills it.
-        return float4(1.0, 1.0, 1.0, 1.0);
+        float coverage = shadeBillboard(input, root.instances[input.instanceIndex]).a;
+        float z = dot(input.worldPosition, root.frame.forward_exposure.xyz);
+        return float4(z * coverage, 0.0, 0.0, coverage);
     }
     Surface s = surfaceAt(root.frame, root.instances, input, true);
     float3x3 rotate = rotation(s.inst.rotation_kind.xyz);

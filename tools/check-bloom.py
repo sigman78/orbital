@@ -115,9 +115,10 @@ def main():
     lens = (ROOT / 'shaders/post/sun_occlusion.slang').read_text(encoding='utf-8')
     lens = re.sub(r'#include "([^"]+)"', lambda m: '#include "' +
                   (ROOT / 'shaders/post' / m[1]).resolve().as_posix() + '"', lens)
-    lens = lens.replace('depth.Load', 'fixtureDepth')
+    lens = lens.replace('depth.Load', 'fixtureDepth').replace('splats.Load', 'fixtureSplats')
     fixture = '#include "' + (ROOT / 'shaders/scene/frame_bindings.slang').as_posix() + '"\n'
-    fixture += """float4 fixtureDepth(int3 pixel) {
+    fixture += """float4 fixtureSplats(int3 pixel) { return float4(0.0); }
+    float4 fixtureDepth(int3 pixel) {
         float value = float(pixel.x) >= root.frame.options.x * .5 ? 1.0 : .5;
         return float4(value, value, value, value);
     }
@@ -125,7 +126,7 @@ def main():
     [shader("fragment")]
     float4 fragmentMain(float4 position : SV_Position) : SV_Target0 {
         float2 sun = (float2(root.frame.camera_time.w, 0.0) - root.frame.jitter.xy) * 2.0 / root.frame.options.xy;
-        float v = sunDepthVisibility(root.frame, textures[TEX_DEPTH], sun, float2(root.frame.options.x / root.frame.options.y, 1.0));
+        float v = sunDepthVisibility(root.frame, textures[TEX_DEPTH], textures[TEX_SPLAT_MASK], sun, float2(root.frame.options.x / root.frame.options.y, 1.0));
         return float4(v, 0.0, 0.0, 1.0);
     }
     """

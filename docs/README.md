@@ -8,6 +8,7 @@
 | [ASSETS.md](ASSETS.md) | Sourced material maps: provenance, processing and attribution |
 | [GALAXY_LAYERS.md](GALAXY_LAYERS.md) | Gaia background research: layer budgets, original comparison, implementation and cleanup after selection |
 | [BLOOM_STABILITY.md](BLOOM_STABILITY.md) | Bloom sampling and sun-occlusion fixes, reproduction view and GPU regression checks |
+| [PERFORMANCE.md](PERFORMANCE.md) | Fixed-scene benchmark suite, timing definitions and cumulative regression comparisons |
 | [CODE_STYLE.md](CODE_STYLE.md) | C++ conventions: language level, error handling, logging, ownership, layering |
 
 Record design changes in DECISIONS.md with what was measured; keep ARCHITECTURE.md describing what exists,

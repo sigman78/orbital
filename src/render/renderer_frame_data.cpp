@@ -172,7 +172,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     const Camera& camera = input.camera;
     FrameData frame{};
     write_projection(frame, camera, extent.aspect());
-    const Float4 jitter = jitter_sequence[frame_index % jitter_count];
+    const Float4 jitter = input.aa.temporal_aa ? jitter_sequence[frame_index % jitter_count] : Float4{};
     frame.jitter = {jitter.x, jitter.y, previous_frame.jitter.x, previous_frame.jitter.y};
     for (unsigned column = 0; column < 4; column++) {
         frame.view_projection[column * 4] += 2 * frame.jitter.x / float(extent.width) *
@@ -185,7 +185,8 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.previous_forward = previous_frame.forward_exposure;
     const Vec3d previous_forward{previous_frame.forward_exposure.x, previous_frame.forward_exposure.y,
                                  previous_frame.forward_exposure.z};
-    if (length(camera.position - previous_camera) > history::max_jump ||
+    if (input.aa.temporal_aa != (previous_frame.quality.x > .5f) || camera.vertical_fov != previous_vertical_fov ||
+        camera.cut_serial() != previous_camera_cut || length(camera.position - previous_camera) > history::max_jump ||
         dot(camera.forward(), previous_forward) < history::min_forward_dot)
         frame.previous_camera_delta.w = 0;
     frame.camera_time = {0, 0, 0, float(input.time)};

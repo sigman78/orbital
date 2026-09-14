@@ -56,13 +56,13 @@ enum class Slot : unsigned {
     belt_light_map = TEX_BELT_LIGHT_MAP,   // belt transmittance, blurred
     belt_light_blur = TEX_BELT_LIGHT_BLUR, // scratch between the two blur directions
     ldr = TEX_LDR,                         // tone-mapped image before FXAA
-    splat_mask = TEX_SPLAT_MASK,     // pixels covered by rock splats, whose history the temporal pass keeps unclipped
-    smaa_area = TEX_SMAA_AREA,       // SMAA area lookup, 160x560
-    smaa_search = TEX_SMAA_SEARCH,   // SMAA search lookup, 64x16
-    smaa_edges = TEX_SMAA_EDGES,     // SMAA edges of the tone-mapped image
-    smaa_weights = TEX_SMAA_WEIGHTS, // SMAA blending weights
-    ui_font = TEX_UI_FONT,           // Dear ImGui font atlas
-    belt_dust = TEX_BELT_DUST,       // half-resolution belt dust march, composited with a depth-aware upsample
+    splat_mask = TEX_SPLAT_MASK,           // splat coverage-weighted linear depth (R) and coverage (A)
+    smaa_area = TEX_SMAA_AREA,             // SMAA area lookup, 160x560
+    smaa_search = TEX_SMAA_SEARCH,         // SMAA search lookup, 64x16
+    smaa_edges = TEX_SMAA_EDGES,           // SMAA edges of the tone-mapped image
+    smaa_weights = TEX_SMAA_WEIGHTS,       // SMAA blending weights
+    ui_font = TEX_UI_FONT,                 // Dear ImGui font atlas
+    belt_dust = TEX_BELT_DUST,             // half-resolution belt dust march, composited with a depth-aware upsample
     belt_disc_light = TEX_BELT_DISC_LIGHT, // far-belt map: sunlight reaching the belt plane, baked every few frames
     belt_disc_rocks = TEX_BELT_DISC_ROCKS, // far-belt map: rock coverage times albedo, splatted every few dozen frames
     gas_flow = TEX_GAS_FLOW,               // gas giant wind flow map, baked by tools/bake-flow-map.py
@@ -332,6 +332,8 @@ struct Renderer::Impl {
     std::chrono::steady_clock::time_point meter_time{}; // last adaptation step
     FrameData previous_frame{};
     Vec3d previous_camera{};
+    double previous_vertical_fov = 0;
+    std::size_t previous_camera_cut = 0;
     bool history_valid = false;
     bool ui_overflow_logged = false;
     bool belt_disc_baked = false;          // the far-belt maps hold data (baked once the far tier is first needed)

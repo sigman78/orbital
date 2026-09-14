@@ -181,6 +181,7 @@ void Camera::set_bookmark(std::size_t index, std::span<const BodyState> bodies) 
     const auto& view = bookmark_views[index];
     if (view.body >= bodies.size())
         return;
+    ++cut_serial_;
     const auto& body = bodies[view.body];
     if (bookmarks_[index].valid) {
         // Re-selecting a bookmark keeps the body-relative offset from the first visit.
@@ -194,18 +195,21 @@ void Camera::set_bookmark(std::size_t index, std::span<const BodyState> bodies) 
 }
 
 void Camera::toggle_tour() {
+    ++cut_serial_;
     mode_ = mode_ == CameraMode::Tour ? CameraMode::Free : CameraMode::Tour;
     tour_clock_valid_ = false;
     tour_override_ = false;
 }
 
 void Camera::look_at(Vec3d eye, Vec3d target) {
+    ++cut_serial_;
     position = eye;
     forward_ = normalized(target - eye);
     rebuild_basis();
 }
 
 void Camera::set_tour_time(double seconds) {
+    ++cut_serial_;
     if (!std::isfinite(seconds))
         seconds = 0.0;
     tour_override_time_ = seconds;
@@ -215,6 +219,7 @@ void Camera::set_tour_time(double seconds) {
 }
 
 void Camera::set_orbit_target(std::size_t index, double zoom) {
+    ++cut_serial_;
     orbit_target_ = index;
     if (zoom > 0.0)
         orbit_zoom_ = zoom;
@@ -224,6 +229,8 @@ void Camera::set_orbit_target(std::size_t index, double zoom) {
 }
 
 void Camera::set_mode(CameraMode mode) {
+    if (mode != mode_)
+        ++cut_serial_;
     mode_ = mode;
     if (mode != CameraMode::Tour)
         tour_clock_valid_ = false;

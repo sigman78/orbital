@@ -72,7 +72,7 @@ void Renderer::Impl::create_pipelines() {
     pso.belt.billboard = make("surface", "surface_rock", Format::rgba16_float, true, Blend::alpha);
     pso.belt.splat = make("beltsplat", "beltsplat", Format::rgba16_float, false, Blend::additive);
     pso.belt.blur = make("fullscreen", "beltblur", Format::rgba16_float);
-    pso.belt.splat_mask = make("surface", "surface_rock", Format::r8_unorm, true);
+    pso.belt.splat_mask = make("surface", "surface_rock", Format::rgba16_float, true, Blend::premultiplied);
     pso.belt.dust = make("fullscreen", "dust", Format::rgba16_float);
     pso.belt.dust_blend = make("fullscreen", "dust", Format::rgba16_float, false, Blend::premultiplied);
     pso.belt.disc = make("fullscreen", "disc", Format::rgba16_float);

@@ -160,20 +160,17 @@ void Renderer::Impl::draw_rock_batch(gpu::CommandBuffer* cmd, Root& root, std::u
     stats.draw_calls++;
 }
 
-// After the atmosphere has read the scene depth, the rock splats write their
-// own depth and mark their pixels. The temporal pass then reprojects them
-// exactly, as rocks at their distance rather than as sky, and keeps their
-// history unclipped: a sub-pixel feature in motion never survives the
-// neighbourhood clip, which faded the splats whenever the camera translated.
-// The atmosphere must not see this depth, since a splat covers only a
-// fraction of its pixels.
+// Record fractional coverage independently of opaque scene depth. Premultiplied
+// blending combines coverage and its weighted linear depth in billboard draw
+// order, matching the color draw. Mixed-depth pixels remain an approximation
+// for temporal reprojection, but never become opaque occluders for other effects.
 void Renderer::Impl::record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, std::uint64_t args_address) {
     root.mode = std::uint32_t(SurfaceMode::splat_mask);
     root.base = 0;
     gpu::ColorAttachment mask{.render_view = splat_mask.view, .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
     gpu::begin_render_pass(cmd,
                            {.colors = {&mask, 1}, .depth = {.render_view = depth.view, .load = gpu::LoadOp::load}});
-    gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
+    gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
     gpu::bind_pso(cmd, pso.belt.splat_mask);
     gpu::draw_indirect(cmd, root,
                        {reinterpret_cast<void*>(args_address + rock_group_count * sizeof(DrawArgs)), sizeof(DrawArgs)},
