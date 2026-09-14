@@ -3,6 +3,9 @@
 #include "imgui.h"
 #include "render/renderer.hpp"
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdio>
 #include <vector>
 
 namespace space::app {
@@ -14,8 +17,8 @@ static_assert(std::size(bookmark_names) == bookmark_count);
 
 // A collapsing section with its own ID scope: headers push none, so labels
 // could otherwise collide across sections (the "Belt" header and button did).
-bool section(const char* title) {
-    const bool open = ImGui::CollapsingHeader(title, ImGuiTreeNodeFlags_DefaultOpen);
+bool section(const char* title, bool default_open = false) {
+    const bool open = ImGui::CollapsingHeader(title, default_open ? ImGuiTreeNodeFlags_DefaultOpen : 0);
     if (open)
         ImGui::PushID(title);
     return open;
@@ -27,6 +30,66 @@ template <class Enum> void combo(const char* label, Enum& value, std::span<const
         value = Enum(index);
 }
 
+void gpu_time_bar(const render::Stats& stats) {
+    struct Segment {
+        const char* label;
+        float ms;
+        ImU32 color;
+    };
+    std::array segments{
+        Segment{.label = "Culling", .ms = stats.cull_ms, .color = IM_COL32(86, 180, 233, 255)},
+        Segment{.label = "Body shadows", .ms = stats.body_shadow_ms, .color = IM_COL32(130, 120, 210, 255)},
+        Segment{.label = "Belt light", .ms = stats.belt_light_ms, .color = IM_COL32(230, 159, 0, 255)},
+        Segment{.label = "Belt discs", .ms = stats.belt_disc_ms, .color = IM_COL32(240, 228, 66, 255)},
+        Segment{.label = "Surface", .ms = stats.surface_ms, .color = IM_COL32(0, 158, 115, 255)},
+        Segment{.label = "Atmosphere", .ms = stats.atmosphere_ms, .color = IM_COL32(204, 121, 167, 255)},
+        Segment{.label = "Post FX", .ms = stats.post_ms, .color = IM_COL32(213, 94, 0, 255)},
+        Segment{.label = "Other", .ms = 0, .color = IM_COL32(140, 145, 155, 255)}};
+    float sum = 0;
+    for (auto& segment : segments) {
+        segment.ms = std::max(segment.ms, 0.f);
+        sum += segment.ms;
+    }
+    segments.back().ms = std::max(stats.gpu_ms - sum, 0.f);
+    const float total = std::max(stats.gpu_ms, sum);
+    if (total <= 0) {
+        ImGui::TextDisabled("Waiting for GPU timings...");
+        return;
+    }
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const ImVec2 size{ImGui::GetContentRegionAvail().x, 18};
+    ImGui::InvisibleButton("##gpu-time", size);
+    const bool hovered = ImGui::IsItemHovered();
+    float x = origin.x;
+    for (const auto& segment : segments) {
+        const float end = x + size.x * segment.ms / total;
+        ImGui::GetWindowDrawList()->AddRectFilled({x, origin.y}, {end, origin.y + size.y}, segment.color);
+        if (hovered && ImGui::GetIO().MousePos.x >= x && ImGui::GetIO().MousePos.x < end)
+            ImGui::SetTooltip("%s: %.2f ms (%.1f%%)", segment.label, segment.ms, 100 * segment.ms / total);
+        x = end;
+    }
+    if (ImGui::BeginTable("##gpu-passes", 2, ImGuiTableFlags_SizingStretchSame)) {
+        for (const auto& segment : segments) {
+            ImGui::TableNextColumn();
+            const auto swatch = ImGui::GetCursorScreenPos();
+            ImGui::GetWindowDrawList()->AddRectFilled({swatch.x, swatch.y + 3}, {swatch.x + 9, swatch.y + 12},
+                                                      segment.color);
+            ImGui::Dummy({9, 12});
+            ImGui::SameLine();
+            ImGui::TextUnformatted(segment.label);
+            ImGui::SameLine(0, ImGui::CalcTextSize(" ").x);
+            char reading[64];
+            std::snprintf(reading, sizeof(reading), "%.2f ms", segment.ms);
+            const float padding = ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(reading).x;
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(padding, 0.f));
+            ImGui::TextColored({.55f, .8f, 1.f, 1.f}, "%s", reading);
+        }
+        ImGui::EndTable();
+    }
+    if (sum > stats.gpu_ms)
+        ImGui::TextDisabled("Shares normalized to summed pass timings");
+}
+
 void frame_controls(const render::Stats& stats, std::span<const float> recent_frame_ms, bool& vsync) {
     std::vector<float> sorted(recent_frame_ms.begin(), recent_frame_ms.end());
     std::sort(sorted.begin(), sorted.end());
@@ -36,17 +99,14 @@ void frame_controls(const render::Stats& stats, std::span<const float> recent_fr
     ImGui::Text("%d FPS   %.1f ms (p95 %.1f)", int(1000 / std::max(stats.frame_ms, .1f)), stats.frame_ms, p95);
     ImGui::PlotLines("##frame", recent_frame_ms.data(), int(recent_frame_ms.size()), 0, nullptr, 0, peak * 1.1f,
                      {-1, 60});
+    ImGui::TextDisabled("Timings: 0.5 s average | graph: raw frames");
     ImGui::Text("GPU %.2f ms", stats.gpu_ms);
-    ImGui::Indent();
-    ImGui::Text("cull + shadow %.2f   surface %.2f", stats.shadow_ms, stats.surface_ms);
-    ImGui::Text("  cull %.2f   body shadow %.2f", stats.cull_ms, stats.body_shadow_ms);
-    ImGui::Text("  belt light %.2f   disc bake %.2f", stats.belt_light_ms, stats.belt_disc_ms);
-    ImGui::Text("atmosphere %.2f   post %.2f", stats.atmosphere_ms, stats.post_ms);
-    ImGui::Unindent();
+    gpu_time_bar(stats);
+    ImGui::Text("Cull + shadows %.2f ms", stats.shadow_ms);
     ImGui::Text("CPU prepare %.2f ms", stats.prepare_ms);
     ImGui::Checkbox("VSync", &vsync);
-    ImGui::SameLine();
-    ImGui::TextDisabled("off for timings: a vsynced GPU idles and clocks down");
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Disable VSync for performance comparisons: a waiting GPU may clock down.");
     ImGui::Text("%u draws, %u rock groups", stats.draw_calls, stats.rock_groups_drawn);
     ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
 }
@@ -201,12 +261,40 @@ void post_fx_controls(render::PostSettings& settings) {
     if (ImGui::SmallButton("Reset post"))
         settings = {};
 }
-void tone_controls(render::ToneSettings& settings) {
+void tone_controls(render::ToneSettings& settings, const render::ExposureStats& exposure) {
     static constexpr const char* curves[] = {"ACES filmic", "AgX", "PBR Neutral"};
     combo("Curve (F8)", settings.tone_curve, curves);
     ImGui::SliderFloat("Exposure (+/-)", &settings.exposure, exposure_keys::range.min, exposure_keys::range.max, "%.2f",
                        ImGuiSliderFlags_Logarithmic);
     ImGui::Checkbox("Auto exposure (X)", &settings.auto_exposure);
+    ImGui::Spacing();
+    if (!exposure.ready) {
+        ImGui::TextDisabled("Waiting for HDR measurement...");
+    } else {
+        if (exposure.has_samples)
+            ImGui::Text("HDR luminance: %.4g", exposure.luminance);
+        else
+            ImGui::TextDisabled("HDR luminance: below metering threshold");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Center-weighted geometric mean before exposure and bloom.\nVery dark samples do not "
+                              "contribute; this is scene-linear luminance, not nits.");
+        ImGui::Text("HDR peak (sampled): %.4g", exposure.peak_luminance);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(
+                "Brightest averaged cell in the 16 x 16 meter.\nThis is not the brightest full-resolution pixel.");
+        ImGui::Text("Adaptation: %.3f x -> %.3f x%s", exposure.adapted, exposure.target,
+                    exposure.limited ? " (limited)" : "");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Current automatic multiplier -> clamped target.\nMeter updates every 16 frames; "
+                              "adaptation follows over time.");
+    }
+    if (!exposure.automatic)
+        ImGui::TextDisabled("Auto adjustment bypassed");
+    ImGui::Text("Applied exposure: %.3f x (%+.2f stops)", exposure.applied,
+                std::log2(std::max(exposure.applied, 1e-6f)));
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Manual exposure x active auto adjustment x tone-curve calibration.\nStops are relative to a "
+                          "multiplier of 1; bloom is combined before this gain.");
 }
 void camera_controls(AppState& app) {
     for (std::size_t i = 0; i < bookmark_count; i++) {
@@ -247,7 +335,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         return;
     }
     ImGui::PushItemWidth(150); // leaves room for the labels beside combos and sliders
-    if (section("Frame")) {
+    if (section("Frame", true)) {
         frame_controls(stats, recent_frame_ms, app.vsync);
         ImGui::PopID();
     }
@@ -284,7 +372,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::PopID();
     }
     if (section("Tone")) {
-        tone_controls(app.tone);
+        tone_controls(app.tone, stats.exposure);
         ImGui::PopID();
     }
     if (section("Camera")) {

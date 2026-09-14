@@ -99,6 +99,8 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.forward_exposure.w =
         input.tone.exposure * (input.tone.auto_exposure ? adapted_exposure : 1) * tone_curves::base_gain *
         tone_curves::exposure_trim[std::min(unsigned(input.tone.tone_curve), unsigned(ToneCurve::Count) - 1)];
+    stats.exposure.applied = frame.forward_exposure.w;
+    stats.exposure.automatic = input.tone.auto_exposure;
     frame.sun = f4(system.star.position - camera.position, sun_flare::disc_radius);
     const Vec3d sun_relative = system.star.position - camera.position;
     const auto body_light = prepare_body_light(input.bodies[showcase.earth()].position - camera.position,

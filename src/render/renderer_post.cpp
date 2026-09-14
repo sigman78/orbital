@@ -22,14 +22,21 @@ void Renderer::Impl::apply_metering() {
         // Each meter texel holds log luminance, luminance and its centre weight.
         const auto* values = reinterpret_cast<const float*>(buffers.luminance_readback.range().cpu);
         float log_sum = 0, weight_sum = 0;
-        for (unsigned i = 0; i < targets::meter_size * targets::meter_size; i++)
+        stats.exposure.peak_luminance = 0;
+        for (unsigned i = 0; i < targets::meter_size * targets::meter_size; i++) {
+            stats.exposure.peak_luminance = std::max(stats.exposure.peak_luminance, values[i * 4 + 1]);
             if (values[i * 4 + 1] > exposure_meter::min_luminance) {
                 log_sum += values[i * 4] * values[i * 4 + 2];
                 weight_sum += values[i * 4 + 2];
             }
-        exposure_target = weight_sum > 0
-                              ? exposure_meter::adapted.clamp(exposure_meter::key / std::exp(log_sum / weight_sum))
-                              : 1.f;
+        }
+        stats.exposure.ready = true;
+        stats.exposure.has_samples = weight_sum > 0;
+        stats.exposure.luminance = weight_sum > 0 ? std::exp(log_sum / weight_sum) : 0;
+        const float requested = weight_sum > 0 ? exposure_meter::key / stats.exposure.luminance : 1.f;
+        exposure_target = exposure_meter::adapted.clamp(requested);
+        stats.exposure.target = exposure_target;
+        stats.exposure.limited = requested != exposure_target;
         meter_pending = false;
     }
     // The meter sets the target every few frames; the filter runs toward it every
@@ -44,6 +51,7 @@ void Renderer::Impl::apply_metering() {
     const float tau = exposure_target < adapted_exposure ? exposure_meter::darken_seconds
                                                          : exposure_meter::brighten_seconds;
     adapted_exposure += (exposure_target - adapted_exposure) * (1 - std::exp(-dt / tau));
+    stats.exposure.adapted = adapted_exposure;
 }
 
 void Renderer::Impl::fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, gpu::PSO* pipeline, Root root,

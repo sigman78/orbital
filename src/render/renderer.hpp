@@ -16,7 +16,14 @@ class ImageView;
 
 namespace space::render {
 
+struct ExposureStats {
+    float luminance = 0, peak_luminance = 0;
+    float target = 1, adapted = 1, applied = 1;
+    bool ready = false, has_samples = false, limited = false, automatic = false;
+};
+
 struct Stats {
+    ExposureStats exposure;
     float frame_ms = 0, gpu_ms = 0, shadow_ms = 0, surface_ms = 0, atmosphere_ms = 0,
           post_ms = 0; // shadow_ms includes the belt culling passes
     float cull_ms = 0, body_shadow_ms = 0, belt_light_ms = 0, belt_disc_ms = 0;
