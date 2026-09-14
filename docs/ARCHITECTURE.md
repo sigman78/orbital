@@ -89,6 +89,37 @@ Between the rocks a half-resolution march through the same density field scatter
 Scoped GPU timings separately bracket compute culling, body shadows, belt light maps, far-belt bakes, the scene,
 atmospheres with dust, and post-processing. The original cull/shadow aggregate is retained in the panel and CSV.
 
+## Image properties
+
+The renders are held to these properties, settled on 2026-09-14 after the contrast and
+night-side investigations (see DECISIONS.md for the measurements). Each names where it is
+enforced and the control that scales it.
+
+- **Black is black.** With no light source in frame, space and the night sides of bodies
+  render at the tone curve's black; nothing adds a constant. The Earth night map's blue
+  floor is subtracted and gated in `surface_earth.slang`; the starlight fill on shadow
+  sides (surfaces, the cloud layer, the gas giant) follows Sun & lens > Ambient fill,
+  default 0.25 of the former constants, 0 for none. City lights and faint cloud cover are
+  what a night side shows.
+- **The lens is additive.** The sun glare, starburst, streak and the flare stack are light
+  the lens adds and never darken the scene. The composite passes them to the tone map
+  apart from the scene, so the neutral curve's black offset is taken from the scene alone
+  (ACES and AgX just sum); the glare's 1/d² tail is cut with exp(-1.5 d) so it does not
+  veil the frame once nothing subtracts it. The stack's veils are intended and scale with
+  their Sun & lens strengths; the Lens flare switch removes the stack and keeps the glare.
+- **The curve is the published PBR Neutral.** Black offset 1.0 by default (Post FX slider
+  scales the subtraction); the per-curve exposure trims, the meter key and the adaptation
+  range are Tone panel controls. The published subtraction also removes faint coloured
+  light such as the Milky Way band: the intended remedy is scene-driven exposure
+  adaptation that brings the sky up when no bright body is in view, not a lifted black.
+- **Contrast reference.** The Sep 11 screenshots (`docs/images` at 7c9535b) are the target:
+  at 1920x1080 with `--time 0`, the belt view's median is 7 display codes and the Dawn
+  night side's 8; a change that moves either by more than a few codes is a regression
+  unless it is the point of the change.
+- **Review method.** Fixed-time captures per bookmark (`--time 0 --frames 90 --no-hud`),
+  the sun placed with `--sun-at` for lens review, and percentile statistics of the
+  captures rather than eyeballing, with a stretched crop for the dark regions.
+
 ## Renderer implementation
 
 `Renderer::Impl` owns the device, heaps, images and pipeline lifetime registry. The implementation

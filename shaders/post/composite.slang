@@ -96,17 +96,20 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float dist = length((p - sun) * aspect);
     // The lens veil: the sun's glare and the stack (starburst and streak here,
     // the soft elements from flare.slang's fractional target), the panel's
-    // saturation scaling the stack's colour. It goes through the tone curve
-    // with the scene, so the neutral curve's black offset subtracts it as a
-    // flare, which is what keeps night sides dark under the glare.
+    // saturation scaling the stack's colour. Kept apart from the scene so the
+    // neutral curve's black offset does not react to it and the flare stays
+    // purely additive.
     float3 flare = starburst(p, sun, vis, aspect, int(lens.w + .5), lens.z)
                    + lensStreak(p, sun, vis, aspect, root.frame.lens_more.y)
                    + (root.frame.lens_stack.x > 0.0 // the stack pass is skipped when the flare is off
                           ? sampleCubic(textures[TEX_FLARE], uv, floor(resolution / root.frame.lens_stack.x))
                           : float3(0.0));
-    color += float3(1.0, .6, .3) * vis * .014 * lens.x / (dist * dist + .012)
-             + lerp(float3(luma709(flare)), flare, root.frame.lens_stack.y);
-    color = toneMap(color * root.frame.forward_exposure.w, uint(root.frame.quality.y + .5), root.frame.post_more.z);
+    // The glare: a 1/d^2 core with its far tail cut, since with the flare
+    // purely additive nothing subtracts the tail and it veiled whole frames.
+    float3 veil = float3(1.0, .6, .3) * vis * .014 * lens.x / (dist * dist + .012) * exp(-dist * 1.5)
+                  + lerp(float3(luma709(flare)), flare, root.frame.lens_stack.y);
+    float exposure = root.frame.forward_exposure.w;
+    color = toneMap(color * exposure, veil * exposure, uint(root.frame.quality.y + .5), root.frame.post_more.z);
     color *= 1.0 - root.frame.post_more.x * pow(length(p * .65), 2.0);
     // Dither and grain in display-code space; linear-space noise is far too
     // bright in black space. Grain is strongest in the midtones.
