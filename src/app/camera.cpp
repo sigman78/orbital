@@ -84,6 +84,32 @@ Camera::Camera() {
     rebuild_basis();
 }
 
+void Camera::aim(Vec3d target, double x, double y, double aspect) {
+    const Vec3d direction = normalized(target - position);
+    const double tan_half = std::tan(vertical_fov * .5);
+    // The direction's camera-space coordinates (right, up, forward) once aimed.
+    const Vec3d wanted = normalized(Vec3d{x * tan_half * aspect, -y * tan_half, 1.0});
+    ++cut_serial_;
+    // The basis keeps world up, which rolls the frame a little after each turn,
+    // so iterate: every pass turns the forward axis by the remaining error.
+    for (int pass = 0; pass < 8; ++pass) {
+        const Vec3d current{dot(direction, right_), dot(direction, up_), dot(direction, forward_)};
+        const Vec3d axis = cross(wanted, current);
+        const double angle = std::acos(std::clamp(dot(wanted, current), -1.0, 1.0));
+        if (length(axis) < 1e-12) {
+            if (angle < 1e-9)
+                break;
+            forward_ = forward_ * -1.0; // the direction is exactly behind: turn around first
+            rebuild_basis();
+            continue;
+        }
+        // The turn taking `wanted` to `current`, applied to the forward axis, puts the direction at `wanted`.
+        const Vec3d turned = rotate_about(Vec3d{0, 0, 1}, axis, angle);
+        forward_ = right_ * turned.x + up_ * turned.y + forward_ * turned.z;
+        rebuild_basis();
+    }
+}
+
 void Camera::rebuild_basis() {
     forward_ = normalized(forward_);
     // Keep world Y as the stable up direction except when looking nearly up.

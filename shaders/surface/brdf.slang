@@ -3,7 +3,9 @@
 #include "../lib/math.slang"
 
 // Dielectric GGX plus Lambert diffuse, with explicit illumination and water-glint inputs.
-float3 shadeSurface(Material m, float3 L, float3 V, float3 irradiance, float glintIntensity)
+// `fill` scales the starlight fill on shadow sides (1 the former constant); it
+// was a blue veil over the Earth's night side, so the panel holds it low.
+float3 shadeSurface(Material m, float3 L, float3 V, float3 irradiance, float glintIntensity, float fill)
 {
     // Normal variance broadens unresolved highlights instead of sparkling.
     float3 normalDx = ddx(m.N), normalDy = ddy(m.N);
@@ -21,5 +23,5 @@ float3 shadeSurface(Material m, float3 L, float3 V, float3 irradiance, float gli
     float3 spec = F * D * G / max(4 * nv * nl, .001);
     spec *= lerp(1.0, glintIntensity, m.water); // the panel's glint intensity, sea only
     float3 diffuse = m.albedo * lerp(1.0, .22, m.water) * (1 - F0) / PI;
-    return (diffuse + spec) * irradiance * nl * m.visibility + m.albedo * float3(.003, .004, .008);
+    return (diffuse + spec) * irradiance * nl * m.visibility + m.albedo * float3(.003, .004, .008) * fill;
 }

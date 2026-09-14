@@ -178,5 +178,5 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     Surface s = surfaceAt(root.frame, root.instances, input, true);
     float3x3 rotate = rotation(s.inst.rotation_kind.xyz);
     Material m = rockMaterial(input, s.inst, rotate, s.N, s.V, s.visibility);
-    return float4(shadeSurface(m, s.L, s.V, sunlight(root.frame), root.frame->earth.y), 1);
+    return float4(shadeSurface(m, s.L, s.V, sunlight(root.frame), root.frame->earth.y, root.frame->quality.w), 1);
 }

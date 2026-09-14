@@ -50,7 +50,8 @@ PreparedBelt prepare_belt(const BeltDescription& ring, Vec3d centre, Vec3d sun, 
 
 struct ScreenSun {
     float x = 0, y = 0;
-    bool visible = false;
+    bool visible = false; // in front of the camera, within reach of the frame and not covered
+    bool lit = true;      // no body covers the sun, wherever it is
 };
 ScreenSun project_sun(const CameraView& camera, Vec3d sun, std::span<const BodyState> bodies, float tan_half_fov,
                       float aspect);

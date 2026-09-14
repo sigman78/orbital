@@ -190,6 +190,10 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
         app.camera.look_at({0, 1000, 0}, Vec3d{0, 1000, 0} + direction);
         free_camera(app);
     }
+    if (options.sun_at) {
+        app.camera.aim(system.star.position, (*options.sun_at)[0], (*options.sun_at)[1], options.size.aspect());
+        free_camera(app);
+    }
     if (options.belt_sun_view && app.bodies.size() > 1 && !system.belts.empty()) {
         const auto& belt = system.belts.front();
         const auto parent = std::find_if(app.bodies.begin(), app.bodies.end(),

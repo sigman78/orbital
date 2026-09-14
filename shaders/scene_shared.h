@@ -50,7 +50,7 @@ struct Frame {
     SHADER_FLOAT4 scene;       // body count, giant body index, belt transmittance map on, belt extinction on
     SHADER_MATRIX4 belt_light_projection; // orthographic box over the whole belt from the sun
     SHADER_FLOAT4 belt_light;  // box half width, half height, map texels, half span of the slice range along the light
-    SHADER_FLOAT4 quality;     // temporal anti-aliasing on, tone curve (0 ACES filmic, 1 AgX, 2 PBR Neutral), belt dust on, unused
+    SHADER_FLOAT4 quality;     // temporal anti-aliasing on, tone curve (0 ACES filmic, 1 AgX, 2 PBR Neutral), belt dust on, ambient fill on shadow sides
     SHADER_FLOAT4 dust;        // belt dust multipliers: density (extinction), brightness (albedo), far-view scale, saturation
     SHADER_FLOAT4 dust_tint;   // multiplies the dust colour, w unused
     SHADER_MATRIX4 belt_disc_projection; // orthographic box over the belt plane, for the far-belt maps
@@ -60,7 +60,9 @@ struct Frame {
     SHADER_FLOAT4 earth;                 // ocean roughness, glint intensity, cloud shadow strength, cloud shadow softness (mip bias)
     SHADER_FLOAT4 earth_more;            // sea wind patchiness, cloud opacity, unused x2
     SHADER_FLOAT4 lens;                  // glare intensity, ghost strength, starburst strength, starburst blades
-    SHADER_FLOAT4 sun_disc;              // angular radius (radians), limb darkening, broad halo strength, rainbow crescent strength
+    SHADER_FLOAT4 sun_disc;              // angular radius (radians), limb darkening, main ring strength, big crescent strength
+    SHADER_FLOAT4 lens_more;             // mini crescent strength, streak strength, ghost spread, ghost size
+    SHADER_FLOAT4 lens_stack;            // flare stack target divisor (0: the pass is skipped), flare saturation, dirty glass light (0 off), dirty glass blur (0 off)
     SHADER_FLOAT4 post;                  // bloom intensity (0 off), bloom threshold, bloom knee, chromatic aberration scale
     SHADER_FLOAT4 post_more;             // vignette, film grain, black offset of the neutral tone curve, unused
     SHADER_FLOAT4 giant;                 // flow time scale (x real), advection cycle (seconds), turbulence, flow map on

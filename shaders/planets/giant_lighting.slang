@@ -23,7 +23,8 @@ float3 shadeGiant(Frame* frame, Material m, float3 N, float3 geometricN, float3 
     float3 hazeColour = float3(.55, .62, .74);
     float3 deck = m.albedo / PI * lit * (1.0 - veil);
     float3 scattered = hazeColour / PI * veil * hazeLit * phase;
-    float3 colour = (deck + scattered) * sunlight(frame) * m.visibility + m.albedo * float3(.003, .004, .008);
+    // The starlight fill follows the panel's ambient fill, as every surface's does.
+    float3 colour = (deck + scattered) * sunlight(frame) * m.visibility + m.albedo * float3(.003, .004, .008) * frame->quality.w;
     // Lightning shows where the sun does not.
     float dark = 1.0 - smoothstep(-.12, .02, dot(geometricN, L));
     if (dark > 0.0)

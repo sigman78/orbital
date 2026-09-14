@@ -76,5 +76,5 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     float3x3 rotate = rotation(s.inst.rotation_kind.xyz);
     Material m = s.kind == KIND_MARS ? marsMaterial(input, rotate, s.N, s.L, s.visibility)
                                      : moonMaterial(input, rotate, s.N, s.L, s.visibility);
-    return float4(shadeSurface(m, s.L, s.V, sunlight(root.frame), root.frame->earth.y), 1);
+    return float4(shadeSurface(m, s.L, s.V, sunlight(root.frame), root.frame->earth.y, root.frame->quality.w), 1);
 }

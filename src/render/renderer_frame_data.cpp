@@ -17,7 +17,6 @@ namespace {
 // than brightness.
 namespace tone_curves {
 inline constexpr float base_gain = 1.5f;
-inline constexpr float exposure_trim[3] = {1.f, .37f, .75f}; // ACES filmic, AgX, Khronos PBR Neutral
 } // namespace tone_curves
 
 // Sun disc and lens flare, read by build_frame.
@@ -98,7 +97,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
                                                   : 0.f);
     frame.forward_exposure.w =
         input.tone.exposure * (input.tone.auto_exposure ? adapted_exposure : 1) * tone_curves::base_gain *
-        tone_curves::exposure_trim[std::min(unsigned(input.tone.tone_curve), unsigned(ToneCurve::Count) - 1)];
+        input.tone.curve_trim[std::min(unsigned(input.tone.tone_curve), unsigned(ToneCurve::Count) - 1)];
     stats.exposure.applied = frame.forward_exposure.w;
     stats.exposure.automatic = input.tone.auto_exposure;
     frame.sun = f4(system.star.position - camera.position, sun_flare::disc_radius);
@@ -132,16 +131,19 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.scene = {float(body_count), float(showcase.giant()), input.belt.light_map ? 1.f : 0.f,
                    input.belt.extinction ? 1.f : 0.f};
     frame.quality = {input.aa.temporal_aa ? 1.f : 0.f, float(input.tone.tone_curve),
-                     input.belt_dust.enabled ? 1.f : 0.f, 0};
+                     input.belt_dust.enabled ? 1.f : 0.f, input.sun.ambient_fill};
     frame.dust = {input.belt_dust.density, input.belt_dust.brightness, input.belt_dust.far, input.belt_dust.saturation};
     frame.dust_tint = {input.belt_dust.tint[0], input.belt_dust.tint[1], input.belt_dust.tint[2], 0};
     frame.earth = {input.earth.ocean_roughness, input.earth.glint_intensity, input.earth.cloud_shadow,
                    input.earth.cloud_shadow_softness};
     frame.earth_more = {input.earth.sea_patchiness, input.earth.cloud_opacity, 0, 0};
-    frame.lens = {input.sun.glare_intensity, input.sun.ghost_strength, input.sun.starburst_strength,
+    const float flare = input.sun.lens_flare ? 1.f : 0.f; // off zeroes every stack element; the glare stays
+    frame.lens = {input.sun.glare_intensity, input.sun.ghost_strength * flare, input.sun.starburst_strength * flare,
                   float(std::clamp(input.sun.starburst_blades, 0, 12))};
-    frame.sun_disc = {input.sun.sun_disc_radius, input.sun.sun_limb_darkening, input.sun.halo_strength,
-                      input.sun.rainbow_strength};
+    frame.sun_disc = {input.sun.sun_disc_radius, input.sun.sun_limb_darkening, input.sun.ring_strength * flare,
+                      input.sun.crescent_strength * flare};
+    frame.lens_more = {input.sun.mini_crescent_strength * flare, input.sun.streak_strength * flare,
+                       input.sun.ghost_spread, input.sun.ghost_size};
     frame.post = {input.post.bloom ? input.post.bloom_intensity : 0.f, input.post.bloom_threshold,
                   input.post.bloom_knee, input.post.aberration};
     frame.post_more = {input.post.vignette, input.post.grain, input.post.black_offset, 0};
@@ -169,6 +171,10 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
 
     const auto sun = project_sun(camera, system.star.position, input.bodies, view.tan_half_fov, view.aspect);
     frame.screen_sun = {sun.x, sun.y, sun.visible ? 1.f : 0.f, sun_flare::screen_size};
+    // The glass is lit by the sun wherever it is unless a body covers it; it blurs regardless.
+    const bool glass = input.post.dirty_glass && lens_dirt;
+    frame.lens_stack = {input.sun.lens_flare ? float(flare_divisor) : 0.f, input.sun.flare_saturation,
+                        glass && sun.lit ? input.post.dirt_light : 0.f, glass ? input.post.dirt_blur : 0.f};
     return frame;
 }
 

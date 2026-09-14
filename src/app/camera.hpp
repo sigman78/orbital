@@ -44,6 +44,8 @@ struct Camera {
     static std::size_t bookmark_body(std::size_t index);
     void toggle_tour();
     void look_at(Vec3d eye, Vec3d target);
+    // Turns the camera so `target` projects to frame coordinates (x, y), 1 at the right or bottom edge.
+    void aim(Vec3d target, double x, double y, double aspect);
     void set_tour_time(double seconds);
     void set_orbit_target(std::size_t index, double zoom = 0.0);
     void set_mode(CameraMode mode);

@@ -49,7 +49,8 @@ constexpr MaterialSource material_sources[] = {{"earth_albedo.png", Slot::earth_
                                                {"gas_detail.png", Slot::gas_detail, true},
                                                {"gas_relief.png", Slot::gas_relief, true},
                                                {"gas_polar.png", Slot::gas_polar, true},
-                                               {"gas_polar_flow.png", Slot::gas_polar_flow, true}};
+                                               {"gas_polar_flow.png", Slot::gas_polar_flow, true},
+                                               {"lens_dirt.png", Slot::lens_dirt, true}};
 constexpr std::size_t material_count = std::size(material_sources);
 
 void append_vertices(std::vector<Vertex>& out, const geometry::Mesh& mesh) {
@@ -149,6 +150,8 @@ void Renderer::Impl::load_materials() {
                     log::warn("{} is missing; run tools/import-assets.ps1 to bake it (its effect is off)", source.file);
                     if (source.slot == Slot::gas_polar)
                         polar_caps = false;
+                    if (source.slot == Slot::lens_dirt)
+                        lens_dirt = false;
                     assets::Rgba8Image neutral{.extent = {4, 4}, .pixels = {}};
                     neutral.pixels.resize(4 * 4 * 4);
                     for (std::size_t p = 0; p < 16; p++) {

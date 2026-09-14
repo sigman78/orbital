@@ -42,11 +42,16 @@ frame root. GPU records and surface mode/kind values remain in `scene_shared.h`.
 
 ## Post-processing passes
 
-`post/bloom.slang`, `post/composite.slang`, `post/meter.slang`,
+`post/bloom.slang`, `post/composite.slang`, `post/flare.slang`, `post/meter.slang`,
 `post/sun_visibility.slang`, `post/present.slang`, and `aa/fxaa_pass.slang` compile
 as separate fragment entry points, sharing the fullscreen vertex shader. Bloom's
 prefilter and two blur directions use `Root.mode`, with the C++/shader contract in
 `post/bloom_shared.h`. Other post entry points do not use a global effect selector.
+The lens flare stack lives in `post/lens.slang`: its soft elements (main ring,
+crescents, ghosts, spindles) are drawn by `post/flare.slang` into a target at the
+frame over the panel's divisor (2, 4 or 8, carried in `Frame.lens_stack`) and
+sampled by the composite, which draws the sharp elements (glare, starburst, streak)
+itself and applies the stack's saturation to all of them.
 Keep the composite's per-pixel effects in one pass to avoid extra intermediate
 images. `post/hdr.slang` and `post/sun_occlusion.slang` are focused shared helpers;
 entry points do not include other entry points.
