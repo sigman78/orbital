@@ -3,6 +3,7 @@
 #include "imgui.h"
 #include "render/renderer.hpp"
 #include <algorithm>
+#include <array>
 #include <vector>
 
 namespace space::app {
@@ -27,6 +28,68 @@ template <class Enum> void combo(const char* label, Enum& value, std::span<const
         value = Enum(index);
 }
 
+void gpu_time_bar(const render::Stats& stats) {
+    struct Segment {
+        const char* label;
+        float ms;
+        ImU32 color;
+    };
+    std::array segments{
+        Segment{.label = "Culling", .ms = stats.cull_ms, .color = IM_COL32(86, 180, 233, 255)},
+        Segment{.label = "Body shadows", .ms = stats.body_shadow_ms, .color = IM_COL32(130, 120, 210, 255)},
+        Segment{.label = "Belt light", .ms = stats.belt_light_ms, .color = IM_COL32(230, 159, 0, 255)},
+        Segment{.label = "Belt discs", .ms = stats.belt_disc_ms, .color = IM_COL32(240, 228, 66, 255)},
+        Segment{.label = "Surface", .ms = stats.surface_ms, .color = IM_COL32(0, 158, 115, 255)},
+        Segment{.label = "Atmosphere", .ms = stats.atmosphere_ms, .color = IM_COL32(204, 121, 167, 255)},
+        Segment{.label = "Post FX", .ms = stats.post_ms, .color = IM_COL32(213, 94, 0, 255)},
+        Segment{.label = "Other", .ms = 0, .color = IM_COL32(140, 145, 155, 255)}};
+    float sum = 0;
+    for (auto& segment : segments) {
+        segment.ms = std::max(segment.ms, 0.f);
+        sum += segment.ms;
+    }
+    segments.back().ms = std::max(stats.gpu_ms - sum, 0.f);
+    const float total = std::max(stats.gpu_ms, sum);
+    if (total <= 0) {
+        ImGui::TextDisabled("Waiting for GPU timings...");
+        return;
+    }
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const ImVec2 size{ImGui::GetContentRegionAvail().x, 18};
+    ImGui::InvisibleButton("##gpu-time", size);
+    const bool hovered = ImGui::IsItemHovered();
+    float x = origin.x;
+    for (const auto& segment : segments) {
+        const float end = x + size.x * segment.ms / total;
+        ImGui::GetWindowDrawList()->AddRectFilled({x, origin.y}, {end, origin.y + size.y}, segment.color);
+        if (hovered && ImGui::GetIO().MousePos.x >= x && ImGui::GetIO().MousePos.x < end)
+            ImGui::SetTooltip("%s: %.2f ms (%.1f%%)", segment.label, segment.ms, 100 * segment.ms / total);
+        x = end;
+    }
+    if (ImGui::BeginTable("##gpu-passes", 3, ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("ms", ImGuiTableColumnFlags_WidthFixed, 62);
+        ImGui::TableSetupColumn("share", ImGuiTableColumnFlags_WidthFixed, 48);
+        for (const auto& segment : segments) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            const auto swatch = ImGui::GetCursorScreenPos();
+            ImGui::GetWindowDrawList()->AddRectFilled({swatch.x, swatch.y + 3}, {swatch.x + 9, swatch.y + 12},
+                                                      segment.color);
+            ImGui::Dummy({9, 12});
+            ImGui::SameLine();
+            ImGui::TextUnformatted(segment.label);
+            ImGui::TableNextColumn();
+            ImGui::Text("%.2f ms", segment.ms);
+            ImGui::TableNextColumn();
+            ImGui::Text("%.1f%%", 100 * segment.ms / total);
+        }
+        ImGui::EndTable();
+    }
+    if (sum > stats.gpu_ms)
+        ImGui::TextDisabled("Shares normalized to summed pass timings");
+}
+
 void frame_controls(const render::Stats& stats, std::span<const float> recent_frame_ms, bool& vsync) {
     std::vector<float> sorted(recent_frame_ms.begin(), recent_frame_ms.end());
     std::sort(sorted.begin(), sorted.end());
@@ -38,16 +101,12 @@ void frame_controls(const render::Stats& stats, std::span<const float> recent_fr
                      {-1, 60});
     ImGui::TextDisabled("Timings: 0.5 s average | graph: raw frames");
     ImGui::Text("GPU %.2f ms", stats.gpu_ms);
-    ImGui::Indent();
-    ImGui::Text("cull + shadow %.2f   surface %.2f", stats.shadow_ms, stats.surface_ms);
-    ImGui::Text("  cull %.2f   body shadow %.2f", stats.cull_ms, stats.body_shadow_ms);
-    ImGui::Text("  belt light %.2f   disc bake %.2f", stats.belt_light_ms, stats.belt_disc_ms);
-    ImGui::Text("atmosphere %.2f   post %.2f", stats.atmosphere_ms, stats.post_ms);
-    ImGui::Unindent();
+    gpu_time_bar(stats);
+    ImGui::Text("Cull + shadows %.2f ms", stats.shadow_ms);
     ImGui::Text("CPU prepare %.2f ms", stats.prepare_ms);
     ImGui::Checkbox("VSync", &vsync);
-    ImGui::SameLine();
-    ImGui::TextDisabled("off for timings: a vsynced GPU idles and clocks down");
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Disable VSync for performance comparisons: a waiting GPU may clock down.");
     ImGui::Text("%u draws, %u rock groups", stats.draw_calls, stats.rock_groups_drawn);
     ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
 }
