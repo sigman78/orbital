@@ -212,24 +212,17 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     system = description;
     directory = base_directory;
     belt_count_override = config.belt_count;
-    panic_if(system.bodies.empty() || system.bodies.size() > max_body_count || system.belts.empty(),
-             "the renderer needs 1 to {} bodies and a belt", max_body_count);
-    body_count = unsigned(system.bodies.size());
+    std::string scene_error;
+    const auto resolved = Showcase::resolve(system, scene_error);
+    panic_if(!resolved, "unsupported renderer scene: {}", scene_error);
+    showcase = *resolved;
+    body_count = showcase.body_count();
     panic_if(std::max(high_quality.belt_count, belt_count_override) > heap_layout.instance_capacity() - body_count,
              "belt count exceeds culling capacity (maximum {} rocks)", heap_layout.instance_capacity() - body_count);
-    const auto find_class = [&](BodyClass body_class, const char* name) {
-        for (unsigned i = 0; i < body_count; i++)
-            if (system.bodies[i].body_class == body_class)
-                return i;
-        panic(std::format("the system has no {} body", name));
-    };
-    earth_index = find_class(BodyClass::Terrestrial, "terrestrial");
-    giant_index = find_class(BodyClass::GasGiant, "gas giant");
-    mars_index = find_class(BodyClass::Desert, "desert");
     create_device(window);
     create_samplers();
     create_meshes();
-    build_belt(system.belts[0]);
+    build_belt(system.belts.front());
     log::info("Loading planetary maps and scanned rock PBR materials...");
     load_materials();
     upload_rgba(Slot::hud, hud);

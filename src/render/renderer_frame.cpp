@@ -34,10 +34,14 @@ void Renderer::Impl::stamp(gpu::CommandBuffer* cmd, unsigned index) {
     gpu::write_timestamp(cmd, reinterpret_cast<gpu::uint64*>(timestamps.range.gpu + index * sizeof(std::uint64_t)));
 }
 
-bool Renderer::draw(const FrameInput& input) {
+bool Renderer::draw(const FrameInput& supplied) {
     const auto start = std::chrono::steady_clock::now();
     auto& s = *impl_;
-    ORBITAL_ASSERT(input.bodies.size() == s.body_count);
+    std::array<BodyState, max_body_count> ordered;
+    const std::span states{ordered.data(), s.body_count};
+    ORBITAL_ASSERT(s.showcase.order_states(supplied.bodies, states));
+    FrameInput input = supplied;
+    input.bodies = states;
     gpu::wait_timeline({s.timeline, s.serial});
     s.read_gpu_timings();
     s.apply_metering();

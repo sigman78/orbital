@@ -31,7 +31,7 @@ struct Stats {
 // Camera/settings are copied values; body and UI storage is borrowed for draw().
 struct FrameInput {
     CameraView camera;
-    std::span<const BodyState> bodies; // at least the three major bodies, in system order
+    std::span<const BodyState> bodies; // exactly one state per configured body ID; any order
     double time = 0;                   // simulation seconds; drives belt spin and rock rotation
     bool high_quality = false;
     bool overlay = true;

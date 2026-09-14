@@ -10,6 +10,7 @@
 #include "post/bloom_shared.h"
 #include "render/gpu_image.hpp"
 #include "render/gpu_types.hpp"
+#include "render/showcase.hpp"
 #include "scene/geometry.hpp"
 #include "scene/system.hpp"
 
@@ -307,7 +308,8 @@ struct Renderer::Impl {
     std::filesystem::path directory;
     // The bodies occupy instance slots 0..body_count-1 in system order. The
     // three anchors carry atmospheres and shadow maps.
-    unsigned body_count = 0, earth_index = 0, giant_index = 0, mars_index = 0;
+    Showcase showcase;
+    unsigned body_count = 0;
     bool polar_caps = true;      // the gas giant's polar cap atlas loaded; the blend is skipped without it
     std::uint64_t star_data = 0; // static heap address of the Bright Star Catalogue records, 0 when absent
     unsigned star_count = 0;

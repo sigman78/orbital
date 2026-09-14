@@ -67,7 +67,7 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
     draw_rock_batch(cmd, root, args_address);
     gpu::bind_pso(cmd, pso.scene.cloud);
     root.mode = std::uint32_t(SurfaceMode::cloud);
-    draw_mesh(cmd, root, spheres[geometry::lod_count - 1], earth_index, 1);
+    draw_mesh(cmd, root, spheres[geometry::lod_count - 1], showcase.earth(), 1);
     gpu::end_render_pass(cmd);
 }
 
@@ -80,7 +80,7 @@ void Renderer::Impl::record_atmosphere_passes(gpu::CommandBuffer* cmd, Root& roo
     // Atmosphere is composited per body; the depth clamp orders them against
     // geometry, and Earth's goes last so it stays on top where shells overlap.
     root.mode = 0;
-    for (unsigned body : {giant_index, mars_index, earth_index}) {
+    for (unsigned body : {showcase.giant(), showcase.desert(), showcase.earth()}) {
         root.base = body;
         fullscreen_pass(cmd, frame_targets.hdr, pso.scene.atmosphere, root, true);
     }

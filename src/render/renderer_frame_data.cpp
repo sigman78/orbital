@@ -209,9 +209,9 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
         tone_curves::exposure_trim[std::min(unsigned(input.tone.tone_curve), unsigned(ToneCurve::Count) - 1)];
     frame.sun = f4(system.star.position - camera.position, sun_flare::disc_radius);
     const auto distance_to = [&](unsigned body) { return length(input.bodies[body].position - camera.position); };
-    const bool giant_close = distance_to(giant_index) < shadow_placement::giant_distance;
-    const bool mars_closer = distance_to(mars_index) < distance_to(earth_index);
-    const unsigned shadow_body = giant_close ? giant_index : (mars_closer ? mars_index : earth_index);
+    const bool giant_close = distance_to(showcase.giant()) < shadow_placement::giant_distance;
+    const bool mars_closer = distance_to(showcase.desert()) < distance_to(showcase.earth());
+    const unsigned shadow_body = giant_close ? showcase.giant() : (mars_closer ? showcase.desert() : showcase.earth());
     const float shadow_half_size = giant_close   ? shadow_placement::giant_half_size
                                    : mars_closer ? shadow_placement::mars_half_size
                                                  : shadow_placement::earth_half_size;
@@ -219,10 +219,10 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     write_light_projection(
         frame.light_projection,
         body_light_frame(input.bodies[shadow_body].position - camera.position, sun_relative, shadow_half_size));
-    const auto& ring = system.belts[0];
+    const auto& ring = system.belts.front();
     // The belt transmittance map's box, and the slice span along the light
     // that the belt's thickness covers at the sun's tilt.
-    const Vec3d giant_relative = input.bodies[giant_index].position - camera.position;
+    const Vec3d giant_relative = input.bodies[showcase.belt_parent()].position - camera.position;
     const LightFrame belt_box = belt_light_frame(giant_relative, sun_relative, ring);
     write_light_projection(frame.belt_light_projection, belt_box);
     const double light_tilt = std::abs(dot(to_double(belt_box.forward), to_double(belt_plane_normal)));
@@ -271,7 +271,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
                      input.overlay ? 1.f : 0.f};
     for (unsigned i = 0; i < body_count; i++)
         frame.bodies[i] = f4(input.bodies[i].position - camera.position, float(input.bodies[i].radius));
-    frame.scene = {float(body_count), float(giant_index), input.belt.light_map ? 1.f : 0.f,
+    frame.scene = {float(body_count), float(showcase.giant()), input.belt.light_map ? 1.f : 0.f,
                    input.belt.extinction ? 1.f : 0.f};
     frame.quality = {input.aa.temporal_aa ? 1.f : 0.f, float(input.tone.tone_curve),
                      input.belt_dust.enabled ? 1.f : 0.f, 0};
@@ -349,7 +349,7 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
                                         std::uint64_t instance_address) {
     const CameraView& camera = input.camera;
     const float tan_y = frame.right_tan.w, tan_x = tan_y * frame.up_aspect.w;
-    const BeltTransform transform = belt_transform(system.belts[0], float(input.time * belt_culling::spin_rate));
+    const BeltTransform transform = belt_transform(system.belts.front(), float(input.time * belt_culling::spin_rate));
     CullParams& p = scratch.params;
     p = {};
     p.right = f4(to_float(camera.right), tan_x);
@@ -357,7 +357,7 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
     p.forward = f4(to_float(camera.forward), tan_y * 4 / float(extent.height));
     p.view = {float(extent.height) / (2 * frame.right_tan.w), std::sqrt(1 + tan_x * tan_x),
               std::sqrt(1 + tan_y * tan_y), float(input.time * belt_culling::rock_spin_rate)};
-    p.giant = f4(input.bodies[giant_index].position - camera.position);
+    p.giant = f4(input.bodies[showcase.belt_parent()].position - camera.position);
     p.belt_tilt = {belt_tilt.y_scale, belt_tilt.y_from_z, belt_tilt.z_scale, 0};
     for (unsigned band = 0; band < belt::radial_bands; band++)
         p.band_spin[band] = {transform.cos_spin[band], transform.sin_spin[band], 0, 0};

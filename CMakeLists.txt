@@ -15,6 +15,7 @@ endif()
 #   orbital_core   logging, panic, file I/O, math
 #   orbital_scene  deterministic system generation, geometry
 #   orbital_camera app navigation/controller, independent of the renderer
+#   orbital_render_scene CPU-only showcase contract and state binding
 #   orbital_assets PNG I/O (vendored Wuffs decoder, stb writer), pixel kernels, materials
 add_library(orbital_core STATIC src/core/log.cpp src/core/panic.cpp src/core/file.cpp)
 target_include_directories(orbital_core PUBLIC src)
@@ -24,6 +25,10 @@ target_compile_options(orbital_core PRIVATE ${ORBITAL_WARNINGS})
 add_library(orbital_scene STATIC src/scene/system.cpp src/scene/geometry.cpp)
 target_link_libraries(orbital_scene PUBLIC orbital_core)
 target_compile_options(orbital_scene PRIVATE ${ORBITAL_WARNINGS})
+
+add_library(orbital_render_scene STATIC src/render/showcase.cpp)
+target_link_libraries(orbital_render_scene PUBLIC orbital_scene)
+target_compile_options(orbital_render_scene PRIVATE ${ORBITAL_WARNINGS})
 
 add_library(orbital_camera STATIC src/app/camera.cpp)
 target_link_libraries(orbital_camera PUBLIC orbital_scene)
@@ -65,9 +70,12 @@ if(ORBITAL_BUILD_TEXTURE_TOOLS)
 endif()
 
 if(BUILD_TESTING)
-  foreach(test IN ITEMS core system geometry camera image kernels materials smaa texture app)
+  foreach(test IN ITEMS core system geometry camera image kernels materials smaa texture app showcase)
     add_executable(${test}_tests tests/${test}_tests.cpp)
     target_link_libraries(${test}_tests PRIVATE orbital_scene orbital_assets)
+    if(test STREQUAL "showcase")
+      target_link_libraries(${test}_tests PRIVATE orbital_render_scene)
+    endif()
     if(test STREQUAL "camera" OR test STREQUAL "app")
       target_link_libraries(${test}_tests PRIVATE orbital_camera)
     endif()
@@ -135,7 +143,7 @@ if(ORBITAL_BUILD_DEMO)
   add_executable(orbital src/app/main.cpp src/app/hud.cpp src/app/ui.cpp src/render/renderer_resources.cpp src/render/gpu_image.cpp src/render/renderer_frame.cpp
     src/render/renderer_frame_data.cpp src/render/renderer_pipelines.cpp src/render/renderer_assets.cpp
     src/render/renderer_belt.cpp src/render/renderer_scene.cpp src/render/renderer_post.cpp src/render/renderer_overlay.cpp)
-  target_link_libraries(orbital PRIVATE orbital_scene orbital_camera orbital_assets orbital_platform NoGraphicsAPI::NoGraphicsAPI)
+  target_link_libraries(orbital PRIVATE orbital_scene orbital_camera orbital_render_scene orbital_assets orbital_platform NoGraphicsAPI::NoGraphicsAPI)
   target_include_directories(orbital PRIVATE shaders) # scene_shared.h, the C++/shader layout
   target_compile_definitions(orbital PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
   target_compile_options(orbital PRIVATE ${ORBITAL_WARNINGS})

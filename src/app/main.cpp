@@ -364,8 +364,11 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     }
     if (options.belt_sun_view && app.bodies.size() > 1 && !system.belts.empty()) {
         const auto& belt = system.belts.front();
+        const auto parent = std::find_if(app.bodies.begin(), app.bodies.end(),
+                                         [&](const BodyState& body) { return body.id == belt.parent_id; });
+        ORBITAL_ASSERT(parent != app.bodies.end());
         // Same tilted ring plane as the belt renderer (normal 0, .933, .36).
-        const Vec3d ring_point = app.bodies[1].position +
+        const Vec3d ring_point = parent->position +
                                  normalized(Vec3d{0, -.36, .933}) * ((belt.inner_radius + belt.outer_radius) * .5);
         const Vec3d toward_sun = normalized(system.star.position - ring_point);
         // Behind the belt plane: the centre ray crosses its middle, clear of the planet.

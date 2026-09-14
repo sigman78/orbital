@@ -30,6 +30,19 @@ subdivision levels selected by projected size. The belt draws from a library of 
 levels (20 to 20k triangles), packed into one pooled vertex and index range so every level of every shape is
 a slice of the same buffers.
 
+The renderer's CPU-only `Showcase` binding is stricter than generic scene validation: exactly one
+terrestrial, gas giant, desert and rocky moon, optional moonlets within the eight-body limit, and one
+positive-thickness belt whose parent ID is the gas giant. It resolves these roles once before GPU setup.
+At draw entry, states are checked and copied by ID into description order using bounded stack storage;
+missing, duplicate, unknown or non-finite states are rejected. Materials, meshes, atmosphere anchors and
+belt placement therefore use the same body slots even when incoming states are reordered.
+
+Some description fields remain metadata: `scale_policy` is not applied as a multiplier;
+`atmosphere_scale` does not override the effect settings; star radius, temperature and intensity do not
+control the artistic sun or lighting. Star position does drive lighting. Moonlet geometry consumes
+`material_seed`; installed planetary maps remain assigned by body class. Giving the metadata rendering
+semantics is a separate visual change. App bookmarks still target the generated showcase's ordering.
+
 ## Belt
 
 The belt is a population rather than a mesh list: `geometry` places 280k (baseline) or 520k (high) rocks in

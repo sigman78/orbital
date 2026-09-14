@@ -380,3 +380,5 @@ depfile tracks consumers when a helper changes; run `python tools/check-shader-h
 include independence and fixed-time capture comparisons to check rendering behavior.
 
 The app camera controller is built as `orbital_camera`, used by the executable and camera/app tests. Scene tests do not link it. Renderer headers accept `CameraView` values and app-supplied HUD pixels; they do not include app headers.
+
+Renderer-specific scene restrictions live in `orbital_render_scene`, which depends on the generic scene library. Keep them out of `validate_system`; the generic scene evaluator must remain usable without the showcase's required roles and belt configuration.
