@@ -61,6 +61,8 @@ struct EarthSettings {
 };
 
 struct SunSettings {
+    float ambient_fill =
+        .25f; // starlight fill on shadow sides (1 the former constant); a blue veil on Earth's night at 1
     float glare_intensity = 1.f;    // the glow around the sun
     float starburst_strength = 1.f; // aperture streaks through the sun
     int starburst_blades = 6;       // streak count, 0 for none

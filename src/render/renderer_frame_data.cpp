@@ -131,7 +131,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.scene = {float(body_count), float(showcase.giant()), input.belt.light_map ? 1.f : 0.f,
                    input.belt.extinction ? 1.f : 0.f};
     frame.quality = {input.aa.temporal_aa ? 1.f : 0.f, float(input.tone.tone_curve),
-                     input.belt_dust.enabled ? 1.f : 0.f, 0};
+                     input.belt_dust.enabled ? 1.f : 0.f, input.sun.ambient_fill};
     frame.dust = {input.belt_dust.density, input.belt_dust.brightness, input.belt_dust.far, input.belt_dust.saturation};
     frame.dust_tint = {input.belt_dust.tint[0], input.belt_dust.tint[1], input.belt_dust.tint[2], 0};
     frame.earth = {input.earth.ocean_roughness, input.earth.glint_intensity, input.earth.cloud_shadow,

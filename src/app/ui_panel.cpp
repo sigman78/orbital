@@ -185,6 +185,7 @@ void earth_controls(render::EarthSettings& settings) {
         settings = {};
 }
 void sun_lens_controls(render::SunSettings& settings) {
+    ImGui::SliderFloat("Ambient fill", &settings.ambient_fill, 0.f, 2.f, "%.2f x"); // starlight on shadow sides
     ImGui::SliderFloat("Glare", &settings.glare_intensity, 0.f, 4.f, "%.2f x");
     ImGui::SliderFloat("Starburst", &settings.starburst_strength, 0.f, 4.f, "%.2f x");
     ImGui::SliderInt("Starburst blades", &settings.starburst_blades, 0, 12);

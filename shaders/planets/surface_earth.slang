@@ -28,7 +28,8 @@ float4 shadeClouds(SurfaceVaryings input, float3 N, float3 L, float visibility, 
     float t = root.frame->camera_time.w;
     float2 uv = sphereUV(normalize(input.localNormal));
     float alpha = cloudDensity(cloudUV(uv, t), t, magnification(uv, EARTH_TEXELS)) * root.frame->earth_more.y;
-    float3 cloudLight = float3(.002, .004, .008) + float3(1.0, .99, .97) * pow(nl, .8) * visibility * root.frame->sun.w / PI * .8;
+    // The clouds' starlight fill follows the panel's ambient fill, as the ground's does.
+    float3 cloudLight = float3(.002, .004, .008) * root.frame->quality.w + float3(1.0, .99, .97) * pow(nl, .8) * visibility * root.frame->sun.w / PI * .8;
     return float4(cloudLight, alpha);
 }
 
@@ -70,9 +71,17 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     if (root.mode == MODE_CLOUD) return shadeClouds(input, s.N, s.L, s.visibility, max(dot(s.N, s.L), 0.0));
     float3x3 rotate = rotation(s.inst.rotation_kind.xyz);
     Material m = earthMaterial(input, rotate, s.N, s.L, s.visibility);
-    float3 colour = shadeSurface(m, s.L, s.V, sunlight(root.frame), root.frame->earth.y);
-    // City lights come up past the terminator.
+    float3 colour = shadeSurface(m, s.L, s.V, sunlight(root.frame), root.frame->earth.y, root.frame->quality.w);
+    // City lights come up past the terminator. The night map carries a blue
+    // floor over the whole globe (4 to 16 sRGB codes with faint cloud and land
+    // texture in it; linear below) that the neutral curve keeps at full
+    // strength, since its offset takes the darkest channel. The floor is
+    // subtracted and what is left below the lights' level gated out, so the
+    // night side is black but for the lights.
+    const float3 NIGHT_FLOOR = float3(.0045, .0055, .014);
     float2 uv = sphereUV(normalize(input.localNormal));
-    colour += sampleSphere(textures[TEX_EARTH_NIGHT], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).rgb * pow(1 - smoothstep(-.15, .1, dot(m.N, s.L)), 2.0) * .65;
+    float3 lights = max(sampleSphere(textures[TEX_EARTH_NIGHT], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).rgb - NIGHT_FLOOR, 0.0) / (1.0 - NIGHT_FLOOR);
+    lights *= smoothstep(0.0, .008, max(lights.r, max(lights.g, lights.b)));
+    colour += lights * pow(1 - smoothstep(-.15, .1, dot(m.N, s.L)), 2.0) * .65;
     return float4(colour, 1);
 }
