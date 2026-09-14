@@ -31,6 +31,12 @@ int main() {
     const auto mips = load_material(source, desc);
     const auto rgba = texture_from_images(mips);
     assert(valid_texture(rgba));
+    auto single_image = image;
+    const auto* pixels = single_image.pixels.data();
+    const auto single = texture_from_image(std::move(single_image));
+    assert(valid_texture(single) && single.format == TextureFormat::RGBA8 && single.mips.size() == 1);
+    assert(single.mips.front().extent == image.extent && single.mips.front().bytes == image.pixels);
+    assert(single.mips.front().bytes.data() == pixels); // transfers the pixel allocation without copying
     auto malformed = rgba;
     malformed.mips.front().bytes.pop_back();
     assert(!valid_texture(malformed) && write_texture_cache(malformed, desc, hash).empty());

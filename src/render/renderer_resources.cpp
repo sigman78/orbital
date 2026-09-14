@@ -114,7 +114,7 @@ void Renderer::Impl::upload_rgba(Slot slot, assets::ImageView pixels) {
         const auto row = pixels.row(y);
         image.pixels.insert(image.pixels.end(), row.begin(), row.end());
     }
-    upload_images({{.data = assets::texture_from_images({std::move(image)}), .slot = slot}});
+    upload_images({{.data = assets::texture_from_image(std::move(image)), .slot = slot}});
 }
 
 void Renderer::Impl::create_device(void* window) {
@@ -230,11 +230,11 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
         return image;
     };
     upload_images(
-        {{.data = assets::texture_from_images({widen(assets::smaa_area(), assets::smaa_area_width,
-                                                    assets::smaa_area_height, assets::smaa_area_channels)}),
+        {{.data = assets::texture_from_image(widen(assets::smaa_area(), assets::smaa_area_width,
+                                                   assets::smaa_area_height, assets::smaa_area_channels)),
           .slot = Slot::smaa_area},
-         {.data = assets::texture_from_images({widen(assets::smaa_search(), assets::smaa_search_width,
-                                                    assets::smaa_search_height, assets::smaa_search_channels)}),
+         {.data = assets::texture_from_image(widen(assets::smaa_search(), assets::smaa_search_width,
+                                                   assets::smaa_search_height, assets::smaa_search_channels)),
           .slot = Slot::smaa_search}});
     create_pipelines();
     create_fixed_targets();

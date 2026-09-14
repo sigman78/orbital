@@ -155,7 +155,7 @@ void Renderer::Impl::load_materials() {
                         neutral.pixels[p * 4] = neutral.pixels[p * 4 + 1] = 128; // zero signed flow
                         neutral.pixels[p * 4 + 3] = 255;
                     }
-                    uploads[i] = {.data = assets::texture_from_images({std::move(neutral)}), .slot = source.slot};
+                    uploads[i] = {.data = assets::texture_from_image(std::move(neutral)), .slot = source.slot};
                     continue;
                 }
                 uploads[i] = {.data = assets::texture_from_images(assets::load_material(path, desc)),

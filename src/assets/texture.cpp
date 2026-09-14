@@ -24,6 +24,13 @@ std::uint64_t mip_size(Extent2D e, TextureFormat format, unsigned bx = 4, unsign
 }
 } // namespace
 
+TextureData texture_from_image(Rgba8Image image) {
+    ORBITAL_ASSERT(image.valid());
+    TextureData result;
+    result.mips.push_back({image.extent, std::move(image.pixels)});
+    return result;
+}
+
 TextureData texture_from_images(MipChain images) {
     TextureData result;
     result.mips.reserve(images.size());

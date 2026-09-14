@@ -25,6 +25,7 @@ struct TextureSupport {
 // before 1x1 (fonts and lookup tables); cache serialization requires all mips.
 bool valid_texture(const TextureData& texture);
 
+TextureData texture_from_image(Rgba8Image image);
 TextureData texture_from_images(MipChain images);
 std::uint64_t texture_hash(ByteView bytes);
 std::uint32_t material_flags(const MaterialDesc& desc);
