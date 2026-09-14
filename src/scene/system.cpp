@@ -171,7 +171,8 @@ ValidationErrors validate_system(const SystemDescription& s) {
         if (b.id == 0 || find_body(bodies, b.id) != i)
             errors.emplace_back("body IDs must be unique and non-zero");
         if (!std::isfinite(b.radius) || b.radius <= 0 || !is_finite(b.orbit_offset) || !is_finite(b.orbit_axis) ||
-            !std::isfinite(b.orbit_angular_rate))
+            !std::isfinite(b.orbit_angular_rate) || !std::isfinite(b.axial_tilt) || !std::isfinite(b.rotation_phase) ||
+            !std::isfinite(b.rotation_period) || b.rotation_period < 0)
             errors.push_back(std::format("body {} has invalid finite/radius parameters", b.id));
         if (b.parent_id == b.id)
             errors.push_back(std::format("body {} is its own parent", b.id));
@@ -182,8 +183,8 @@ ValidationErrors validate_system(const SystemDescription& s) {
     }
     for (const auto& belt : s.belts) {
         if (belt.id == 0 || !std::isfinite(belt.inner_radius) || !std::isfinite(belt.outer_radius) ||
-            belt.inner_radius <= 0 || belt.outer_radius <= belt.inner_radius || belt.thickness < 0 ||
-            !std::isfinite(belt.density) || belt.density < 0)
+            belt.inner_radius <= 0 || belt.outer_radius <= belt.inner_radius || !std::isfinite(belt.thickness) ||
+            belt.thickness < 0 || !std::isfinite(belt.density) || belt.density < 0)
             errors.emplace_back("belt has invalid bounds or density");
         if (belt.parent_id && find_body(bodies, belt.parent_id) == bodies.size())
             errors.emplace_back("belt references missing parent");

@@ -29,7 +29,7 @@ struct BodyDescription {
     BodyClass body_class = BodyClass::Terrestrial;
     double radius = 1.0;
     double axial_tilt = 0.0;
-    double rotation_period = 1.0;
+    double rotation_period = 1.0; // finite, nonnegative; zero means no spin
     double rotation_phase = 0.0;
     Vec3d orbit_offset{}; // local position at t=0, in the right-handed Y-up frame
     Vec3d orbit_axis{0.0, 1.0, 0.0};
