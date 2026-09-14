@@ -34,8 +34,7 @@ bool Renderer::draw(const FrameInput& input) {
     const auto drawable = gpu::get_drawable_extent(s.device);
     if (!drawable.x || !drawable.y)
         return false;
-    s.resize({drawable.x, drawable.y});
-    s.resize_galaxy(unsigned(input.sky.galaxy_resolution));
+    s.resize({drawable.x, drawable.y}, unsigned(input.sky.galaxy_resolution));
     const auto swap = gpu::acquire(s.device);
     if (!swap.render_view)
         return false;

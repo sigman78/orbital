@@ -336,6 +336,7 @@ struct Renderer::Impl {
     std::size_t previous_camera_cut = 0;
     bool history_valid = false;
     bool ui_overflow_logged = false;
+    bool ui_font_uploaded = false;
     bool belt_disc_baked = false;          // the far-belt maps hold data (baked once the far tier is first needed)
     gpu::SwapchainInfo logged_swapchain{}; // last presentation mode and image count reported to the log
 
@@ -351,7 +352,7 @@ struct Renderer::Impl {
     void create_device(void* window);
     void create_samplers();
     void create_fixed_targets();
-    void resize(Extent2D new_extent);
+    void resize(Extent2D new_extent, unsigned galaxy_divisor);
     void resize_galaxy(unsigned divisor);
     unsigned galaxy_divisor = 4;
     void destroy(GpuImage& image);

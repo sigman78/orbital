@@ -29,6 +29,26 @@ int main() {
     const auto hash = texture_hash(*png);
     const auto mips = load_material(source, desc);
     const auto rgba = texture_from_images(mips);
+    assert(valid_texture(rgba));
+    auto malformed = rgba;
+    malformed.mips.front().bytes.pop_back();
+    assert(!valid_texture(malformed) && write_texture_cache(malformed, desc, hash).empty());
+    malformed = rgba;
+    malformed.mips[1].extent.width++;
+    assert(!valid_texture(malformed) && write_texture_cache(malformed, desc, hash).empty());
+    malformed = rgba;
+    malformed.format = TextureFormat(99);
+    assert(!valid_texture(malformed) && write_texture_cache(malformed, desc, hash).empty());
+    malformed = rgba;
+    malformed.block_x = 5;
+    assert(!valid_texture(malformed) && write_texture_cache(malformed, desc, hash).empty());
+    malformed = rgba;
+    malformed.mips.push_back(malformed.mips.back());
+    assert(!valid_texture(malformed));
+    auto partial = rgba;
+    partial.mips.resize(1);
+    assert(valid_texture(partial)); // valid upload, incomplete serialized cache
+    assert(write_texture_cache(partial, desc, hash).empty());
     // Synthetic block payload exercises cache parsing independently of the optional encoder.
     TextureData encoded{.format = TextureFormat::ASTC, .mips = {}};
     for (const auto& mip : mips)

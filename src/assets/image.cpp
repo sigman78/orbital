@@ -134,6 +134,7 @@ bool save_png(const std::filesystem::path& path, Extent2D extent, unsigned chann
         const auto* bytes = static_cast<const std::uint8_t*>(data);
         out->insert(out->end(), bytes, bytes + size);
     };
+    ORBITAL_ASSERT(std::uint64_t(extent.width) * channels <= INT_MAX && extent.height <= INT_MAX);
     const int stride = static_cast<int>(extent.width * channels);
     if (!stbi_write_png_to_func(append, &encoded, static_cast<int>(extent.width), static_cast<int>(extent.height),
                                 static_cast<int>(channels), pixels.data(), stride)) {

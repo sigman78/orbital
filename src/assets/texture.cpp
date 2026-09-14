@@ -1,6 +1,7 @@
 #include "assets/texture.hpp"
 #include "core/file.hpp"
 #include "core/log.hpp"
+#include "core/panic.hpp"
 #include <algorithm>
 #include <limits>
 
@@ -25,9 +26,34 @@ std::uint64_t mip_size(Extent2D e, TextureFormat format, unsigned bx = 4, unsign
 
 TextureData texture_from_images(MipChain images) {
     TextureData result;
-    for (auto& image : images)
+    result.mips.reserve(images.size());
+    for (auto& image : images) {
+        ORBITAL_ASSERT(image.valid());
         result.mips.push_back({image.extent, std::move(image.pixels)});
+    }
     return result;
+}
+
+bool valid_texture(const TextureData& texture) {
+    if (texture.mips.empty() || (texture.format != TextureFormat::RGBA8 && texture.format != TextureFormat::BC7 &&
+                                 texture.format != TextureFormat::ASTC))
+        return false;
+    const unsigned block = texture.block_x;
+    if (block != texture.block_y || (block != 4 && block != 6 && block != 8 && block != 12) ||
+        (texture.format == TextureFormat::BC7 && block != 4))
+        return false;
+    Extent2D expected = texture.mips.front().extent;
+    if (expected.empty() || expected.width > 16384 || expected.height > 16384)
+        return false;
+    for (std::size_t level = 0; level < texture.mips.size(); ++level) {
+        const auto& mip = texture.mips[level];
+        if (mip.extent != expected || mip.bytes.size() != mip_size(expected, texture.format, block, block))
+            return false;
+        if (expected.width == 1 && expected.height == 1 && level + 1 != texture.mips.size())
+            return false;
+        expected = {std::max(1u, expected.width / 2), std::max(1u, expected.height / 2)};
+    }
+    return true;
 }
 std::uint64_t texture_hash(ByteView bytes) {
     std::uint64_t hash = 14695981039346656037ull;
@@ -100,7 +126,7 @@ std::optional<TextureData> read_texture_cache(ByteView b, const MaterialDesc& de
 }
 
 Bytes write_texture_cache(const TextureData& texture, const MaterialDesc& desc, std::uint64_t source_hash) {
-    if (texture.mips.empty())
+    if (!valid_texture(texture) || texture.mips.back().extent.width != 1 || texture.mips.back().extent.height != 1)
         return {};
     Bytes result(header_size);
     const auto base = texture.mips.front().extent;

@@ -9,6 +9,15 @@
 
 int main() {
     using namespace space::assets;
+    assert(!Image{}.valid());
+    Image malformed{{4, 4}, {}};
+    assert(!malformed.valid());
+    malformed.pixels.resize(4 * 4 * 3);
+    assert(!malformed.valid());
+    malformed.pixels.resize(4 * 4 * 4);
+    assert(malformed.valid());
+    malformed.pixels.push_back(0);
+    assert(!malformed.valid());
     const std::uint32_t width = 7, height = 5;
     const space::Extent2D extent{width, height};
     space::Bytes rgba(width * height * 4);

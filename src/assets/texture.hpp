@@ -21,6 +21,10 @@ struct TextureSupport {
     std::array<bool, 13> astc_blocks{};
 };
 
+// Validates format, dimensions and payload lengths. A valid chain may stop
+// before 1x1 (fonts and lookup tables); cache serialization requires all mips.
+bool valid_texture(const TextureData& texture);
+
 TextureData texture_from_images(MipChain images);
 std::uint64_t texture_hash(ByteView bytes);
 std::uint32_t material_flags(const MaterialDesc& desc);
@@ -29,6 +33,7 @@ std::filesystem::path texture_cache_path(const std::filesystem::path& source, Te
 // Strictly validates our complete 2D texture cache, including source identity and payload checksum.
 std::optional<TextureData> read_texture_cache(ByteView bytes, const MaterialDesc& desc,
                                               std::optional<std::uint64_t> source_hash);
+// Empty result for invalid data or an incomplete chain.
 Bytes write_texture_cache(const TextureData& texture, const MaterialDesc& desc, std::uint64_t source_hash);
 std::optional<TextureData> load_texture_cache(const std::filesystem::path& source, const MaterialDesc& desc,
                                               const TextureSupport& support = {});

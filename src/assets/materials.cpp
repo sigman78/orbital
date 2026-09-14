@@ -12,6 +12,7 @@ MipChain load_material(const std::filesystem::path& path, const MaterialDesc& de
 }
 
 MipChain prepare_material(Image base, const MaterialDesc& desc) {
+    ORBITAL_ASSERT(base.valid());
     ORBITAL_ASSERT(!(desc.normal_map && desc.luminance_to_alpha));
     if (desc.luminance_to_alpha)
         kernels::luminance_to_alpha(base.pixels.data(), base.pixel_count());

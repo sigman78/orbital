@@ -15,6 +15,7 @@ struct Image {
 
     std::size_t pixel_count() const { return static_cast<std::size_t>(extent.width) * extent.height; }
     ByteView bytes() const { return pixels; }
+    bool valid() const { return !extent.empty() && pixels.size() % 4 == 0 && pixel_count() == pixels.size() / 4; }
 };
 
 // Base level first, each level half the previous, down to 1x1.

@@ -24,9 +24,10 @@ Renderer::Impl::~Impl() {
         gpu::destroy_pso(pipeline);
     for (auto& image : material_images)
         destroy(image);
-    for (auto* image : {&hdr, &depth, &sun_visibility, &bloom_a, &bloom_b, &final_image, &ldr, &shadow_map, &luminance,
-                        &history[0], &history[1], &belt_light, &belt_light_blur, &splat_mask, &smaa_edges,
-                        &smaa_weights, &belt_dust, &belt_disc_light, &belt_disc_rocks})
+    for (auto* image : {&hdr,          &depth,      &sun_visibility,  &bloom_a,         &bloom_b,
+                        &final_image,  &ldr,        &shadow_map,      &luminance,       &history[0],
+                        &history[1],   &belt_light, &belt_light_blur, &splat_mask,      &smaa_edges,
+                        &smaa_weights, &belt_dust,  &belt_disc_light, &belt_disc_rocks, &galaxy})
         destroy(*image);
     for (auto* heap : {&data, &texture_descriptors, &sampler_descriptors, &luminance_readback, &timestamps})
         gpu::destroy_gpu_heap(*heap);
@@ -85,7 +86,7 @@ void Renderer::Impl::upload_images(std::span<Upload> uploads) {
     images.reserve(uploads.size());
     std::uint64_t largest = 0;
     for (const auto& upload : uploads) {
-        ORBITAL_ASSERT(!upload.data.mips.empty());
+        ORBITAL_ASSERT(assets::valid_texture(upload.data));
         const auto& base = upload.data.mips.front();
         images.push_back(create_image({.extent = base.extent,
                                        .format = texture_format(upload.data),
@@ -267,9 +268,13 @@ void Renderer::Impl::resize_galaxy(unsigned divisor) {
     bind(Slot::milky_way, galaxy);
 }
 
-void Renderer::Impl::resize(Extent2D new_extent) {
-    if (extent == new_extent)
+void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor) {
+    divisor = std::clamp(divisor, 1u, 4u);
+    if (extent == new_extent) {
+        resize_galaxy(divisor);
         return;
+    }
+    galaxy_divisor = divisor;
     gpu::wait_idle(device);
     log::info("Resizing frame targets {}x{} -> {}x{}", extent.width, extent.height, new_extent.width,
               new_extent.height);
