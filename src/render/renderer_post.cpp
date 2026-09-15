@@ -26,6 +26,14 @@ void Renderer::Impl::apply_metering(const ToneSettings& tone) {
         exposure_target = settle_target(exposure_target, reading.target, tone.adapt_deadzone);
         stats.exposure.target = reading.target;
         stats.exposure.limited = reading.limited;
+        static_assert(ExposureStats::histogram_bins == ORBITAL_METER_BINS);
+        stats.exposure.stops_min = float(ORBITAL_METER_LOG_MIN);
+        stats.exposure.stops_range = float(ORBITAL_METER_LOG_RANGE);
+        float total = 0;
+        for (const auto weight : histogram->bins)
+            total += float(weight);
+        for (unsigned bin = 0; bin < ORBITAL_METER_BINS; bin++)
+            stats.exposure.histogram[bin] = total > 0 ? float(histogram->bins[bin]) / total : 0.f;
         meter_pending = false;
     }
     // The meter sets the target every few frames; the filter runs toward it every

@@ -20,6 +20,11 @@ struct ExposureStats {
     float luminance = 0, peak_luminance = 0;
     float target = 1, adapted = 1, applied = 1;
     bool ready = false, has_samples = false, limited = false, automatic = false;
+    // The meter's last histogram: each bin's share of the weight, over log2 luminance
+    // from stops_min across stops_range, for the panel's plot.
+    static constexpr unsigned histogram_bins = 64;
+    float histogram[histogram_bins] = {};
+    float stops_min = -14.f, stops_range = 20.f;
 };
 
 struct Stats {

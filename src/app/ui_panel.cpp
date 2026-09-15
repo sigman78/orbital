@@ -344,17 +344,37 @@ void tone_controls(render::ToneSettings& settings, const render::Stats& stats, c
         else
             ImGui::TextDisabled("HDR luminance: below metering threshold");
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Center-weighted geometric mean before exposure and bloom.\nVery dark samples do not "
-                              "contribute; this is scene-linear luminance, not nits.");
+            ImGui::SetTooltip("Centre-weighted mean of the histogram below its 99.5th percentile, plus the "
+                              "highlight share,\nbefore exposure and bloom; scene-linear luminance, not nits.");
         ImGui::Text("HDR peak (sampled): %.4g", exposure.peak_luminance);
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip(
-                "Brightest averaged cell in the 16 x 16 meter.\nThis is not the brightest full-resolution pixel.");
+            ImGui::SetTooltip("Brightest tap of the meter's four pixel grid, not the brightest full-resolution pixel.");
         ImGui::Text("Adaptation: %.3f x -> %.3f x%s", exposure.adapted, exposure.target,
                     exposure.limited ? " (limited)" : "");
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Current automatic multiplier -> clamped target.\nMeter updates every 16 frames; "
-                              "adaptation follows over time.");
+            ImGui::SetTooltip("Current automatic multiplier -> clamped target.\nThe histogram completes every 16 "
+                              "frames; adaptation follows over time.");
+        // The meter's histogram over log2 luminance, with the metered value and the key marked.
+        float peak_share = 0;
+        for (const float share : exposure.histogram)
+            peak_share = std::max(peak_share, share);
+        const float width = ImGui::GetContentRegionAvail().x;
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        ImGui::PlotHistogram("##meter", exposure.histogram, int(render::ExposureStats::histogram_bins), 0, nullptr, 0.f,
+                             std::max(peak_share, 1e-6f), ImVec2(width, 52));
+        const auto stop_x = [&](float luminance) {
+            const float stops = (std::log2(std::max(luminance, 1e-9f)) - exposure.stops_min) / exposure.stops_range;
+            return origin.x + std::clamp(stops, 0.f, 1.f) * width;
+        };
+        auto* draw = ImGui::GetWindowDrawList();
+        draw->AddLine({stop_x(exposure.luminance), origin.y}, {stop_x(exposure.luminance), origin.y + 52},
+                      IM_COL32(255, 255, 255, 200), 1.5f);
+        draw->AddLine({stop_x(settings.meter_key), origin.y}, {stop_x(settings.meter_key), origin.y + 52},
+                      IM_COL32(240, 200, 60, 200), 1.5f);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Share of the meter's taps per bin over %.0f stops from 2^%.0f.\nWhite: the metered "
+                              "luminance.\nYellow: the meter key, which the adaptation maps to 1x.",
+                              exposure.stops_range, exposure.stops_min);
     }
     if (!exposure.automatic)
         ImGui::TextDisabled("Auto adjustment bypassed");
