@@ -49,7 +49,7 @@ def command_output(command, cwd=ROOT):
     return subprocess.check_output(command, cwd=cwd, text=True).strip()
 
 
-def summarize(rows, warmup, metrics):
+def summarize(rows, warmup, metrics=METRICS):
     rows = rows[warmup:]
     if len(rows) < 100:
         raise ValueError('At least 100 measured frames required after warmup')
