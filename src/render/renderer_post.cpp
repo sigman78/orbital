@@ -1,3 +1,4 @@
+#include "render/frame_calculations.hpp"
 #include "render/renderer_impl.hpp"
 
 #include <algorithm>
@@ -16,29 +17,16 @@ inline constexpr float max_step_seconds = 1.f;                         // a stal
 
 void Renderer::Impl::apply_metering(const ToneSettings& tone) {
     if (meter_pending) {
-        // Each meter texel holds its cell's mean luminance (with the sun's glare), the
-        // brightest tap and its centre weight. The metered value is the weighted mean
-        // of the cells plus a share of the brightest cell, so a bright source in frame
-        // pulls the exposure down the way a bright sky does for the eye.
+        // The meter's readback: four floats per cell, read by meter_exposure (frame_calculations).
         const auto* values = reinterpret_cast<const float*>(buffers.luminance_readback.range().cpu);
-        float mean_sum = 0, weight_sum = 0, brightest_cell = 0;
-        stats.exposure.peak_luminance = 0;
-        for (unsigned i = 0; i < targets::meter_size * targets::meter_size; i++) {
-            stats.exposure.peak_luminance = std::max(stats.exposure.peak_luminance, values[i * 4 + 1]);
-            brightest_cell = std::max(brightest_cell, values[i * 4]);
-            mean_sum += values[i * 4] * values[i * 4 + 2];
-            weight_sum += values[i * 4 + 2];
-        }
+        const auto reading = meter_exposure({values, std::size_t(targets::meter_size) * targets::meter_size * 4}, tone);
         stats.exposure.ready = true;
-        stats.exposure.has_samples = weight_sum > 0;
-        stats.exposure.luminance = (weight_sum > 0 ? mean_sum / weight_sum : 0) + tone.highlight_bias * brightest_cell;
-        // The strength damps the change in stops, so half strength halves every excursion.
-        const float requested = stats.exposure.luminance > 0
-                                    ? std::pow(tone.meter_key / stats.exposure.luminance, tone.adapt_strength)
-                                    : 1.f;
-        exposure_target = std::clamp(requested, tone.adapt_min, std::max(tone.adapt_min, tone.adapt_max));
-        stats.exposure.target = exposure_target;
-        stats.exposure.limited = requested != exposure_target;
+        stats.exposure.has_samples = reading.has_samples;
+        stats.exposure.luminance = reading.luminance;
+        stats.exposure.peak_luminance = reading.peak;
+        exposure_target = reading.target;
+        stats.exposure.target = reading.target;
+        stats.exposure.limited = reading.limited;
         meter_pending = false;
     }
     // The meter sets the target every few frames; the filter runs toward it every

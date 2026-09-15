@@ -1,7 +1,9 @@
 #include "render/frame_calculations.hpp"
 #include "scene/system.hpp"
+#include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <vector>
 
 using namespace space;
 using namespace space::render;
@@ -76,4 +78,31 @@ int main() {
     assert(prepare_body_light({1, 0, 0}, {0, 0, 50}, {20, 0, 0}, sun).half_x == 70);
     assert(prepare_body_light({1, 0, 0}, {0, 0, 200}, {20, 0, 0}, sun).half_x == 12);
     assert(prepare_body_light({20, 0, 0}, {0, 0, 200}, {1, 0, 0}, sun).half_x == 10);
+
+    // The exposure meter: 256 cells of mean, peak, weight, unused.
+    ToneSettings tone; // key .09, highlight bias .1, strength 1, range .25 to 8
+    std::vector<float> cells(256 * 4, 0.f);
+    const auto fill = [&](float mean, float peak) {
+        for (std::size_t i = 0; i < 256; i++)
+            cells[i * 4] = mean, cells[i * 4 + 1] = peak, cells[i * 4 + 2] = 1.f;
+    };
+    fill(.09f, .2f); // the Earth bookmark's level maps to 1x, the highlight share aside
+    auto reading = meter_exposure(cells, tone);
+    assert(reading.has_samples && std::abs(reading.luminance - (.09f + .1f * .09f)) < 1e-6f);
+    assert(std::abs(reading.requested - .09f / .099f) < 1e-5f && !reading.limited && reading.peak == .2f);
+    fill(.003f, .01f); // sky only: far above the ceiling, clamped and flagged
+    reading = meter_exposure(cells, tone);
+    assert(reading.requested > 8.f && reading.target == 8.f && reading.limited);
+    fill(.01f, .01f); // one bright cell pulls the exposure down through the highlight bias
+    cells[7 * 4] = 2.f;
+    reading = meter_exposure(cells, tone);
+    assert(std::abs(reading.luminance - (.01f + 1.99f / 256.f + .1f * 2.f)) < 1e-5f && reading.target < .5f);
+    tone.adapt_strength = .5f; // half strength halves the excursion in stops
+    const auto damped = meter_exposure(cells, tone);
+    assert(std::abs(damped.requested - std::sqrt(reading.requested)) < 1e-5f);
+    tone.adapt_strength = 0.f;
+    assert(meter_exposure(cells, tone).requested == 1.f);
+    std::fill(cells.begin(), cells.end(), 0.f); // no weight at all: no samples, 1x
+    reading = meter_exposure(cells, tone);
+    assert(!reading.has_samples && reading.requested == 1.f);
 }

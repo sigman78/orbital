@@ -1,6 +1,7 @@
 #pragma once
 #include "core/extent.hpp"
 #include "render/camera_view.hpp"
+#include "render/settings.hpp"
 #include <span>
 
 namespace space {
@@ -55,5 +56,17 @@ struct ScreenSun {
 };
 ScreenSun project_sun(const CameraView& camera, Vec3d sun, std::span<const BodyState> bodies, float tan_half_fov,
                       float aspect);
+
+// The exposure meter's reading from its readback: four floats per cell (the cell's
+// mean luminance with the sun's glare, its brightest tap, its centre weight, unused).
+// The metered luminance is the weighted mean of the cells plus the highlight bias
+// share of the brightest cell; the request maps the key to 1x, damped in stops by
+// the strength and held within the adaptation range.
+struct MeterReading {
+    float luminance = 0, peak = 0;   // metered luminance and the brightest tap anywhere
+    float requested = 1, target = 1; // before and after the range clamp
+    bool has_samples = false, limited = false;
+};
+MeterReading meter_exposure(std::span<const float> cells, const ToneSettings& tone);
 
 } // namespace space::render

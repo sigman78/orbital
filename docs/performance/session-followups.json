@@ -1,0 +1,2075 @@
+{
+  "suite_version": 1,
+  "label": "session-followups",
+  "recorded_utc": "2026-09-15T03:13:28.233974+00:00",
+  "revision": "0db771e205c37a2b53ce4705337e6439ea064d4e",
+  "source_dirty": false,
+  "source_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "executable_sha256": "e88dfcb10a72f99c18ca577a9279a3a6c17e1e339f2caeb621da9fef4c715496",
+  "shaders_sha256": "95894cb41176e2ee5cf60e802f1e139dca9657a8b53bb6c178d4b3a74e90a5de",
+  "assets_sha256": "182dcf1d7597972af5cb91266975818d08b83332d8647bf88b8a5dff33a3c694",
+  "machine": {
+    "os": "Windows-10-10.0.19045-SP0",
+    "cpu": "Intel64 Family 6 Model 158 Stepping 12, GenuineIntel",
+    "gpu": "NVIDIA GeForce GTX 1080 Ti | conventional NoGraphicsAPI backend",
+    "driver_info": "NVIDIA GeForce GTX 1080 Ti, 582.66"
+  },
+  "protocol": {
+    "settings": [
+      "--seed",
+      "20260911",
+      "--time",
+      "0",
+      "--taa",
+      "1",
+      "--spatial",
+      "2",
+      "--dust",
+      "1",
+      "--disc",
+      "1",
+      "--lod-scale",
+      "1",
+      "--splat",
+      "2",
+      "--tone",
+      "2",
+      "--galaxy",
+      "0",
+      "--exposure",
+      "1",
+      "--vsync",
+      "0",
+      "--no-hud"
+    ],
+    "scenes": {
+      "earth": [
+        "--bookmark",
+        "0"
+      ],
+      "giant": [
+        "--bookmark",
+        "1"
+      ],
+      "moon": [
+        "--bookmark",
+        "2"
+      ],
+      "mars": [
+        "--bookmark",
+        "3"
+      ],
+      "dawn": [
+        "--bookmark",
+        "4"
+      ],
+      "belt": [
+        "--bookmark",
+        "5"
+      ],
+      "belt-sun": [
+        "--belt-sun-view"
+      ]
+    },
+    "quality": "default (no --high)",
+    "window": [
+      1600,
+      900
+    ],
+    "frames": 360,
+    "warmup": 120,
+    "repeats": 3,
+    "fullscreen_at": 30
+  },
+  "cases": {
+    "earth/window": {
+      "resolution": [
+        1600,
+        900
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 4.8586,
+          "p95": 5.4225,
+          "run_min": 4.505850000000001,
+          "run_max": 4.87635
+        },
+        "gpu_ms": {
+          "median": 4.2122399999999995,
+          "p95": 4.625312,
+          "run_min": 3.8123199999999997,
+          "run_max": 4.277232
+        },
+        "cpu_prepare_ms": {
+          "median": 0.28259999999999996,
+          "p95": 0.3633,
+          "run_min": 0.26545,
+          "run_max": 0.28859999999999997
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.555312,
+          "p95": 0.66976,
+          "run_min": 0.551984,
+          "run_max": 0.556944
+        },
+        "gpu_surface_ms": {
+          "median": 1.488896,
+          "p95": 2.045952,
+          "run_min": 1.366016,
+          "run_max": 1.49555195
+        },
+        "gpu_atmosphere_ms": {
+          "median": 1.254912,
+          "p95": 1.625088,
+          "run_min": 1.089024,
+          "run_max": 1.285632
+        },
+        "gpu_post_ms": {
+          "median": 0.60928,
+          "p95": 1.055744,
+          "run_min": 0.602112,
+          "run_max": 0.611328
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 4.505850000000001,
+            "p95": 5.1684
+          },
+          "gpu_ms": {
+            "median": 3.8123199999999997,
+            "p95": 4.303904
+          },
+          "cpu_prepare_ms": {
+            "median": 0.28859999999999997,
+            "p95": 0.4657
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.551984,
+            "p95": 0.664992
+          },
+          "gpu_surface_ms": {
+            "median": 1.366016,
+            "p95": 1.553408
+          },
+          "gpu_atmosphere_ms": {
+            "median": 1.285632,
+            "p95": 1.512448
+          },
+          "gpu_post_ms": {
+            "median": 0.602112,
+            "p95": 0.796672
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 4.8586,
+            "p95": 5.4311
+          },
+          "gpu_ms": {
+            "median": 4.277232,
+            "p95": 4.736736
+          },
+          "cpu_prepare_ms": {
+            "median": 0.26545,
+            "p95": 0.3293
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.555312,
+            "p95": 0.670144
+          },
+          "gpu_surface_ms": {
+            "median": 1.488896,
+            "p95": 2.055168
+          },
+          "gpu_atmosphere_ms": {
+            "median": 1.254912,
+            "p95": 1.651712
+          },
+          "gpu_post_ms": {
+            "median": 0.611328,
+            "p95": 1.055744
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 4.87635,
+            "p95": 5.4225
+          },
+          "gpu_ms": {
+            "median": 4.2122399999999995,
+            "p95": 4.625312
+          },
+          "cpu_prepare_ms": {
+            "median": 0.28259999999999996,
+            "p95": 0.3633
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.556944,
+            "p95": 0.66976
+          },
+          "gpu_surface_ms": {
+            "median": 1.49555195,
+            "p95": 2.045952
+          },
+          "gpu_atmosphere_ms": {
+            "median": 1.089024,
+            "p95": 1.625088
+          },
+          "gpu_post_ms": {
+            "median": 0.60928,
+            "p95": 1.067008
+          }
+        }
+      ]
+    },
+    "earth/fullscreen": {
+      "resolution": [
+        3440,
+        1440
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 11.528749999999999,
+          "p95": 15.581,
+          "run_min": 10.74745,
+          "run_max": 11.552
+        },
+        "gpu_ms": {
+          "median": 10.704384000000001,
+          "p95": 14.756064,
+          "run_min": 9.9276,
+          "run_max": 10.789408
+        },
+        "cpu_prepare_ms": {
+          "median": 0.31625000000000003,
+          "p95": 0.4445,
+          "run_min": 0.3053,
+          "run_max": 0.3536
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.5632,
+          "p95": 0.675648,
+          "run_min": 0.5568,
+          "run_max": 0.565584
+        },
+        "gpu_surface_ms": {
+          "median": 3.9808,
+          "p95": 4.890624,
+          "run_min": 3.762176,
+          "run_max": 4.094976
+        },
+        "gpu_atmosphere_ms": {
+          "median": 3.8318079999999997,
+          "p95": 7.135232,
+          "run_min": 3.574272,
+          "run_max": 3.931648
+        },
+        "gpu_post_ms": {
+          "median": 2.082816,
+          "p95": 2.891776,
+          "run_min": 2.058752,
+          "run_max": 2.205184
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 10.74745,
+            "p95": 14.3236
+          },
+          "gpu_ms": {
+            "median": 9.9276,
+            "p95": 13.5299835
+          },
+          "cpu_prepare_ms": {
+            "median": 0.31625000000000003,
+            "p95": 0.4445
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.5568,
+            "p95": 0.6696
+          },
+          "gpu_surface_ms": {
+            "median": 3.762176,
+            "p95": 4.324352
+          },
+          "gpu_atmosphere_ms": {
+            "median": 3.574272,
+            "p95": 6.5433598
+          },
+          "gpu_post_ms": {
+            "median": 2.205184,
+            "p95": 2.615296
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 11.528749999999999,
+            "p95": 15.581
+          },
+          "gpu_ms": {
+            "median": 10.789408,
+            "p95": 14.756064
+          },
+          "cpu_prepare_ms": {
+            "median": 0.3053,
+            "p95": 0.3922
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.5632,
+            "p95": 0.675648
+          },
+          "gpu_surface_ms": {
+            "median": 4.094976,
+            "p95": 5.31968
+          },
+          "gpu_atmosphere_ms": {
+            "median": 3.931648,
+            "p95": 7.135232
+          },
+          "gpu_post_ms": {
+            "median": 2.058752,
+            "p95": 2.891776
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 11.552,
+            "p95": 16.4625
+          },
+          "gpu_ms": {
+            "median": 10.704384000000001,
+            "p95": 14.850208
+          },
+          "cpu_prepare_ms": {
+            "median": 0.3536,
+            "p95": 0.5373
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.565584,
+            "p95": 0.68096
+          },
+          "gpu_surface_ms": {
+            "median": 3.9808,
+            "p95": 4.890624
+          },
+          "gpu_atmosphere_ms": {
+            "median": 3.8318079999999997,
+            "p95": 7.3267198
+          },
+          "gpu_post_ms": {
+            "median": 2.082816,
+            "p95": 3.136512
+          }
+        }
+      ]
+    },
+    "giant/window": {
+      "resolution": [
+        1600,
+        900
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 5.88425,
+          "p95": 6.6044,
+          "run_min": 5.67055,
+          "run_max": 5.98555
+        },
+        "gpu_ms": {
+          "median": 5.212928,
+          "p95": 5.599456,
+          "run_min": 5.0722559,
+          "run_max": 5.364224
+        },
+        "cpu_prepare_ms": {
+          "median": 0.28300000000000003,
+          "p95": 0.4091,
+          "run_min": 0.2675,
+          "run_max": 0.30895
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.600848,
+          "p95": 0.713824,
+          "run_min": 0.59904,
+          "run_max": 0.605168
+        },
+        "gpu_surface_ms": {
+          "median": 1.6256,
+          "p95": 2.071552,
+          "run_min": 1.381376,
+          "run_max": 2.019328
+        },
+        "gpu_atmosphere_ms": {
+          "median": 2.09408,
+          "p95": 2.405376,
+          "run_min": 2.0864000000000003,
+          "run_max": 2.098176
+        },
+        "gpu_post_ms": {
+          "median": 0.600064,
+          "p95": 0.991232,
+          "run_min": 0.596992,
+          "run_max": 0.741376
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 5.67055,
+            "p95": 6.2139
+          },
+          "gpu_ms": {
+            "median": 5.0722559,
+            "p95": 5.393952
+          },
+          "cpu_prepare_ms": {
+            "median": 0.2675,
+            "p95": 0.4091
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.59904,
+            "p95": 0.711712
+          },
+          "gpu_surface_ms": {
+            "median": 1.381376,
+            "p95": 1.952768
+          },
+          "gpu_atmosphere_ms": {
+            "median": 2.0864000000000003,
+            "p95": 2.308096
+          },
+          "gpu_post_ms": {
+            "median": 0.741376,
+            "p95": 0.991232
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 5.88425,
+            "p95": 6.6044
+          },
+          "gpu_ms": {
+            "median": 5.212928,
+            "p95": 5.599456
+          },
+          "cpu_prepare_ms": {
+            "median": 0.30895,
+            "p95": 0.5139
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.600848,
+            "p95": 0.713824
+          },
+          "gpu_surface_ms": {
+            "median": 1.6256,
+            "p95": 2.071552
+          },
+          "gpu_atmosphere_ms": {
+            "median": 2.09408,
+            "p95": 2.4258559
+          },
+          "gpu_post_ms": {
+            "median": 0.596992,
+            "p95": 0.968704
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 5.98555,
+            "p95": 6.6556
+          },
+          "gpu_ms": {
+            "median": 5.364224,
+            "p95": 5.828608
+          },
+          "cpu_prepare_ms": {
+            "median": 0.28300000000000003,
+            "p95": 0.3812
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.605168,
+            "p95": 0.717824
+          },
+          "gpu_surface_ms": {
+            "median": 2.019328,
+            "p95": 2.388992
+          },
+          "gpu_atmosphere_ms": {
+            "median": 2.098176,
+            "p95": 2.405376
+          },
+          "gpu_post_ms": {
+            "median": 0.600064,
+            "p95": 1.050624
+          }
+        }
+      ]
+    },
+    "giant/fullscreen": {
+      "resolution": [
+        3440,
+        1440
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 14.87665,
+          "p95": 20.2963,
+          "run_min": 14.74045,
+          "run_max": 15.07225
+        },
+        "gpu_ms": {
+          "median": 14.048255999999999,
+          "p95": 19.5416,
+          "run_min": 13.888255999999998,
+          "run_max": 14.226208
+        },
+        "cpu_prepare_ms": {
+          "median": 0.33485,
+          "p95": 0.5587,
+          "run_min": 0.31984999999999997,
+          "run_max": 0.37034999999999996
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.617056,
+          "p95": 0.729696,
+          "run_min": 0.6135999999999999,
+          "run_max": 0.620544
+        },
+        "gpu_surface_ms": {
+          "median": 3.6966400000000004,
+          "p95": 7.272448,
+          "run_min": 3.61830395,
+          "run_max": 3.749376
+        },
+        "gpu_atmosphere_ms": {
+          "median": 7.360512,
+          "p95": 9.991168,
+          "run_min": 7.068672,
+          "run_max": 7.368192
+        },
+        "gpu_post_ms": {
+          "median": 2.403328,
+          "p95": 3.125248,
+          "run_min": 2.35776,
+          "run_max": 2.40896
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 14.74045,
+            "p95": 20.2963
+          },
+          "gpu_ms": {
+            "median": 13.888255999999998,
+            "p95": 19.5416
+          },
+          "cpu_prepare_ms": {
+            "median": 0.33485,
+            "p95": 0.5913
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.6135999999999999,
+            "p95": 0.729024
+          },
+          "gpu_surface_ms": {
+            "median": 3.61830395,
+            "p95": 7.272448
+          },
+          "gpu_atmosphere_ms": {
+            "median": 7.068672,
+            "p95": 9.353216
+          },
+          "gpu_post_ms": {
+            "median": 2.35776,
+            "p95": 3.075072
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 14.87665,
+            "p95": 18.0434
+          },
+          "gpu_ms": {
+            "median": 14.048255999999999,
+            "p95": 17.18848
+          },
+          "cpu_prepare_ms": {
+            "median": 0.37034999999999996,
+            "p95": 0.5133
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.617056,
+            "p95": 0.729696
+          },
+          "gpu_surface_ms": {
+            "median": 3.6966400000000004,
+            "p95": 4.685824
+          },
+          "gpu_atmosphere_ms": {
+            "median": 7.360512,
+            "p95": 9.991168
+          },
+          "gpu_post_ms": {
+            "median": 2.40896,
+            "p95": 3.125248
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 15.07225,
+            "p95": 26.553
+          },
+          "gpu_ms": {
+            "median": 14.226208,
+            "p95": 25.880928
+          },
+          "cpu_prepare_ms": {
+            "median": 0.31984999999999997,
+            "p95": 0.5587
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.620544,
+            "p95": 0.733216
+          },
+          "gpu_surface_ms": {
+            "median": 3.749376,
+            "p95": 7.578624
+          },
+          "gpu_atmosphere_ms": {
+            "median": 7.368192,
+            "p95": 10.300416
+          },
+          "gpu_post_ms": {
+            "median": 2.403328,
+            "p95": 3.178496
+          }
+        }
+      ]
+    },
+    "moon/window": {
+      "resolution": [
+        1600,
+        900
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 3.15545,
+          "p95": 3.8086,
+          "run_min": 2.9928,
+          "run_max": 3.1857499999999996
+        },
+        "gpu_ms": {
+          "median": 2.36144,
+          "p95": 3.072288,
+          "run_min": 2.324144,
+          "run_max": 2.364928
+        },
+        "cpu_prepare_ms": {
+          "median": 0.25639999999999996,
+          "p95": 0.337,
+          "run_min": 0.2486,
+          "run_max": 0.2589
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.509248,
+          "p95": 0.622944,
+          "run_min": 0.508192,
+          "run_max": 0.510304
+        },
+        "gpu_surface_ms": {
+          "median": 0.8995839999999999,
+          "p95": 1.414144,
+          "run_min": 0.89856,
+          "run_max": 0.902144
+        },
+        "gpu_atmosphere_ms": {
+          "median": 0.183296,
+          "p95": 0.18432,
+          "run_min": 0.182272,
+          "run_max": 0.183296
+        },
+        "gpu_post_ms": {
+          "median": 0.710144,
+          "p95": 1.073152,
+          "run_min": 0.70656,
+          "run_max": 0.711168
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 2.9928,
+            "p95": 3.6616
+          },
+          "gpu_ms": {
+            "median": 2.364928,
+            "p95": 3.072288
+          },
+          "cpu_prepare_ms": {
+            "median": 0.2589,
+            "p95": 0.3384
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.508192,
+            "p95": 0.6208
+          },
+          "gpu_surface_ms": {
+            "median": 0.8995839999999999,
+            "p95": 1.414144
+          },
+          "gpu_atmosphere_ms": {
+            "median": 0.182272,
+            "p95": 0.18432
+          },
+          "gpu_post_ms": {
+            "median": 0.70656,
+            "p95": 1.052672
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 3.15545,
+            "p95": 3.8086
+          },
+          "gpu_ms": {
+            "median": 2.36144,
+            "p95": 3.0128
+          },
+          "cpu_prepare_ms": {
+            "median": 0.25639999999999996,
+            "p95": 0.3345
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.509248,
+            "p95": 0.622976
+          },
+          "gpu_surface_ms": {
+            "median": 0.902144,
+            "p95": 1.260544
+          },
+          "gpu_atmosphere_ms": {
+            "median": 0.183296,
+            "p95": 0.18432
+          },
+          "gpu_post_ms": {
+            "median": 0.710144,
+            "p95": 1.08544
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 3.1857499999999996,
+            "p95": 3.8574
+          },
+          "gpu_ms": {
+            "median": 2.324144,
+            "p95": 3.196736
+          },
+          "cpu_prepare_ms": {
+            "median": 0.2486,
+            "p95": 0.337
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.510304,
+            "p95": 0.622944
+          },
+          "gpu_surface_ms": {
+            "median": 0.89856,
+            "p95": 1.524736
+          },
+          "gpu_atmosphere_ms": {
+            "median": 0.183296,
+            "p95": 0.18432
+          },
+          "gpu_post_ms": {
+            "median": 0.711168,
+            "p95": 1.073152
+          }
+        }
+      ]
+    },
+    "moon/fullscreen": {
+      "resolution": [
+        3440,
+        1440
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 7.2397,
+          "p95": 8.5174,
+          "run_min": 7.214,
+          "run_max": 7.3846
+        },
+        "gpu_ms": {
+          "median": 6.527216,
+          "p95": 7.438624,
+          "run_min": 6.452096,
+          "run_max": 6.646416
+        },
+        "cpu_prepare_ms": {
+          "median": 0.29995000000000005,
+          "p95": 0.4338,
+          "run_min": 0.29145,
+          "run_max": 0.3268
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.525184,
+          "p95": 0.641984,
+          "run_min": 0.522511985,
+          "run_max": 0.52784
+        },
+        "gpu_surface_ms": {
+          "median": 2.4837119999999997,
+          "p95": 3.232768,
+          "run_min": 2.391552,
+          "run_max": 2.509312
+        },
+        "gpu_atmosphere_ms": {
+          "median": 0.9374720000000001,
+          "p95": 1.721344,
+          "run_min": 0.864256,
+          "run_max": 1.0357759999999998
+        },
+        "gpu_post_ms": {
+          "median": 2.1888,
+          "p95": 2.991104,
+          "run_min": 2.095104,
+          "run_max": 2.19392
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 7.2397,
+            "p95": 8.5174
+          },
+          "gpu_ms": {
+            "median": 6.527216,
+            "p95": 7.438624
+          },
+          "cpu_prepare_ms": {
+            "median": 0.29145,
+            "p95": 0.3928
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.522511985,
+            "p95": 0.638976
+          },
+          "gpu_surface_ms": {
+            "median": 2.4837119999999997,
+            "p95": 3.232768
+          },
+          "gpu_atmosphere_ms": {
+            "median": 1.0357759999999998,
+            "p95": 1.671168
+          },
+          "gpu_post_ms": {
+            "median": 2.1888,
+            "p95": 2.991104
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 7.214,
+            "p95": 8.3322
+          },
+          "gpu_ms": {
+            "median": 6.452096,
+            "p95": 7.136256
+          },
+          "cpu_prepare_ms": {
+            "median": 0.3268,
+            "p95": 0.4609
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.525184,
+            "p95": 0.641984
+          },
+          "gpu_surface_ms": {
+            "median": 2.391552,
+            "p95": 2.92352
+          },
+          "gpu_atmosphere_ms": {
+            "median": 0.864256,
+            "p95": 1.721344
+          },
+          "gpu_post_ms": {
+            "median": 2.095104,
+            "p95": 2.950144
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 7.3846,
+            "p95": 8.5824
+          },
+          "gpu_ms": {
+            "median": 6.646416,
+            "p95": 7.691776
+          },
+          "cpu_prepare_ms": {
+            "median": 0.29995000000000005,
+            "p95": 0.4338
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.52784,
+            "p95": 0.64364797
+          },
+          "gpu_surface_ms": {
+            "median": 2.509312,
+            "p95": 3.367936
+          },
+          "gpu_atmosphere_ms": {
+            "median": 0.9374720000000001,
+            "p95": 1.752064
+          },
+          "gpu_post_ms": {
+            "median": 2.19392,
+            "p95": 3.187712
+          }
+        }
+      ]
+    },
+    "mars/window": {
+      "resolution": [
+        1600,
+        900
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 3.58665,
+          "p95": 4.1437,
+          "run_min": 3.4779999999999998,
+          "run_max": 3.7203999999999997
+        },
+        "gpu_ms": {
+          "median": 2.8541920000000003,
+          "p95": 3.367488,
+          "run_min": 2.8246719999999996,
+          "run_max": 2.89336
+        },
+        "cpu_prepare_ms": {
+          "median": 0.266,
+          "p95": 0.4144,
+          "run_min": 0.26149999999999995,
+          "run_max": 0.2783
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.510368,
+          "p95": 0.623072,
+          "run_min": 0.50864,
+          "run_max": 0.5124
+        },
+        "gpu_surface_ms": {
+          "median": 0.914432,
+          "p95": 1.296384,
+          "run_min": 0.904192,
+          "run_max": 0.914432
+        },
+        "gpu_atmosphere_ms": {
+          "median": 0.623104,
+          "p95": 0.903168,
+          "run_min": 0.61952,
+          "run_max": 0.6251519999999999
+        },
+        "gpu_post_ms": {
+          "median": 0.57344,
+          "p95": 1.020928,
+          "run_min": 0.567296,
+          "run_max": 0.672768
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 3.4779999999999998,
+            "p95": 4.0838
+          },
+          "gpu_ms": {
+            "median": 2.8246719999999996,
+            "p95": 3.346624
+          },
+          "cpu_prepare_ms": {
+            "median": 0.26149999999999995,
+            "p95": 0.369
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.50864,
+            "p95": 0.621216
+          },
+          "gpu_surface_ms": {
+            "median": 0.904192,
+            "p95": 1.241088
+          },
+          "gpu_atmosphere_ms": {
+            "median": 0.61952,
+            "p95": 0.868352
+          },
+          "gpu_post_ms": {
+            "median": 0.672768,
+            "p95": 1.007616
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 3.58665,
+            "p95": 4.1437
+          },
+          "gpu_ms": {
+            "median": 2.8541920000000003,
+            "p95": 3.367488
+          },
+          "cpu_prepare_ms": {
+            "median": 0.266,
+            "p95": 0.4144
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.510368,
+            "p95": 0.623072
+          },
+          "gpu_surface_ms": {
+            "median": 0.914432,
+            "p95": 1.296384
+          },
+          "gpu_atmosphere_ms": {
+            "median": 0.6251519999999999,
+            "p95": 0.903168
+          },
+          "gpu_post_ms": {
+            "median": 0.567296,
+            "p95": 1.020928
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 3.7203999999999997,
+            "p95": 4.5696
+          },
+          "gpu_ms": {
+            "median": 2.89336,
+            "p95": 3.718304
+          },
+          "cpu_prepare_ms": {
+            "median": 0.2783,
+            "p95": 0.4402
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.5124,
+            "p95": 0.625408
+          },
+          "gpu_surface_ms": {
+            "median": 0.914432,
+            "p95": 1.701888
+          },
+          "gpu_atmosphere_ms": {
+            "median": 0.623104,
+            "p95": 1.083392
+          },
+          "gpu_post_ms": {
+            "median": 0.57344,
+            "p95": 1.118208
+          }
+        }
+      ]
+    },
+    "mars/fullscreen": {
+      "resolution": [
+        3440,
+        1440
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 8.26675,
+          "p95": 10.5895,
+          "run_min": 8.2317,
+          "run_max": 8.973600000000001
+        },
+        "gpu_ms": {
+          "median": 7.513984000000001,
+          "p95": 9.873344,
+          "run_min": 7.493856,
+          "run_max": 7.9085119
+        },
+        "cpu_prepare_ms": {
+          "median": 0.3196,
+          "p95": 0.4946,
+          "run_min": 0.312,
+          "run_max": 0.3345
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.551968,
+          "p95": 0.666048,
+          "run_min": 0.548528,
+          "run_max": 0.55296
+        },
+        "gpu_surface_ms": {
+          "median": 2.5011200000000002,
+          "p95": 3.42016,
+          "run_min": 2.4586240000000004,
+          "run_max": 2.659328
+        },
+        "gpu_atmosphere_ms": {
+          "median": 2.223104,
+          "p95": 3.260416,
+          "run_min": 2.07104,
+          "run_max": 2.272256
+        },
+        "gpu_post_ms": {
+          "median": 1.979392,
+          "p95": 2.968576,
+          "run_min": 1.973248,
+          "run_max": 2.010112
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 8.2317,
+            "p95": 9.5297
+          },
+          "gpu_ms": {
+            "median": 7.493856,
+            "p95": 8.572832
+          },
+          "cpu_prepare_ms": {
+            "median": 0.3345,
+            "p95": 0.4636
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.548528,
+            "p95": 0.661824
+          },
+          "gpu_surface_ms": {
+            "median": 2.5011200000000002,
+            "p95": 3.084288
+          },
+          "gpu_atmosphere_ms": {
+            "median": 2.223104,
+            "p95": 2.873344
+          },
+          "gpu_post_ms": {
+            "median": 1.973248,
+            "p95": 2.859008
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 8.26675,
+            "p95": 10.5895
+          },
+          "gpu_ms": {
+            "median": 7.513984000000001,
+            "p95": 9.873344
+          },
+          "cpu_prepare_ms": {
+            "median": 0.312,
+            "p95": 0.4946
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.551968,
+            "p95": 0.66656
+          },
+          "gpu_surface_ms": {
+            "median": 2.4586240000000004,
+            "p95": 3.42016
+          },
+          "gpu_atmosphere_ms": {
+            "median": 2.07104,
+            "p95": 3.260416
+          },
+          "gpu_post_ms": {
+            "median": 1.979392,
+            "p95": 2.968576
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 8.973600000000001,
+            "p95": 11.4024
+          },
+          "gpu_ms": {
+            "median": 7.9085119,
+            "p95": 10.697056
+          },
+          "cpu_prepare_ms": {
+            "median": 0.3196,
+            "p95": 0.495
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.55296,
+            "p95": 0.666048
+          },
+          "gpu_surface_ms": {
+            "median": 2.659328,
+            "p95": 3.639296
+          },
+          "gpu_atmosphere_ms": {
+            "median": 2.272256,
+            "p95": 3.987456
+          },
+          "gpu_post_ms": {
+            "median": 2.010112,
+            "p95": 3.264512
+          }
+        }
+      ]
+    },
+    "dawn/window": {
+      "resolution": [
+        1600,
+        900
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 4.7979,
+          "p95": 5.3188,
+          "run_min": 4.7265,
+          "run_max": 4.8112
+        },
+        "gpu_ms": {
+          "median": 4.174208,
+          "p95": 4.55456,
+          "run_min": 4.0708,
+          "run_max": 4.181312
+        },
+        "cpu_prepare_ms": {
+          "median": 0.26944999999999997,
+          "p95": 0.3568,
+          "run_min": 0.2643,
+          "run_max": 0.27155
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.507328,
+          "p95": 0.621824,
+          "run_min": 0.505072,
+          "run_max": 0.507568
+        },
+        "gpu_surface_ms": {
+          "median": 1.498624,
+          "p95": 2.167808,
+          "run_min": 1.492992,
+          "run_max": 1.50016
+        },
+        "gpu_atmosphere_ms": {
+          "median": 0.980992,
+          "p95": 1.477632,
+          "run_min": 0.971776,
+          "run_max": 1.07776
+        },
+        "gpu_post_ms": {
+          "median": 0.644096,
+          "p95": 1.117184,
+          "run_min": 0.643072,
+          "run_max": 0.649216
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 4.7979,
+            "p95": 5.3188
+          },
+          "gpu_ms": {
+            "median": 4.174208,
+            "p95": 4.55456
+          },
+          "cpu_prepare_ms": {
+            "median": 0.27155,
+            "p95": 0.3568
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.505072,
+            "p95": 0.61808
+          },
+          "gpu_surface_ms": {
+            "median": 1.492992,
+            "p95": 2.167808
+          },
+          "gpu_atmosphere_ms": {
+            "median": 1.07776,
+            "p95": 1.574912
+          },
+          "gpu_post_ms": {
+            "median": 0.643072,
+            "p95": 1.123328
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 4.7265,
+            "p95": 5.3044
+          },
+          "gpu_ms": {
+            "median": 4.0708,
+            "p95": 4.503328
+          },
+          "cpu_prepare_ms": {
+            "median": 0.2643,
+            "p95": 0.4013
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.507328,
+            "p95": 0.622848
+          },
+          "gpu_surface_ms": {
+            "median": 1.50016,
+            "p95": 2.157568
+          },
+          "gpu_atmosphere_ms": {
+            "median": 0.971776,
+            "p95": 1.434624
+          },
+          "gpu_post_ms": {
+            "median": 0.644096,
+            "p95": 1.086464
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 4.8112,
+            "p95": 5.4952
+          },
+          "gpu_ms": {
+            "median": 4.181312,
+            "p95": 4.788224
+          },
+          "cpu_prepare_ms": {
+            "median": 0.26944999999999997,
+            "p95": 0.3472
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.507568,
+            "p95": 0.621824
+          },
+          "gpu_surface_ms": {
+            "median": 1.498624,
+            "p95": 2.276352
+          },
+          "gpu_atmosphere_ms": {
+            "median": 0.980992,
+            "p95": 1.477632
+          },
+          "gpu_post_ms": {
+            "median": 0.649216,
+            "p95": 1.117184
+          }
+        }
+      ]
+    },
+    "dawn/fullscreen": {
+      "resolution": [
+        3440,
+        1440
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 11.004999999999999,
+          "p95": 14.4268,
+          "run_min": 10.9622,
+          "run_max": 11.0792
+        },
+        "gpu_ms": {
+          "median": 10.17432,
+          "p95": 13.542944,
+          "run_min": 10.088415999999999,
+          "run_max": 10.41804775
+        },
+        "cpu_prepare_ms": {
+          "median": 0.30994999999999995,
+          "p95": 0.4942,
+          "run_min": 0.3028,
+          "run_max": 0.3241
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.5131840000000001,
+          "p95": 0.6304,
+          "run_min": 0.510624,
+          "run_max": 0.515072
+        },
+        "gpu_surface_ms": {
+          "median": 3.781632,
+          "p95": 4.789248,
+          "run_min": 3.513344,
+          "run_max": 3.849216
+        },
+        "gpu_atmosphere_ms": {
+          "median": 3.613184,
+          "p95": 6.53312,
+          "run_min": 3.516416,
+          "run_max": 3.713536
+        },
+        "gpu_post_ms": {
+          "median": 2.225664,
+          "p95": 3.073024,
+          "run_min": 2.138112,
+          "run_max": 2.235392
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 11.004999999999999,
+            "p95": 14.9615
+          },
+          "gpu_ms": {
+            "median": 10.41804775,
+            "p95": 13.993312
+          },
+          "cpu_prepare_ms": {
+            "median": 0.3028,
+            "p95": 0.4413
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.510624,
+            "p95": 0.623264
+          },
+          "gpu_surface_ms": {
+            "median": 3.849216,
+            "p95": 4.789248
+          },
+          "gpu_atmosphere_ms": {
+            "median": 3.713536,
+            "p95": 6.53312
+          },
+          "gpu_post_ms": {
+            "median": 2.235392,
+            "p95": 3.073024
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 10.9622,
+            "p95": 14.4268
+          },
+          "gpu_ms": {
+            "median": 10.088415999999999,
+            "p95": 13.542944
+          },
+          "cpu_prepare_ms": {
+            "median": 0.3241,
+            "p95": 0.5907
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.5131840000000001,
+            "p95": 0.6304
+          },
+          "gpu_surface_ms": {
+            "median": 3.513344,
+            "p95": 4.635648
+          },
+          "gpu_atmosphere_ms": {
+            "median": 3.613184,
+            "p95": 6.846464
+          },
+          "gpu_post_ms": {
+            "median": 2.138112,
+            "p95": 2.957312
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 11.0792,
+            "p95": 13.0121
+          },
+          "gpu_ms": {
+            "median": 10.17432,
+            "p95": 11.861728
+          },
+          "cpu_prepare_ms": {
+            "median": 0.30994999999999995,
+            "p95": 0.4942
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.515072,
+            "p95": 0.6304
+          },
+          "gpu_surface_ms": {
+            "median": 3.781632,
+            "p95": 5.118976
+          },
+          "gpu_atmosphere_ms": {
+            "median": 3.516416,
+            "p95": 4.375552
+          },
+          "gpu_post_ms": {
+            "median": 2.225664,
+            "p95": 3.20512
+          }
+        }
+      ]
+    },
+    "belt/window": {
+      "resolution": [
+        1600,
+        900
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 6.3256,
+          "p95": 7.1073,
+          "run_min": 6.18235,
+          "run_max": 6.356400000000001
+        },
+        "gpu_ms": {
+          "median": 5.642416,
+          "p95": 6.285792,
+          "run_min": 5.576528,
+          "run_max": 5.681584
+        },
+        "cpu_prepare_ms": {
+          "median": 0.28985,
+          "p95": 0.4389,
+          "run_min": 0.274,
+          "run_max": 0.31
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.58872,
+          "p95": 0.59616,
+          "run_min": 0.586112,
+          "run_max": 0.5894079999999999
+        },
+        "gpu_surface_ms": {
+          "median": 2.24512,
+          "p95": 3.136512,
+          "run_min": 2.172928,
+          "run_max": 2.298368
+        },
+        "gpu_atmosphere_ms": {
+          "median": 1.74336,
+          "p95": 2.251776,
+          "run_min": 1.624576,
+          "run_max": 1.7955839999999998
+        },
+        "gpu_post_ms": {
+          "median": 0.796672,
+          "p95": 1.161216,
+          "run_min": 0.669696,
+          "run_max": 0.813056
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 6.18235,
+            "p95": 7.1073
+          },
+          "gpu_ms": {
+            "median": 5.576528,
+            "p95": 6.556224
+          },
+          "cpu_prepare_ms": {
+            "median": 0.28985,
+            "p95": 0.4423
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.586112,
+            "p95": 0.59616
+          },
+          "gpu_surface_ms": {
+            "median": 2.172928,
+            "p95": 3.136512
+          },
+          "gpu_atmosphere_ms": {
+            "median": 1.7955839999999998,
+            "p95": 2.390016
+          },
+          "gpu_post_ms": {
+            "median": 0.813056,
+            "p95": 1.245184
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 6.3256,
+            "p95": 6.8284
+          },
+          "gpu_ms": {
+            "median": 5.642416,
+            "p95": 5.89056
+          },
+          "cpu_prepare_ms": {
+            "median": 0.31,
+            "p95": 0.4389
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.58872,
+            "p95": 0.592672
+          },
+          "gpu_surface_ms": {
+            "median": 2.24512,
+            "p95": 2.896896
+          },
+          "gpu_atmosphere_ms": {
+            "median": 1.624576,
+            "p95": 2.096128
+          },
+          "gpu_post_ms": {
+            "median": 0.796672,
+            "p95": 1.149952
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 6.356400000000001,
+            "p95": 7.6714
+          },
+          "gpu_ms": {
+            "median": 5.681584,
+            "p95": 6.285792
+          },
+          "cpu_prepare_ms": {
+            "median": 0.274,
+            "p95": 0.3794
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.5894079999999999,
+            "p95": 0.596992
+          },
+          "gpu_surface_ms": {
+            "median": 2.298368,
+            "p95": 3.229696
+          },
+          "gpu_atmosphere_ms": {
+            "median": 1.74336,
+            "p95": 2.251776
+          },
+          "gpu_post_ms": {
+            "median": 0.669696,
+            "p95": 1.161216
+          }
+        }
+      ]
+    },
+    "belt/fullscreen": {
+      "resolution": [
+        3440,
+        1440
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 16.19715,
+          "p95": 20.638,
+          "run_min": 16.0952,
+          "run_max": 17.10265
+        },
+        "gpu_ms": {
+          "median": 15.408128,
+          "p95": 19.671392,
+          "run_min": 15.245808,
+          "run_max": 16.2396315
+        },
+        "cpu_prepare_ms": {
+          "median": 0.34604999999999997,
+          "p95": 0.5575,
+          "run_min": 0.3419,
+          "run_max": 0.36660000000000004
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.607232,
+          "p95": 0.63808,
+          "run_min": 0.607216,
+          "run_max": 0.6102719999999999
+        },
+        "gpu_surface_ms": {
+          "median": 6.35904,
+          "p95": 7.642112,
+          "run_min": 6.16857585,
+          "run_max": 6.572032
+        },
+        "gpu_atmosphere_ms": {
+          "median": 6.094336,
+          "p95": 10.497024,
+          "run_min": 5.874176,
+          "run_max": 6.3544319
+        },
+        "gpu_post_ms": {
+          "median": 2.533376,
+          "p95": 3.255296,
+          "run_min": 2.330624,
+          "run_max": 2.6142719999999997
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 16.19715,
+            "p95": 20.2297
+          },
+          "gpu_ms": {
+            "median": 15.408128,
+            "p95": 19.418049
+          },
+          "cpu_prepare_ms": {
+            "median": 0.36660000000000004,
+            "p95": 0.6267
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.607232,
+            "p95": 0.63808
+          },
+          "gpu_surface_ms": {
+            "median": 6.35904,
+            "p95": 7.421952
+          },
+          "gpu_atmosphere_ms": {
+            "median": 6.094336,
+            "p95": 10.497024
+          },
+          "gpu_post_ms": {
+            "median": 2.330624,
+            "p95": 3.255296
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 16.0952,
+            "p95": 20.638
+          },
+          "gpu_ms": {
+            "median": 15.245808,
+            "p95": 19.671392
+          },
+          "cpu_prepare_ms": {
+            "median": 0.34604999999999997,
+            "p95": 0.5532
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.607216,
+            "p95": 0.614752
+          },
+          "gpu_surface_ms": {
+            "median": 6.16857585,
+            "p95": 7.642112
+          },
+          "gpu_atmosphere_ms": {
+            "median": 5.874176,
+            "p95": 10.458112
+          },
+          "gpu_post_ms": {
+            "median": 2.533376,
+            "p95": 3.16928
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 17.10265,
+            "p95": 22.9677
+          },
+          "gpu_ms": {
+            "median": 16.2396315,
+            "p95": 21.584255
+          },
+          "cpu_prepare_ms": {
+            "median": 0.3419,
+            "p95": 0.5575
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.6102719999999999,
+            "p95": 0.639904
+          },
+          "gpu_surface_ms": {
+            "median": 6.572032,
+            "p95": 8.097792
+          },
+          "gpu_atmosphere_ms": {
+            "median": 6.3544319,
+            "p95": 11.440128
+          },
+          "gpu_post_ms": {
+            "median": 2.6142719999999997,
+            "p95": 3.654656
+          }
+        }
+      ]
+    },
+    "belt-sun/window": {
+      "resolution": [
+        1600,
+        900
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 4.1848,
+          "p95": 4.6873,
+          "run_min": 3.9924999999999997,
+          "run_max": 4.2088
+        },
+        "gpu_ms": {
+          "median": 3.438336,
+          "p95": 3.981344,
+          "run_min": 3.273232,
+          "run_max": 3.50860795
+        },
+        "cpu_prepare_ms": {
+          "median": 0.2687,
+          "p95": 0.3552,
+          "run_min": 0.25825,
+          "run_max": 0.29255
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.7239519999999999,
+          "p95": 1.045856,
+          "run_min": 0.71736,
+          "run_max": 0.73304
+        },
+        "gpu_surface_ms": {
+          "median": 0.587776,
+          "p95": 0.98816,
+          "run_min": 0.58368,
+          "run_max": 0.65024
+        },
+        "gpu_atmosphere_ms": {
+          "median": 0.98048,
+          "p95": 1.779712,
+          "run_min": 0.974848,
+          "run_max": 1.09568
+        },
+        "gpu_post_ms": {
+          "median": 0.613376,
+          "p95": 1.046528,
+          "run_min": 0.612352,
+          "run_max": 0.7336959999999999
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 3.9924999999999997,
+            "p95": 4.5142
+          },
+          "gpu_ms": {
+            "median": 3.273232,
+            "p95": 3.816736
+          },
+          "cpu_prepare_ms": {
+            "median": 0.29255,
+            "p95": 0.4215
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.71736,
+            "p95": 0.990176
+          },
+          "gpu_surface_ms": {
+            "median": 0.58368,
+            "p95": 0.98816
+          },
+          "gpu_atmosphere_ms": {
+            "median": 0.974848,
+            "p95": 1.64864
+          },
+          "gpu_post_ms": {
+            "median": 0.612352,
+            "p95": 0.996352
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 4.1848,
+            "p95": 4.6873
+          },
+          "gpu_ms": {
+            "median": 3.50860795,
+            "p95": 3.981344
+          },
+          "cpu_prepare_ms": {
+            "median": 0.2687,
+            "p95": 0.3552
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.7239519999999999,
+            "p95": 1.045856
+          },
+          "gpu_surface_ms": {
+            "median": 0.587776,
+            "p95": 1.030144
+          },
+          "gpu_atmosphere_ms": {
+            "median": 1.09568,
+            "p95": 1.779712
+          },
+          "gpu_post_ms": {
+            "median": 0.613376,
+            "p95": 1.067008
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 4.2088,
+            "p95": 4.9367
+          },
+          "gpu_ms": {
+            "median": 3.438336,
+            "p95": 4.115872
+          },
+          "cpu_prepare_ms": {
+            "median": 0.25825,
+            "p95": 0.3494
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.73304,
+            "p95": 1.076704
+          },
+          "gpu_surface_ms": {
+            "median": 0.65024,
+            "p95": 0.97792
+          },
+          "gpu_atmosphere_ms": {
+            "median": 0.98048,
+            "p95": 1.821696
+          },
+          "gpu_post_ms": {
+            "median": 0.7336959999999999,
+            "p95": 1.046528
+          }
+        }
+      ]
+    },
+    "belt-sun/fullscreen": {
+      "resolution": [
+        3440,
+        1440
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 9.79795,
+          "p95": 11.3986,
+          "run_min": 9.6278,
+          "run_max": 9.8671
+        },
+        "gpu_ms": {
+          "median": 8.915008,
+          "p95": 10.595584,
+          "run_min": 8.844463999999999,
+          "run_max": 9.08368
+        },
+        "cpu_prepare_ms": {
+          "median": 0.30375,
+          "p95": 0.4362,
+          "run_min": 0.30245,
+          "run_max": 0.38780000000000003
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.73848,
+          "p95": 1.063328,
+          "run_min": 0.736272,
+          "run_max": 0.743344
+        },
+        "gpu_surface_ms": {
+          "median": 2.106368,
+          "p95": 3.555328,
+          "run_min": 2.0894719999999998,
+          "run_max": 2.16064
+        },
+        "gpu_atmosphere_ms": {
+          "median": 3.440128,
+          "p95": 4.465664,
+          "run_min": 3.421696,
+          "run_max": 3.4647040000000002
+        },
+        "gpu_post_ms": {
+          "median": 2.403328,
+          "p95": 3.09248,
+          "run_min": 2.2205440000000003,
+          "run_max": 2.405376
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 9.6278,
+            "p95": 10.8388
+          },
+          "gpu_ms": {
+            "median": 8.915008,
+            "p95": 10.328064
+          },
+          "cpu_prepare_ms": {
+            "median": 0.30245,
+            "p95": 0.4328
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.73848,
+            "p95": 1.063328
+          },
+          "gpu_surface_ms": {
+            "median": 2.0894719999999998,
+            "p95": 3.185664
+          },
+          "gpu_atmosphere_ms": {
+            "median": 3.421696,
+            "p95": 4.465664
+          },
+          "gpu_post_ms": {
+            "median": 2.403328,
+            "p95": 3.09248
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 9.8671,
+            "p95": 11.3986
+          },
+          "gpu_ms": {
+            "median": 9.08368,
+            "p95": 10.690848
+          },
+          "cpu_prepare_ms": {
+            "median": 0.30375,
+            "p95": 0.4362
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.743344,
+            "p95": 1.103424
+          },
+          "gpu_surface_ms": {
+            "median": 2.16064,
+            "p95": 3.555328
+          },
+          "gpu_atmosphere_ms": {
+            "median": 3.4647040000000002,
+            "p95": 4.432896
+          },
+          "gpu_post_ms": {
+            "median": 2.405376,
+            "p95": 3.1467519
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 9.79795,
+            "p95": 11.9225
+          },
+          "gpu_ms": {
+            "median": 8.844463999999999,
+            "p95": 10.595584
+          },
+          "cpu_prepare_ms": {
+            "median": 0.38780000000000003,
+            "p95": 0.5887
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.736272,
+            "p95": 1.024448
+          },
+          "gpu_surface_ms": {
+            "median": 2.106368,
+            "p95": 3.60448
+          },
+          "gpu_atmosphere_ms": {
+            "median": 3.440128,
+            "p95": 4.78208
+          },
+          "gpu_post_ms": {
+            "median": 2.2205440000000003,
+            "p95": 3.07712
+          }
+        }
+      ]
+    }
+  },
+  "comparisons": {}
+}

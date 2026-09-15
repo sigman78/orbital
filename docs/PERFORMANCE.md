@@ -55,3 +55,14 @@ Two sequential runs per setting at the frozen fullscreen belt bookmark (500 fram
 `fxaa` replaces SMAA with FXAA; `splat4` raises the mesh-to-billboard cutoff from 2.5 to 4 pixels; `both` combines them. Both together save roughly 0.4-0.6 ms (about 3-4%) in this scene. FXAA post cost falls consistently, while the larger cutoff alone is closer to run-to-run noise. Static captures retain the broad scene appearance, but moving-image shimmer and small-rock detail need evaluation before changing defaults. No renderer defaults were changed.
 
 Further candidates to measure are conservative atmosphere screen bounds (skip pixels outside projected shells) and an early TAA-off copy path. These have no intended quality loss but no measured benefit yet; the copy path only benefits TAA-off. Reduced dust sample counts may save more, but require temporal-noise testing rather than assuming equal quality.
+
+## Cumulative check after the lens, HDR and exposure work (2026-09-15)
+
+One suite run over all seven scenes at revision `0db771e` (the lens flare stack, dirty glass, the night-side and tone fixes, HDR output, the reworked auto exposure and the telescope zoom, all merged), recorded as [session-followups](performance/session-followups.md) ([JSON](performance/session-followups.json)): the first all-scene baseline since `taa-stage-1-2`, for later comparisons. The belt cases are compared with `gpu-scopes-after`, the last belt-only milestone, in [session-followups-belt](performance/session-followups-belt.md); the suite's asset hash check was waived for that comparison because the asset set gained `lens_dirt.png`, which no benchmark scene reads.
+
+| Belt case | GPU before | GPU after | Change | Where |
+| --- | ---: | ---: | ---: | --- |
+| window 1600x900 | 5.277 ms | 5.642 ms | +0.365 ms (+6.9%) | post +0.156 ms (the flare pass and the wider meter); surface and atmosphere within threshold |
+| fullscreen 3440x1440 | 14.528 ms | 15.408 ms | +0.880 ms (+6.1%) | surface +0.468 and atmosphere +0.449 ms flagged; post +0.051 within threshold |
+
+The window increase is the expected price of the flare pass and the meter. The fullscreen surface and atmosphere increases are not explained by this work (those passes changed only by the ambient fill multiply and the Earth night floor) and their run ranges are separated rather than overlapping, so they are flagged as regression candidates to reproduce with a second run before anything is attributed. The auto exposure is off in the suite (`--time 0`), so its cost is the meter pass alone.
