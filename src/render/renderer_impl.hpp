@@ -345,6 +345,14 @@ struct Renderer::Impl {
     // its atmosphere shell, and the mesh level for its projected size.
     std::bitset<max_body_count> body_visible;
     std::array<unsigned, max_body_count> body_level{};
+    // The draw tier from the same projected size: the detail weight the surface
+    // shaders fade their detail terms by (0 at the smallest level, 1 from the
+    // third), and whether the Earth's cloud shell is drawn as its own surface
+    // (large and near enough for the depth buffer to separate it from the ground)
+    // or folded into the ground shader; both keep the previous frame's state for
+    // their hysteresis.
+    std::array<float, max_body_count> body_detail{};
+    std::bitset<max_body_count> body_shell;
     SystemDescription system;
     std::filesystem::path directory;
     // The bodies occupy instance slots 0..body_count-1 in system order. The

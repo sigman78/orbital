@@ -12,13 +12,17 @@
 static const float CLOUD_DRIFT = .00012; // uv per second; Earth itself turns 1/1600 of a revolution per second
 
 // Cloud coordinate: a slow drift plus a slower, larger swirl that follows it.
-float2 cloudUV(float2 uv, float t)
+// The swirl is a detail term: its weight fades with the body's draw tier, and
+// at zero the six noise octaves are skipped (the weight is uniform per draw).
+float2 cloudUV(float2 uv, float t, float swirlWeight)
 {
     uv.x += t * CLOUD_DRIFT;
+    if (swirlWeight <= 0.0) return uv;
     float2 swirl = float2(fbm2(uv * float2(6, 12) + t * .003, 3),
                           fbm2(uv * float2(6, 12) + float2(11.3, 4.7) - t * .002, 3)) - .5;
-    return uv + swirl * float2(.006, .004);
+    return uv + swirl * float2(.006, .004) * swirlWeight;
 }
+float2 cloudUV(float2 uv, float t) { return cloudUV(uv, t, 1.0); }
 
 // Cloud coverage as a shadow caster: read at a coarser footprint for the
 // penumbra the sun's disc and in-cloud scattering give, without the fine

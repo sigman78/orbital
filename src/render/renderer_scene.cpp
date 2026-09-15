@@ -85,8 +85,12 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
                 if (!body_visible[i])
                     continue;
                 gpu::bind_pso(cmd, surface_pso(surface_kind(system.bodies[i].body_class)));
+                root.detail = body_detail[i];
+                root.flags = i == showcase.earth() && !body_shell[i] ? ORBITAL_ROOT_FOLD_CLOUDS : 0;
                 draw_mesh(cmd, root, body_mesh(i, body_level[i]), i, 1);
             }
+            root.detail = 0;
+            root.flags = 0;
         }
         gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
         {
@@ -106,11 +110,15 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
             GpuTimingScope splats(timings, GpuPass::SurfaceSplats);
             draw_rock_splats(cmd, root, args_address);
         }
-        if (body_visible[showcase.earth()]) {
+        // The cloud shell at the Earth's own mesh level (the same subdivision, so it
+        // stays a uniform 0.9 percent above the ground), while the tier draws it.
+        if (const unsigned earth = showcase.earth(); body_visible[earth] && body_shell[earth]) {
             GpuTimingScope clouds(timings, GpuPass::SurfaceClouds);
             gpu::bind_pso(cmd, pso.scene.cloud);
             root.mode = std::uint32_t(SurfaceMode::cloud);
-            draw_mesh(cmd, root, spheres[geometry::lod_count - 1], showcase.earth(), 1);
+            root.detail = body_detail[earth];
+            draw_mesh(cmd, root, spheres[body_level[earth]], earth, 1);
+            root.detail = 0;
         }
     }
 }
