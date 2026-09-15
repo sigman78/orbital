@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 #include <format>
+#include <initializer_list>
 
 namespace space::render {
 
@@ -346,6 +347,56 @@ void Renderer::Impl::update_hdr_metadata(const ToneSettings& tone, const Display
     gpu::set_hdr_metadata(device, metadata);
     hdr_metadata_sent = metadata;
     hdr_metadata_valid = true;
+}
+
+void Renderer::Impl::collect_memory_stats() {
+    const auto images = [](std::initializer_list<const GpuImage*> list) {
+        MemoryPool pool;
+        for (const auto* image : list)
+            if (image->bytes()) {
+                pool.bytes += image->bytes();
+                pool.count++;
+            }
+        pool.used = pool.bytes;
+        return pool;
+    };
+    const auto heap = [](MemoryPool& pool, const UniqueGpuHeap& buffer) {
+        if (buffer.range().size) {
+            pool.bytes += buffer.range().size;
+            pool.count++;
+        }
+    };
+    auto& memory = stats.memory;
+    memory.frame_targets = images({&frame_targets.hdr, &frame_targets.depth, &frame_targets.sun_visibility,
+                                   &frame_targets.bloom_a, &frame_targets.bloom_b, &frame_targets.flare,
+                                   &frame_targets.final_image, &frame_targets.ldr, &frame_targets.history[0],
+                                   &frame_targets.history[1], &frame_targets.splat_mask, &frame_targets.smaa_edges,
+                                   &frame_targets.smaa_weights, &frame_targets.belt_dust, &frame_targets.galaxy});
+    memory.fixed_targets = images({&fixed_targets.shadow_map, &fixed_targets.belt_light, &fixed_targets.belt_light_blur,
+                                   &fixed_targets.belt_disc_light, &fixed_targets.belt_disc_rocks});
+    memory.materials = {};
+    for (const auto& image : material_images)
+        if (image.bytes()) {
+            memory.materials.bytes += image.bytes();
+            memory.materials.count++;
+        }
+    memory.materials.used = memory.materials.bytes;
+    // The mapped heap is one allocation: the static records fill from the front up to the
+    // dynamic region, which with the UI region is always in use.
+    memory.mapped = {};
+    heap(memory.mapped, buffers.data);
+    memory.mapped.used = static_cursor + (heap_layout.mapped_size() - heap_layout.dynamic_offset);
+    memory.device_buffers = {};
+    heap(memory.device_buffers, buffers.cull_device);
+    heap(memory.device_buffers, buffers.meter_device);
+    memory.device_buffers.used = memory.device_buffers.bytes;
+    memory.readback = {};
+    heap(memory.readback, buffers.cull_readback);
+    heap(memory.readback, buffers.meter_readback);
+    heap(memory.readback, buffers.meter_zero);
+    heap(memory.readback, buffers.texture_descriptors);
+    heap(memory.readback, buffers.sampler_descriptors);
+    memory.readback.used = memory.readback.bytes;
 }
 
 void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor, unsigned flare) {

@@ -90,6 +90,70 @@ void gpu_time_bar(const render::Stats& stats) {
         ImGui::TextDisabled("Shares normalized to summed pass timings");
 }
 
+// GPU memory by resource type, as the pass timings are shown: a bar of the shares
+// and a table of the pools with their allocation counts and, for the mapped heap,
+// how much of it is in use.
+void memory_bar(const render::MemoryStats& memory) {
+    struct Pool {
+        const char* label;
+        const render::MemoryPool* pool;
+        ImU32 color;
+    };
+    const std::array pools{
+        Pool{.label = "Frame targets", .pool = &memory.frame_targets, .color = IM_COL32(86, 180, 233, 255)},
+        Pool{.label = "Fixed targets", .pool = &memory.fixed_targets, .color = IM_COL32(130, 120, 210, 255)},
+        Pool{.label = "Materials", .pool = &memory.materials, .color = IM_COL32(0, 158, 115, 255)},
+        Pool{.label = "Mapped heap", .pool = &memory.mapped, .color = IM_COL32(230, 159, 0, 255)},
+        Pool{.label = "Device buffers", .pool = &memory.device_buffers, .color = IM_COL32(213, 94, 0, 255)},
+        Pool{.label = "Readback", .pool = &memory.readback, .color = IM_COL32(204, 121, 167, 255)}};
+    const double total = double(memory.total());
+    const auto mib = [](std::uint64_t bytes) { return double(bytes) / (1024.0 * 1024.0); };
+    ImGui::Text("GPU memory %.1f MiB", mib(memory.total()));
+    if (total <= 0) {
+        ImGui::TextDisabled("No allocations yet");
+        return;
+    }
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const ImVec2 size{ImGui::GetContentRegionAvail().x, 18};
+    ImGui::InvisibleButton("##gpu-memory", size);
+    const bool hovered = ImGui::IsItemHovered();
+    float x = origin.x;
+    for (const auto& entry : pools) {
+        const float end = x + float(size.x * double(entry.pool->bytes) / total);
+        ImGui::GetWindowDrawList()->AddRectFilled({x, origin.y}, {end, origin.y + size.y}, entry.color);
+        if (entry.pool->used < entry.pool->bytes) // the unused part of a suballocated heap, hatched darker
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                {x + float((end - x) * double(entry.pool->used) / double(entry.pool->bytes)), origin.y + 9},
+                {end, origin.y + size.y}, IM_COL32(0, 0, 0, 110));
+        if (hovered && ImGui::GetIO().MousePos.x >= x && ImGui::GetIO().MousePos.x < end)
+            ImGui::SetTooltip("%s: %.1f MiB (%.1f%%), %u allocation%s", entry.label, mib(entry.pool->bytes),
+                              100.0 * double(entry.pool->bytes) / total, entry.pool->count,
+                              entry.pool->count == 1 ? "" : "s");
+        x = end;
+    }
+    if (ImGui::BeginTable("##gpu-memory-pools", 2, ImGuiTableFlags_SizingStretchSame)) {
+        for (const auto& entry : pools) {
+            ImGui::TableNextColumn();
+            const auto swatch = ImGui::GetCursorScreenPos();
+            ImGui::GetWindowDrawList()->AddRectFilled({swatch.x, swatch.y + 3}, {swatch.x + 9, swatch.y + 12},
+                                                      entry.color);
+            ImGui::Dummy({9, 12});
+            ImGui::SameLine();
+            ImGui::TextUnformatted(entry.label);
+            ImGui::SameLine(0, ImGui::CalcTextSize(" ").x);
+            char reading[64];
+            if (entry.pool->used < entry.pool->bytes)
+                std::snprintf(reading, sizeof(reading), "%.1f/%.1f MiB", mib(entry.pool->used), mib(entry.pool->bytes));
+            else
+                std::snprintf(reading, sizeof(reading), "%.1f MiB x%u", mib(entry.pool->bytes), entry.pool->count);
+            const float padding = ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(reading).x;
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(padding, 0.f));
+            ImGui::TextColored({.55f, .8f, 1.f, 1.f}, "%s", reading);
+        }
+        ImGui::EndTable();
+    }
+}
+
 void frame_controls(const render::Stats& stats, std::span<const float> recent_frame_ms, bool& vsync) {
     std::vector<float> sorted(recent_frame_ms.begin(), recent_frame_ms.end());
     std::sort(sorted.begin(), sorted.end());
@@ -438,6 +502,10 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
     ImGui::PushItemWidth(150); // leaves room for the labels beside combos and sliders
     if (section("Frame", true)) {
         frame_controls(stats, recent_frame_ms, app.vsync);
+        ImGui::PopID();
+    }
+    if (section("Memory")) { // collapsed by default; the sums are refreshed every frame
+        memory_bar(stats.memory);
         ImGui::PopID();
     }
     if (section("Quality")) {

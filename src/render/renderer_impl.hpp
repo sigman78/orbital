@@ -376,6 +376,7 @@ struct Renderer::Impl {
     void create_fixed_targets();
     void resize(Extent2D new_extent, unsigned galaxy_divisor, unsigned flare_divisor);
     void set_hdr_output(HdrOutput mode);
+    void collect_memory_stats(); // sums the owned allocations into stats.memory
     void update_hdr_metadata(const ToneSettings& tone, const DisplaySettings& display);
     gpu::HdrMetadata hdr_metadata_sent{};
     bool hdr_metadata_valid = false; // the metadata the swapchain carries; resent when the values change

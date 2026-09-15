@@ -1,6 +1,7 @@
 #pragma once
 #include "core/extent.hpp"
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
+#include <cstdint>
 #include <utility>
 
 namespace space::render {
@@ -22,19 +23,21 @@ public:
     GpuImage& operator=(const GpuImage&) = delete;
     constexpr GpuImage(GpuImage&& other) noexcept
         : heap_(std::exchange(other.heap_, {})), texture_(std::exchange(other.texture_, nullptr)),
-          view_(std::exchange(other.view_, nullptr)) {}
+          view_(std::exchange(other.view_, nullptr)), bytes_(std::exchange(other.bytes_, 0)) {}
     GpuImage& operator=(GpuImage&& other) noexcept;
     ~GpuImage();
 
     static GpuImage create(gpu::Device* device, const ImageDesc& desc);
     constexpr gpu::Texture* texture() const { return texture_; }
     constexpr gpu::RenderView* view() const { return view_; }
+    constexpr std::uint64_t bytes() const { return bytes_; } // the allocation, 0 when empty
     void reset() noexcept;
 
 private:
     gpu::TextureHeap heap_{};
     gpu::Texture* texture_ = nullptr;
     gpu::RenderView* view_ = nullptr;
+    std::uint64_t bytes_ = 0;
 };
 
 // Replaced together on window resize, after a single GPU wait.
