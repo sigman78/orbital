@@ -173,8 +173,6 @@ void frame_controls(const render::Stats& stats, std::span<const float> recent_fr
         ImGui::SetTooltip("Disable VSync for performance comparisons: a waiting GPU may clock down.");
     ImGui::Text("%u draws, %u rock groups", stats.draw_calls, stats.rock_groups_drawn);
     ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
-    ImGui::Spacing();
-    memory_bar(stats.memory);
 }
 void quality_controls(bool& high) {
     ImGui::Checkbox("High tier (F2)", &high);
@@ -504,6 +502,10 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
     ImGui::PushItemWidth(150); // leaves room for the labels beside combos and sliders
     if (section("Frame", true)) {
         frame_controls(stats, recent_frame_ms, app.vsync);
+        ImGui::PopID();
+    }
+    if (section("Memory")) { // collapsed by default; the sums are refreshed every frame
+        memory_bar(stats.memory);
         ImGui::PopID();
     }
     if (section("Quality")) {
