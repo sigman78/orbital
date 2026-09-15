@@ -94,6 +94,7 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
         fullscreen_pass(cmd, frame_targets.final_image, hdr() ? pso.post.smaa_blend_hdr : pso.post.smaa_blend, root);
     }
     if (frame_index % exposure_meter::interval == 0) {
+        GpuTimingScope timing(timings, GpuPass::Meter);
         fullscreen_pass(cmd, fixed_targets.luminance, pso.post.meter, root);
         synchronize(cmd, access::color_write, access::transfer_read);
         gpu::copy_texture_to_memory(cmd, fixed_targets.luminance.texture(),

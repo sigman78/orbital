@@ -30,6 +30,7 @@ struct Stats {
     float frame_ms = 0, gpu_ms = 0, shadow_ms = 0, surface_ms = 0, atmosphere_ms = 0,
           post_ms = 0; // shadow_ms includes the belt culling passes
     float cull_ms = 0, body_shadow_ms = 0, belt_light_ms = 0, belt_disc_ms = 0;
+    float meter_ms = 0;   // the exposure meter, 0 on the frames it does not run
     float prepare_ms = 0; // CPU work between acquiring the swapchain image and submitting
     unsigned visible_asteroids = 0, triangles = 0,
              rock_triangles = 0;    // rock figures are from the previous frame's culling
