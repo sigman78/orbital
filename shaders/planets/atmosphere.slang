@@ -5,6 +5,9 @@
 #include "../lib/scattering.slang"
 #include "clouds.slang"
 
+static const float DEPTH_FLOAT_STEP = 6e-8;       // one float step just below 1, where far depths land
+static const float DEPTH_RESOLUTION_STEPS = 4.0;  // steps within which a buffer depth is taken as the analytic ground
+
 float airDensity(float altitude, float scaleHeight) { return exp(-max(altitude, 0.0) / scaleHeight); }
 
 [shader("fragment")]
@@ -25,10 +28,8 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     if (end <= begin) return float4(0.0, 0.0, 0.0, 0.0);
 
     float2 groundHit = sphereHit(ro, rd, centre, radius);
-    if (groundHit.y > 0.0) {
-        float nearGround = groundHit.x > 0.0 ? groundHit.x : groundHit.y;
-        end = min(end, nearGround);
-    }
+    float nearGround = groundHit.y > 0.0 ? (groundHit.x > 0.0 ? groundHit.x : groundHit.y) : 1e9;
+    end = min(end, nearGround);
     int bodyCount = int(root.frame.scene.x);
     for (int i = 0; i < MAX_OCCLUDING_BODIES; ++i) if (i < bodyCount && i != bodyIndex) {
         float4 other = root.frame.bodies[i];
@@ -36,7 +37,16 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         if (hit.x > 0.0) end = min(end, hit.x);
     }
     // Anything already drawn in front of the shell (asteroids, the moon) ends the march.
-    end = min(end, sceneDistance(root.frame, textures[TEX_DEPTH], position.xy, rd));
+    // The depth buffer's own resolution (the float step of the standard projection
+    // near 1, over its slope of near / z^2) grows with the square of the distance
+    // and passes the shell's thickness a few hundred units out, so a ground pixel's
+    // depth lands either side of the analytic hit and the march would end early by
+    // up to that step, a pattern that moves with the view; within that resolution
+    // the analytic ground stands in for the buffer.
+    float scene = sceneDistance(root.frame, textures[TEX_DEPTH], position.xy, rd);
+    float resolution = scene * scene * DEPTH_RESOLUTION_STEPS * DEPTH_FLOAT_STEP / NEAR_Z;
+    if (abs(scene - nearGround) < resolution) scene = nearGround;
+    end = min(end, scene);
     if (end <= begin) return float4(0.0, 0.0, 0.0, 0.0);
 
     float3 sunDirection = normalize(root.frame.sun.xyz - centre);
