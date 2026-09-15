@@ -77,6 +77,7 @@ bool Renderer::draw(const FrameInput& supplied) {
         s.read_cull_counts(*reinterpret_cast<const CullScratch*>(s.buffers.cull_readback.range().cpu));
     std::memcpy(dynamic, &frame, sizeof frame);
     const auto cull_address = reinterpret_cast<std::uint64_t>(s.buffers.cull_device.range().gpu);
+    s.cull_bodies(input, frame);
     s.write_cull_scratch(input, frame, *scratch,
                          cull_address + heap_layout.instance_offset + s.body_count * sizeof(Instance));
     std::memcpy(dynamic + heap_layout.instance_offset, s.instances.data(), s.instances.size() * sizeof(Instance));
@@ -130,6 +131,10 @@ bool Renderer::draw(const FrameInput& supplied) {
         {
             GpuTimingScope timing(s.timings, GpuPass::Surface);
             s.record_galaxy_pass(cmd, root, frame); // counted in the group's remainder, not a child
+            {
+                GpuTimingScope child(s.timings, GpuPass::SurfacePrepass);
+                s.record_depth_prepass(cmd, root);
+            }
             s.record_scene_pass(cmd, root, input, frame, args_address);
         }
         {

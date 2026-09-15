@@ -2,6 +2,7 @@
 #include "core/extent.hpp"
 #include "render/camera_view.hpp"
 #include "render/settings.hpp"
+#include "scene/geometry.hpp"
 #include "scene_shared.h" // the exposure meter's histogram layout
 #include <cstdint>
 #include <span>
@@ -39,6 +40,11 @@ struct LightFrame {
     Vec3f centre{}, forward{}, right{}, up{};
     float half_x = 1, half_y = 1, half_depth = 1;
 };
+
+// The view frustum in camera-relative space: the near plane and the four sides,
+// as geometry::sphere_in_frustum takes them. tan_x and tan_y are the half-angle
+// tangents; the far plane is left out, since nothing drawn reaches it.
+geometry::Frustum view_frustum(const CameraView& camera, float tan_x, float tan_y);
 
 LightFrame body_light_frame(Vec3d centre, Vec3d sun, float half_size);
 LightFrame prepare_body_light(Vec3d earth, Vec3d giant, Vec3d desert, Vec3d sun);

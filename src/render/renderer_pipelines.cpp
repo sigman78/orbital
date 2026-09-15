@@ -111,6 +111,11 @@ void Renderer::Impl::create_pipelines() {
                  .rasterization = {.depth_bias_constant = 1, .depth_bias_slope = 1.5f}});
     panic_if(!pso.scene.shadow, "shadow pipeline creation failed");
     pipelines.emplace_back(pso.scene.shadow);
+    // The bodies' depth pre-pass: the same vertex shader and view, so the scene pass matches it exactly.
+    pso.scene.depth_prepass = gpu::create_graphics_pso(
+        device, {.vertex_spirv = shadow_vertex, .depth_format = Format::d32_float});
+    panic_if(!pso.scene.depth_prepass, "depth pre-pass pipeline creation failed");
+    pipelines.emplace_back(pso.scene.depth_prepass);
 }
 
 } // namespace space::render

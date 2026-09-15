@@ -243,7 +243,7 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
     ImGui::Checkbox("VSync", &vsync);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Disable VSync for performance comparisons: a waiting GPU may clock down.");
-    ImGui::Text("%u draws, %u rock groups", stats.draw_calls, stats.rock_groups_drawn);
+    ImGui::Text("%u draws, %u bodies, %u rock groups", stats.draw_calls, stats.bodies_drawn, stats.rock_groups_drawn);
     ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
 }
 void quality_controls(bool& high) {

@@ -25,7 +25,7 @@ Comparisons reject mismatched hardware/software environment, settings/protocol, 
 | CPU preparation | Frame/instance preparation |
 | GPU total | Timestamp span covering the rendered frame |
 | Cull/maps | Culling, shadows and belt-map generation |
-| Surface | Galaxy/background, stars, opaque surfaces, billboards and clouds (children: sky, bodies, rocks and splats, clouds; the galaxy pass counts in the remainder) |
+| Surface | The bodies' depth pre-pass, opaque surfaces, the sky behind them, billboards and clouds (children: depth pre-pass, sky, bodies, rocks, splats, clouds; the galaxy pass counts in the remainder) |
 | Atmosphere group | Planet atmospheres, belt dust/disc and splat metadata (children: atmospheres, belt dust, splat mask) |
 | Post | TAA, bloom, sun visibility, composite, spatial AA, metering and presentation (children: temporal, motion streaks, bloom, sun visibility, flare, composite, spatial AA, meter, present) |
 | Meter | The exposure histogram's slice for the frame, plus the zeroing copy on the first frame of a cycle and the readback copy on the last. Inside Post, reported separately in the CSV as gpu_meter_ms |

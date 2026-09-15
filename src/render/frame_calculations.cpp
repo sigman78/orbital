@@ -32,6 +32,20 @@ inline constexpr float giant_half_size = 70.f, earth_half_size = 12.f, mars_half
 } // namespace
 // Light box looking from the sun at a camera-relative body, square and
 // three half sizes deep either way.
+geometry::Frustum view_frustum(const CameraView& camera, float tan_x, float tan_y) {
+    const Vec3f forward = to_float(camera.forward), right = to_float(camera.right), up = to_float(camera.up);
+    // Each side plane's inward normal: the forward axis leaned against the side by its tangent.
+    const auto side = [&](Vec3f axis, float tan) { return normalized(forward * tan - axis); };
+    geometry::Frustum frustum;
+    frustum.planes[0] = {forward, 0};
+    frustum.planes[1] = {side(right, tan_x), 0};
+    frustum.planes[2] = {side(right * -1.f, tan_x), 0};
+    frustum.planes[3] = {side(up, tan_y), 0};
+    frustum.planes[4] = {side(up * -1.f, tan_y), 0};
+    frustum.planes[5] = {forward, 0}; // the far plane is not tested
+    return frustum;
+}
+
 LightFrame body_light_frame(Vec3d centre, Vec3d sun, float half_size) {
     const Vec3d forward = normalized(centre - sun), r = normalized(Vec3d{-forward.z, 0, forward.x});
     return {.centre = to_float(centre),

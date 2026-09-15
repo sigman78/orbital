@@ -64,7 +64,7 @@ Between the rocks a half-resolution march through the same density field scatter
 
 1. Cull passes write the instance list and draw arguments into the dynamic half of the heap.
 2. Shadow map (2048, depth only) for the bodies; belt transmittance map (2048, four coverage slices) and its blur.
-3. Scene pass into the HDR target: background, bodies, the pooled rock multi-draw, splats, clouds.
+3. The bodies' depth pre-pass, then the scene pass into the HDR target: the pooled rock multi-draw, bodies, the background and stars depth-tested behind them, then the blended splats and clouds. Bodies outside the view frustum (tested at the cull camera, with their atmosphere shell) skip all of it and their atmosphere pass.
 4. Atmospheres, composited per body against depth; then the belt dust, marched at half resolution and
    composited with a depth-aware upsample.
 5. Splats write fractional coverage and coverage-weighted depth into metadata; scene depth remains opaque-only.

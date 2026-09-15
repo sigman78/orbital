@@ -144,7 +144,8 @@ void Renderer::Impl::record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullR
     belt_disc_baked = true;
 }
 
-void Renderer::Impl::draw_rock_batch(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address) {
+// The opaque half of the rock batch, drawn with the other opaque geometry.
+void Renderer::Impl::draw_rock_meshes(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address) {
     gpu::bind_pso(cmd, pso.scene.surface_rock);
     // Rocks: one multi-draw over the pooled mesh; the culling pass wrote every
     // group's count, base and slice into the argument array.
@@ -158,6 +159,10 @@ void Renderer::Impl::draw_rock_batch(gpu::CommandBuffer* cmd, Root& root, std::u
         rock_group_count, sizeof(DrawArgs));
     stats.frame.draw_calls++;
     stats.frame.triangles += stats.frame.rock_triangles;
+}
+
+// The blended half: billboards and splats over whatever is behind them, so after the sky.
+void Renderer::Impl::draw_rock_splats(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address) {
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
     gpu::bind_pso(cmd, pso.belt.billboard);
     root.mode = std::uint32_t(SurfaceMode::billboard);
