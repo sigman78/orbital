@@ -12,6 +12,8 @@ enum class ToneCurve : unsigned { ACES = 0, AgX = 1, PbrNeutral = 2, Count };
 enum class SpatialAA : unsigned { Off = 0, FXAA = 1, SMAA = 2, Count };
 enum class SplatMode : unsigned { Off = 0, Pixels1_2 = 1, Pixels2_5 = 2, Pixels4 = 3, Count };
 enum class GalaxyResolution : unsigned { Full = 1, Half = 2, Quarter = 4 };
+// The swapchain's output: 8-bit sRGB, 16-bit float scRGB or 10-bit PQ; the HDR pairs need the OS presenting in HDR.
+enum class HdrOutput : unsigned { Off = 0, ScRgb = 1, Hdr10 = 2, Count };
 // The flare stack's target over the frame; an eighth is a defocused stack, a sixteenth was too blurred.
 enum class FlareResolution : unsigned { Half = 2, Quarter = 4, Eighth = 8 };
 
@@ -19,9 +21,22 @@ struct ToneSettings {
     float exposure = 1; // manual exposure multiplier
     bool auto_exposure = true;
     ToneCurve tone_curve = ToneCurve::PbrNeutral; // 0 ACES filmic, 1 AgX, 2 Khronos PBR Neutral (F8)
-    float meter_key = .18f;                       // the metered luminance the auto exposure maps to (middle grey)
-    float adapt_min = .6f, adapt_max = 1.8f;      // the auto exposure's range of multipliers
+    float meter_key =
+        .09f; // the metered luminance the auto exposure maps to 1x: the Earth bookmark, as the screenshots
+    float highlight_bias = .1f;              // share of the brightest meter cell added to the metered luminance
+    float adapt_strength = 1.f;              // scales the adaptation in stops: 0 none, 1 the full metered change
+    float adapt_min = .25f, adapt_max = 8.f; // the auto exposure's range of multipliers (-2 to +3 stops)
     float curve_trim[3] = {1.f, .37f, .75f}; // exposure trim per curve (ACES, AgX, PBR Neutral), fitted on captures
+    HdrOutput hdr_output = HdrOutput::Off;   // stays Off when the surface does not offer the pair (Stats reports it)
+    float paper_white_nits = 200.f;          // what the tone curve's white maps to on an HDR display
+    float peak_nits = 1000.f;                // the curve's shoulder reaches this; the headroom is peak over paper white
+};
+
+// What the OS reports about the display, passed through from the platform layer: the HDR
+// metadata's mastering range and the panel's readout. Zero nits means unknown.
+struct DisplaySettings {
+    bool hdr = false;
+    float min_nits = 0, max_nits = 0, max_full_frame_nits = 0, sdr_white_nits = 0;
 };
 
 struct AntiAliasingSettings {
@@ -79,6 +94,8 @@ struct SunSettings {
     float ghost_size = 1.f;             // scales the ghosts' radii
     float streak_strength = 1.f;        // the axis streak and its spindle knots
     float flare_saturation = 1.f;       // colour of the whole flare: 0 neutral, 1 as fitted, above exaggerates
+    float flare_adaptation = 0.f; // how much the flare follows the auto exposure: 0 stays at its tuned level, 1 dims
+                                  // and brightens with the scene
     FlareResolution flare_resolution = FlareResolution::Quarter; // coarser is softer, as a defocused stack
 };
 

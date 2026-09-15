@@ -95,6 +95,8 @@ std::optional<Options> parse_options(int argc, const char* const* argv) {
             ok = parse_number(value(), options.fullscreen_at);
         else if (arg == "--tone")
             ok = parse_choice(value(), options.tone, unsigned(render::ToneCurve::Count));
+        else if (arg == "--hdr")
+            ok = parse_choice(value(), options.hdr, unsigned(render::HdrOutput::Count));
         else if (arg == "--galaxy-view") {
             auto& longitude = options.galaxy_view.emplace();
             ok = parse_number(value(), longitude) && longitude >= -180 && longitude <= 180;

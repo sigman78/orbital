@@ -468,6 +468,7 @@ struct DeviceFunctions
     PFN_vkCmdDrawIndexedIndirect2KHR cmd_draw_indexed_indirect = nullptr;
     PFN_vkCmdDispatchIndirect2KHR cmd_dispatch_indirect = nullptr;
     PFN_vkCmdDrawMeshTasksEXT cmd_draw_mesh_tasks = nullptr;
+    PFN_vkSetHdrMetadataEXT set_hdr_metadata = nullptr; // VK_EXT_hdr_metadata, when enabled
     PFN_vkCmdDrawMeshTasksIndirect2EXT cmd_draw_mesh_tasks_indirect = nullptr;
     PFN_vkCmdCopyMemoryKHR cmd_copy_memory = nullptr;
     PFN_vkCmdCopyMemoryToImageKHR cmd_copy_memory_to_image = nullptr;
@@ -1503,6 +1504,7 @@ struct Swapchain
     uint32 width = 0;
     uint32 height = 0;
     Format format = Format::bgra8_srgb;
+    ColorSpace color_space = ColorSpace::srgb_nonlinear;
     VkSurfaceTransformFlagBitsKHR transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     VkCompositeAlphaFlagBitsKHR composite_alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     detail::PresentContext* present_context = nullptr;
@@ -1511,6 +1513,8 @@ struct Swapchain
     bool recreate_required = false;
     bool vsync = true;
     VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR; // chosen at (re)creation from vsync and the surface's modes
+    HdrMetadata hdr_metadata{};
+    bool hdr_metadata_set = false; // re-applied to every new handle
 
     Swapchain() = default;
     Swapchain(const Swapchain&) = delete;
@@ -1623,6 +1627,7 @@ struct Candidate
     bool texture_compression_etc2 = false;
     bool storage_input_output16 = false;
     bool khr_swapchain_maintenance1 = false;
+    bool ext_hdr_metadata = false;
     bool conventional = false;
     bool storage_image_read_without_format = false;
     VkPhysicalDeviceDescriptorHeapPropertiesEXT heap_properties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT};
@@ -1741,6 +1746,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface, 
     result.storage_input_output16 = features.vulkan11.storageInputOutput16 == VK_TRUE;
     result.storage_image_read_without_format = features.core.features.shaderStorageImageReadWithoutFormat == VK_TRUE;
     result.khr_swapchain_maintenance1 = khr_swapchain_maintenance1;
+    result.ext_hdr_metadata = surface != VK_NULL_HANDLE && has_name({extensions, extension_count}, VK_EXT_HDR_METADATA_EXTENSION_NAME);
 
     uint32 available_queue_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &available_queue_count, nullptr);
@@ -1830,6 +1836,10 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     const bool ext_surface_maintenance1 = presentation && has_name(
         {instance_extensions, instance_extension_count},
         VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+    // Lists the HDR colour spaces among the surface formats; without it only sRGB non-linear is offered.
+    const bool ext_swapchain_colorspace = presentation && has_name(
+        {instance_extensions, instance_extension_count},
+        VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
     if (presentation &&
         (!has_name({instance_extensions, instance_extension_count},
                    VK_KHR_SURFACE_EXTENSION_NAME) ||
@@ -1886,6 +1896,8 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
             enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
         if (ext_surface_maintenance1)
             enabled_instance_extensions[enabled_instance_extension_count++] = VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
+        if (ext_swapchain_colorspace)
+            enabled_instance_extensions[enabled_instance_extension_count++] = VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME;
     }
 #endif
 
@@ -2039,7 +2051,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         .queueCount = 1,
         .pQueuePriorities = &queue_priority,
     };
-    const char* enabled_device_extensions[7]{};
+    const char* enabled_device_extensions[8]{};
     uint32 enabled_device_extension_count = 0;
     if (!selected.conventional)
     {
@@ -2059,6 +2071,8 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         enabled_device_extensions[enabled_device_extension_count++] = selected.khr_swapchain_maintenance1
             ? VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME
             : VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME;
+        if (selected.ext_hdr_metadata)
+            enabled_device_extensions[enabled_device_extension_count++] = VK_EXT_HDR_METADATA_EXTENSION_NAME;
     }
 #endif
     const VkDeviceCreateInfo device_info{
@@ -2105,6 +2119,8 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     state->fn.cmd_draw_indexed_indirect = load_device_proc<PFN_vkCmdDrawIndexedIndirect2KHR>(state->device, "vkCmdDrawIndexedIndirect2KHR");
     state->fn.cmd_dispatch_indirect = load_device_proc<PFN_vkCmdDispatchIndirect2KHR>(state->device, "vkCmdDispatchIndirect2KHR");
     state->fn.cmd_draw_mesh_tasks = load_device_proc<PFN_vkCmdDrawMeshTasksEXT>(state->device, "vkCmdDrawMeshTasksEXT");
+    if (selected.ext_hdr_metadata)
+        state->fn.set_hdr_metadata = load_device_proc<PFN_vkSetHdrMetadataEXT>(state->device, "vkSetHdrMetadataEXT");
     state->fn.cmd_draw_mesh_tasks_indirect = load_device_proc<PFN_vkCmdDrawMeshTasksIndirect2EXT>(state->device, "vkCmdDrawMeshTasksIndirect2EXT");
     state->fn.cmd_copy_memory = load_device_proc<PFN_vkCmdCopyMemoryKHR>(state->device, "vkCmdCopyMemoryKHR");
     state->fn.cmd_copy_memory_to_image = load_device_proc<PFN_vkCmdCopyMemoryToImageKHR>(state->device, "vkCmdCopyMemoryToImageKHR");
@@ -2147,12 +2163,14 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         .conventional_descriptor_backend = selected.conventional,
         .mesh_shaders = !selected.conventional,
         .storage_image_read_without_format = selected.storage_image_read_without_format,
+        .hdr_metadata = selected.ext_hdr_metadata,
     };
     if (presentation)
     {
         state->swapchain = new Swapchain;
         state->swapchain->state = state;
         state->swapchain->format = desc.swapchain_format;
+        state->swapchain->color_space = desc.swapchain_color_space;
         state->swapchain->vsync = desc.vsync;
         error = recreate_swapchain(*state->swapchain);
         if (error != Error::none)
@@ -2404,6 +2422,37 @@ VkPresentModeKHR choose_present_mode(const Device& device, bool vsync) noexcept
     return immediate ? VK_PRESENT_MODE_IMMEDIATE_KHR : mailbox ? VK_PRESENT_MODE_MAILBOX_KHR : VK_PRESENT_MODE_FIFO_KHR;
 }
 
+void apply_hdr_metadata(Swapchain& swapchain) noexcept
+{
+    Device& device = *swapchain.state;
+    if (!device.fn.set_hdr_metadata || swapchain.handle == VK_NULL_HANDLE)
+        return;
+    const HdrMetadata& m = swapchain.hdr_metadata;
+    const VkHdrMetadataEXT metadata{
+        .sType = VK_STRUCTURE_TYPE_HDR_METADATA_EXT,
+        .displayPrimaryRed = {m.red_x, m.red_y},
+        .displayPrimaryGreen = {m.green_x, m.green_y},
+        .displayPrimaryBlue = {m.blue_x, m.blue_y},
+        .whitePoint = {m.white_x, m.white_y},
+        .maxLuminance = m.max_luminance,
+        .minLuminance = m.min_luminance,
+        .maxContentLightLevel = m.max_content_light_level,
+        .maxFrameAverageLightLevel = m.max_frame_average_light_level,
+    };
+    device.fn.set_hdr_metadata(device.device, 1, &swapchain.handle, &metadata);
+}
+
+VkColorSpaceKHR to_vk(ColorSpace color_space) noexcept
+{
+    switch (color_space)
+    {
+    case ColorSpace::extended_srgb_linear: return VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT;
+    case ColorSpace::hdr10_st2084: return VK_COLOR_SPACE_HDR10_ST2084_EXT;
+    case ColorSpace::srgb_nonlinear: break;
+    }
+    return VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+}
+
 Error recreate_swapchain(Swapchain& swapchain) noexcept
 {
     Device& device = *swapchain.state;
@@ -2458,7 +2507,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
     {
         if ((formats[index].format == requested_format ||
              formats[index].format == VK_FORMAT_UNDEFINED) &&
-            formats[index].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+            formats[index].colorSpace == to_vk(swapchain.color_space))
         {
             format_supported = true;
             break;
@@ -2485,7 +2534,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
         .surface = device.surface,
         .minImageCount = requested_image_count,
         .imageFormat = requested_format,
-        .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+        .imageColorSpace = to_vk(swapchain.color_space),
         .imageExtent = extent,
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
@@ -2567,6 +2616,8 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
             .swapchain_view = true,
         };
     }
+    if (swapchain.hdr_metadata_set)
+        apply_hdr_metadata(swapchain);
     return Error::none;
 }
 
@@ -2581,12 +2632,56 @@ void set_vsync(Device* device, bool vsync) noexcept
     device->swapchain->recreate_required = true;
 }
 
+bool surface_format_supported(Device* device, Format format, ColorSpace color_space) noexcept
+{
+    assert(device && "surface_format_supported called with a null device");
+    if (!device->swapchain || device->surface == VK_NULL_HANDLE)
+        return false;
+    VkSurfaceFormatKHR formats[max_surface_formats]{};
+    uint32 count = 0;
+    if (vkGetPhysicalDeviceSurfaceFormatsKHR(device->physical_device, device->surface, &count, nullptr) != VK_SUCCESS ||
+        count == 0 || count > max_surface_formats)
+        return false;
+    if (vkGetPhysicalDeviceSurfaceFormatsKHR(device->physical_device, device->surface, &count, formats) != VK_SUCCESS)
+        return false;
+    const VkFormat vk_format = to_vk(format);
+    const VkColorSpaceKHR vk_color_space = to_vk(color_space);
+    for (uint32 index = 0; index < count; ++index)
+        if ((formats[index].format == vk_format || formats[index].format == VK_FORMAT_UNDEFINED) &&
+            formats[index].colorSpace == vk_color_space)
+            return true;
+    return false;
+}
+
+void set_swapchain_output(Device* device, Format format, ColorSpace color_space) noexcept
+{
+    assert(device && "set_swapchain_output called with a null device");
+    if (!device->swapchain ||
+        (device->swapchain->format == format && device->swapchain->color_space == color_space))
+        return;
+    device->swapchain->format = format;
+    device->swapchain->color_space = color_space;
+    device->swapchain->recreate_required = true;
+}
+
+void set_hdr_metadata(Device* device, const HdrMetadata& metadata) noexcept
+{
+    assert(device && "set_hdr_metadata called with a null device");
+    if (!device->swapchain)
+        return;
+    device->swapchain->hdr_metadata = metadata;
+    device->swapchain->hdr_metadata_set = true;
+    apply_hdr_metadata(*device->swapchain);
+}
+
 SwapchainInfo get_swapchain_info(const Device* device) noexcept
 {
     SwapchainInfo info{};
     if (!device || !device->swapchain)
         return info;
     const Swapchain& swapchain = *device->swapchain;
+    info.format = swapchain.format;
+    info.color_space = swapchain.color_space;
     info.present_mode = swapchain.present_mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? PresentMode::immediate
                       : swapchain.present_mode == VK_PRESENT_MODE_MAILBOX_KHR ? PresentMode::mailbox
                                                                                : PresentMode::fifo;

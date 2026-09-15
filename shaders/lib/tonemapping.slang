@@ -48,7 +48,10 @@ float3 agx(float3 c)
 // purely additive: with the veil inside, a coloured flare raised the darkest
 // channel and the offset took that out of every channel, darkening the scene
 // under the flare's dimmer colours and crushing the glare over night sides.
-float3 pbrNeutral(float3 c, float3 veil, float blackOffset)
+// `headroom` is the display's peak over the curve's white (1 for SDR): the
+// shoulder then reaches it instead of 1, with the same start and slope, so
+// everything below the compression start is the SDR image exactly.
+float3 pbrNeutral(float3 c, float3 veil, float blackOffset, float headroom)
 {
     const float startCompression = 0.8 - 0.04, desaturation = 0.15;
     float x = min(c.r, min(c.g, c.b));
@@ -56,19 +59,22 @@ float3 pbrNeutral(float3 c, float3 veil, float blackOffset)
     c = c - offset + veil;
     float peak = max(c.r, max(c.g, c.b));
     if (peak < startCompression) return c;
-    const float d = 1.0 - startCompression;
-    float newPeak = 1.0 - d * d / (peak + d - startCompression);
+    const float d = headroom - startCompression;
+    float newPeak = headroom - d * d / (peak + d - startCompression);
     c *= newPeak / peak;
     float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
     return lerp(c, newPeak.xxx, g);
 }
 
 // The scene and the lens veil separately: only the neutral curve's black
-// offset tells them apart, the others just add them.
-float3 toneMap(float3 c, float3 veil, uint curve, float blackOffset)
+// offset tells them apart, the others just add them. `headroom` is the
+// display's peak over the curve's white, 1 for SDR: the neutral curve extends
+// its shoulder to it; the fitted curves run over it, which also lifts their
+// toes a little, so their HDR image is not their SDR one below white.
+float3 toneMap(float3 c, float3 veil, uint curve, float blackOffset, float headroom)
 {
-    if (curve == TONE_AGX) return agx(c + veil);
-    if (curve == TONE_NEUTRAL) return pbrNeutral(c, veil, blackOffset);
-    return acesFilmic(c + veil);
+    if (curve == TONE_AGX) return agx((c + veil) / headroom) * headroom;
+    if (curve == TONE_NEUTRAL) return pbrNeutral(c, veil, blackOffset, headroom);
+    return acesFilmic((c + veil) / headroom) * headroom;
 }
 

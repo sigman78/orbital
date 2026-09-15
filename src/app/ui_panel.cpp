@@ -203,6 +203,8 @@ void sun_lens_controls(render::SunSettings& settings) {
     ImGui::SliderFloat("Ghost spread", &settings.ghost_spread, .5f, 2.f, "%.2f x");
     ImGui::SliderFloat("Ghost size", &settings.ghost_size, .5f, 2.f, "%.2f x");
     ImGui::SliderFloat("Saturation", &settings.flare_saturation, 0.f, 2.f, "%.2f x");
+    ImGui::SliderFloat("Follows adaptation", &settings.flare_adaptation, 0.f, 1.f,
+                       "%.2f"); // 0 fixed level, 1 dims with the scene
     {
         const char* labels[] = {"half", "quarter", "eighth"};
         int choice = settings.flare_resolution == render::FlareResolution::Eighth ? 2
@@ -289,20 +291,46 @@ void post_fx_controls(render::PostSettings& settings) {
     if (ImGui::SmallButton("Reset post"))
         settings = {};
 }
-void tone_controls(render::ToneSettings& settings, const render::ExposureStats& exposure) {
+void tone_controls(render::ToneSettings& settings, const render::Stats& stats, const render::DisplaySettings& display) {
+    const auto& exposure = stats.exposure;
     static constexpr const char* curves[] = {"ACES filmic", "AgX", "PBR Neutral"};
     combo("Curve (F8)", settings.tone_curve, curves);
     ImGui::SliderFloat("Exposure (+/-)", &settings.exposure, exposure_keys::range.min, exposure_keys::range.max, "%.2f",
                        ImGuiSliderFlags_Logarithmic);
     ImGui::Checkbox("Auto exposure (X)", &settings.auto_exposure);
     ImGui::BeginDisabled(!settings.auto_exposure);
-    ImGui::SliderFloat("Meter key", &settings.meter_key, .02f, .5f, "%.3f", ImGuiSliderFlags_Logarithmic);
-    ImGui::SliderFloat("Adaptation min", &settings.adapt_min, .1f, 1.f, "%.2f x");
-    ImGui::SliderFloat("Adaptation max", &settings.adapt_max, 1.f, 8.f, "%.2f x");
+    ImGui::SliderFloat("Meter key", &settings.meter_key, .005f, .5f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("Highlight bias", &settings.highlight_bias, 0.f, .5f, "%.2f");
+    ImGui::SliderFloat("Adaptation strength", &settings.adapt_strength, 0.f, 1.f,
+                       "%.2f"); // in stops; the range still clamps
+    ImGui::SliderFloat("Adaptation min", &settings.adapt_min, .05f, 1.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("Adaptation max", &settings.adapt_max, 1.f, 32.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
     ImGui::EndDisabled();
     // The active curve's exposure trim; each curve keeps its own value.
     ImGui::SliderFloat("Curve trim", &settings.curve_trim[std::min(unsigned(settings.tone_curve), 2u)], .1f, 2.f,
                        "%.2f x");
+    // The swapchain's output; the HDR pairs are offered only with the OS presenting in HDR.
+    static constexpr const char* outputs[] = {"SDR (8-bit sRGB)", "HDR scRGB (16-bit float)", "HDR10 (10-bit PQ)"};
+    combo("Output", settings.hdr_output, outputs);
+    if (stats.hdr_unsupported)
+        ImGui::TextDisabled("Not offered by the display; is HDR on in the OS?");
+    if (display.hdr)
+        ImGui::Text("Display: HDR, %.0f to %.0f nits, SDR white %.0f", display.min_nits, display.max_nits,
+                    display.sdr_white_nits);
+    else
+        ImGui::TextDisabled("Display: SDR desktop");
+    ImGui::BeginDisabled(settings.hdr_output == render::HdrOutput::Off);
+    ImGui::SliderFloat("Paper white", &settings.paper_white_nits, 80.f, 400.f, "%.0f nits");
+    ImGui::SliderFloat("Peak brightness", &settings.peak_nits, 200.f, 4000.f, "%.0f nits",
+                       ImGuiSliderFlags_Logarithmic);
+    if (display.hdr && display.max_nits > 0 && ImGui::SmallButton("From display")) {
+        settings.peak_nits = display.max_nits;
+        if (display.sdr_white_nits > 0)
+            settings.paper_white_nits = display.sdr_white_nits;
+    }
+    if (!stats.hdr_metadata)
+        ImGui::TextDisabled("No HDR metadata path on this device");
+    ImGui::EndDisabled();
     ImGui::Spacing();
     if (!exposure.ready) {
         ImGui::TextDisabled("Waiting for HDR measurement...");
@@ -408,7 +436,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::PopID();
     }
     if (section("Tone")) {
-        tone_controls(app.tone, stats.exposure);
+        tone_controls(app.tone, stats, app.display);
         ImGui::PopID();
     }
     if (section("Camera")) {

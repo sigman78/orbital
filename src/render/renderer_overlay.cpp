@@ -16,7 +16,7 @@ struct UiVertex {
 struct UiRoot {
     float scale[2], translate[2];
     std::uint64_t vertices;
-    std::uint32_t texture, unused;
+    std::uint32_t texture, display; // display: the output encoding, mode in the low byte and paper white above
 };
 static_assert(sizeof(UiVertex) == 32 && sizeof(UiRoot) == 32);
 static_assert(sizeof(ImDrawIdx) == 2, "The overlay pipeline requires 16-bit ImGui indices");
@@ -41,12 +41,12 @@ void Renderer::Impl::record_ui(gpu::CommandBuffer* cmd, const ImDrawData* ui, st
     auto* vertices = reinterpret_cast<UiVertex*>(cpu);
     auto* indices = reinterpret_cast<ImDrawIdx*>(cpu + vertex_bytes);
     const std::uint64_t index_address = gpu + vertex_bytes;
-    gpu::bind_pso(cmd, pso.ui);
+    gpu::bind_pso(cmd, ui_pso());
     UiRoot ui_root{.scale = {2.f / ui->DisplaySize.x, 2.f / ui->DisplaySize.y},
                    .translate = {},
                    .vertices = gpu,
                    .texture = std::uint32_t(Slot::ui_font),
-                   .unused = 0};
+                   .display = ui_display};
     ui_root.translate[0] = -1 - ui->DisplayPos.x * ui_root.scale[0];
     ui_root.translate[1] = -1 - ui->DisplayPos.y * ui_root.scale[1];
     unsigned vertex_base = 0, index_base = 0;

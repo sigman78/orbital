@@ -24,6 +24,9 @@ struct ExposureStats {
 
 struct Stats {
     ExposureStats exposure;
+    HdrOutput hdr_output = HdrOutput::Off; // what the swapchain presents
+    bool hdr_unsupported = false;          // the requested HDR output is not offered by the surface
+    bool hdr_metadata = false;             // the device can pass mastering metadata to the display
     float frame_ms = 0, gpu_ms = 0, shadow_ms = 0, surface_ms = 0, atmosphere_ms = 0,
           post_ms = 0; // shadow_ms includes the belt culling passes
     float cull_ms = 0, body_shadow_ms = 0, belt_light_ms = 0, belt_disc_ms = 0;
@@ -44,6 +47,7 @@ struct FrameInput {
     bool overlay = true;
     const ImDrawData* ui = nullptr; // drawn over the presented frame
     ToneSettings tone;
+    DisplaySettings display;
     AntiAliasingSettings aa;
     BeltSettings belt;
     BeltDustSettings belt_dust;

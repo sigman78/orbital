@@ -5,6 +5,7 @@
 
 #include "../scene_shared.h"
 #include "../scene/bindings.slang"
+#include "../lib/color.slang"
 
 struct UiVertex {
     float4 position_uv; // pixel position, then atlas uv
@@ -14,7 +15,7 @@ struct UiVertex {
 struct UiRoot {
     float2 scale, translate; // pixels to clip space
     UiVertex* vertices;
-    uint texture, unused;
+    uint texture, display; // display: the output encoding, mode (0 sRGB, 1 scRGB, 2 HDR10) in the low byte, paper white in nits above
 };
 
 [[vk::push_constant]] ConstantBuffer<UiRoot> root;
@@ -42,5 +43,11 @@ UiVaryings vertexMain(uint vertexIndex : SV_VertexID)
 [shader("fragment")]
 float4 fragmentMain(UiVaryings input) : SV_Target0
 {
-    return input.colour * textures[TEX_UI_FONT].Sample(samplers[SAMPLER_CLAMP], input.uv);
+    float4 colour = input.colour * textures[TEX_UI_FONT].Sample(samplers[SAMPLER_CLAMP], input.uv);
+    // An HDR swapchain does not encode for us: the panel is drawn at the paper white.
+    uint mode = root.display & 0xff;
+    if (mode == 0) return colour;
+    float paperWhite = float(root.display >> 8);
+    if (mode == 1) return float4(colour.rgb * paperWhite / 80.0, colour.a);
+    return float4(pqEncode(mul(REC709_TO_REC2020, colour.rgb) * paperWhite / 10000.0), colour.a);
 }

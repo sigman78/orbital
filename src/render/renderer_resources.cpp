@@ -126,6 +126,7 @@ void Renderer::Impl::create_device(void* window) {
     panic_if(!device, "Vulkan device creation failed; check the console for missing features or driver errors");
     const auto& caps = gpu::get_device_caps(device);
     log::info("GPU: {} | conventional NoGraphicsAPI backend", caps.device_name);
+    stats.hdr_metadata = caps.hdr_metadata;
     panic_if(!caps.conventional_descriptor_backend,
              "the demo's shaders require the conventional descriptor backend build option");
     submissions.initialize(device);
@@ -269,6 +270,81 @@ void Renderer::Impl::resize_flare(unsigned divisor) {
     bind(Slot::flare, frame_targets.flare);
 }
 
+// The swapchain's output. HDR modes need the surface to offer the format and
+// colour space pair, which it does only with the OS presenting in HDR; an
+// unsupported request is reported through the stats and the output stays as
+// it was. A switch recreates the swapchain on the next acquire and the two
+// intermediates, which for HDR are 16-bit float holding the composite's linear
+// display value over the headroom, so the spatial anti-aliasing sees the same
+// values it does in SDR and the present pass scales them.
+void Renderer::Impl::set_hdr_output(HdrOutput mode) {
+    if (mode == hdr_output || mode == hdr_requested)
+        return;
+    hdr_requested = mode;
+    gpu::Format format = gpu::Format::bgra8_srgb;
+    gpu::ColorSpace color_space = gpu::ColorSpace::srgb_nonlinear;
+    if (mode == HdrOutput::ScRgb) {
+        format = gpu::Format::rgba16_float;
+        color_space = gpu::ColorSpace::extended_srgb_linear;
+    } else if (mode == HdrOutput::Hdr10) {
+        format = gpu::Format::rgb10a2_unorm;
+        color_space = gpu::ColorSpace::hdr10_st2084;
+    }
+    static constexpr const char* names[] = {"SDR", "scRGB", "HDR10"};
+    if (mode != HdrOutput::Off && !gpu::surface_format_supported(device, format, color_space)) {
+        log::warn("{} output is not offered by the display surface (is HDR on in the OS?); staying at {}",
+                  names[unsigned(mode)], names[unsigned(hdr_output)]);
+        stats.hdr_unsupported = true;
+        return;
+    }
+    stats.hdr_unsupported = false;
+    gpu::wait_idle(device);
+    gpu::set_swapchain_output(device, format, color_space);
+    hdr_output = mode;
+    stats.hdr_output = mode;
+    if (extent.width) {
+        const auto color_usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment;
+        frame_targets.final_image.reset();
+        frame_targets.ldr.reset();
+        frame_targets.final_image = create_image({.extent = extent,
+                                                  .format = intermediate_format(),
+                                                  .usage = color_usage | gpu::TextureUsage::transfer_source});
+        frame_targets.ldr = create_image({.extent = extent, .format = intermediate_format(), .usage = color_usage});
+        bind(Slot::final_image, frame_targets.final_image);
+        bind(Slot::ldr, frame_targets.ldr);
+    }
+    log::info("Output: {} ({})", names[unsigned(mode)],
+              mode == HdrOutput::ScRgb   ? "16-bit float, extended linear sRGB"
+              : mode == HdrOutput::Hdr10 ? "10-bit, SMPTE ST 2084"
+                                         : "8-bit sRGB");
+}
+
+// SMPTE ST 2086 metadata for an HDR swapchain: the display's own range when
+// the OS reported it (mastering the content to the display it is shown on),
+// otherwise the panel's peak; the content light level is the curve's peak and
+// the frame average the paper white, since a mostly dark sky never exceeds it.
+void Renderer::Impl::update_hdr_metadata(const ToneSettings& tone, const DisplaySettings& display) {
+    if (!hdr() || !stats.hdr_metadata) {
+        hdr_metadata_valid = false;
+        return;
+    }
+    gpu::HdrMetadata metadata;
+    if (hdr_output == HdrOutput::ScRgb) { // scRGB carries Rec. 709 primaries
+        metadata.red_x = .640f, metadata.red_y = .330f;
+        metadata.green_x = .300f, metadata.green_y = .600f;
+        metadata.blue_x = .150f, metadata.blue_y = .060f;
+    }
+    metadata.max_luminance = display.max_nits > 0 ? display.max_nits : tone.peak_nits;
+    metadata.min_luminance = display.min_nits;
+    metadata.max_content_light_level = tone.peak_nits;
+    metadata.max_frame_average_light_level = std::min(tone.paper_white_nits, metadata.max_luminance);
+    if (hdr_metadata_valid && std::memcmp(&metadata, &hdr_metadata_sent, sizeof(metadata)) == 0)
+        return;
+    gpu::set_hdr_metadata(device, metadata);
+    hdr_metadata_sent = metadata;
+    hdr_metadata_valid = true;
+}
+
 void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor, unsigned flare) {
     divisor = std::clamp(divisor, 1u, 4u);
     if (extent == new_extent) {
@@ -301,10 +377,9 @@ void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor, unsigned flar
         {.extent = {std::max(1u, extent.width / flare_divisor), std::max(1u, extent.height / flare_divisor)},
          .format = gpu::Format::rgba16_float,
          .usage = color_usage});
-    frame_targets.final_image = create_image({.extent = extent,
-                                              .format = gpu::Format::rgba8_srgb,
-                                              .usage = color_usage | gpu::TextureUsage::transfer_source});
-    frame_targets.ldr = create_image({.extent = extent, .format = gpu::Format::rgba8_srgb, .usage = color_usage});
+    frame_targets.final_image = create_image(
+        {.extent = extent, .format = intermediate_format(), .usage = color_usage | gpu::TextureUsage::transfer_source});
+    frame_targets.ldr = create_image({.extent = extent, .format = intermediate_format(), .usage = color_usage});
     for (auto& image : frame_targets.history)
         image = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
     frame_targets.splat_mask = create_image(

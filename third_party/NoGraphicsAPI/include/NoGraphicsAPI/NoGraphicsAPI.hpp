@@ -449,7 +449,15 @@ struct DeviceCaps
     bool conventional_descriptor_backend = false;
     bool mesh_shaders = false;
     bool storage_image_read_without_format = false;
+    bool hdr_metadata = false; // VK_EXT_hdr_metadata: set_hdr_metadata reaches the display (conventional backend addition)
 };
+
+// The swapchain's colour space (conventional backend addition, for HDR output):
+// sRGB non-linear for 8-bit formats, extended linear sRGB (scRGB, 1.0 = 80 nits)
+// with a 16-bit float format, or HDR10 (SMPTE ST 2084 PQ, Rec. 2020) with a
+// 10-bit format. The surface offers the HDR pairs only when the OS presents in
+// HDR; see surface_format_supported.
+enum class ColorSpace : uint8 { srgb_nonlinear, extended_srgb_linear, hdr10_st2084 };
 
 // A windowed device and every call using it must remain on the native
 // window's message-pump thread. The window must outlive the device.
@@ -457,6 +465,7 @@ struct DeviceDesc
 {
     void* window = nullptr; // HWND on Windows; SDL_Window* on Linux; null for a device without presentation.
     Format swapchain_format = Format::undefined;
+    ColorSpace swapchain_color_space = ColorSpace::srgb_nonlinear; // conventional backend addition
     uint32 desired_swapchain_image_count = 2; // 1..8 presentation contexts.
     uint32 timestamp_query_count = 256; // Per command buffer; zero disables timestamps.
     bool vsync = true; // FIFO presentation; false selects mailbox when available, else immediate (conventional backend addition).
@@ -668,9 +677,28 @@ struct SwapchainInfo
 {
     PresentMode present_mode = PresentMode::fifo;
     uint32 image_count = 0;
+    Format format = Format::undefined;
+    ColorSpace color_space = ColorSpace::srgb_nonlinear;
 };
 // What the driver granted at the last (re)creation.
 [[nodiscard]] SwapchainInfo get_swapchain_info(const Device* device) noexcept;
+// Conventional backend additions for HDR output: whether the surface offers a
+// format and colour space pair, and switching the swapchain to one (recreated
+// on the next acquire; check support first, an unsupported pair fails there).
+[[nodiscard]] bool surface_format_supported(Device* device, Format format, ColorSpace color_space) noexcept;
+void set_swapchain_output(Device* device, Format format, ColorSpace color_space) noexcept;
+// SMPTE ST 2086 mastering metadata and the content light levels, in nits and
+// CIE xy, for an HDR swapchain (conventional backend addition over
+// VK_EXT_hdr_metadata). Kept and re-applied whenever the swapchain is
+// recreated; a no-op when the device lacks the extension.
+struct HdrMetadata
+{
+    float red_x = .708f, red_y = .292f, green_x = .170f, green_y = .797f, blue_x = .131f, blue_y = .046f; // Rec. 2020
+    float white_x = .3127f, white_y = .3290f;                                                             // D65
+    float max_luminance = 1000.0f, min_luminance = 0.0f;
+    float max_content_light_level = 1000.0f, max_frame_average_light_level = 200.0f;
+};
+void set_hdr_metadata(Device* device, const HdrMetadata& metadata) noexcept;
 
 [[nodiscard]] TimelineSemaphore* create_timeline_semaphore(Device* device, uint64 initial_value = 0) noexcept;
 void destroy_timeline_semaphore(TimelineSemaphore* semaphore) noexcept;

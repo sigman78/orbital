@@ -73,7 +73,10 @@ Between the rocks a half-resolution march through the same density field scatter
    area-prefiltered bloom with adjacent-texel separable blur at quarter resolution;
    one shared 1×1 sun-visibility estimate for lens effects; the soft part of the lens flare stack
    (main ring, crescents, coloured ghosts, streak spindles) into a quarter-resolution target;
-   exposure metering every sixteenth frame from a 16x16 log-luminance image.
+   exposure metering every sixteenth frame from a 16x16 image whose cells integrate their whole
+   area at a four pixel stride plus the sun's glare; the CPU averages the cells by centre weight,
+   adds a tenth of the brightest cell and maps the meter key to 1x, scaled in stops by the
+   adaptation strength, within -2 to +3 stops.
 7. The composite adds the sun glare, the aperture starburst and the thin axis streak at full
    resolution and samples the flare stack target, all in HDR using the shared sun visibility. The
    stack lies along the axis through the image centre and the projected sun; its major elements
@@ -84,7 +87,16 @@ Between the rocks a half-resolution march through the same density field scatter
    brightens the film where the sun's direction grazes the pane.
    Tone mapping (PBR Neutral, AgX or ACES filmic) with vignette, chromatic fringe and grain into an
    intermediate, then the spatial pass (SMAA or FXAA) into the final image.
-8. Present, with the HUD and the Dear ImGui panel drawn last into the swapchain.
+8. Present, with the HUD and the Dear ImGui panel drawn last into the swapchain. The swapchain is
+   8-bit sRGB by default; with Output set to scRGB or HDR10 (Tone panel, `--hdr`) it is 16-bit float
+   extended linear sRGB or 10-bit PQ, the intermediates become 16-bit float holding the composite's
+   linear display value over the headroom (so the spatial pass, grain and dither see SDR values),
+   the neutral curve's shoulder extends to the headroom, and the present and overlay passes decode and
+   scale by the paper white and encode for the colour space. Captures clip at the curve's white.
+   The platform layer reports the display's HDR state, luminance range and SDR white level (DXGI
+   and the display configuration on Windows; nothing on Linux), polled once a second: they seed the
+   paper white and peak defaults at startup, feed the ST 2086 metadata the swapchain carries, and
+   show in the Tone panel.
 
 Scoped GPU timings separately bracket compute culling, body shadows, belt light maps, far-belt bakes, the scene,
 atmospheres with dust, and post-processing. The original cull/shadow aggregate is retained in the panel and CSV.
@@ -102,16 +114,19 @@ enforced and the control that scales it.
   default 0.25 of the former constants, 0 for none. City lights and faint cloud cover are
   what a night side shows.
 - **The lens is additive.** The sun glare, starburst, streak and the flare stack are light
-  the lens adds and never darken the scene. The composite passes them to the tone map
+  the lens adds and never darken the scene. They follow the manual exposure but, by default,
+  not the auto exposure (Sun & lens > Follows adaptation), so a sun in frame stopping the
+  scene down leaves the flare at its tuned level. The composite passes them to the tone map
   apart from the scene, so the neutral curve's black offset is taken from the scene alone
   (ACES and AgX just sum); the glare's 1/d² tail is cut with exp(-1.5 d) so it does not
   veil the frame once nothing subtracts it. The stack's veils are intended and scale with
   their Sun & lens strengths; the Lens flare switch removes the stack and keeps the glare.
 - **The curve is the published PBR Neutral.** Black offset 1.0 by default (Post FX slider
   scales the subtraction); the per-curve exposure trims, the meter key and the adaptation
-  range are Tone panel controls. The published subtraction also removes faint coloured
-  light such as the Milky Way band: the intended remedy is scene-driven exposure
-  adaptation that brings the sky up when no bright body is in view, not a lifted black.
+  range are Tone panel controls. On an HDR output the image below the curve's white is the
+  SDR image exactly; only the shoulder above it reaches for the display's peak. The published subtraction also removes faint coloured
+  light such as the Milky Way band: the remedy is the auto exposure, which brings a sky-only
+  view up three stops and a sun in frame down one to two, never a lifted black.
 - **Contrast reference.** The Sep 11 screenshots (`docs/images` at 7c9535b) are the target:
   at 1920x1080 with `--time 0`, the belt view's median is 7 display codes and the Dawn
   night side's 8; a change that moves either by more than a few codes is a regression

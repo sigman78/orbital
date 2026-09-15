@@ -173,6 +173,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.belt.lod_scale = options.lod_scale;
     app.vsync = options.vsync < 0 ? options.benchmark.empty() : options.vsync != 0;
     app.tone.exposure = options.exposure;
+    app.tone.hdr_output = render::HdrOutput(options.hdr);
     app.tone.auto_exposure = options.fixed_time < 0;
     app.bodies = evaluate_system(system, std::max(0.0, options.fixed_time));
     if (options.bookmark >= 0)
@@ -208,6 +209,14 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
         free_camera(app);
     }
     return app;
+}
+
+render::DisplaySettings display_settings(const platform::DisplayInfo& info) {
+    return {.hdr = info.hdr,
+            .min_nits = info.min_nits,
+            .max_nits = info.max_nits,
+            .max_full_frame_nits = info.max_full_frame_nits,
+            .sdr_white_nits = info.sdr_white_nits};
 }
 
 struct Session {
@@ -269,6 +278,8 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
 
         const auto frame_input = make_frame_input(app, simulation_time, ui_draw);
         renderer.set_vsync(app.vsync);
+        if (frames % 60 == 0) // the window may move to another display, or the OS switch HDR
+            app.display = display_settings(window.display_info());
         if (renderer.draw(frame_input)) {
             frames++;
             if (options.maximize_at && frames == options.maximize_at)
@@ -324,6 +335,16 @@ int run(const Options& options) {
     platform::init_process();
     AppState app = initial_state(options, system);
     const auto window = platform::Window::create({.client_size = options.size, .title = window_title});
+    // The display's HDR range seeds the tone defaults once; the panel can change them after.
+    app.display = display_settings(window->display_info());
+    if (app.display.hdr) {
+        if (app.display.sdr_white_nits > 0)
+            app.tone.paper_white_nits = app.display.sdr_white_nits;
+        if (app.display.max_nits > 0)
+            app.tone.peak_nits = app.display.max_nits;
+        log::info("Display: HDR on, {:.0f} to {:.0f} nits, SDR white {:.0f} nits", app.display.min_nits,
+                  app.display.max_nits, app.display.sdr_white_nits);
+    }
     auto hud = make_hud();
     render::Renderer renderer(window->native_handle(), system, directory, hud.view(), {.belt_count = options.rocks});
     hud = {}; // The renderer has copied/uploaded the pixels.

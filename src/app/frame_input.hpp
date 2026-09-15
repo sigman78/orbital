@@ -21,6 +21,7 @@ inline render::FrameInput make_frame_input(const AppState& app, double time, con
             .overlay = app.overlay,
             .ui = ui,
             .tone = app.tone,
+            .display = app.display,
             .aa = app.aa,
             .belt = app.belt,
             .belt_dust = app.belt_dust,

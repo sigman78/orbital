@@ -9,7 +9,6 @@ namespace space::render {
 namespace {
 namespace exposure_meter {
 inline constexpr unsigned interval = 16;                               // frames between readbacks
-inline constexpr float min_luminance = 0.004f;                         // darker texels (space) do not vote
 inline constexpr float brighten_seconds = 2.5f, darken_seconds = 0.6f; // time constants of the exposure change
 inline constexpr float max_step_seconds = 1.f;                         // a stalled frame does not snap the adaptation
 } // namespace exposure_meter
@@ -17,21 +16,26 @@ inline constexpr float max_step_seconds = 1.f;                         // a stal
 
 void Renderer::Impl::apply_metering(const ToneSettings& tone) {
     if (meter_pending) {
-        // Each meter texel holds log luminance, luminance and its centre weight.
+        // Each meter texel holds its cell's mean luminance (with the sun's glare), the
+        // brightest tap and its centre weight. The metered value is the weighted mean
+        // of the cells plus a share of the brightest cell, so a bright source in frame
+        // pulls the exposure down the way a bright sky does for the eye.
         const auto* values = reinterpret_cast<const float*>(buffers.luminance_readback.range().cpu);
-        float log_sum = 0, weight_sum = 0;
+        float mean_sum = 0, weight_sum = 0, brightest_cell = 0;
         stats.exposure.peak_luminance = 0;
         for (unsigned i = 0; i < targets::meter_size * targets::meter_size; i++) {
             stats.exposure.peak_luminance = std::max(stats.exposure.peak_luminance, values[i * 4 + 1]);
-            if (values[i * 4 + 1] > exposure_meter::min_luminance) {
-                log_sum += values[i * 4] * values[i * 4 + 2];
-                weight_sum += values[i * 4 + 2];
-            }
+            brightest_cell = std::max(brightest_cell, values[i * 4]);
+            mean_sum += values[i * 4] * values[i * 4 + 2];
+            weight_sum += values[i * 4 + 2];
         }
         stats.exposure.ready = true;
         stats.exposure.has_samples = weight_sum > 0;
-        stats.exposure.luminance = weight_sum > 0 ? std::exp(log_sum / weight_sum) : 0;
-        const float requested = weight_sum > 0 ? tone.meter_key / stats.exposure.luminance : 1.f;
+        stats.exposure.luminance = (weight_sum > 0 ? mean_sum / weight_sum : 0) + tone.highlight_bias * brightest_cell;
+        // The strength damps the change in stops, so half strength halves every excursion.
+        const float requested = stats.exposure.luminance > 0
+                                    ? std::pow(tone.meter_key / stats.exposure.luminance, tone.adapt_strength)
+                                    : 1.f;
         exposure_target = std::clamp(requested, tone.adapt_min, std::max(tone.adapt_min, tone.adapt_max));
         stats.exposure.target = exposure_target;
         stats.exposure.limited = requested != exposure_target;
@@ -89,10 +93,11 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
     if (flare)
         fullscreen_pass(cmd, frame_targets.flare, pso.post.flare, root);
     // Tone map into the final image, or through an intermediate when a spatial pass follows.
+    // The HDR variants of these pipelines target the 16-bit float intermediates.
     fullscreen_pass(cmd, spatial_aa != SpatialAA::Off ? frame_targets.ldr : frame_targets.final_image,
-                    pso.post.composite, root);
+                    hdr() ? pso.post.composite_hdr : pso.post.composite, root);
     if (spatial_aa == SpatialAA::FXAA) {
-        fullscreen_pass(cmd, frame_targets.final_image, pso.post.fxaa, root);
+        fullscreen_pass(cmd, frame_targets.final_image, hdr() ? pso.post.fxaa_hdr : pso.post.fxaa, root);
     } else if (spatial_aa == SpatialAA::SMAA) {
         // SMAA: edges, blending weights, neighbourhood blend (modes 0, 1, 2 of smaa.slang).
         root.mode = 0;
@@ -100,7 +105,7 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
         root.mode = 1;
         fullscreen_pass(cmd, frame_targets.smaa_weights, pso.post.smaa_weights, root);
         root.mode = 2;
-        fullscreen_pass(cmd, frame_targets.final_image, pso.post.smaa_blend, root);
+        fullscreen_pass(cmd, frame_targets.final_image, hdr() ? pso.post.smaa_blend_hdr : pso.post.smaa_blend, root);
     }
     if (frame_index % exposure_meter::interval == 0) {
         fullscreen_pass(cmd, fixed_targets.luminance, pso.post.meter, root);
@@ -113,7 +118,7 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
     gpu::ColorAttachment color{.render_view = swapchain_view, .load = gpu::LoadOp::clear};
     {
         RenderPassScope pass(cmd, {.colors = {&color, 1}});
-        gpu::bind_pso(cmd, pso.post.present);
+        gpu::bind_pso(cmd, present_pso());
         gpu::draw(cmd, root, 3);
         record_ui(cmd, ui, ui_cpu, ui_gpu);
     }
