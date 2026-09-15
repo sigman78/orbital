@@ -1,81 +1,52 @@
 #pragma once
 #include "render/renderer.hpp"
-#include <array>
-#include <cmath>
+#include <algorithm>
 #include <cstddef>
-#include <type_traits>
 
 namespace space::app {
 
-// Presentation-only smoothing of the panel's readings: an exponential moving
-// average over every timing and count, so the numbers hold still enough to
-// read while the graph keeps showing raw frames. The renderer's stats and the
-// benchmark samples stay raw. The average is timed in seconds, not frames, so
-// it settles at the same pace at any frame rate; the first sample primes it
-// and a camera cut restarts it, since the old view's numbers say nothing about
-// the new one.
-class StatsSmoother {
-public:
-    static constexpr double time_constant_seconds = .5;
+// Presentation-only smoothing of the panel's numbers: each reading eases toward
+// the latest sample by the share of the time constant that has passed, so the
+// numbers settle in about half a second at any frame rate. Not an exact average
+// and not meant to be; the graph shows the raw frames, and the renderer's stats
+// and the benchmark stay raw. The first sample after a camera cut is taken as
+// is, since the old view's numbers say nothing about the new one.
+struct SmoothedStats {
+    static constexpr float time_constant_seconds = .5f;
 
-    void add(const render::Stats& sample, double dt_seconds, std::size_t cut_serial) {
+    render::PassTimings gpu;
+    float frame_ms = 0, prepare_ms = 0, rocks = 0, triangles = 0;
+    std::size_t cut_serial = 0;
+    bool primed = false;
+
+    void add(const render::Stats& sample, double dt_seconds, std::size_t cut) {
         if (sample.frame_ms <= 0)
             return;
-        if (cut_serial != cut_serial_) {
-            cut_serial_ = cut_serial;
-            primed_ = false;
+        if (cut != cut_serial) {
+            cut_serial = cut;
+            primed = false;
         }
-        const Values values = collect(sample);
-        if (!primed_) {
-            values_ = values;
-            primed_ = true;
-            return;
-        }
-        const double alpha = 1 - std::exp(-std::max(dt_seconds, 0.0) / time_constant_seconds);
-        for (std::size_t i = 0; i < values.size(); i++)
-            values_[i] += alpha * (values[i] - values_[i]);
+        const float a = primed ? std::clamp(float(dt_seconds) / time_constant_seconds, 0.f, 1.f) : 1.f;
+        primed = true;
+        const auto ease = [a](float& value, float latest) { value += a * (latest - value); };
+        for (std::size_t i = 0; i < render::gpu_pass_count; i++)
+            ease(gpu.ms[i], sample.gpu.ms[i]);
+        ease(frame_ms, sample.frame_ms);
+        ease(prepare_ms, sample.prepare_ms);
+        ease(rocks, float(sample.visible_asteroids));
+        ease(triangles, float(sample.triangles));
     }
+    // The latest stats with the smoothed readings in place of the raw ones.
     render::Stats apply(render::Stats latest) const {
-        if (!primed_)
+        if (!primed)
             return latest;
-        std::size_t i = 0;
-        visit(latest, [&](auto& field) {
-            using Field = std::remove_reference_t<decltype(field)>;
-            if constexpr (std::is_integral_v<Field>)
-                field = Field(std::llround(values_[i++]));
-            else
-                field = Field(values_[i++]);
-        });
+        latest.gpu = gpu;
+        latest.frame_ms = frame_ms;
+        latest.prepare_ms = prepare_ms;
+        latest.visible_asteroids = unsigned(rocks + .5f);
+        latest.triangles = unsigned(triangles + .5f);
         return latest;
     }
-    void reset() { primed_ = false; }
-
-private:
-    // Every reading the panel shows as a number: the CPU times, each GPU pass
-    // and the counts from culling and drawing. Anything not listed passes
-    // through apply() untouched.
-    template <class Stats, class Visitor> static void visit(Stats& stats, Visitor&& visitor) {
-        visitor(stats.frame_ms);
-        visitor(stats.prepare_ms);
-        for (auto& ms : stats.gpu.ms)
-            visitor(ms);
-        visitor(stats.visible_asteroids);
-        visitor(stats.triangles);
-        visitor(stats.rock_triangles);
-        visitor(stats.draw_calls);
-        visitor(stats.rock_groups_drawn);
-    }
-    static constexpr std::size_t value_count = 2 + render::gpu_pass_count + 5;
-    using Values = std::array<double, value_count>;
-    static Values collect(const render::Stats& stats) {
-        Values values{};
-        std::size_t i = 0;
-        visit(stats, [&](const auto& field) { values[i++] = double(field); });
-        return values;
-    }
-    Values values_{};
-    std::size_t cut_serial_ = 0;
-    bool primed_ = false;
 };
 
 } // namespace space::app

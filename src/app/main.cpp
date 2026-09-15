@@ -245,7 +245,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
     auto previous = std::chrono::steady_clock::now();
     double simulation_time = 0, elapsed = 0, title_clock = 0;
     unsigned frames = 0;
-    StatsSmoother smoother;
+    SmoothedStats smoother;
     while (app.running && window.pump_events()) {
         for (const Key key : window.key_presses()) {
             if (key == Key::alt_enter)
