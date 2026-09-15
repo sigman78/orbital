@@ -132,19 +132,19 @@ void update_title(platform::Window& window, const render::Stats& stats, const Ap
 
 struct FrameTimes {
     std::vector<float> cpu_ms, gpu_ms, prepare_ms;
-    std::vector<float> cull_ms, body_shadow_ms, belt_light_ms, belt_disc_ms;
+    std::vector<float> cull_ms, body_shadow_ms, belt_light_ms, belt_disc_ms, meter_ms;
     std::vector<float> cull_shadow_ms, surface_ms, atmosphere_ms, post_ms; // GPU pass timings
 };
 
 void write_benchmark(const std::filesystem::path& path, const FrameTimes& times) {
-    std::string csv =
-        "frame,cpu_submit_and_wait_ms,gpu_ms,cpu_prepare_ms,gpu_cull_shadow_ms,gpu_surface_ms,"
-        "gpu_atmosphere_ms,gpu_post_ms,gpu_cull_ms,gpu_body_shadow_ms,gpu_belt_light_ms,gpu_belt_disc_ms\n";
+    std::string csv = "frame,cpu_submit_and_wait_ms,gpu_ms,cpu_prepare_ms,gpu_cull_shadow_ms,gpu_surface_ms,"
+                      "gpu_atmosphere_ms,gpu_post_ms,gpu_cull_ms,gpu_body_shadow_ms,gpu_belt_light_ms,gpu_belt_disc_ms,"
+                      "gpu_meter_ms\n";
     for (std::size_t i = 0; i < times.cpu_ms.size(); i++)
-        std::format_to(std::back_inserter(csv), "{},{},{},{},{},{},{},{},{},{},{},{}\n", i, times.cpu_ms[i],
+        std::format_to(std::back_inserter(csv), "{},{},{},{},{},{},{},{},{},{},{},{},{}\n", i, times.cpu_ms[i],
                        times.gpu_ms[i], times.prepare_ms[i], times.cull_shadow_ms[i], times.surface_ms[i],
                        times.atmosphere_ms[i], times.post_ms[i], times.cull_ms[i], times.body_shadow_ms[i],
-                       times.belt_light_ms[i], times.belt_disc_ms[i]);
+                       times.belt_light_ms[i], times.belt_disc_ms[i], times.meter_ms[i]);
     if (!file::write_text(path, csv))
         log::error("cannot write benchmark {}", path.string());
     auto sorted = times.cpu_ms;
@@ -300,6 +300,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                 times.body_shadow_ms.push_back(stats.body_shadow_ms);
                 times.belt_light_ms.push_back(stats.belt_light_ms);
                 times.belt_disc_ms.push_back(stats.belt_disc_ms);
+                times.meter_ms.push_back(stats.meter_ms);
                 times.surface_ms.push_back(stats.surface_ms);
                 times.atmosphere_ms.push_back(stats.atmosphere_ms);
                 times.post_ms.push_back(stats.post_ms);
@@ -368,6 +369,7 @@ int run(const Options& options) {
         times.body_shadow_ms.reserve(times.cpu_ms.capacity());
         times.belt_light_ms.reserve(times.cpu_ms.capacity());
         times.belt_disc_ms.reserve(times.cpu_ms.capacity());
+        times.meter_ms.reserve(times.cpu_ms.capacity());
         times.surface_ms.reserve(times.cpu_ms.capacity());
         times.atmosphere_ms.reserve(times.cpu_ms.capacity());
         times.post_ms.reserve(times.cpu_ms.capacity());

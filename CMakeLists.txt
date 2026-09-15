@@ -27,6 +27,7 @@ target_link_libraries(orbital_scene PUBLIC orbital_core)
 target_compile_options(orbital_scene PRIVATE ${ORBITAL_WARNINGS})
 
 add_library(orbital_render_cpu STATIC src/render/showcase.cpp src/render/frame_calculations.cpp)
+target_include_directories(orbital_render_cpu PUBLIC shaders) # the shared GPU ABI headers
 target_link_libraries(orbital_render_cpu PUBLIC orbital_scene)
 target_compile_options(orbital_render_cpu PRIVATE ${ORBITAL_WARNINGS})
 
@@ -124,13 +125,15 @@ if(ORBITAL_BUILD_DEMO)
       surface/surface_rock sky/background sky/galaxy sky/stars
       belt/beltsplat belt/beltblur belt/dust belt/disc belt/discsplat
       aa/temporal aa/smaa aa/fxaa_pass
-      post/bloom post/composite post/flare post/meter post/present post/sun_visibility overlay/ui scene/motes)
+      post/bloom post/composite post/flare post/present post/sun_visibility overlay/ui scene/motes)
     get_filename_component(shader "${source}" NAME)
     orbital_compile_slang("shaders/${shader}.fragment.spv" "shaders/${source}.slang" fragmentMain fragment)
     list(APPEND ORBITAL_SHADER_OUTPUTS "${CMAKE_BINARY_DIR}/shaders/${shader}.fragment.spv")
   endforeach()
   orbital_compile_slang("shaders/cull.compute.spv" "shaders/belt/cull.slang" computeMain compute)
   list(APPEND ORBITAL_SHADER_OUTPUTS "${CMAKE_BINARY_DIR}/shaders/cull.compute.spv")
+  orbital_compile_slang("shaders/meter_histogram.compute.spv" "shaders/post/meter_histogram.slang" computeMain compute)
+  list(APPEND ORBITAL_SHADER_OUTPUTS "${CMAKE_BINARY_DIR}/shaders/meter_histogram.compute.spv")
   add_custom_target(orbital_shaders DEPENDS ${ORBITAL_SHADER_OUTPUTS})
 
   # Dear ImGui core (vendored, MIT); its OS backend is compiled into the platform layer.

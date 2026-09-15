@@ -19,6 +19,7 @@ using CullRoot = ::CullRoot;
 static_assert(sizeof(Root) == 32 && sizeof(Vertex) == 32 && sizeof(Instance) == 48);
 static_assert(sizeof(AsteroidInstance) == 32 && offsetof(AsteroidInstance, payload) == 16);
 static_assert(sizeof(CullRoot) == 32 && sizeof(RockData) == 48 && sizeof(DrawArgs) == 32);
+static_assert(sizeof(MeterRoot) == 24 && sizeof(MeterHistogram) == (ORBITAL_METER_BINS + 4) * 4);
 // Scalar layout the shader sees: float4 members first, then 8-byte pointers and 4-byte words.
 static_assert(offsetof(CullParams, index_counts) == 272 && sizeof(CullParams) == 272 + 12 * ORBITAL_ROCK_GROUPS);
 static_assert(offsetof(CullScratch, instances) == sizeof(CullParams) &&

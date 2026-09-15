@@ -3,6 +3,7 @@
 #include "scene/system.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace space::render {
 namespace {
@@ -194,22 +195,52 @@ PreparedCamera prepare_camera(const CameraView& camera, const CameraHistory& pre
     return result;
 }
 
-MeterReading meter_exposure(std::span<const float> cells, const ToneSettings& tone) {
+MeterReading meter_exposure(std::span<const std::uint32_t> bins, std::uint32_t peak_bits, const ToneSettings& tone) {
     MeterReading reading;
-    float mean_sum = 0, weight_sum = 0, brightest_cell = 0;
-    for (std::size_t i = 0; i + 3 < cells.size(); i += 4) {
-        reading.peak = std::max(reading.peak, cells[i + 1]);
-        brightest_cell = std::max(brightest_cell, cells[i]);
-        mean_sum += cells[i] * cells[i + 2];
-        weight_sum += cells[i + 2];
+    const auto luminance_of = [](std::size_t bin) {
+        return std::exp2(float(ORBITAL_METER_LOG_MIN) +
+                         (float(bin) + .5f) * float(ORBITAL_METER_LOG_RANGE) / float(ORBITAL_METER_BINS));
+    };
+    float total = 0;
+    for (const auto weight : bins)
+        total += float(weight);
+    reading.has_samples = total > 0;
+    float bits_float;
+    std::memcpy(&bits_float, &peak_bits, sizeof(bits_float));
+    reading.peak = std::isfinite(bits_float) ? bits_float : 0.f;
+    if (!reading.has_samples) {
+        reading.target = std::clamp(reading.requested, tone.adapt_min, std::max(tone.adapt_min, tone.adapt_max));
+        return reading;
     }
-    reading.has_samples = weight_sum > 0;
-    reading.luminance = (weight_sum > 0 ? mean_sum / weight_sum : 0) + tone.highlight_bias * brightest_cell;
+    // Weighted means over percentile bands of the cumulative weight.
+    const auto band_mean = [&](float low, float high) {
+        float sum = 0, weight_sum = 0, cumulative = 0;
+        for (std::size_t bin = 0; bin < bins.size(); bin++) {
+            const float weight = float(bins[bin]);
+            const float from = std::max(cumulative, low * total), to = std::min(cumulative + weight, high * total);
+            cumulative += weight;
+            if (to > from) {
+                sum += (to - from) * luminance_of(bin);
+                weight_sum += to - from;
+            }
+        }
+        return weight_sum > 0 ? sum / weight_sum : 0.f;
+    };
+    constexpr float highlight_share = .001f;
+    // The band drops only the brightest half percent (a sun, hot specks): a planet filling a
+    // fifth of the frame must count in full, or the meter brightens it as if it were sky.
+    reading.luminance = band_mean(0.f, .995f) + tone.highlight_bias * band_mean(1.f - highlight_share, 1.f);
     // The strength damps the change in stops, so half strength halves every excursion.
     reading.requested = reading.luminance > 0 ? std::pow(tone.meter_key / reading.luminance, tone.adapt_strength) : 1.f;
     reading.target = std::clamp(reading.requested, tone.adapt_min, std::max(tone.adapt_min, tone.adapt_max));
     reading.limited = reading.requested != reading.target;
     return reading;
+}
+
+float settle_target(float current_target, float requested_target, float deadzone_stops) {
+    if (current_target <= 0 || requested_target <= 0)
+        return requested_target;
+    return std::abs(std::log2(requested_target / current_target)) >= deadzone_stops ? requested_target : current_target;
 }
 
 } // namespace space::render

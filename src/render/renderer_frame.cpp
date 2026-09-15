@@ -28,6 +28,7 @@ void Renderer::Impl::read_gpu_timings() {
     stats.body_shadow_ms = elapsed(GpuPass::BodyShadows);
     stats.belt_light_ms = elapsed(GpuPass::BeltLight);
     stats.belt_disc_ms = elapsed(GpuPass::BeltDiscs);
+    stats.meter_ms = elapsed(GpuPass::Meter);
     stats.surface_ms = elapsed(GpuPass::Surface);
     stats.atmosphere_ms = elapsed(GpuPass::Atmosphere);
     stats.post_ms = elapsed(GpuPass::Post);

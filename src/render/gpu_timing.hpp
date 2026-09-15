@@ -18,6 +18,7 @@ enum class GpuPass : unsigned {
     Surface,
     Atmosphere,
     Post,
+    Meter, // the exposure meter pass and its readback copy, on the frames it runs
     Count
 };
 

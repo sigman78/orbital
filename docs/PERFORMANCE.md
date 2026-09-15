@@ -28,6 +28,7 @@ Comparisons reject mismatched hardware/software environment, settings/protocol, 
 | Surface | Galaxy/background, stars, opaque surfaces, billboards and clouds |
 | Atmosphere group | Planet atmospheres, belt dust/disc, motion streaks and splat metadata |
 | Post | TAA, bloom, sun visibility, composite, spatial AA, periodic metering and presentation |
+| Meter | The exposure histogram's slice for the frame, plus the zeroing copy on the first frame of a cycle and the readback copy on the last. Inside Post, reported separately in the CSV as gpu_meter_ms |
 
 These are existing GPU **pass groups**, not individual shader timings. They add no new rendering instrumentation. Split a group into finer timestamps when a regression points there. Independent medians do not necessarily sum exactly to the median total. All columns are milliseconds; use GPU time to identify rendering costs instead of interpreting a rounded FPS counter as isolated GPU performance.
 

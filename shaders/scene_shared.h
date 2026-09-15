@@ -88,6 +88,34 @@ struct Root {
     SHADER_UINT base, mode;
 };
 
+// --- Exposure meter histogram (shaders/post/meter_histogram.slang) ------------------
+
+// Log2 luminance bins from ORBITAL_METER_LOG_MIN over ORBITAL_METER_LOG_RANGE stops, a
+// sixteenth of the tap grid per frame (the phase), read by the CPU once per cycle.
+#define ORBITAL_METER_BINS 64
+#define ORBITAL_METER_PHASES 16
+#define ORBITAL_METER_LOG_MIN -14.0
+#define ORBITAL_METER_LOG_RANGE 20.0
+struct MeterHistogram {
+#ifdef __cplusplus
+    SHADER_UINT bins[ORBITAL_METER_BINS]; // fixed-point centre weight per bin
+    SHADER_UINT peak;                     // the brightest luminance seen, as float bits
+#else
+    Atomic<uint> bins[ORBITAL_METER_BINS];
+    Atomic<uint> peak;
+#endif
+    SHADER_UINT pad0, pad1, pad2;
+};
+struct MeterRoot {
+#ifdef __cplusplus
+    SHADER_ADDRESS frame, histogram;
+#else
+    SHADER_ADDRESS(Frame) frame;
+    SHADER_ADDRESS(MeterHistogram) histogram;
+#endif
+    SHADER_UINT phase, unused;
+};
+
 // --- GPU belt culling (shaders/belt/cull.slang) ----------------------------------
 
 #define ORBITAL_ROCK_LEVELS 6                            // geometry::rock_level_count

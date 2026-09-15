@@ -303,6 +303,10 @@ void tone_controls(render::ToneSettings& settings, const render::Stats& stats, c
     ImGui::SliderFloat("Highlight bias", &settings.highlight_bias, 0.f, .5f, "%.2f");
     ImGui::SliderFloat("Adaptation strength", &settings.adapt_strength, 0.f, 1.f,
                        "%.2f"); // in stops; the range still clamps
+    ImGui::SliderFloat("Dead zone", &settings.adapt_deadzone, 0.f, 1.f,
+                       "%.2f stops"); // the request must move this far before the exposure follows
+    ImGui::SliderFloat("Brighten time", &settings.brighten_seconds, .5f, 15.f, "%.1f s", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("Darken time", &settings.darken_seconds, .2f, 5.f, "%.1f s", ImGuiSliderFlags_Logarithmic);
     ImGui::SliderFloat("Adaptation min", &settings.adapt_min, .05f, 1.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
     ImGui::SliderFloat("Adaptation max", &settings.adapt_max, 1.f, 32.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
     ImGui::EndDisabled();
@@ -340,17 +344,50 @@ void tone_controls(render::ToneSettings& settings, const render::Stats& stats, c
         else
             ImGui::TextDisabled("HDR luminance: below metering threshold");
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Center-weighted geometric mean before exposure and bloom.\nVery dark samples do not "
-                              "contribute; this is scene-linear luminance, not nits.");
+            ImGui::SetTooltip("Centre-weighted mean of the histogram below its 99.5th percentile, plus the "
+                              "highlight share,\nbefore exposure and bloom; scene-linear luminance, not nits.");
         ImGui::Text("HDR peak (sampled): %.4g", exposure.peak_luminance);
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip(
-                "Brightest averaged cell in the 16 x 16 meter.\nThis is not the brightest full-resolution pixel.");
+            ImGui::SetTooltip("Brightest tap of the meter's four pixel grid, not the brightest full-resolution pixel.");
         ImGui::Text("Adaptation: %.3f x -> %.3f x%s", exposure.adapted, exposure.target,
                     exposure.limited ? " (limited)" : "");
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Current automatic multiplier -> clamped target.\nMeter updates every 16 frames; "
-                              "adaptation follows over time.");
+            ImGui::SetTooltip("Current automatic multiplier -> clamped target.\nThe histogram completes every 16 "
+                              "frames; adaptation follows over time.");
+        // The meter's histogram over log2 luminance. Marks: the metered luminance, the
+        // key, and the luminances the target and the current adaptation are set for
+        // (an exposure e is the key over e on this axis), so their distance from the
+        // white mark is the adaptation still to come, in stops.
+        float peak_share = 0;
+        for (const float share : exposure.histogram)
+            peak_share = std::max(peak_share, share);
+        const float width = ImGui::GetContentRegionAvail().x, height = 52;
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        ImGui::PlotHistogram("##meter", exposure.histogram, int(render::ExposureStats::histogram_bins), 0, nullptr, 0.f,
+                             std::max(peak_share, 1e-6f), ImVec2(width, height));
+        const auto stop_x = [&](float luminance) {
+            const float stops = (std::log2(std::max(luminance, 1e-9f)) - exposure.stops_min) / exposure.stops_range;
+            return origin.x + std::clamp(stops, 0.f, 1.f) * width;
+        };
+        auto* draw = ImGui::GetWindowDrawList();
+        const auto mark = [&](float luminance, ImU32 color, float top, float bottom) {
+            const float x = stop_x(luminance);
+            draw->AddLine({x, origin.y + top}, {x, origin.y + bottom}, color, 1.5f);
+        };
+        mark(exposure.luminance, IM_COL32(255, 255, 255, 200), 0, height); // metered
+        mark(settings.meter_key, IM_COL32(240, 200, 60, 200), 0, height);  // key
+        if (exposure.automatic) {
+            mark(settings.meter_key / std::max(exposure.target, 1e-6f), IM_COL32(230, 110, 200, 220), 0,
+                 height * .5f); // target, upper half
+            mark(settings.meter_key / std::max(exposure.adapted, 1e-6f), IM_COL32(90, 210, 255, 220), height * .5f,
+                 height); // current adaptation, lower half
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Share of the meter's taps per bin over %.0f stops from 2^%.0f.\n"
+                              "White: the metered luminance.  Yellow: the meter key (maps to 1x).\n"
+                              "Magenta (top): the target, %.2f x.  Cyan (bottom): the current adaptation, %.2f x.\n"
+                              "The distance from the white mark is the adaptation still to come, in stops.",
+                              exposure.stops_range, exposure.stops_min, exposure.target, exposure.adapted);
     }
     if (!exposure.automatic)
         ImGui::TextDisabled("Auto adjustment bypassed");

@@ -2,6 +2,8 @@
 #include "core/extent.hpp"
 #include "render/camera_view.hpp"
 #include "render/settings.hpp"
+#include "scene_shared.h" // the exposure meter's histogram layout
+#include <cstdint>
 #include <span>
 
 namespace space {
@@ -57,16 +59,22 @@ struct ScreenSun {
 ScreenSun project_sun(const CameraView& camera, Vec3d sun, std::span<const BodyState> bodies, float tan_half_fov,
                       float aspect);
 
-// The exposure meter's reading from its readback: four floats per cell (the cell's
-// mean luminance with the sun's glare, its brightest tap, its centre weight, unused).
-// The metered luminance is the weighted mean of the cells plus the highlight bias
-// share of the brightest cell; the request maps the key to 1x, damped in stops by
-// the strength and held within the adaptation range.
+// The exposure meter's reading from its histogram: ORBITAL_METER_BINS bins of
+// fixed-point centre weight over log2 luminance, and the brightest tap as float bits.
+// The metered luminance is the weighted mean below the 99.5th percentile, which no
+// single outlier can move, plus the highlight bias share of the mean of
+// the brightest tenth of a percent, which is where a sun in frame shows; the
+// request maps the key to 1x, damped in stops by the strength and held within the
+// adaptation range.
 struct MeterReading {
     float luminance = 0, peak = 0;   // metered luminance and the brightest tap anywhere
     float requested = 1, target = 1; // before and after the range clamp
     bool has_samples = false, limited = false;
 };
-MeterReading meter_exposure(std::span<const float> cells, const ToneSettings& tone);
+MeterReading meter_exposure(std::span<const std::uint32_t> bins, std::uint32_t peak_bits, const ToneSettings& tone);
+// The dead zone: the target the adaptation follows moves to the meter's request only
+// once the request differs from it by at least `deadzone_stops`, so a composition
+// drifting by a fraction of a stop leaves the exposure alone.
+float settle_target(float current_target, float requested_target, float deadzone_stops);
 
 } // namespace space::render

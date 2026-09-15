@@ -145,8 +145,15 @@ void Renderer::Impl::create_device(void* window) {
     panic_if(!buffers.data.range().cpu || !buffers.texture_descriptors.range().cpu ||
                  !buffers.sampler_descriptors.range().cpu,
              "GPU mapped heap allocation failed");
-    buffers.luminance_readback = UniqueGpuHeap::create(
-        device, targets::meter_size * targets::meter_size * sizeof(Float4), gpu::MemoryType::readback);
+    // The exposure histogram: accumulated on the device, zeroed from a mapped source each cycle, read back once per
+    // cycle.
+    buffers.meter_device = UniqueGpuHeap::create(device, sizeof(MeterHistogram), gpu::MemoryType::gpu_only);
+    buffers.meter_zero = UniqueGpuHeap::create(device, sizeof(MeterHistogram));
+    buffers.meter_readback = UniqueGpuHeap::create(device, sizeof(MeterHistogram), gpu::MemoryType::readback);
+    panic_if(!buffers.meter_device.range().gpu || !buffers.meter_zero.range().cpu ||
+                 !buffers.meter_readback.range().cpu,
+             "exposure meter heap allocation failed");
+    std::memset(buffers.meter_zero.range().cpu, 0, sizeof(MeterHistogram));
     timings.initialize(device);
 }
 
@@ -196,10 +203,6 @@ void Renderer::Impl::create_fixed_targets() {
          .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment});
     bind(Slot::belt_disc_light, fixed_targets.belt_disc_light);
     bind(Slot::belt_disc_rocks, fixed_targets.belt_disc_rocks);
-    fixed_targets.luminance = create_image(
-        {.extent = {targets::meter_size, targets::meter_size},
-         .format = gpu::Format::rgba32_float,
-         .usage = gpu::TextureUsage::color_attachment | gpu::TextureUsage::transfer_source});
 }
 
 void Renderer::Impl::init(void* window, const SystemDescription& description,

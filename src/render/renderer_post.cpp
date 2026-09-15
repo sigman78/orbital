@@ -9,24 +9,31 @@ namespace space::render {
 
 namespace {
 namespace exposure_meter {
-inline constexpr unsigned interval = 16;                               // frames between readbacks
-inline constexpr float brighten_seconds = 2.5f, darken_seconds = 0.6f; // time constants of the exposure change
-inline constexpr float max_step_seconds = 1.f;                         // a stalled frame does not snap the adaptation
+inline constexpr unsigned interval = ORBITAL_METER_PHASES; // frames per histogram cycle, one slice of the taps each
+inline constexpr float max_step_seconds = 1.f;             // a stalled frame does not snap the adaptation
 } // namespace exposure_meter
 } // namespace
 
 void Renderer::Impl::apply_metering(const ToneSettings& tone) {
     if (meter_pending) {
-        // The meter's readback: four floats per cell, read by meter_exposure (frame_calculations).
-        const auto* values = reinterpret_cast<const float*>(buffers.luminance_readback.range().cpu);
-        const auto reading = meter_exposure({values, std::size_t(targets::meter_size) * targets::meter_size * 4}, tone);
+        // The histogram of the last cycle, read by meter_exposure (frame_calculations).
+        const auto* histogram = reinterpret_cast<const MeterHistogram*>(buffers.meter_readback.range().cpu);
+        const auto reading = meter_exposure(histogram->bins, histogram->peak, tone);
         stats.exposure.ready = true;
         stats.exposure.has_samples = reading.has_samples;
         stats.exposure.luminance = reading.luminance;
         stats.exposure.peak_luminance = reading.peak;
-        exposure_target = reading.target;
+        exposure_target = settle_target(exposure_target, reading.target, tone.adapt_deadzone);
         stats.exposure.target = reading.target;
         stats.exposure.limited = reading.limited;
+        static_assert(ExposureStats::histogram_bins == ORBITAL_METER_BINS);
+        stats.exposure.stops_min = float(ORBITAL_METER_LOG_MIN);
+        stats.exposure.stops_range = float(ORBITAL_METER_LOG_RANGE);
+        float total = 0;
+        for (const auto weight : histogram->bins)
+            total += float(weight);
+        for (unsigned bin = 0; bin < ORBITAL_METER_BINS; bin++)
+            stats.exposure.histogram[bin] = total > 0 ? float(histogram->bins[bin]) / total : 0.f;
         meter_pending = false;
     }
     // The meter sets the target every few frames; the filter runs toward it every
@@ -38,8 +45,7 @@ void Renderer::Impl::apply_metering(const ToneSettings& tone) {
                          : std::min(std::chrono::duration<float>(now - meter_time).count(),
                                     exposure_meter::max_step_seconds);
     meter_time = now;
-    const float tau = exposure_target < adapted_exposure ? exposure_meter::darken_seconds
-                                                         : exposure_meter::brighten_seconds;
+    const float tau = std::max(exposure_target < adapted_exposure ? tone.darken_seconds : tone.brighten_seconds, .05f);
     adapted_exposure += (exposure_target - adapted_exposure) * (1 - std::exp(-dt / tau));
     stats.exposure.adapted = adapted_exposure;
 }
@@ -95,13 +101,33 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
         root.mode = 2;
         fullscreen_pass(cmd, frame_targets.final_image, hdr() ? pso.post.smaa_blend_hdr : pso.post.smaa_blend, root);
     }
-    if (frame_index % exposure_meter::interval == 0) {
-        fullscreen_pass(cmd, fixed_targets.luminance, pso.post.meter, root);
-        synchronize(cmd, access::color_write, access::transfer_read);
-        gpu::copy_texture_to_memory(cmd, fixed_targets.luminance.texture(),
-                                    gpu::gpu_range(buffers.luminance_readback.get()));
-        synchronize(cmd, access::transfer_write, access::host_read);
-        meter_pending = true;
+    {
+        // The exposure histogram: one slice of the tap grid a frame, zeroed at the
+        // start of a cycle and read back at its end, so no frame carries the whole
+        // meter. Its timing scope brackets the slice, and the copies on the cycle's ends.
+        GpuTimingScope timing(timings, GpuPass::Meter);
+        const unsigned phase = frame_index % exposure_meter::interval;
+        const gpu::GpuRange histogram = gpu::gpu_range(buffers.meter_device.get());
+        if (phase == 0) {
+            gpu::copy_memory(cmd, gpu::gpu_range(buffers.meter_zero.get()), histogram);
+            synchronize(cmd, access::transfer_write, access::compute_read_write);
+        }
+        const MeterRoot meter_root{.frame = root.frame,
+                                   .histogram = reinterpret_cast<std::uint64_t>(histogram.gpu),
+                                   .phase = phase,
+                                   .unused = 0};
+        const unsigned taps_x = (extent.width + 3) / 4;
+        const unsigned rows = ((extent.height + 3) / 4 + exposure_meter::interval - 1) / exposure_meter::interval;
+        gpu::bind_pso(cmd, pso.post.meter);
+        gpu::dispatch(cmd, meter_root, {(taps_x + 7) / 8, (rows + 7) / 8, 1});
+        if (phase + 1 == exposure_meter::interval) {
+            synchronize(cmd, access::compute_write, access::transfer_read);
+            gpu::copy_memory(cmd, histogram, gpu::gpu_range(buffers.meter_readback.get()));
+            synchronize(cmd, access::transfer_write, access::host_read);
+            meter_pending = true;
+        } else {
+            synchronize(cmd, access::compute_write, access::compute_read_write);
+        }
     }
     gpu::ColorAttachment color{.render_view = swapchain_view, .load = gpu::LoadOp::clear};
     {

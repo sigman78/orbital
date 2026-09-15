@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <vector>
 
 using namespace space;
@@ -79,30 +81,53 @@ int main() {
     assert(prepare_body_light({1, 0, 0}, {0, 0, 200}, {20, 0, 0}, sun).half_x == 12);
     assert(prepare_body_light({20, 0, 0}, {0, 0, 200}, {1, 0, 0}, sun).half_x == 10);
 
-    // The exposure meter: 256 cells of mean, peak, weight, unused.
-    ToneSettings tone; // key .09, highlight bias .1, strength 1, range .25 to 8
-    std::vector<float> cells(256 * 4, 0.f);
-    const auto fill = [&](float mean, float peak) {
-        for (std::size_t i = 0; i < 256; i++)
-            cells[i * 4] = mean, cells[i * 4 + 1] = peak, cells[i * 4 + 2] = 1.f;
+    // The exposure meter: a histogram of fixed-point weight over log2 luminance bins.
+    ToneSettings tone; // highlight bias .1, strength 1, range .25 to 8
+    std::vector<std::uint32_t> bins(ORBITAL_METER_BINS, 0);
+    const auto bin_of = [](float luminance) {
+        const float position = (std::log2(luminance) - float(ORBITAL_METER_LOG_MIN)) / float(ORBITAL_METER_LOG_RANGE);
+        return std::size_t(std::clamp(position * ORBITAL_METER_BINS, 0.f, float(ORBITAL_METER_BINS - 1)));
     };
-    fill(.09f, .2f); // the Earth bookmark's level maps to 1x, the highlight share aside
-    auto reading = meter_exposure(cells, tone);
-    assert(reading.has_samples && std::abs(reading.luminance - (.09f + .1f * .09f)) < 1e-6f);
-    assert(std::abs(reading.requested - .09f / .099f) < 1e-5f && !reading.limited && reading.peak == .2f);
-    fill(.003f, .01f); // sky only: far above the ceiling, clamped and flagged
-    reading = meter_exposure(cells, tone);
+    const auto centre_of = [](std::size_t bin) {
+        return std::exp2(float(ORBITAL_METER_LOG_MIN) +
+                         (float(bin) + .5f) * float(ORBITAL_METER_LOG_RANGE) / ORBITAL_METER_BINS);
+    };
+    const auto bits_of = [](float value) {
+        std::uint32_t bits;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return bits;
+    };
+    bins[bin_of(.09f)] = 1000; // one level: the metered luminance is that bin's centre, highlight included
+    auto reading = meter_exposure(bins, bits_of(.2f), tone);
+    assert(reading.has_samples &&
+           std::abs(reading.luminance - centre_of(bin_of(.09f)) * (1.f + tone.highlight_bias)) < 1e-6f);
+    assert(std::abs(reading.requested - tone.meter_key / reading.luminance) < 1e-5f && reading.peak == .2f);
+    std::fill(bins.begin(), bins.end(), 0); // sky: far above the ceiling, clamped and flagged
+    bins[bin_of(.003f)] = 1000;
+    reading = meter_exposure(bins, bits_of(.01f), tone);
     assert(reading.requested > 8.f && reading.target == 8.f && reading.limited);
-    fill(.01f, .01f); // one bright cell pulls the exposure down through the highlight bias
-    cells[7 * 4] = 2.f;
-    reading = meter_exposure(cells, tone);
-    assert(std::abs(reading.luminance - (.01f + 1.99f / 256.f + .1f * 2.f)) < 1e-5f && reading.target < .5f);
+    std::fill(bins.begin(), bins.end(),
+              0); // a sun in a thousandth of the taps: the band ignores it, the highlight sees it
+    bins[bin_of(.01f)] = 9990;
+    bins[bin_of(20.f)] = 10;
+    reading = meter_exposure(bins, bits_of(20.f), tone);
+    assert(std::abs(reading.luminance - (centre_of(bin_of(.01f)) + tone.highlight_bias * centre_of(bin_of(20.f)))) <
+           1e-3f);
+    tone.highlight_bias = 0.f; // without the highlight the sun's thousandth is outside the band
+    assert(std::abs(meter_exposure(bins, bits_of(20.f), tone).luminance - centre_of(bin_of(.01f))) < 1e-6f);
+    tone.highlight_bias = .1f;
     tone.adapt_strength = .5f; // half strength halves the excursion in stops
-    const auto damped = meter_exposure(cells, tone);
+    const auto damped = meter_exposure(bins, bits_of(20.f), tone);
     assert(std::abs(damped.requested - std::sqrt(reading.requested)) < 1e-5f);
     tone.adapt_strength = 0.f;
-    assert(meter_exposure(cells, tone).requested == 1.f);
-    std::fill(cells.begin(), cells.end(), 0.f); // no weight at all: no samples, 1x
-    reading = meter_exposure(cells, tone);
+    assert(meter_exposure(bins, bits_of(20.f), tone).requested == 1.f);
+    std::fill(bins.begin(), bins.end(), 0); // no weight at all: no samples, 1x
+    reading = meter_exposure(bins, 0, tone);
     assert(!reading.has_samples && reading.requested == 1.f);
+
+    // The dead zone: a request within it leaves the target alone, one beyond it is taken whole.
+    assert(settle_target(1.f, 1.2f, .33f) == 1.f && settle_target(1.f, .85f, .33f) == 1.f);
+    assert(settle_target(1.f, 1.3f, .33f) == 1.3f && settle_target(1.f, .7f, .33f) == .7f);
+    assert(settle_target(2.f, 2.1f, 0.f) == 2.1f); // no dead zone follows every request
+    assert(settle_target(0.f, 3.f, .33f) == 3.f);  // an unset target takes the first request
 }
