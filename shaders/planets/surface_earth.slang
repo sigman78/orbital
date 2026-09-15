@@ -13,9 +13,8 @@
 // Draw tier (root.detail, set per draw from the projected size): the normal map
 // and the cloud swirl fade out toward the smallest mesh level, with their work
 // skipped at zero, while the lighting terms stay as they are at every size.
-// When the shell is not drawn (root.flags, small or far bodies, where the shell
-// sits within a few depth steps of the ground and fights it) the ground pass
-// blends the clouds in itself, lit as the shell would be, with no parallax.
+// When the shell is not drawn (root.flags, small bodies) the ground pass blends
+// the clouds in itself, read at the shell's parallax and lit as the shell would be.
 
 static const float EARTH_NORMAL_Y = 1.0;      // the sourced map is DirectX-style (green = south), matching B below
 static const float2 EARTH_TEXELS = float2(4096.0, 2048.0);
@@ -30,10 +29,10 @@ float cloudDensity(float2 uv, float t, float detail)
     return pow(saturate(density), 1.3);
 }
 
-float4 shadeClouds(SurfaceVaryings input, float3 N, float3 L, float visibility, float nl)
+float4 shadeClouds(float3 localDirection, float3 N, float3 L, float visibility, float nl)
 {
     float t = root.frame->camera_time.w;
-    float2 uv = sphereUV(normalize(input.localNormal));
+    float2 uv = sphereUV(localDirection);
     float alpha = cloudDensity(cloudUV(uv, t, root.detail), t, magnification(uv, EARTH_TEXELS)) * root.frame->earth_more.y;
     // The clouds' starlight fill follows the panel's ambient fill, as the ground's does.
     float3 cloudLight = float3(.002, .004, .008) * root.frame->quality.w + float3(1.0, .99, .97) * pow(nl, .8) * visibility * root.frame->sun.w / PI * .8;
@@ -80,7 +79,8 @@ Material earthMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
 float4 fragmentMain(SurfaceVaryings input) : SV_Target0
 {
     Surface s = surfaceAt(root.frame, root.instances, input, true);
-    if (root.mode == MODE_CLOUD) return shadeClouds(input, s.N, s.L, s.visibility, max(dot(s.N, s.L), 0.0));
+    if (root.mode == MODE_CLOUD)
+        return shadeClouds(normalize(input.localNormal), s.N, s.L, s.visibility, max(dot(s.N, s.L), 0.0));
     float3x3 rotate = rotation(s.inst.rotation_kind.xyz);
     Material m = earthMaterial(input, rotate, s.N, s.L, s.visibility);
     float3 colour = shadeSurface(m, s.L, s.V, sunlight(root.frame), root.frame->earth.y, root.frame->quality.w);
@@ -96,10 +96,13 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     lights *= smoothstep(0.0, .008, max(lights.r, max(lights.g, lights.b)));
     colour += lights * pow(1 - smoothstep(-.15, .1, dot(m.N, s.L)), 2.0) * .65;
     // The clouds folded in where the shell is not drawn: what the shell's alpha
-    // blend would have composited over this pixel, from the ground's own normal
+    // blend would have composited over this pixel, read where the view ray
+    // crosses the shell (the shell's own parallax), lit from the ground's normal
     // and the visibility before the cloud's shadow on the ground.
     if (root.flags & ORBITAL_ROOT_FOLD_CLOUDS) {
-        float4 clouds = shadeClouds(input, s.N, s.L, s.visibility, max(dot(s.N, s.L), 0.0));
+        float3 localV = mul(transpose(rotate), s.V);
+        float3 onShell = cloudShellView(normalize(input.localNormal), localV);
+        float4 clouds = shadeClouds(onShell, s.N, s.L, s.visibility, max(dot(s.N, s.L), 0.0));
         colour = lerp(colour, clouds.rgb, clouds.a);
     }
     return float4(colour, 1);

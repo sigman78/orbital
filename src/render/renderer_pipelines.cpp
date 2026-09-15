@@ -42,7 +42,7 @@ gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
                  .fragment_spirv = fragment,
                  .color_targets = {&target, 1},
                  .depth_format = desc.has_depth_attachment ? gpu::Format::d32_float : gpu::Format::undefined,
-                 .rasterization = {.cull = desc.cull}});
+                 .rasterization = {.cull = desc.cull, .depth_bias_constant = desc.depth_bias_constant}});
     panic_if(!pipeline, "pipeline creation failed for {} + {}", desc.vertex_shader, desc.fragment_shader);
     pipelines.emplace_back(pipeline);
     return pipeline;
@@ -51,13 +51,15 @@ gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
 void Renderer::Impl::create_pipelines() {
     using gpu::Format;
     const auto make = [&](const char* vertex, const char* fragment, Format format, bool has_depth_attachment = false,
-                          Blend blend = Blend::none, gpu::CullMode cull = gpu::CullMode::none) {
+                          Blend blend = Blend::none, gpu::CullMode cull = gpu::CullMode::none,
+                          float depth_bias_constant = 0) {
         return create_pipeline({.vertex_shader = vertex,
                                 .fragment_shader = fragment,
                                 .color_format = format,
                                 .has_depth_attachment = has_depth_attachment,
                                 .blend = blend,
-                                .cull = cull});
+                                .cull = cull,
+                                .depth_bias_constant = depth_bias_constant});
     };
     // The sphere and rock meshes are closed, wound counter-clockwise from outside, so
     // their clockwise back faces are culled in every pass that draws them.
@@ -67,7 +69,12 @@ void Renderer::Impl::create_pipelines() {
     pso.scene.surface_giant = make("surface", "surface_giant", Format::rgba16_float, true, Blend::none, mesh_cull);
     pso.scene.surface_airless = make("surface", "surface_airless", Format::rgba16_float, true, Blend::none, mesh_cull);
     pso.scene.surface_rock = make("surface", "surface_rock", Format::rgba16_float, true, Blend::none, mesh_cull);
-    pso.scene.cloud = make("surface", "surface_earth", Format::rgba16_float, true, Blend::alpha, mesh_cull);
+    // The cloud shell sits 0.9 percent of a radius above the ground, which the float
+    // depth cannot separate past a few hundred units (the standard projection's step
+    // there grows with the square of the distance), so the shell fought the ground
+    // under the telescope zoom; a bias of a few steps toward the camera keeps it
+    // ahead at any distance, while anything genuinely in front still occludes it.
+    pso.scene.cloud = make("surface", "surface_earth", Format::rgba16_float, true, Blend::alpha, mesh_cull, -4.f);
     pso.scene.background = make("fullscreen", "background", Format::rgba16_float, true);
     pso.scene.galaxy = make("fullscreen", "galaxy", Format::rgba16_float);
     pso.scene.atmosphere = make("fullscreen", "atmosphere", Format::rgba16_float, false, Blend::alpha);

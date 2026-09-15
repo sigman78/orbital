@@ -28,17 +28,11 @@ inline constexpr float screen_size = 0.008f; // Frame.screen_sun.w
 // Belt motion and per-rock culling limits, read by write_cull_scratch.
 // Body draw tiers, read by cull_bodies. The detail weight runs over the smallest
 // mesh level's range (the level thresholds are 24, 80 and 240 pixels of radius).
-// The cloud shell is drawn only while it is large enough to matter and near
-// enough for the depth buffer to hold it apart from the ground: with the standard
-// float projection two surfaces cloud_height * r apart at distance d are
-// near_plane * cloud_height * r / d^2 apart in depth, and the shell fights the
-// ground once that falls to a few float steps (the telescope zoom shows it, since
-// it enlarges the disc without changing the depth).
+// The cloud shell is drawn while it is large enough for its parallax to show
+// (below the limit the ground pass folds the clouds in, less than a pixel off).
 namespace body_tiers {
 inline constexpr float detail_from_pixels = 24.f, detail_to_pixels = 80.f;
 inline constexpr float shell_min_pixels = 80.f;
-inline constexpr float shell_depth_steps = 8.f; // of the float depth's resolution near 1
-inline constexpr float depth_step = 6e-8f;      // one float step just below 1
 inline constexpr float grow_hysteresis = 1.15f, shrink_hysteresis = .85f;
 } // namespace body_tiers
 
@@ -245,12 +239,8 @@ void Renderer::Impl::cull_bodies(const FrameInput& input, const FrameData& frame
                                             (body_tiers::detail_to_pixels - body_tiers::detail_from_pixels),
                                         0.f, 1.f);
         body_detail[i] = detail * detail * (3 - 2 * detail);
-        // The shell's limits, each relaxed by the hysteresis in the direction it was last in.
-        const float grow = body_shell[i] ? body_tiers::shrink_hysteresis : body_tiers::grow_hysteresis;
-        const float shell_distance_sq = targets::depth.min * float(ORBITAL_CLOUD_HEIGHT) * radius /
-                                        (body_tiers::shell_depth_steps * body_tiers::depth_step);
-        body_shell[i] = projected >= body_tiers::shell_min_pixels * grow &&
-                        distance * distance * grow * grow <= shell_distance_sq;
+        body_shell[i] = projected >= body_tiers::shell_min_pixels *
+                                         (body_shell[i] ? body_tiers::shrink_hysteresis : body_tiers::grow_hysteresis);
         stats.frame.bodies_drawn += body_visible[i] ? 1 : 0;
     }
 }
