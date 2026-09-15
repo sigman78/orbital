@@ -219,12 +219,18 @@ bool Renderer::capture(const std::filesystem::path& path) {
     synchronize(cmd, access::transfer_write, access::host_read);
     s.submissions.submit_and_wait({cmd});
     const std::size_t pixels = std::size_t(s.extent.width) * s.extent.height;
+    // The readback heap is host-visible but uncached, and reading it a value at a
+    // time from the conversion loops below took three seconds for a 1080p frame;
+    // one sequential copy into ordinary memory first, then the conversion.
+    Bytes staged(readback.range().size);
+    std::memcpy(staged.data(), readback.range().cpu, staged.size());
+    readback.reset();
     Bytes rgb(pixels * 3);
     if (s.hdr()) {
         // The HDR intermediate holds the linear display value over the headroom;
         // the capture is an SDR image, so anything above the tone curve's white
         // clips, as it would on an SDR display.
-        const auto* half = reinterpret_cast<const std::uint16_t*>(readback.range().cpu);
+        const auto* half = reinterpret_cast<const std::uint16_t*>(staged.data());
         const float headroom = std::max(s.previous_frame.display.z, 1.f);
         for (std::size_t i = 0; i < pixels; i++)
             for (unsigned channel = 0; channel < 3; channel++) {
@@ -232,12 +238,11 @@ bool Renderer::capture(const std::filesystem::path& path) {
                 rgb[i * 3 + channel] = std::uint8_t(std::lround(linear_to_srgb(std::min(display, 1.f)) * 255.f));
             }
     } else {
-        const auto* rgba = reinterpret_cast<const std::uint8_t*>(readback.range().cpu);
+        const auto* rgba = staged.data();
         for (std::size_t i = 0; i < pixels; i++)
             for (unsigned channel = 0; channel < 3; channel++)
                 rgb[i * 3 + channel] = rgba[i * 4 + channel];
     }
-    readback.reset();
     return assets::save_png(path, {s.extent, assets::PixelLayout::Rgb8, rgb});
 }
 
