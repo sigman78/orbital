@@ -5,7 +5,10 @@
 #include <array>
 #include <filesystem>
 #include <optional>
+#include <span>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace space::app {
 inline constexpr std::string_view usage =
@@ -21,6 +24,10 @@ inline constexpr std::string_view usage =
     "--galaxy 0|1|2 (splats, texture layers, original full resolution) --galaxy-view -180..180 (longitude, sky-only "
     "view)\n"
     "--belt-sun-view (sun through the gas giant's belt, for bloom/occlusion checks)\n"
+    "--back units (move away from the bookmark's body along its line, aimed at it) --fov-div X (telescope-like zoom)\n"
+    "--shots file (one shot per line: key=value tokens named as the options above, e.g. bookmark=3 frames=80 "
+    "capture=mars.png; the command line sets the defaults) --report file.json (per-shot readings) --headless "
+    "(hidden window)\n"
     "Controls: RMB mouse look; MMB hold telescope (5x); WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F "
     "free;\n"
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
@@ -53,12 +60,30 @@ struct Options {
     float pan = 0;            // lateral drift as a fraction of the flight speed, stepped at a fixed 60 Hz for captures
     unsigned maximize_at = 0; // > 0 maximizes the window after this many frames, to test resizing in captures
     unsigned fullscreen_at = 0; // > 0 enters borderless fullscreen after this many frames
+    double back = 0;            // move the camera this far from the bookmark's body along its line, aimed at it
+    double fov_div = 1;         // divide the field of view, as the telescope does, for zoomed checks
     bool tour = false, high = false, no_hud = false, help = false;
     bool ui = false;            // start with the control panel shown
     bool belt_sun_view = false; // repeatable view through the gas giant's belt toward the sun
+    bool headless = false;      // the window is created hidden: scripted runs without a window on screen
     std::filesystem::path capture, benchmark;
+    std::filesystem::path shots;  // a shot list to run in one process, one shot per line
+    std::filesystem::path report; // JSON with each shot's readings, written when the run ends
 };
 
 // argv includes the program name. Invalid options log an option-specific error.
 std::optional<Options> parse_options(int argc, const char* const* argv);
+
+// One line of a shot list applied over the base options: key=value tokens named
+// as the command line options without their dashes (bookmark=3 frames=80
+// capture=mars.png time=0), a bare key for a flag (high), commas for a
+// multi-value option (sun-at=0.7,-0.7), and a name=... token for the report.
+// Blank lines and lines starting with # are skipped (nullopt with an empty name).
+struct Shot {
+    std::string name;
+    Options options;
+};
+std::optional<Shot> parse_shot(const Options& base, std::string_view line, unsigned line_number);
+// The whole list; nullopt after logging the first line that does not parse.
+std::optional<std::vector<Shot>> load_shots(const Options& base, const std::filesystem::path& path);
 } // namespace space::app

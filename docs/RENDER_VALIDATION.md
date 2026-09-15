@@ -19,10 +19,17 @@ python tools/check-motion-streaks.py --build build/release
 python tools/check-exposure.py
 ```
 
-`check-exposure.py` runs the six bookmarks with the auto exposure on and compares the
-meter's request at each, in stops, against the band recorded in the script from the
-reviewed readings (half a stop of slack), so a meter change that moves a view a stop
-from where it was reviewed fails; the captures are kept for a look.
+`check-exposure.py` runs the six bookmarks as one shot list in a single hidden-window
+process with the auto exposure on and compares the meter's request at each, in stops,
+against the band recorded in the script from the reviewed readings (half a stop of
+slack), so a meter change that moves a view a stop from where it was reviewed fails;
+the captures and the run's report are kept for a look.
+
+Shot lists (`--shots file`, `--report file.json`, `--headless`) are how scripted views
+should be run from now on: one launch for any number of views, each line the options
+of one view as key=value tokens (`name=mars bookmark=3 back=25 fov-div=5 capture=m.png`),
+the command line setting the defaults, and the report holding each shot's GPU pass
+medians and exposure reading. `orbital --help` lists the keys.
 
 Requirements: Windows desktop GPU, MSVC/CMake/Ninja, Python with Pillow; the motion
 fixture also needs NumPy and the local Slang compiler. Set `ORBITAL_VCVARS` when MSVC
