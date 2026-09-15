@@ -69,7 +69,8 @@ Between the rocks a half-resolution march through the same density field scatter
    composited with a depth-aware upsample.
 5. Splats write fractional coverage and coverage-weighted depth into metadata; scene depth remains opaque-only.
    TAA uses the reconstructed splat depth for reprojection and currently keeps splat history unclipped.
-6. Temporal anti-aliasing into a history target; transient motion streaks into reused HDR storage, added before
+6. Temporal anti-aliasing into a history target, its neighbourhood clip tightening with motion and
+   splat history clipped loosely rather than not at all; transient motion streaks into reused HDR storage, added before
    area-prefiltered bloom with adjacent-texel separable blur at quarter resolution;
    one shared 1×1 sun-visibility estimate for lens effects; the soft part of the lens flare stack
    (main ring, crescents, coloured ghosts, streak spindles) into a quarter-resolution target;
