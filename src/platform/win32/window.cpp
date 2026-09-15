@@ -91,6 +91,7 @@ struct Window::Impl {
     detail::MessageHook hook = nullptr; // the overlay backend sees every message first
     void* hook_user = nullptr;
     bool fullscreen = false; // borderless fullscreen (Alt+Enter); the placement below restores the window
+    bool hidden = false;     // created hidden: stays off screen through fullscreen and restore
     LONG saved_style = 0;
     RECT saved_rect{};
     bool saved_maximized = false;
@@ -198,6 +199,7 @@ std::unique_ptr<Window> Window::create(const WindowDesc& desc) {
                                   wc.hInstance, impl.get());
     panic_if(!handle, "cannot create the desktop window");
     impl->handle = handle;
+    impl->hidden = desc.hidden;
     if (!desc.hidden) {
         ShowWindow(handle, SW_SHOW);
         UpdateWindow(handle); // Paint now, before synchronous renderer and asset initialization.
@@ -284,16 +286,19 @@ void Window::toggle_fullscreen() {
         MONITORINFO monitor{.cbSize = sizeof monitor};
         GetMonitorInfoW(MonitorFromWindow(handle, MONITOR_DEFAULTTONEAREST), &monitor);
         const RECT& m = monitor.rcMonitor;
-        SetWindowLongW(handle, GWL_STYLE, (i.saved_style & ~LONG(WS_OVERLAPPEDWINDOW)) | WS_POPUP | WS_VISIBLE);
-        SetWindowPos(handle, HWND_TOP, m.left, m.top, m.right - m.left, m.bottom - m.top,
-                     SWP_FRAMECHANGED | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+        SetWindowLongW(handle, GWL_STYLE,
+                       (i.saved_style & ~LONG(WS_OVERLAPPEDWINDOW)) | WS_POPUP | (i.hidden ? 0 : WS_VISIBLE));
+        SetWindowPos(handle, i.hidden ? nullptr : HWND_TOP, m.left, m.top, m.right - m.left, m.bottom - m.top,
+                     SWP_FRAMECHANGED | SWP_NOOWNERZORDER |
+                         (i.hidden ? SWP_NOZORDER | SWP_NOACTIVATE : SWP_SHOWWINDOW));
         i.fullscreen = true;
     } else {
         SetWindowLongW(handle, GWL_STYLE, i.saved_style);
         const RECT& r = i.saved_rect;
         SetWindowPos(handle, nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top,
-                     SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
-        if (i.saved_maximized)
+                     SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOOWNERZORDER |
+                         (i.hidden ? SWP_NOACTIVATE : SWP_SHOWWINDOW));
+        if (i.saved_maximized && !i.hidden)
             ShowWindow(handle, SW_MAXIMIZE);
         i.fullscreen = false;
     }
