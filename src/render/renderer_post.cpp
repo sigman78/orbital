@@ -32,7 +32,10 @@ void Renderer::Impl::apply_metering(const ToneSettings& tone) {
         stats.exposure.ready = true;
         stats.exposure.has_samples = weight_sum > 0;
         stats.exposure.luminance = (weight_sum > 0 ? mean_sum / weight_sum : 0) + tone.highlight_bias * brightest_cell;
-        const float requested = stats.exposure.luminance > 0 ? tone.meter_key / stats.exposure.luminance : 1.f;
+        // The strength damps the change in stops, so half strength halves every excursion.
+        const float requested = stats.exposure.luminance > 0
+                                    ? std::pow(tone.meter_key / stats.exposure.luminance, tone.adapt_strength)
+                                    : 1.f;
         exposure_target = std::clamp(requested, tone.adapt_min, std::max(tone.adapt_min, tone.adapt_max));
         stats.exposure.target = exposure_target;
         stats.exposure.limited = requested != exposure_target;

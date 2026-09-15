@@ -75,7 +75,8 @@ Between the rocks a half-resolution march through the same density field scatter
    (main ring, crescents, coloured ghosts, streak spindles) into a quarter-resolution target;
    exposure metering every sixteenth frame from a 16x16 image whose cells integrate their whole
    area at a four pixel stride plus the sun's glare; the CPU averages the cells by centre weight,
-   adds a tenth of the brightest cell and maps the meter key to 1x, within -2 to +3 stops.
+   adds a tenth of the brightest cell and maps the meter key to 1x, scaled in stops by the
+   adaptation strength, within -2 to +3 stops.
 7. The composite adds the sun glare, the aperture starburst and the thin axis streak at full
    resolution and samples the flare stack target, all in HDR using the shared sun visibility. The
    stack lies along the axis through the image centre and the projected sun; its major elements
