@@ -22,6 +22,7 @@
 #include <chrono>
 #include <cstdint>
 #include <initializer_list>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -329,6 +330,14 @@ struct Renderer::Impl {
     std::uint64_t rock_tail_data = 0;    // the size-tail rocks again, compacted for the transmittance splat
     std::vector<unsigned> rock_tail_ids; // their ids, ascending
     unsigned belt_count_override = 0;    // RendererConfig::belt_count
+    // The cull camera while BeltSettings::freeze_culling holds it: the belt keeps
+    // the visibility, levels and far-tier weight of this view while the live
+    // camera flies around to inspect them.
+    struct FrozenCull {
+        CameraView camera;
+        float tan_y, disc_weight;
+    };
+    std::optional<FrozenCull> frozen_cull;
     SystemDescription system;
     std::filesystem::path directory;
     // The bodies occupy instance slots 0..body_count-1 in system order. The

@@ -56,6 +56,7 @@ struct BeltSettings {
     static constexpr std::array<float, 4> splat_radii{0.f, 1.2f, 2.5f, 4.f};
     SplatMode splat_mode = SplatMode::Pixels2_5; // index into splat_radii; shared by F6 and the panel
     bool splat_light_twice = false;              // light splats in the count pass too, for comparison (F7)
+    bool freeze_culling = false; // hold the cull camera (frustum, levels, far-tier weight) so the view can inspect it
 
     constexpr float billboard_radius() const {
         return splat_radii[std::min<std::size_t>(unsigned(splat_mode), splat_radii.size() - 1)];

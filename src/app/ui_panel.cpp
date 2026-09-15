@@ -262,6 +262,10 @@ void belt_controls(render::BeltSettings& belt, render::BeltDustSettings& dust, f
     static constexpr const char* cutoffs[] = {"Off", "1.2 px", "2.5 px", "4 px"};
     combo("Splat cut-off (F6)", belt.splat_mode, cutoffs);
     ImGui::Checkbox("Light splats in both cull passes (F7)", &belt.splat_light_twice);
+    ImGui::Checkbox("Freeze culling", &belt.freeze_culling); // the rock set, levels and splats of this view stay put
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Holds the cull camera: frustum, occlusion, mesh levels, splat coverage and far-tier\n"
+                          "weight stay as in the view where this was switched on while the camera flies around.");
     ImGui::Checkbox("Far-belt disc LOD",
                     &belt.disc); // off: the dust march and splats at every distance, as before the disc
     ImGui::SameLine();

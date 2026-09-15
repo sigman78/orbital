@@ -140,6 +140,7 @@ struct CullParams {
     SHADER_FLOAT4 right, up, forward;   // camera basis; w = tan_x, tan_y, pixel padding per unit depth
     SHADER_FLOAT4 view;                 // pixels per unit depth, plane x scale, plane y scale, rock spin angle
     SHADER_FLOAT4 giant;                // camera-relative belt centre, w unused
+    SHADER_FLOAT4 freeze;               // live camera to the frozen cull camera, zero when culling follows the view; w unused
     SHADER_FLOAT4 belt_tilt;            // y scale, y from z, z scale, unused
     SHADER_FLOAT4 band_spin[ORBITAL_BELT_BANDS]; // cos and sin of each radial band's spin angle
     SHADER_FLOAT4 levels;               // projected-radius thresholds of levels 1 to 4, in pixels
