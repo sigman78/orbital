@@ -9,9 +9,12 @@
 
 static const float HISTORY_WEIGHT = .95;      // at rest
 static const float HISTORY_WEIGHT_MOVING = .80; // at one pixel of motion per frame and beyond
-static const float CLIP_SIGMA = 1.5;          // variance clip half-width, in standard deviations
+static const float CLIP_SIGMA = 1.5;          // variance clip half-width at rest, in standard deviations
+static const float CLIP_SIGMA_MOVING = .75;   // and at CLIP_MOTION_PIXELS of motion and beyond: a tighter box drops the copies a fast rock leaves behind
+static const float CLIP_MOTION_PIXELS = 3.0;
 static const float SPLAT_WEIGHT_MOVING = .3;  // splat pixels at SPLAT_MOTION_PIXELS of motion and beyond: already filtered, so a short history keeps them sharp
 static const float SPLAT_MOTION_PIXELS = 4.0;
+static const float SPLAT_CLIP_SIGMA = 3.0;    // splat history is clipped only loosely: its own filtering settles instead of twinkling
 
 // Moves the history colour to the nearest point of the neighbourhood box along
 // the line toward the box centre, which keeps hue better than a clamp.
@@ -111,10 +114,16 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     }
     mean /= 9.0;
     float3 sigma = sqrt(max(meanSquare / 9.0 - mean * mean, float3(0.0, 0.0, 0.0)));
-    float3 boxMin = mean - sigma * CLIP_SIGMA, boxMax = mean + sigma * CLIP_SIGMA;
-    float3 clippedHistory = splat ? history.rgb : fromYCoCg(clipToBox(boxMin, boxMax, toYCoCg(history.rgb)));
-
+    // The box tightens with motion: at speed a rock crosses pixels whose
+    // neighbourhood still holds bright rock, and a wide box let its old copies
+    // through as a trail. Splat pixels were never clipped and trailed worst;
+    // they now get a loose box, which still settles their filtered footprints.
     float motionPixels = length((previousUV - uv) * float2(size));
+    float clipSigma = splat ? SPLAT_CLIP_SIGMA
+                            : lerp(CLIP_SIGMA, CLIP_SIGMA_MOVING, smoothstep(.5, CLIP_MOTION_PIXELS, motionPixels));
+    float3 boxMin = mean - sigma * clipSigma, boxMax = mean + sigma * clipSigma;
+    float3 clippedHistory = fromYCoCg(clipToBox(boxMin, boxMax, toYCoCg(history.rgb)));
+
     float historyWeight = splat ? lerp(HISTORY_WEIGHT, SPLAT_WEIGHT_MOVING, smoothstep(.25, SPLAT_MOTION_PIXELS, motionPixels))
                               : lerp(HISTORY_WEIGHT, HISTORY_WEIGHT_MOVING, smoothstep(.25, 1.0, motionPixels));
     // Luminance-weighted blend: bright specks count less, so they settle instead of flickering.

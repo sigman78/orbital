@@ -64,6 +64,8 @@ Some reduction of a point's peak is legitimate antialiasing, since a subpixel ro
 
 ### 6. History validation is weak at precisely the belt's edges — medium/high priority, confirmed
 
+Update 2026-09-15: the splat exemption from clipping is gone (splat history is clipped to a loose box of three standard deviations) and the box tightens with motion for every pixel (1.5 standard deviations at rest, 0.75 from three pixels of motion per frame). This halves the light TAA adds beside fast rocks in forward flight (see DECISIONS.md). Depth-based validation of splats and the coverage-aware policy remain open.
+
 Depth stored in history alpha is filtered with the same Catmull–Rom weights as color. Interpolating foreground depth with the sky sentinel, including negative lobes, produces values that need not belong to any surface. Those values control both the sky classification and the depth rejection test. RGBA16F can represent the 2000-unit sentinel; overflow is not the issue here.
 
 Rejection runs only when both pixels classify as surfaces, and never for current splats. Allowing sky/surface transitions helped coverage convergence in previous experiments, but indiscriminately accepting them also admits disoccluded history. The 5% depth tolerance is additionally broad for nearby overlapping belt layers.
