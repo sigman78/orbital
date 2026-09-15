@@ -3,7 +3,7 @@
 #include "app/frame_input.hpp"
 #include "app/hud.hpp"
 #include "app/options.hpp"
-#include "app/timing_average.hpp"
+#include "app/stats_smoothing.hpp"
 #include "app/ui.hpp"
 #include "assets/image.hpp"
 #include "core/file.hpp"
@@ -117,9 +117,10 @@ void update_title(platform::Window& window, const render::Stats& stats, const Ap
         "ORBITAL  |  {} FPS  |  {:.1f} ms (p95 {:.1f})  |  GPU {:.1f} ms  |  {} draws ({} rock groups)  |  "
         "{} rocks  |  {:.2f} M tris  |  {}  |  belt map {} ext {} dust {}  |  TAA {} + {}  |  splats {} lit {}  |  "
         "tone {}",
-        fps, stats.frame_ms, p95_ms, stats.gpu_ms, stats.draw_calls, stats.rock_groups_drawn, stats.visible_asteroids,
-        stats.triangles / 1e6, app.high ? "HIGH" : "BASELINE", app.belt.light_map ? "on" : "off",
-        app.belt.extinction ? "on" : "off", app.belt_dust.enabled ? "on" : "off", app.aa.temporal_aa ? "on" : "off",
+        fps, stats.frame_ms, p95_ms, stats.gpu[render::GpuPass::Frame], stats.draw_calls, stats.rock_groups_drawn,
+        stats.visible_asteroids, stats.triangles / 1e6, app.high ? "HIGH" : "BASELINE",
+        app.belt.light_map ? "on" : "off", app.belt.extinction ? "on" : "off", app.belt_dust.enabled ? "on" : "off",
+        app.aa.temporal_aa ? "on" : "off",
         app.aa.spatial_aa == render::SpatialAA::Off    ? "none"
         : app.aa.spatial_aa == render::SpatialAA::FXAA ? "FXAA"
                                                        : "SMAA",
@@ -130,27 +131,23 @@ void update_title(platform::Window& window, const render::Stats& stats, const Ap
                                                         : "Neutral"));
 }
 
+// Per-frame samples: the CPU frame time always, for the panel's graph; the rest
+// only for a benchmark, which writes every GPU pass as its own column.
 struct FrameTimes {
-    std::vector<float> cpu_ms, gpu_ms, prepare_ms;
-    std::vector<float> cull_ms, body_shadow_ms, belt_light_ms, belt_disc_ms, meter_ms;
-    std::vector<float> cull_shadow_ms, surface_ms, atmosphere_ms, post_ms; // GPU pass timings
-    std::vector<float> children[15]; // the groups' children, in the CSV's column order
+    std::vector<float> cpu_ms, prepare_ms;
+    std::vector<render::PassTimings> gpu;
 };
 
 void write_benchmark(const std::filesystem::path& path, const FrameTimes& times) {
-    std::string csv =
-        "frame,cpu_submit_and_wait_ms,gpu_ms,cpu_prepare_ms,gpu_cull_shadow_ms,gpu_surface_ms,"
-        "gpu_atmosphere_ms,gpu_post_ms,gpu_cull_ms,gpu_body_shadow_ms,gpu_belt_light_ms,gpu_belt_disc_ms,"
-        "gpu_meter_ms,gpu_surface_sky_ms,gpu_surface_bodies_ms,gpu_surface_rocks_ms,gpu_surface_clouds_ms,"
-        "gpu_atmospheres_ms,gpu_belt_dust_ms,gpu_splat_mask_ms,gpu_temporal_ms,gpu_streaks_ms,gpu_bloom_ms,"
-        "gpu_sun_visibility_ms,gpu_flare_ms,gpu_composite_ms,gpu_spatial_aa_ms,gpu_present_ms\n";
+    // The columns are read by name (tools/benchmark-suite.py), so their order follows the pass table.
+    std::string csv = "frame,cpu_submit_and_wait_ms,cpu_prepare_ms";
+    for (const auto& pass : render::gpu_pass_info)
+        std::format_to(std::back_inserter(csv), ",{}", pass.column);
+    csv += '\n';
     for (std::size_t i = 0; i < times.cpu_ms.size(); i++) {
-        std::format_to(std::back_inserter(csv), "{},{},{},{},{},{},{},{},{},{},{},{},{}", i, times.cpu_ms[i],
-                       times.gpu_ms[i], times.prepare_ms[i], times.cull_shadow_ms[i], times.surface_ms[i],
-                       times.atmosphere_ms[i], times.post_ms[i], times.cull_ms[i], times.body_shadow_ms[i],
-                       times.belt_light_ms[i], times.belt_disc_ms[i], times.meter_ms[i]);
-        for (const auto& child : times.children)
-            std::format_to(std::back_inserter(csv), ",{}", child[i]);
+        std::format_to(std::back_inserter(csv), "{},{},{}", i, times.cpu_ms[i], times.prepare_ms[i]);
+        for (const float ms : times.gpu[i].ms)
+            std::format_to(std::back_inserter(csv), ",{}", ms);
         csv += '\n';
     }
     if (!file::write_text(path, csv))
@@ -248,7 +245,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
     auto previous = std::chrono::steady_clock::now();
     double simulation_time = 0, elapsed = 0, title_clock = 0;
     unsigned frames = 0;
-    TimingAverage timing_average;
+    StatsSmoother smoother;
     while (app.running && window.pump_events()) {
         for (const Key key : window.key_presses()) {
             if (key == Key::alt_enter)
@@ -281,7 +278,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
         ui.begin_frame();
         if (app.show_ui) {
             const std::size_t recent = std::min(times.cpu_ms.size(), window_limits::timing_history_frames);
-            draw_panel(app, timing_average.apply(renderer.stats()), std::span<const float>(times.cpu_ms).last(recent));
+            draw_panel(app, smoother.apply(renderer.stats()), std::span<const float>(times.cpu_ms).last(recent));
         }
         const ImDrawData* ui_draw = ui.end_frame();
 
@@ -296,29 +293,13 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
             if (options.fullscreen_at && frames == options.fullscreen_at)
                 window.toggle_fullscreen();
             const auto stats = renderer.stats();
-            timing_average.add(stats);
+            smoother.add(stats, dt, app.camera.cut_serial());
             if (options.benchmark.empty() && times.cpu_ms.size() == window_limits::timing_history_frames)
                 times.cpu_ms.erase(times.cpu_ms.begin());
             times.cpu_ms.push_back(stats.frame_ms);
             if (!options.benchmark.empty()) {
-                times.gpu_ms.push_back(stats.gpu_ms);
                 times.prepare_ms.push_back(stats.prepare_ms);
-                times.cull_shadow_ms.push_back(stats.shadow_ms);
-                times.cull_ms.push_back(stats.cull_ms);
-                times.body_shadow_ms.push_back(stats.body_shadow_ms);
-                times.belt_light_ms.push_back(stats.belt_light_ms);
-                times.belt_disc_ms.push_back(stats.belt_disc_ms);
-                times.meter_ms.push_back(stats.meter_ms);
-                const float children[15] = {stats.surface_sky_ms,    stats.surface_bodies_ms, stats.surface_rocks_ms,
-                                            stats.surface_clouds_ms, stats.atmospheres_ms,    stats.belt_dust_ms,
-                                            stats.splat_mask_ms,     stats.temporal_ms,       stats.streaks_ms,
-                                            stats.bloom_ms,          stats.sun_visibility_ms, stats.flare_ms,
-                                            stats.composite_ms,      stats.spatial_aa_ms,     stats.present_ms};
-                for (std::size_t c = 0; c < 15; c++)
-                    times.children[c].push_back(children[c]);
-                times.surface_ms.push_back(stats.surface_ms);
-                times.atmosphere_ms.push_back(stats.atmosphere_ms);
-                times.post_ms.push_back(stats.post_ms);
+                times.gpu.push_back(stats.gpu);
             }
             if (!app.capture_request.empty()) {
                 const auto path = session.directory / app.capture_request;
@@ -377,19 +358,8 @@ int run(const Options& options) {
                          : options.frame_limit     ? options.frame_limit
                                                    : benchmark::expected_frames);
     if (!options.benchmark.empty()) {
-        times.gpu_ms.reserve(times.cpu_ms.capacity());
         times.prepare_ms.reserve(times.cpu_ms.capacity());
-        times.cull_shadow_ms.reserve(times.cpu_ms.capacity());
-        times.cull_ms.reserve(times.cpu_ms.capacity());
-        times.body_shadow_ms.reserve(times.cpu_ms.capacity());
-        times.belt_light_ms.reserve(times.cpu_ms.capacity());
-        times.belt_disc_ms.reserve(times.cpu_ms.capacity());
-        times.meter_ms.reserve(times.cpu_ms.capacity());
-        for (auto& child : times.children)
-            child.reserve(times.cpu_ms.capacity());
-        times.surface_ms.reserve(times.cpu_ms.capacity());
-        times.atmosphere_ms.reserve(times.cpu_ms.capacity());
-        times.post_ms.reserve(times.cpu_ms.capacity());
+        times.gpu.reserve(times.cpu_ms.capacity());
     }
     const unsigned frames = frame_loop({.options = options,
                                         .system = system,

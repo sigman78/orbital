@@ -21,32 +21,8 @@ constexpr AccessScope cull_input_access{gpu::Stage::compute | gpu::Stage::vertex
 void Renderer::Impl::read_gpu_timings() {
     if (!frame_index)
         return;
-    const auto elapsed = [&](GpuPass pass) { return timings.milliseconds(pass).value_or(0.f); };
-    stats.gpu_ms = elapsed(GpuPass::Frame);
-    stats.shadow_ms = elapsed(GpuPass::CullAndShadows);
-    stats.cull_ms = elapsed(GpuPass::Culling);
-    stats.body_shadow_ms = elapsed(GpuPass::BodyShadows);
-    stats.belt_light_ms = elapsed(GpuPass::BeltLight);
-    stats.belt_disc_ms = elapsed(GpuPass::BeltDiscs);
-    stats.meter_ms = elapsed(GpuPass::Meter);
-    stats.surface_ms = elapsed(GpuPass::Surface);
-    stats.atmosphere_ms = elapsed(GpuPass::Atmosphere);
-    stats.post_ms = elapsed(GpuPass::Post);
-    stats.surface_sky_ms = elapsed(GpuPass::SurfaceSky);
-    stats.surface_bodies_ms = elapsed(GpuPass::SurfaceBodies);
-    stats.surface_rocks_ms = elapsed(GpuPass::SurfaceRocks);
-    stats.surface_clouds_ms = elapsed(GpuPass::SurfaceClouds);
-    stats.atmospheres_ms = elapsed(GpuPass::Atmospheres);
-    stats.belt_dust_ms = elapsed(GpuPass::BeltDust);
-    stats.splat_mask_ms = elapsed(GpuPass::SplatMask);
-    stats.temporal_ms = elapsed(GpuPass::Temporal);
-    stats.streaks_ms = elapsed(GpuPass::MotionStreaks);
-    stats.bloom_ms = elapsed(GpuPass::Bloom);
-    stats.sun_visibility_ms = elapsed(GpuPass::SunVisibility);
-    stats.flare_ms = elapsed(GpuPass::Flare);
-    stats.composite_ms = elapsed(GpuPass::Composite);
-    stats.spatial_aa_ms = elapsed(GpuPass::SpatialAA);
-    stats.present_ms = elapsed(GpuPass::Present);
+    for (std::size_t pass = 0; pass < gpu_pass_count; pass++)
+        stats.gpu.ms[pass] = timings.milliseconds(GpuPass(pass)).value_or(0.f);
 }
 
 bool Renderer::draw(const FrameInput& supplied) {

@@ -1,6 +1,7 @@
 #pragma once
 #include "core/timing.hpp"
 #include "render/gpu_owners.hpp"
+#include "render/gpu_pass.hpp"
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
 #include <cassert>
 #include <cstdint>
@@ -8,45 +9,14 @@
 
 namespace space::render {
 
-enum class GpuPass : unsigned {
-    Frame,
-    CullAndShadows,
-    Culling,
-    BodyShadows,
-    BeltLight,
-    BeltDiscs,
-    Surface,
-    Atmosphere,
-    Post,
-    Meter, // the exposure histogram's slice for the frame and the cycle's copies
-    // Children of the groups above, each one contiguous run of commands; a group's
-    // remainder over its children is the barriers and transitions between them.
-    SurfaceSky,    // the galaxy splat pass, the background and the stars
-    SurfaceBodies, // the planet surfaces
-    SurfaceRocks,  // the pooled rock multi-draw, meshes and splats together
-    SurfaceClouds, // the cloud shell
-    Atmospheres,   // the per-body shell marches
-    BeltDust,      // the dust march, its upsample and the disc blend
-    SplatMask,     // splat coverage and depth for TAA and sun visibility
-    Temporal,      // the temporal resolve
-    MotionStreaks,
-    Bloom, // prefilter and both blurs
-    SunVisibility,
-    Flare,     // the quarter-resolution stack
-    Composite, // tone map and the full-resolution lens work
-    SpatialAA, // FXAA, or the three SMAA passes
-    Present,   // the swapchain copy with the HUD and the panel
-    Count
-};
-
 class GpuTimingScope;
 class GpuTimingFrame;
 
 // One recording at a time; read results only after its submission completes.
 class GpuTimings {
 public:
-    static_assert(unsigned(GpuPass::Count) <= 32); // one bit per pass in recording masks
-    static constexpr unsigned timestamp_count = 2 * unsigned(GpuPass::Count);
+    static_assert(gpu_pass_count <= 32); // one bit per pass in recording masks
+    static constexpr unsigned timestamp_count = 2 * unsigned(gpu_pass_count);
     constexpr GpuTimings() = default;
     GpuTimings(const GpuTimings&) = delete;
     GpuTimings& operator=(const GpuTimings&) = delete;

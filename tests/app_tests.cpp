@@ -1,27 +1,51 @@
 #include "app/actions.hpp"
 #include "app/frame_input.hpp"
-#include "app/timing_average.hpp"
+#include "app/stats_smoothing.hpp"
 #include <cassert>
+#include <cmath>
+#include <string_view>
 
 int main() {
     using namespace space;
     using namespace space::app;
-    TimingAverage average;
+    // The smoother: primed by the first sample, then an exponential average timed in
+    // seconds; counts round, untouched fields pass through, a camera cut restarts it.
+    StatsSmoother smoother;
+    const double half_life = StatsSmoother::time_constant_seconds * std::log(2.0); // alpha of one half
     render::Stats sample;
     sample.frame_ms = 250;
-    sample.gpu_ms = 10;
-    average.add(sample);
-    sample.gpu_ms = 30;
-    average.add(sample);
-    sample.draw_calls = 123;
-    assert(average.apply(sample).gpu_ms == 20 && average.apply(sample).draw_calls == 123);
-    sample.gpu_ms = 50;
-    average.add(sample);
-    assert(average.apply(sample).gpu_ms == 40); // oldest frame leaves the half-second window
-    sample.frame_ms = 1000;
-    sample.gpu_ms = 70;
-    average.add(sample);
-    assert(average.apply(sample).gpu_ms == 70); // a long frame stands alone
+    sample.gpu[render::GpuPass::Frame] = 10;
+    sample.draw_calls = 100;
+    smoother.add(sample, half_life, 1);
+    assert(smoother.apply(sample).gpu[render::GpuPass::Frame] == 10); // primed, not averaged with zero
+    sample.gpu[render::GpuPass::Frame] = 30;
+    sample.draw_calls = 103;
+    sample.belt_lod = .5f;
+    smoother.add(sample, half_life, 1);
+    {
+        const auto shown = smoother.apply(sample);
+        assert(std::abs(shown.gpu[render::GpuPass::Frame] - 20) < 1e-4f);
+        assert(shown.draw_calls == 102); // 101.5 rounds up
+        assert(shown.belt_lod == .5f);   // not smoothed
+        assert(shown.frame_ms == 250);   // constant readings stay exact
+    }
+    sample.gpu[render::GpuPass::Frame] = 50;
+    smoother.add(sample, half_life, 1);
+    assert(std::abs(smoother.apply(sample).gpu[render::GpuPass::Frame] - 35) < 1e-4f);
+    smoother.add(sample, 0, 1); // no time passed, nothing moves
+    assert(std::abs(smoother.apply(sample).gpu[render::GpuPass::Frame] - 35) < 1e-4f);
+    sample.gpu[render::GpuPass::Frame] = 70;
+    smoother.add(sample, half_life, 2); // a cut: the new view's first sample stands alone
+    assert(smoother.apply(sample).gpu[render::GpuPass::Frame] == 70);
+    sample.frame_ms = 0;
+    sample.gpu[render::GpuPass::Frame] = 5;
+    smoother.add(sample, half_life, 2); // a frame that did not draw is ignored
+    assert(smoother.apply(sample).gpu[render::GpuPass::Frame] == 70);
+    // The pass table: one column per pass, all distinct, every child after its parent.
+    for (std::size_t i = 0; i < render::gpu_pass_count; i++)
+        for (std::size_t j = 0; j < i; j++)
+            assert(std::string_view(render::gpu_pass_info[i].column) != render::gpu_pass_info[j].column);
+    assert(std::string_view(render::pass_info(render::GpuPass::Frame).column) == "gpu_ms");
     AppState app;
     app.bodies = evaluate_system(generate_system(showcase_seed), 0);
     app.belt_dust = {
