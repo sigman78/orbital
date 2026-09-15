@@ -26,7 +26,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--executable', type=Path, default=ROOT / 'build/release/orbital.exe')
     parser.add_argument('--output', type=Path, default=ROOT / '.scratch/exposure-check')
-    parser.add_argument('--frames', type=int, default=80)  # five meter cycles of sixteen frames
+    parser.add_argument('--frames', type=int, default=48)  # three meter cycles of sixteen frames
     parser.add_argument('--width', type=int, default=960)
     parser.add_argument('--height', type=int, default=540)
     parser.add_argument('--show', action='store_true', help='keep the window visible while the shots run')

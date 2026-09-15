@@ -31,6 +31,13 @@ of one view as key=value tokens (`name=mars bookmark=3 back=25 fov-div=5 capture
 the command line setting the defaults, and the report holding each shot's GPU pass
 medians and exposure reading. `orbital --help` lists the keys.
 
+Frames per shot, measured on the belt view against a 240-frame reference (pixels off
+by more than two codes): with TAA off one frame is converged (0.007 percent, the
+run-to-run floor at any count); with TAA on 32 frames leave 0.7 percent, 64 leave
+0.07 and 120 leave 0.04 (the history half-life is 13.5 frames). The meter needs two
+16-frame cycles for a reading. So: `taa=0 frames=1` for signatures and feature checks,
+64 for anything that looks at the TAA result, 32 or more for the meter.
+
 Requirements: Windows desktop GPU, MSVC/CMake/Ninja, Python with Pillow; the motion
 fixture also needs NumPy and the local Slang compiler. Set `ORBITAL_VCVARS` when MSVC
 cannot be discovered. `-Rebuild` cleans the validation build before rebuilding.
