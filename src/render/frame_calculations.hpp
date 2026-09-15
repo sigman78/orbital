@@ -68,5 +68,9 @@ struct MeterReading {
     bool has_samples = false, limited = false;
 };
 MeterReading meter_exposure(std::span<const float> cells, const ToneSettings& tone);
+// The dead zone: the target the adaptation follows moves to the meter's request only
+// once the request differs from it by at least `deadzone_stops`, so a composition
+// drifting by a fraction of a stop leaves the exposure alone.
+float settle_target(float current_target, float requested_target, float deadzone_stops);
 
 } // namespace space::render

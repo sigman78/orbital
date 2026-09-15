@@ -105,4 +105,10 @@ int main() {
     std::fill(cells.begin(), cells.end(), 0.f); // no weight at all: no samples, 1x
     reading = meter_exposure(cells, tone);
     assert(!reading.has_samples && reading.requested == 1.f);
+
+    // The dead zone: a request within it leaves the target alone, one beyond it is taken whole.
+    assert(settle_target(1.f, 1.2f, .33f) == 1.f && settle_target(1.f, .85f, .33f) == 1.f);
+    assert(settle_target(1.f, 1.3f, .33f) == 1.3f && settle_target(1.f, .7f, .33f) == .7f);
+    assert(settle_target(2.f, 2.1f, 0.f) == 2.1f); // no dead zone follows every request
+    assert(settle_target(0.f, 3.f, .33f) == 3.f);  // an unset target takes the first request
 }

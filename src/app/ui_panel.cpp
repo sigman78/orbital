@@ -303,6 +303,10 @@ void tone_controls(render::ToneSettings& settings, const render::Stats& stats, c
     ImGui::SliderFloat("Highlight bias", &settings.highlight_bias, 0.f, .5f, "%.2f");
     ImGui::SliderFloat("Adaptation strength", &settings.adapt_strength, 0.f, 1.f,
                        "%.2f"); // in stops; the range still clamps
+    ImGui::SliderFloat("Dead zone", &settings.adapt_deadzone, 0.f, 1.f,
+                       "%.2f stops"); // the request must move this far before the exposure follows
+    ImGui::SliderFloat("Brighten time", &settings.brighten_seconds, .5f, 15.f, "%.1f s", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("Darken time", &settings.darken_seconds, .2f, 5.f, "%.1f s", ImGuiSliderFlags_Logarithmic);
     ImGui::SliderFloat("Adaptation min", &settings.adapt_min, .05f, 1.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
     ImGui::SliderFloat("Adaptation max", &settings.adapt_max, 1.f, 32.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
     ImGui::EndDisabled();

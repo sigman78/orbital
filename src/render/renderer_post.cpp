@@ -9,9 +9,8 @@ namespace space::render {
 
 namespace {
 namespace exposure_meter {
-inline constexpr unsigned interval = 16;                               // frames between readbacks
-inline constexpr float brighten_seconds = 2.5f, darken_seconds = 0.6f; // time constants of the exposure change
-inline constexpr float max_step_seconds = 1.f;                         // a stalled frame does not snap the adaptation
+inline constexpr unsigned interval = 16;       // frames between readbacks
+inline constexpr float max_step_seconds = 1.f; // a stalled frame does not snap the adaptation
 } // namespace exposure_meter
 } // namespace
 
@@ -24,7 +23,7 @@ void Renderer::Impl::apply_metering(const ToneSettings& tone) {
         stats.exposure.has_samples = reading.has_samples;
         stats.exposure.luminance = reading.luminance;
         stats.exposure.peak_luminance = reading.peak;
-        exposure_target = reading.target;
+        exposure_target = settle_target(exposure_target, reading.target, tone.adapt_deadzone);
         stats.exposure.target = reading.target;
         stats.exposure.limited = reading.limited;
         meter_pending = false;
@@ -38,8 +37,7 @@ void Renderer::Impl::apply_metering(const ToneSettings& tone) {
                          : std::min(std::chrono::duration<float>(now - meter_time).count(),
                                     exposure_meter::max_step_seconds);
     meter_time = now;
-    const float tau = exposure_target < adapted_exposure ? exposure_meter::darken_seconds
-                                                         : exposure_meter::brighten_seconds;
+    const float tau = std::max(exposure_target < adapted_exposure ? tone.darken_seconds : tone.brighten_seconds, .05f);
     adapted_exposure += (exposure_target - adapted_exposure) * (1 - std::exp(-dt / tau));
     stats.exposure.adapted = adapted_exposure;
 }

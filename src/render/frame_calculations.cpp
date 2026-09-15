@@ -212,4 +212,10 @@ MeterReading meter_exposure(std::span<const float> cells, const ToneSettings& to
     return reading;
 }
 
+float settle_target(float current_target, float requested_target, float deadzone_stops) {
+    if (current_target <= 0 || requested_target <= 0)
+        return requested_target;
+    return std::abs(std::log2(requested_target / current_target)) >= deadzone_stops ? requested_target : current_target;
+}
+
 } // namespace space::render
