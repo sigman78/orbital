@@ -8,7 +8,7 @@
 // Coverage-aware history validation is a separate follow-up to this coordinate fix.
 
 static const float HISTORY_WEIGHT = .95;      // at rest
-static const float HISTORY_WEIGHT_MOVING = .80; // at one pixel of motion per frame and beyond
+static const float HISTORY_WEIGHT_MOVING = .60; // at one pixel of motion per frame and beyond; shorter keeps flight sharper
 static const float CLIP_SIGMA = 1.5;          // variance clip half-width at rest, in standard deviations
 static const float CLIP_SIGMA_MOVING = .75;   // and at CLIP_MOTION_PIXELS of motion and beyond: a tighter box drops the copies a fast rock leaves behind
 static const float CLIP_MOTION_PIXELS = 3.0;
