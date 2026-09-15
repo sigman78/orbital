@@ -32,7 +32,11 @@ void computeMain(uint3 thread : SV_DispatchThreadID)
     Frame* frame = root.frame;
     float2 resolution = frame->options.xy;
     uint2 taps = uint2(ceil(resolution / METER_STRIDE));
-    uint row = thread.y * ORBITAL_METER_PHASES + root.phase; // this phase's rows of the tap grid
+    // The phases take the rows in bit-reversed order (0, 8, 4, 12, ...) rather than top
+    // to bottom, so a cycle cut short by a change of view has sampled the whole frame
+    // evenly instead of one contiguous band of it.
+    uint slice = reversebits(root.phase) >> (32 - 4); // ORBITAL_METER_PHASES is 16
+    uint row = thread.y * ORBITAL_METER_PHASES + slice; // this phase's rows of the tap grid
     if (thread.x >= taps.x || row >= taps.y) return;
     float2 uv = (float2(thread.x, row) + .5) * METER_STRIDE / resolution;
     float lum = luma709(resolvedHDR(frame, uv));
