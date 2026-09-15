@@ -89,6 +89,7 @@ public:
     bool mouse_look_active() const;
     bool mouse_look_began() const;
     MouseDelta take_mouse_look_delta();
+    bool middle_button_down() const; // polled; the telescope zoom holds while it is
     // Polled state, true only while this window is in the foreground.
     bool key_down(Key key) const;
 

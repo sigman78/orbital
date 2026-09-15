@@ -19,6 +19,7 @@ struct Input {
     float mouse_dx = 0.0f;
     float mouse_dy = 0.0f;
     float speed_scale = 1.0f;
+    bool telescope = false; // the telescope zoom is held
 };
 
 // Number of preset views reachable with the number keys.
@@ -35,6 +36,9 @@ struct Camera {
     constexpr Vec3d forward() const { return forward_; }
     constexpr Vec3d right() const { return right_; }
     constexpr Vec3d up() const { return up_; }
+    // The telescope zoom's current magnification (1 at rest) and the field of view under it.
+    constexpr double zoom() const { return zoom_; }
+    constexpr double effective_fov() const { return vertical_fov / zoom_; }
 
     // Advances navigation by dt. Simulation time is supplied separately so a
     // paused simulation does not pause camera input or the tour clock.
@@ -69,6 +73,7 @@ private:
     double tour_override_time_ = 0.0;
     Bookmark bookmarks_[bookmark_count]{};
     std::size_t cut_serial_ = 0;
+    double zoom_ = 1.0; // eases toward the telescope's magnification while it is held
 
     void step_tour(double time, std::span<const BodyState> bodies);
     void step_orbit(double dt, double speed, const Input& input, const BodyState& body);
