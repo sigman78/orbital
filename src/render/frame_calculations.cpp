@@ -194,4 +194,22 @@ PreparedCamera prepare_camera(const CameraView& camera, const CameraHistory& pre
     return result;
 }
 
+MeterReading meter_exposure(std::span<const float> cells, const ToneSettings& tone) {
+    MeterReading reading;
+    float mean_sum = 0, weight_sum = 0, brightest_cell = 0;
+    for (std::size_t i = 0; i + 3 < cells.size(); i += 4) {
+        reading.peak = std::max(reading.peak, cells[i + 1]);
+        brightest_cell = std::max(brightest_cell, cells[i]);
+        mean_sum += cells[i] * cells[i + 2];
+        weight_sum += cells[i + 2];
+    }
+    reading.has_samples = weight_sum > 0;
+    reading.luminance = (weight_sum > 0 ? mean_sum / weight_sum : 0) + tone.highlight_bias * brightest_cell;
+    // The strength damps the change in stops, so half strength halves every excursion.
+    reading.requested = reading.luminance > 0 ? std::pow(tone.meter_key / reading.luminance, tone.adapt_strength) : 1.f;
+    reading.target = std::clamp(reading.requested, tone.adapt_min, std::max(tone.adapt_min, tone.adapt_max));
+    reading.limited = reading.requested != reading.target;
+    return reading;
+}
+
 } // namespace space::render

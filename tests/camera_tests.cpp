@@ -65,5 +65,25 @@ int main() {
     assert(temporal.cut_serial() == reframed);
     temporal.set_bookmark(0, bodies);
     assert(temporal.cut_serial() != reframed);
+
+    // The telescope: held, the zoom climbs to its cap and the field of view narrows to
+    // match; released, it returns to 1x; released early it reverses from where it was.
+    Camera scope;
+    const double base_fov = scope.vertical_fov;
+    assert(scope.zoom() == 1.0 && scope.effective_fov() == base_fov);
+    Input held{0, 0, 0, 0, 0, 1, true}, released{0, 0, 0, 0, 0, 1, false};
+    scope.step(.01, 0, held, bodies);
+    assert(scope.zoom() > 1.0 && scope.zoom() < 5.0);
+    for (int i = 0; i < 50; i++)
+        scope.step(.01, 0, held, bodies);
+    assert(std::abs(scope.zoom() - 5.0) < 1e-9 && std::abs(scope.effective_fov() - base_fov / 5.0) < 1e-9);
+    scope.step(.01, 0, released, bodies);
+    const auto returning = scope.zoom();
+    assert(returning < 5.0 && returning > 1.0);
+    scope.step(.01, 0, held, bodies);
+    assert(scope.zoom() > returning); // held again: back toward the cap
+    for (int i = 0; i < 50; i++)
+        scope.step(.01, 0, released, bodies);
+    assert(scope.zoom() == 1.0 && scope.vertical_fov == base_fov);
     return 0;
 }
