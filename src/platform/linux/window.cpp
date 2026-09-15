@@ -61,7 +61,8 @@ std::unique_ptr<Window> Window::create(const WindowDesc& desc) {
     auto impl = std::make_unique<Impl>();
     impl->handle = SDL_CreateWindow(std::string(desc.title).c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                     int(desc.client_size.width), int(desc.client_size.height),
-                                    SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+                                    SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
+                                        (desc.hidden ? SDL_WINDOW_HIDDEN : 0));
     panic_if(!impl->handle, "cannot create the desktop window: {}", SDL_GetError());
     return std::unique_ptr<Window>(new Window(std::move(impl)));
 }
@@ -169,6 +170,10 @@ void Window::wait_for_events() const {
 void Window::set_title(std::string_view utf8) {
     SDL_SetWindowTitle(impl_->handle, std::string(utf8).c_str());
 }
+void Window::resize(Extent2D client_size) {
+    SDL_SetWindowSize(impl_->handle, int(client_size.width), int(client_size.height));
+}
+
 void Window::maximize() {
     SDL_MaximizeWindow(impl_->handle);
 }

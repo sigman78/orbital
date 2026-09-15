@@ -198,8 +198,10 @@ std::unique_ptr<Window> Window::create(const WindowDesc& desc) {
                                   wc.hInstance, impl.get());
     panic_if(!handle, "cannot create the desktop window");
     impl->handle = handle;
-    ShowWindow(handle, SW_SHOW);
-    UpdateWindow(handle); // Paint now, before synchronous renderer and asset initialization.
+    if (!desc.hidden) {
+        ShowWindow(handle, SW_SHOW);
+        UpdateWindow(handle); // Paint now, before synchronous renderer and asset initialization.
+    }
     return std::unique_ptr<Window>(new Window(std::move(impl)));
 }
 
@@ -259,6 +261,13 @@ void Window::wait_for_events() const {
 
 void Window::set_title(std::string_view utf8) {
     SetWindowTextW(impl_->handle, to_wide(utf8).c_str());
+}
+
+void Window::resize(Extent2D client_size) {
+    RECT area{0, 0, LONG(client_size.width), LONG(client_size.height)};
+    AdjustWindowRect(&area, WS_OVERLAPPEDWINDOW, FALSE);
+    SetWindowPos(impl_->handle, nullptr, 0, 0, area.right - area.left, area.bottom - area.top,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void Window::maximize() {

@@ -61,6 +61,7 @@ struct MouseDelta {
 struct WindowDesc {
     Extent2D client_size{1280, 720};
     std::string_view title;
+    bool hidden = false; // never shown: scripted runs that must not take the screen or the focus
 };
 
 // What the OS reports about the display the window is on, for HDR output.
@@ -96,8 +97,9 @@ public:
     bool minimized() const;
     void wait_for_events() const; // blocks until the next event, for a minimized window
     void set_title(std::string_view utf8);
-    void maximize();          // as the maximize button would; the drawable size changes on the next pump
-    void toggle_fullscreen(); // borderless window over the monitor, and back to the previous placement
+    void maximize();                   // as the maximize button would; the drawable size changes on the next pump
+    void resize(Extent2D client_size); // a new client size in place; the drawable size changes on the next pump
+    void toggle_fullscreen();          // borderless window over the monitor, and back to the previous placement
     bool fullscreen() const;
     // The display under the window; cheap enough to poll once a second, not every frame.
     DisplayInfo display_info() const;

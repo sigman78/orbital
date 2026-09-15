@@ -3,6 +3,7 @@
 #include "core/log.hpp"
 #include <charconv>
 #include <cmath>
+#include <fstream>
 #include <type_traits>
 
 namespace space::app {
@@ -40,19 +41,19 @@ bool options_valid(const Options& options) {
                          std::isfinite(options.duration) && options.duration >= 0;
     const bool exposure_ok = std::isfinite(options.exposure) && options.exposure > 0;
     const bool bookmark_ok = options.bookmark >= -1 && options.bookmark < int(bookmark_count);
-    return size_ok && time_ok && exposure_ok && bookmark_ok;
+    const bool view_ok = std::isfinite(options.back) && options.back >= 0 && std::isfinite(options.fov_div) &&
+                         options.fov_div >= 1;
+    return size_ok && time_ok && exposure_ok && bookmark_ok && view_ok;
 }
 
-} // namespace
-
-std::optional<Options> parse_options(int argc, const char* const* argv) {
-    Options options;
-    for (int i = 1; i < argc; ++i) {
-        const std::string_view arg = argv[i];
+// Applies --option [value...] arguments over the options; false after logging the first bad one.
+bool apply_arguments(Options& options, std::span<const std::string_view> args) {
+    for (std::size_t i = 0; i < args.size(); ++i) {
+        const std::string_view arg = args[i];
         const auto value = [&]() -> std::optional<std::string_view> {
-            if (i + 1 >= argc)
+            if (i + 1 >= args.size())
                 return std::nullopt;
-            return std::string_view(argv[++i]);
+            return args[++i];
         };
         bool ok = true;
         if (arg == "--help")
@@ -67,6 +68,8 @@ std::optional<Options> parse_options(int argc, const char* const* argv) {
             options.high = true;
         else if (arg == "--no-hud")
             options.no_hud = true;
+        else if (arg == "--headless")
+            options.headless = true;
         else if (arg == "--seed")
             ok = parse_number(value(), options.seed);
         else if (arg == "--frames")
@@ -93,6 +96,10 @@ std::optional<Options> parse_options(int argc, const char* const* argv) {
             ok = parse_number(value(), options.maximize_at);
         else if (arg == "--fullscreen-at")
             ok = parse_number(value(), options.fullscreen_at);
+        else if (arg == "--back")
+            ok = parse_number(value(), options.back);
+        else if (arg == "--fov-div")
+            ok = parse_number(value(), options.fov_div);
         else if (arg == "--tone")
             ok = parse_choice(value(), options.tone, unsigned(render::ToneCurve::Count));
         else if (arg == "--hdr")
@@ -123,20 +130,115 @@ std::optional<Options> parse_options(int argc, const char* const* argv) {
             ok = parse_path(value(), options.capture);
         else if (arg == "--benchmark")
             ok = parse_path(value(), options.benchmark);
+        else if (arg == "--shots")
+            ok = parse_path(value(), options.shots);
+        else if (arg == "--report")
+            ok = parse_path(value(), options.report);
         else {
             log::error("unknown option {}", arg);
-            return std::nullopt;
+            return false;
         }
         if (!ok) {
             log::error("missing or invalid value for {}", arg);
-            return std::nullopt;
+            return false;
         }
     }
     if (!options_valid(options)) {
-        log::error("invalid dimensions, time, duration, exposure, or bookmark (expected 0..{})", bookmark_count - 1);
-        return std::nullopt;
+        log::error("invalid dimensions, time, duration, exposure, view, or bookmark (expected 0..{})",
+                   bookmark_count - 1);
+        return false;
     }
+    return true;
+}
+
+} // namespace
+
+std::optional<Options> parse_options(int argc, const char* const* argv) {
+    std::vector<std::string_view> args;
+    for (int i = 1; i < argc; ++i)
+        args.emplace_back(argv[i]);
+    Options options;
+    if (!apply_arguments(options, args))
+        return std::nullopt;
     return options;
 }
 
+std::optional<Shot> parse_shot(const Options& base, std::string_view line, unsigned line_number) {
+    // Tokens are whitespace separated; a key=value token becomes --key value, a
+    // bare key a flag, and commas in a value split it into several values.
+    std::vector<std::string> words; // owns the storage the views below point into
+    std::vector<std::string_view> tokens;
+    for (std::size_t i = 0; i < line.size();) {
+        while (i < line.size() && (line[i] == ' ' || line[i] == '\t' || line[i] == '\r'))
+            ++i;
+        std::size_t end = i;
+        while (end < line.size() && line[end] != ' ' && line[end] != '\t' && line[end] != '\r')
+            ++end;
+        if (end > i)
+            tokens.push_back(line.substr(i, end - i));
+        i = end;
+    }
+    if (tokens.empty() || tokens.front().starts_with('#'))
+        return std::nullopt;
+    Shot shot{.name = "shot " + std::to_string(line_number), .options = base};
+    // The base's own single-run outputs do not carry into a shot: each names its own.
+    shot.options.capture.clear();
+    shot.options.benchmark.clear();
+    words.reserve(tokens.size() * 3);
+    std::vector<std::string_view> args;
+    for (const std::string_view token : tokens) {
+        const auto equals = token.find('=');
+        const std::string_view key = token.substr(0, equals);
+        if (key == "name") {
+            if (equals == std::string_view::npos || equals + 1 >= token.size()) {
+                log::error("shot list line {}: name needs a value", line_number);
+                return std::nullopt;
+            }
+            shot.name = std::string(token.substr(equals + 1));
+            continue;
+        }
+        words.push_back("--" + std::string(key));
+        args.push_back(words.back());
+        if (equals == std::string_view::npos)
+            continue;
+        std::string_view rest = token.substr(equals + 1);
+        while (true) {
+            const auto comma = rest.find(',');
+            words.emplace_back(rest.substr(0, comma));
+            args.push_back(words.back());
+            if (comma == std::string_view::npos)
+                break;
+            rest = rest.substr(comma + 1);
+        }
+    }
+    if (!apply_arguments(shot.options, args)) {
+        log::error("shot list line {} ({}) does not parse", line_number, shot.name);
+        return std::nullopt;
+    }
+    return shot;
+}
+
+std::optional<std::vector<Shot>> load_shots(const Options& base, const std::filesystem::path& path) {
+    std::ifstream file(path);
+    if (!file) {
+        log::error("cannot read the shot list {}", path.string());
+        return std::nullopt;
+    }
+    std::vector<Shot> shots;
+    std::string line;
+    for (unsigned number = 1; std::getline(file, line); ++number) {
+        const bool blank = line.find_first_not_of(" \t\r") == std::string::npos;
+        if (blank || line[line.find_first_not_of(" \t\r")] == '#')
+            continue;
+        auto shot = parse_shot(base, line, number);
+        if (!shot)
+            return std::nullopt;
+        shots.push_back(std::move(*shot));
+    }
+    if (shots.empty()) {
+        log::error("the shot list {} holds no shots", path.string());
+        return std::nullopt;
+    }
+    return shots;
+}
 } // namespace space::app
