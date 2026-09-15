@@ -21,8 +21,10 @@ struct ToneSettings {
     float exposure = 1; // manual exposure multiplier
     bool auto_exposure = true;
     ToneCurve tone_curve = ToneCurve::PbrNeutral; // 0 ACES filmic, 1 AgX, 2 Khronos PBR Neutral (F8)
-    float meter_key = .18f;                       // the metered luminance the auto exposure maps to (middle grey)
-    float adapt_min = .6f, adapt_max = 1.8f;      // the auto exposure's range of multipliers
+    float meter_key =
+        .09f; // the metered luminance the auto exposure maps to 1x: the Earth bookmark, as the screenshots
+    float highlight_bias = .1f;              // share of the brightest meter cell added to the metered luminance
+    float adapt_min = .25f, adapt_max = 8.f; // the auto exposure's range of multipliers (-2 to +3 stops)
     float curve_trim[3] = {1.f, .37f, .75f}; // exposure trim per curve (ACES, AgX, PBR Neutral), fitted on captures
     HdrOutput hdr_output = HdrOutput::Off;   // stays Off when the surface does not offer the pair (Stats reports it)
     float paper_white_nits = 200.f;          // what the tone curve's white maps to on an HDR display

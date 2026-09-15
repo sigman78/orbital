@@ -297,9 +297,10 @@ void tone_controls(render::ToneSettings& settings, const render::Stats& stats, c
                        ImGuiSliderFlags_Logarithmic);
     ImGui::Checkbox("Auto exposure (X)", &settings.auto_exposure);
     ImGui::BeginDisabled(!settings.auto_exposure);
-    ImGui::SliderFloat("Meter key", &settings.meter_key, .02f, .5f, "%.3f", ImGuiSliderFlags_Logarithmic);
-    ImGui::SliderFloat("Adaptation min", &settings.adapt_min, .1f, 1.f, "%.2f x");
-    ImGui::SliderFloat("Adaptation max", &settings.adapt_max, 1.f, 8.f, "%.2f x");
+    ImGui::SliderFloat("Meter key", &settings.meter_key, .005f, .5f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("Highlight bias", &settings.highlight_bias, 0.f, .5f, "%.2f");
+    ImGui::SliderFloat("Adaptation min", &settings.adapt_min, .05f, 1.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("Adaptation max", &settings.adapt_max, 1.f, 32.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
     ImGui::EndDisabled();
     // The active curve's exposure trim; each curve keeps its own value.
     ImGui::SliderFloat("Curve trim", &settings.curve_trim[std::min(unsigned(settings.tone_curve), 2u)], .1f, 2.f,

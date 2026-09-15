@@ -73,7 +73,9 @@ Between the rocks a half-resolution march through the same density field scatter
    area-prefiltered bloom with adjacent-texel separable blur at quarter resolution;
    one shared 1×1 sun-visibility estimate for lens effects; the soft part of the lens flare stack
    (main ring, crescents, coloured ghosts, streak spindles) into a quarter-resolution target;
-   exposure metering every sixteenth frame from a 16x16 log-luminance image.
+   exposure metering every sixteenth frame from a 16x16 image whose cells integrate their whole
+   area at a four pixel stride plus the sun's glare; the CPU averages the cells by centre weight,
+   adds a tenth of the brightest cell and maps the meter key to 1x, within -2 to +3 stops.
 7. The composite adds the sun glare, the aperture starburst and the thin axis streak at full
    resolution and samples the flare stack target, all in HDR using the shared sun visibility. The
    stack lies along the axis through the image centre and the projected sun; its major elements
@@ -120,8 +122,8 @@ enforced and the control that scales it.
   scales the subtraction); the per-curve exposure trims, the meter key and the adaptation
   range are Tone panel controls. On an HDR output the image below the curve's white is the
   SDR image exactly; only the shoulder above it reaches for the display's peak. The published subtraction also removes faint coloured
-  light such as the Milky Way band: the intended remedy is scene-driven exposure
-  adaptation that brings the sky up when no bright body is in view, not a lifted black.
+  light such as the Milky Way band: the remedy is the auto exposure, which brings a sky-only
+  view up three stops and a sun in frame down one to two, never a lifted black.
 - **Contrast reference.** The Sep 11 screenshots (`docs/images` at 7c9535b) are the target:
   at 1920x1080 with `--time 0`, the belt view's median is 7 display codes and the Dawn
   night side's 8; a change that moves either by more than a few codes is a regression
