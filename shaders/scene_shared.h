@@ -8,11 +8,13 @@ using ShaderMatrix4 = float[16];
 #define SHADER_MATRIX4 ShaderMatrix4
 #define SHADER_ADDRESS std::uint64_t
 #define SHADER_UINT std::uint32_t
+#define SHADER_FLOAT float
 #else
 #define SHADER_FLOAT4 float4
 #define SHADER_MATRIX4 float4x4
 #define SHADER_ADDRESS(T) T*
 #define SHADER_UINT uint
+#define SHADER_FLOAT float
 #endif
 
 // Root.mode of the surface pipelines (SurfaceMode on the C++ side).
@@ -21,6 +23,10 @@ using ShaderMatrix4 = float[16];
 #define ORBITAL_SURFACE_SHADOW 2
 #define ORBITAL_SURFACE_BILLBOARD 3
 #define ORBITAL_SURFACE_SPLAT_MASK 4
+// Root.flags for a body draw.
+#define ORBITAL_ROOT_FOLD_CLOUDS 1 // the cloud shell is not drawn: the ground shader blends the clouds in
+// The Earth's cloud shell above the surface, in radii (the mesh scale and the shadow geometry).
+#define ORBITAL_CLOUD_HEIGHT 0.009
 // Instance.rotation_kind.w (SurfaceKind on the C++ side); each kind has its own fragment shader.
 #define ORBITAL_KIND_EARTH 0
 #define ORBITAL_KIND_GIANT 1
@@ -86,6 +92,10 @@ struct Root {
     SHADER_ADDRESS(Instance) instances;
 #endif
     SHADER_UINT base, mode;
+    // Per body draw: the detail weight (0 at the smallest mesh level, 1 from the third)
+    // that the surface shaders fade their detail terms by, and ORBITAL_ROOT_* flags.
+    SHADER_FLOAT detail;
+    SHADER_UINT flags;
 };
 
 // --- Exposure meter histogram (shaders/post/meter_histogram.slang) ------------------

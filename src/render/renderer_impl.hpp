@@ -205,6 +205,8 @@ struct PipelineDesc {
     bool has_depth_attachment = false;
     Blend blend = Blend::none;
     gpu::CullMode cull = gpu::CullMode::none; // closed meshes cull their back faces
+    float depth_bias_constant =
+        0; // in the depth format's steps at the primitive's depth; negative is toward the camera
 };
 
 inline gpu::Format texture_format(const assets::TextureData& data) {
@@ -345,6 +347,13 @@ struct Renderer::Impl {
     // its atmosphere shell, and the mesh level for its projected size.
     std::bitset<max_body_count> body_visible;
     std::array<unsigned, max_body_count> body_level{};
+    // The draw tier from the same projected size: the detail weight the surface
+    // shaders fade their detail terms by (0 at the smallest level, 1 from the
+    // third), and whether the Earth's cloud shell is drawn as its own surface or,
+    // small, folded into the ground shader; both keep the previous frame's state
+    // for their hysteresis.
+    std::array<float, max_body_count> body_detail{};
+    std::bitset<max_body_count> body_shell;
     SystemDescription system;
     std::filesystem::path directory;
     // The bodies occupy instance slots 0..body_count-1 in system order. The

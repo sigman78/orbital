@@ -16,7 +16,7 @@ using DrawArgs = ::DrawArgs;
 using CullParams = ::CullParams;
 using CullScratch = ::CullScratch;
 using CullRoot = ::CullRoot;
-static_assert(sizeof(Root) == 32 && sizeof(Vertex) == 32 && sizeof(Instance) == 48);
+static_assert(sizeof(Root) == 40 && sizeof(Vertex) == 32 && sizeof(Instance) == 48);
 static_assert(sizeof(AsteroidInstance) == 32 && offsetof(AsteroidInstance, payload) == 16);
 static_assert(sizeof(CullRoot) == 32 && sizeof(RockData) == 48 && sizeof(DrawArgs) == 32);
 static_assert(sizeof(MeterRoot) == 24 && sizeof(MeterHistogram) == (ORBITAL_METER_BINS + 4) * 4);

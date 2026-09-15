@@ -25,8 +25,7 @@ giant with an asteroid belt, a rocky moon, a desert world with two tidally locke
 stable ids and independent derived seeds; orbits and rotations are evaluated directly at a time, so a fixed
 time reproduces a snapshot. Distances are deliberately compressed so several bodies share a frame.
 
-Positions are double precision and converted to camera-relative floats each frame. Spheres come in four
-subdivision levels selected by projected size. The belt draws from a library of 16 seeded rock shapes at 6
+Positions are double precision and converted to camera-relative floats each frame. Spheres come in four subdivision levels selected by projected size, and the same size sets a per-draw detail weight the body shaders fade their detail terms by (the Earth's normal map and cloud swirl so far), and whether the Earth's cloud shell is drawn or folded into the ground pass. The belt draws from a library of 16 seeded rock shapes at 6
 levels (20 to 20k triangles), packed into one pooled vertex and index range so every level of every shape is
 a slice of the same buffers.
 

@@ -26,6 +26,16 @@ inline constexpr float screen_size = 0.008f; // Frame.screen_sun.w
 } // namespace sun_flare
 
 // Belt motion and per-rock culling limits, read by write_cull_scratch.
+// Body draw tiers, read by cull_bodies. The detail weight runs over the smallest
+// mesh level's range (the level thresholds are 24, 80 and 240 pixels of radius).
+// The cloud shell is drawn while it is large enough for its parallax to show
+// (below the limit the ground pass folds the clouds in, less than a pixel off).
+namespace body_tiers {
+inline constexpr float detail_from_pixels = 24.f, detail_to_pixels = 80.f;
+inline constexpr float shell_min_pixels = 80.f;
+inline constexpr float grow_hysteresis = 1.15f, shrink_hysteresis = .85f;
+} // namespace body_tiers
+
 namespace belt_culling {
 inline constexpr double spin_rate = 0.0012, rock_spin_rate = 0.02; // radians per simulation second, barely visible
 inline constexpr float shear_exponent =
@@ -222,8 +232,15 @@ void Renderer::Impl::cull_bodies(const FrameInput& input, const FrameData& frame
         const Vec3d relative = input.bodies[i].position - camera.position;
         const float radius = float(input.bodies[i].radius);
         body_visible[i] = geometry::sphere_in_frustum(frustum, to_float(relative), radius * shell);
-        const float projected = radius * float(extent.height) / (float(length(relative)) * tan_y);
-        body_level[i] = geometry::select_lod(projected, 2);
+        const float distance = float(length(relative));
+        const float projected = radius * float(extent.height) / (distance * tan_y);
+        body_level[i] = geometry::select_lod(projected, body_level[i]);
+        const float detail = std::clamp((projected - body_tiers::detail_from_pixels) /
+                                            (body_tiers::detail_to_pixels - body_tiers::detail_from_pixels),
+                                        0.f, 1.f);
+        body_detail[i] = detail * detail * (3 - 2 * detail);
+        body_shell[i] = projected >= body_tiers::shell_min_pixels *
+                                         (body_shell[i] ? body_tiers::shrink_hysteresis : body_tiers::grow_hysteresis);
         stats.frame.bodies_drawn += body_visible[i] ? 1 : 0;
     }
 }
