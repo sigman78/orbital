@@ -4,7 +4,7 @@
 | --- | --- |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Layers, scene, belt, frame sequence, resources, application, tools and tests, as implemented |
 | [DECISIONS.md](DECISIONS.md) | The engineering log: every rendering decision with the measurements behind it |
-| [TASKS.md](TASKS.md) | Preliminary task list: what is agreed or proposed next, with order and rough effort |
+| [PLANS-2026-09-15.md](PLANS-2026-09-15.md) | Plans as of that date: immediate tasks and the longer horizon that brings the vision together |
 | [FOUNDATION.md](FOUNDATION.md) | The NoGraphicsAPI compatibility backend, shader ABI, toolchain pins and validation |
 | [ASSETS.md](ASSETS.md) | Sourced material maps: provenance, processing and attribution |
 | [GALAXY_LAYERS.md](GALAXY_LAYERS.md) | Gaia background research: layer budgets, original comparison, implementation and cleanup after selection |
