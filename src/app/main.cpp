@@ -344,6 +344,10 @@ std::string report_entry(const Shot& shot, const ShotReadings& readings) {
 }
 
 int run(const Options& options) {
+    const auto start = std::chrono::steady_clock::now();
+    const auto since_start = [&] {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+    };
     const auto directory = platform::executable_directory();
     const auto system = generate_system(options.seed);
     if (const auto errors = validate_system(system); !errors.empty()) {
@@ -360,8 +364,10 @@ int run(const Options& options) {
     else
         return 1;
     platform::init_process();
+    log::info("System generated in {} ms", since_start());
     const auto window = platform::Window::create(
         {.client_size = shots.front().options.size, .title = window_title, .hidden = options.headless});
+    log::info("Window at {} ms", since_start());
     Extent2D window_size = shots.front().options.size;
     const auto display = window->display_info();
     if (display.hdr)
@@ -375,8 +381,9 @@ int run(const Options& options) {
     renderer.set_ui_font({{atlas.width, atlas.height},
                           assets::PixelLayout::Rgba8,
                           {atlas.rgba, std::size_t(atlas.width) * atlas.height * 4}});
-    log::info(
-        "Ready. RMB + WASD: fly | 1-6: views | T: tour | F12: control panel | F10: capture | --help for all controls");
+    log::info("Ready at {} ms. RMB + WASD: fly | 1-6: views | T: tour | F12: control panel | F10: capture | --help "
+              "for all controls",
+              since_start());
     std::string report;
     std::size_t last_cut = 0;
     for (std::size_t index = 0; index < shots.size(); index++) {

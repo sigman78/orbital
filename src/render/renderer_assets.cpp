@@ -94,11 +94,24 @@ void Renderer::Impl::create_meshes() {
     for (unsigned lod = 0; lod < geometry::lod_count; lod++)
         spheres[lod] = upload_mesh(geometry::generate_sphere(32u << lod, 16u << lod));
     constexpr std::uint32_t rock_seed_base = 71, rock_seed_stride = 37;
+    // The library's shapes are independent, so they are generated across the
+    // material pool's workers; each writes its own groups of the library.
     std::vector<geometry::Mesh> library(rock_group_count);
-    for (unsigned shape = 0; shape < geometry::rock_shape_count; shape++)
-        for (unsigned level = 0; level < geometry::rock_level_count; level++)
-            library[rock_group(shape, level)] = geometry::generate_rock(rock_seed_base + shape * rock_seed_stride,
-                                                                        level);
+    {
+        const unsigned cores = std::thread::hardware_concurrency();
+        const unsigned workers = std::clamp(cores > 1 ? cores - 1 : 1u, 1u, decode_workers_max);
+        std::atomic<unsigned> next_shape = 0;
+        SmallVec<std::future<void>, decode_workers_max> pool;
+        for (unsigned worker = 0; worker < workers; worker++)
+            pool.push_back(std::async(std::launch::async, [&] {
+                for (unsigned shape = next_shape++; shape < geometry::rock_shape_count; shape = next_shape++)
+                    for (unsigned level = 0; level < geometry::rock_level_count; level++)
+                        library[rock_group(shape, level)] = geometry::generate_rock(
+                            rock_seed_base + shape * rock_seed_stride, level);
+            }));
+        for (auto& task : pool)
+            task.get();
+    }
     upload_rock_pool(library);
     // Moonlets are irregular bodies: each gets its own seeded rock at full detail.
     for (unsigned i = 0; i < body_count; i++)
@@ -121,7 +134,7 @@ void Renderer::Impl::load_materials() {
     const unsigned cores = std::thread::hardware_concurrency();
     const std::size_t workers = std::min(material_count,
                                          std::size_t(std::clamp(cores > 1 ? cores - 1 : 1u, 1u, decode_workers_max)));
-    assets::TextureSupport support;
+    assets::TextureSupport& support = texture_support;
     support.bc7 = gpu::supports_texture_format(device, gpu::Format::bc7_unorm,
                                                gpu::TextureUsage::sampled | gpu::TextureUsage::transfer_destination);
     for (const auto block : {4u, 6u, 8u, 12u}) {
@@ -180,10 +193,27 @@ void Renderer::Impl::load_materials() {
     log::info("Loaded {} materials in {} ms on {} workers ({})", material_count, elapsed.count(), workers,
               assets::kernels::backend());
     log::info("Texture cache: {} of {} materials", cached_count.load(), material_count);
+    const auto sky_start = std::chrono::steady_clock::now();
     load_stars();
     load_splats();
-    load_galaxy_layers(support);
-    load_galaxy_original();
+    log::info(
+        "Loaded the sky in {} ms",
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - sky_start).count());
+}
+
+// The galaxy modes' textures, on the first frame that needs them: a hitch of
+// tens of milliseconds on the switch instead of every start-up paying for
+// modes it never shows. Called between frames, after the previous one is
+// waited for, so the descriptor slots rebound here are not in use.
+void Renderer::Impl::ensure_galaxy_textures(GalaxyMode mode) {
+    if (mode == GalaxyMode::TextureLayers && !galaxy_layers_tried) {
+        galaxy_layers_tried = true;
+        load_galaxy_layers();
+    }
+    if (mode == GalaxyMode::OriginalTexture && !galaxy_original_tried) {
+        galaxy_original_tried = true;
+        load_galaxy_original();
+    }
 }
 
 // The Bright Star Catalogue baked by tools/bake-stars.py: a 16-byte header
@@ -243,7 +273,8 @@ void Renderer::Impl::load_splats() {
     log::info("Loaded {} Milky Way splats ({} KB with their cell table)", count, (payload + 512) / 1024);
 }
 
-void Renderer::Impl::load_galaxy_layers(const assets::TextureSupport& support) {
+void Renderer::Impl::load_galaxy_layers() {
+    const assets::TextureSupport& support = texture_support;
     constexpr std::array names{"galaxy_low.png", "galaxy_clouds.png", "galaxy_filaments.png"};
     constexpr std::array slots{Slot::galaxy_low, Slot::galaxy_clouds, Slot::galaxy_filaments};
     std::array<Upload, 3> uploads;

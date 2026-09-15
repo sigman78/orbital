@@ -366,8 +366,11 @@ struct Renderer::Impl {
     unsigned star_count = 0;
     std::uint64_t splat_data = 0; // static heap address of the Milky Way's splat records, 0 when absent
     unsigned splat_count = 0;
-    bool galaxy_layers_available = false;
-    bool galaxy_original_available = false;
+    // The Gaia layers and the original texture load on the first frame whose
+    // galaxy mode reads them, not at start-up; tried once each, available if it worked.
+    assets::TextureSupport texture_support;
+    bool galaxy_layers_tried = false, galaxy_layers_available = false;
+    bool galaxy_original_tried = false, galaxy_original_available = false;
 
     // Frame state.
     Extent2D extent{};
@@ -426,8 +429,9 @@ struct Renderer::Impl {
     void load_materials();
     void load_stars();
     void load_splats();
-    void load_galaxy_layers(const assets::TextureSupport& support);
+    void load_galaxy_layers();
     void load_galaxy_original();
+    void ensure_galaxy_textures(GalaxyMode mode); // loads what the mode reads, once; between frames only
     GpuMesh upload_mesh(const geometry::Mesh& mesh);
     void upload_rock_pool(std::span<const geometry::Mesh> meshes);
     const GpuMesh& body_mesh(unsigned body, unsigned lod) const;

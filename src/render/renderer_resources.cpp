@@ -4,9 +4,12 @@
 #include "core/log.hpp"
 #include "core/panic_if.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <format>
 #include <initializer_list>
+#include <iterator>
+#include <string>
 
 namespace space::render {
 
@@ -219,12 +222,26 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     body_count = showcase.body_count();
     panic_if(std::max(high_quality.belt_count, belt_count_override) > heap_layout.instance_capacity() - body_count,
              "belt count exceeds culling capacity (maximum {} rocks)", heap_layout.instance_capacity() - body_count);
+    // Where the start-up time goes, phase by phase, for the log line at the end.
+    auto phase_start = std::chrono::steady_clock::now();
+    std::string phases;
+    const auto phase = [&](const char* name) {
+        const auto now = std::chrono::steady_clock::now();
+        std::format_to(std::back_inserter(phases), "{}{} {} ms", phases.empty() ? "" : ", ", name,
+                       std::chrono::duration_cast<std::chrono::milliseconds>(now - phase_start).count());
+        phase_start = now;
+    };
+    const auto init_start = phase_start;
     create_device(window);
+    phase("device");
     create_samplers();
     create_meshes();
+    phase("meshes");
     build_belt(system.belts.front());
+    phase("belt");
     log::info("Loading planetary maps and scanned rock PBR materials...");
     load_materials();
+    phase("materials and sky");
     upload_rgba(Slot::hud, hud);
     // Embedded SMAA lookup tables, widened to RGBA8 for the upload path.
     const auto widen = [](std::span<const unsigned char> bytes, unsigned width, unsigned height, unsigned channels) {
@@ -241,8 +258,15 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
                    {.data = assets::texture_from_image(widen(assets::smaa_search(), assets::smaa_search_width,
                                                              assets::smaa_search_height, assets::smaa_search_channels)),
                     .slot = Slot::smaa_search}});
+    phase("tables");
     create_pipelines();
+    phase("pipelines");
     create_fixed_targets();
+    phase("targets");
+    log::info(
+        "Renderer ready in {} ms: {}",
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - init_start).count(),
+        phases);
 }
 
 void Renderer::Impl::resize_galaxy(unsigned divisor) {
