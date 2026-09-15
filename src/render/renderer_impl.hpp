@@ -204,6 +204,7 @@ struct PipelineDesc {
     gpu::Format color_format;
     bool has_depth_attachment = false;
     Blend blend = Blend::none;
+    gpu::CullMode cull = gpu::CullMode::none; // closed meshes cull their back faces
 };
 
 inline gpu::Format texture_format(const assets::TextureData& data) {
