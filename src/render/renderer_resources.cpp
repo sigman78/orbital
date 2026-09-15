@@ -31,7 +31,6 @@ Renderer::Impl::~Impl() {
         gpu::wait_idle(device);
     pipelines.clear();
     material_images.clear();
-    memory_dirty = true;
     frame_targets = {};
     fixed_targets = {};
     buffers = {};
@@ -68,7 +67,6 @@ void Renderer::Impl::bind(Slot slot, const GpuImage& image) {
 // begin_commands so the backend records their layout initialization first.
 void Renderer::Impl::upload_images(std::span<const Upload> uploads) {
     const auto first_image = material_images.size();
-    memory_dirty = true;
     material_images.reserve(first_image + uploads.size());
     std::uint64_t largest = 0;
     for (const auto& upload : uploads) {
@@ -252,7 +250,6 @@ void Renderer::Impl::resize_galaxy(unsigned divisor) {
     if (divisor == galaxy_divisor || extent.width == 0)
         return;
     gpu::wait_idle(device);
-    memory_dirty = true;
     galaxy_divisor = divisor;
     frame_targets.galaxy.reset();
     frame_targets.galaxy = create_image(
@@ -268,7 +265,6 @@ void Renderer::Impl::resize_flare(unsigned divisor) {
     if (divisor == flare_divisor || extent.width == 0)
         return;
     gpu::wait_idle(device);
-    memory_dirty = true;
     flare_divisor = divisor;
     frame_targets.flare.reset();
     frame_targets.flare = create_image(
@@ -288,7 +284,6 @@ void Renderer::Impl::resize_flare(unsigned divisor) {
 void Renderer::Impl::set_hdr_output(HdrOutput mode) {
     if (mode == hdr_output || mode == hdr_requested)
         return;
-    memory_dirty = true;
     hdr_requested = mode;
     gpu::Format format = gpu::Format::bgra8_srgb;
     gpu::ColorSpace color_space = gpu::ColorSpace::srgb_nonlinear;
@@ -355,7 +350,6 @@ void Renderer::Impl::update_hdr_metadata(const ToneSettings& tone, const Display
 }
 
 void Renderer::Impl::collect_memory_stats() {
-    memory_dirty = false;
     const auto images = [](std::initializer_list<const GpuImage*> list) {
         MemoryPool pool;
         for (const auto* image : list)
@@ -415,7 +409,6 @@ void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor, unsigned flar
     galaxy_divisor = divisor;
     flare_divisor = std::clamp(flare, 2u, 8u);
     gpu::wait_idle(device);
-    memory_dirty = true;
     log::info("Resizing frame targets {}x{} -> {}x{}", extent.width, extent.height, new_extent.width,
               new_extent.height);
     frame_targets = {};

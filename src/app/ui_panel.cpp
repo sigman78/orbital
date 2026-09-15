@@ -580,7 +580,7 @@ void draw_panel(AppState& app, const render::Stats& stats, const SmoothedStats& 
         frame_controls(smoothed, history, app.vsync);
         ImGui::PopID();
     }
-    if (section("Memory")) { // collapsed by default; the sums are refreshed when allocations change
+    if (section("Memory")) { // collapsed by default; the sums are refreshed every frame
         memory_bar(stats.memory);
         ImGui::PopID();
     }

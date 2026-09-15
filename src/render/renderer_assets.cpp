@@ -168,7 +168,6 @@ void Renderer::Impl::load_materials() {
     for (auto& worker : pool)
         worker.get();
     const auto first_material = material_images.size();
-    memory_dirty = true;
     upload_images(uploads);
     bool used[unsigned(Slot::count)]{};
     for (const auto& source : material_sources)

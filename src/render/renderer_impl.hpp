@@ -358,7 +358,6 @@ struct Renderer::Impl {
     unsigned frame_index = 0;
     GpuTimings timings;
     Stats stats{};
-    bool memory_dirty = true;                        // an allocation changed since stats.memory was summed
     float adapted_exposure = 1, exposure_target = 1; // the filtered exposure and the meter's last target
     bool meter_pending = false;
     std::chrono::steady_clock::time_point meter_time{}; // last adaptation step
@@ -386,7 +385,7 @@ struct Renderer::Impl {
     void create_fixed_targets();
     void resize(Extent2D new_extent, unsigned galaxy_divisor, unsigned flare_divisor);
     void set_hdr_output(HdrOutput mode);
-    void collect_memory_stats(); // sums the owned allocations into stats.memory, clearing memory_dirty
+    void collect_memory_stats(); // sums the owned allocations into stats.memory
     void update_hdr_metadata(const ToneSettings& tone, const DisplaySettings& display);
     gpu::HdrMetadata hdr_metadata_sent{};
     bool hdr_metadata_valid = false; // the metadata the swapchain carries; resent when the values change

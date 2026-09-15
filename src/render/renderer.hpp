@@ -69,8 +69,8 @@ struct OutputStatus {
     bool hdr_metadata = false;             // the device can pass mastering metadata to the display
 };
 
-// The renderer's readings, each part refreshed at its own pace: the frame every
-// draw, the exposure as the meter cycles, the memory when allocations change.
+// The renderer's readings: the frame and the memory sums every draw, the
+// exposure as the meter cycles, the output status as the mode changes.
 struct Stats {
     FrameStats frame;
     ExposureStats exposure;

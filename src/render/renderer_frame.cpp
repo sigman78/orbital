@@ -169,8 +169,7 @@ bool Renderer::draw(const FrameInput& supplied) {
     s.previous_vertical_fov = input.camera.vertical_fov;
     s.previous_camera_cut = input.camera.cut_serial;
     s.history_valid = true;
-    if (s.memory_dirty)
-        s.collect_memory_stats();
+    s.collect_memory_stats(); // a few dozen reads; cheaper than tracking when allocations change
     s.stats.frame.draw_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count();
     return true;
 }
