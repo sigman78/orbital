@@ -20,6 +20,7 @@
 #include <cmath>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <iterator>
 #include <optional>
 #include <string>
@@ -137,6 +138,16 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.bodies = evaluate_system(system, std::max(0.0, options.fixed_time));
     if (options.bookmark >= 0)
         select_bookmark(app, unsigned(options.bookmark));
+    // Away from the bookmark's body along its line, aimed at its centre: the far
+    // and zoomed views the size-dependent checks need, without a bookmark each.
+    if (const auto body = Camera::bookmark_body(options.bookmark >= 0 ? std::size_t(options.bookmark) : 0);
+        options.back > 0 && body < app.bodies.size()) {
+        const Vec3d centre = app.bodies[body].position, away = normalized(app.camera.position - centre);
+        app.camera.look_at(centre + away * (length(app.camera.position - centre) + options.back), centre);
+        free_camera(app);
+    }
+    if (options.fov_div > 1)
+        app.camera.vertical_fov /= options.fov_div;
     if (options.tour) {
         if (options.fixed_time >= 0)
             app.camera.set_tour_time(options.fixed_time);
@@ -188,8 +199,17 @@ struct Session {
     Ui& ui;
 };
 
-// Runs until the window closes or the frame/duration limit is reached; returns the frame count.
-unsigned frame_loop(const Session& session, FrameHistory& history, BenchmarkLog* benchmark) {
+// What a scripted run reports per shot: the frames drawn, the median of each GPU
+// pass over the frames after the warmup, and the meter's last reading.
+struct ShotReadings {
+    unsigned frames = 0;
+    std::array<float, render::gpu_pass_count> pass_ms{};
+    float draw_ms = 0;
+    render::ExposureStats exposure;
+};
+
+// Runs until the window closes or the frame/duration limit is reached.
+ShotReadings frame_loop(const Session& session, FrameHistory& history, BenchmarkLog* benchmark) {
     const Options& options = session.options;
     AppState& app = session.app;
     platform::Window& window = session.window;
@@ -199,6 +219,8 @@ unsigned frame_loop(const Session& session, FrameHistory& history, BenchmarkLog*
     double simulation_time = 0, elapsed = 0, title_clock = 0;
     unsigned frames = 0;
     SmoothedStats smoother;
+    std::vector<render::PassTimings> timings; // per frame, for the readings of a frame-limited run
+    std::vector<float> draw_times;
     while (app.running && window.pump_events()) {
         for (const Key key : window.key_presses()) {
             if (key == Key::alt_enter)
@@ -248,6 +270,10 @@ unsigned frame_loop(const Session& session, FrameHistory& history, BenchmarkLog*
             const render::FrameStats& frame = renderer.stats().frame;
             history.push(frame_ms);
             smoother.add(frame, frame_ms, dt, app.camera.cut_serial());
+            if (options.frame_limit) {
+                timings.push_back(frame.gpu);
+                draw_times.push_back(frame.draw_ms);
+            }
             if (benchmark)
                 benchmark->record(frame_ms, frame);
             if (!app.capture_request.empty()) {
@@ -269,7 +295,52 @@ unsigned frame_loop(const Session& session, FrameHistory& history, BenchmarkLog*
             update_title(window, smoother, app, history.percentile(.95f));
         }
     }
-    return frames;
+    ShotReadings readings{.frames = frames, .exposure = renderer.stats().exposure};
+    // Medians over the frames after a warmup of the first half, at most 60 frames.
+    const std::size_t warmup = std::min<std::size_t>(timings.size() / 2, 60);
+    const auto median = [&](auto value_of) {
+        std::vector<float> values;
+        for (std::size_t i = warmup; i < timings.size(); i++)
+            values.push_back(value_of(i));
+        if (values.empty())
+            return 0.f;
+        std::nth_element(values.begin(), values.begin() + std::ptrdiff_t(values.size() / 2), values.end());
+        return values[values.size() / 2];
+    };
+    for (std::size_t pass = 0; pass < render::gpu_pass_count; pass++)
+        readings.pass_ms[pass] = median([&](std::size_t i) { return timings[i].ms[pass]; });
+    readings.draw_ms = median([&](std::size_t i) { return draw_times[i]; });
+    return readings;
+}
+
+// A JSON string with the two characters that need it escaped.
+std::string json_string(std::string_view text) {
+    std::string out = "\"";
+    for (const char c : text) {
+        if (c == '\\' || c == '"')
+            out += '\\';
+        out += c;
+    }
+    return out + "\"";
+}
+
+// One shot's entry of the report: its name and outputs, the frame count, the
+// GPU pass medians by their benchmark column names, and the meter's reading.
+std::string report_entry(const Shot& shot, const ShotReadings& readings) {
+    std::string entry = std::format(
+        "  {{\n    \"name\": {}, \"capture\": {}, \"frames\": {}, \"width\": {}, \"height\": {},\n",
+        json_string(shot.name), json_string(shot.options.capture.string()), readings.frames, shot.options.size.width,
+        shot.options.size.height);
+    entry += std::format("    \"draw_ms\": {:.4f},\n    \"gpu\": {{", readings.draw_ms);
+    for (std::size_t pass = 0; pass < render::gpu_pass_count; pass++)
+        entry += std::format("{}\"{}\": {:.4f}", pass ? ", " : "", render::gpu_pass_info[pass].column,
+                             readings.pass_ms[pass]);
+    const auto& e = readings.exposure;
+    entry += std::format(
+        "}},\n    \"exposure\": {{\"automatic\": {}, \"ready\": {}, \"metered\": {:.5f}, \"peak\": {:.4f}, "
+        "\"target\": {:.4f}, \"adapted\": {:.4f}}}\n  }}",
+        e.automatic ? "true" : "false", e.ready ? "true" : "false", e.luminance, e.peak_luminance, e.target, e.adapted);
+    return entry;
 }
 
 int run(const Options& options) {
@@ -279,19 +350,23 @@ int run(const Options& options) {
         log::error("invalid generated system: {}", errors.front());
         return 1;
     }
+    // A shot list runs several scripted views in this one process; the command
+    // line alone is a single shot with its own outputs.
+    std::vector<Shot> shots;
+    if (options.shots.empty())
+        shots.push_back({.name = "", .options = options});
+    else if (auto loaded = load_shots(options, options.shots))
+        shots = std::move(*loaded);
+    else
+        return 1;
     platform::init_process();
-    AppState app = initial_state(options, system);
-    const auto window = platform::Window::create({.client_size = options.size, .title = window_title});
-    // The display's HDR range seeds the tone defaults once; the panel can change them after.
-    app.display = display_settings(window->display_info());
-    if (app.display.hdr) {
-        if (app.display.sdr_white_nits > 0)
-            app.tone.paper_white_nits = app.display.sdr_white_nits;
-        if (app.display.max_nits > 0)
-            app.tone.peak_nits = app.display.max_nits;
-        log::info("Display: HDR on, {:.0f} to {:.0f} nits, SDR white {:.0f} nits", app.display.min_nits,
-                  app.display.max_nits, app.display.sdr_white_nits);
-    }
+    const auto window = platform::Window::create(
+        {.client_size = shots.front().options.size, .title = window_title, .hidden = options.headless});
+    Extent2D window_size = shots.front().options.size;
+    const auto display = window->display_info();
+    if (display.hdr)
+        log::info("Display: HDR on, {:.0f} to {:.0f} nits, SDR white {:.0f} nits", display.min_nits, display.max_nits,
+                  display.sdr_white_nits);
     auto hud = make_hud();
     render::Renderer renderer(window->native_handle(), system, directory, hud.view(), {.belt_count = options.rocks});
     hud = {}; // The renderer has copied/uploaded the pixels.
@@ -302,25 +377,62 @@ int run(const Options& options) {
                           {atlas.rgba, std::size_t(atlas.width) * atlas.height * 4}});
     log::info(
         "Ready. RMB + WASD: fly | 1-6: views | T: tour | F12: control panel | F10: capture | --help for all controls");
-    FrameHistory history;
-    std::optional<BenchmarkLog> benchmark;
-    if (!options.benchmark.empty())
-        benchmark.emplace(options.benchmark);
-    const unsigned frames = frame_loop({.options = options,
-                                        .system = system,
-                                        .directory = directory,
-                                        .app = app,
-                                        .window = *window,
-                                        .renderer = renderer,
-                                        .ui = ui},
-                                       history, benchmark ? &*benchmark : nullptr);
-    if (benchmark)
-        benchmark->finish();
-    // The meter's last reading, so a scripted run can check where each view lands.
-    if (const auto& exposure = renderer.stats().exposure; app.tone.auto_exposure && exposure.ready)
-        log::info("Exposure: metered {:.4f}, peak {:.2f}, target {:.2f}x, adapted {:.2f}x", exposure.luminance,
-                  exposure.peak_luminance, exposure.target, exposure.adapted);
-    log::info("Completed {} frames.", frames);
+    std::string report;
+    std::size_t last_cut = 0;
+    for (std::size_t index = 0; index < shots.size(); index++) {
+        const Shot& shot = shots[index];
+        if (!shot.name.empty())
+            log::info("Shot {} of {}: {}", index + 1, shots.size(), shot.name);
+        AppState app = initial_state(shot.options, system);
+        // The camera's cut count continues from the previous shot's, so the new
+        // view reads as a cut and no history crosses over.
+        app.camera.resume_cuts(last_cut);
+        // The display's HDR range seeds the tone defaults once; the panel can change them after.
+        app.display = display_settings(window->display_info());
+        if (app.display.hdr) {
+            if (app.display.sdr_white_nits > 0)
+                app.tone.paper_white_nits = app.display.sdr_white_nits;
+            if (app.display.max_nits > 0)
+                app.tone.peak_nits = app.display.max_nits;
+        }
+        if (window->fullscreen())
+            window->toggle_fullscreen(); // a previous shot's fullscreen-at; each shot starts windowed
+        if (shot.options.size != window_size) {
+            window->resize(shot.options.size);
+            window_size = shot.options.size;
+        }
+        FrameHistory history;
+        std::optional<BenchmarkLog> benchmark;
+        if (!shot.options.benchmark.empty())
+            benchmark.emplace(shot.options.benchmark);
+        const ShotReadings readings = frame_loop({.options = shot.options,
+                                                  .system = system,
+                                                  .directory = directory,
+                                                  .app = app,
+                                                  .window = *window,
+                                                  .renderer = renderer,
+                                                  .ui = ui},
+                                                 history, benchmark ? &*benchmark : nullptr);
+        if (benchmark)
+            benchmark->finish();
+        last_cut = app.camera.cut_serial();
+        // The meter's last reading, so a scripted run can check where each view lands.
+        if (const auto& exposure = readings.exposure; app.tone.auto_exposure && exposure.ready)
+            log::info("Exposure: metered {:.4f}, peak {:.2f}, target {:.2f}x, adapted {:.2f}x", exposure.luminance,
+                      exposure.peak_luminance, exposure.target, exposure.adapted);
+        log::info("Completed {} frames.", readings.frames);
+        report += (report.empty() ? "" : ",\n") + report_entry(shot, readings);
+        if (!app.running)
+            break; // closed or Esc: the remaining shots are skipped
+    }
+    if (!options.report.empty()) {
+        std::ofstream file(options.report, std::ios::binary | std::ios::trunc);
+        file << "{\n\"shots\": [\n" << report << "\n]\n}\n";
+        if (file)
+            log::info("Saved {}", options.report.string());
+        else
+            log::error("cannot write the report {}", options.report.string());
+    }
     return 0;
 }
 

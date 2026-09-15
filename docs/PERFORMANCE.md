@@ -72,3 +72,18 @@ The window increase is the expected price of the flare pass and the meter. The f
 
 The surface and atmosphere increases flagged above were re-measured with both revisions (`79ccaad` and `0db771e`) built and run in one session against the current head (`6adcd2f`, bodies culled and the depth pre-pass), belt scene, two repeats at 1920x1080 windowed and native fullscreen, four runs of each old build over two passes: [belt-confirm](performance/belt-confirm.md) ([JSON](performance/belt-confirm.json)). They do not reproduce: across the two old revisions the fullscreen surface group reads 6.16 against 6.08 ms and the atmosphere group 5.77 against 5.57 ms, and at 1920x1080 both groups are within 0.05 ms. The old builds land one run in four about 1.3 ms low at fullscreen, and once split 2.8 ms differently between the two scopes with the frame unchanged, which is the spread the single-pass flag was made of. The current head is 12.15 ms fullscreen against 14.7 for either old revision, from the body culling and pre-pass. The suite now summarizes the child scopes (a Children table in every report; older baselines still compare on the groups), so the next flag can be read at the child level: in this belt view the atmospheres child is 2.88 ms and the belt dust 2.50 of the atmosphere group's 5.51 at fullscreen.
 
+## Visible and hidden windows are different protocols (2026-09-15)
+
+With the shot-list work the demo gained `--headless` (a hidden window), and the suite a matching switch. Measured on one build, Earth, giant and belt at 1920x1080 and native fullscreen, two repeats each, visible against hidden (`.scratch/performance/headless-ab-*`):
+
+| Case | GPU visible | GPU hidden | Change |
+| --- | ---: | ---: | ---: |
+| earth/window | 4.897 ms | 4.287 ms | -12% |
+| earth/fullscreen | 9.026 ms | 8.194 ms | -9% |
+| giant/window | 5.817 ms | 5.410 ms | -7% |
+| giant/fullscreen | 12.061 ms | 11.179 ms | -7% |
+| belt/window | 5.597 ms | 5.087 ms | -9% |
+| belt/fullscreen | 11.711 ms | 10.744 ms | -8% |
+
+The saving is in every pass in proportion (the atmosphere group -8 to -10 percent, the surface and post groups likewise) and not in the present scope, so it is not our presentation cost: a hidden window is not composed by the desktop each frame, and the GPU stops sharing its time with the compositor. Hidden numbers are cleaner and steadier, and they are what the renderer itself costs, so the suite runs hidden from now on (`--visible` restores the old protocol). The two kinds never compare: the protocol records `headless` for a hidden run, every baseline before this date is a visible one, and the suite refuses to compare across. The hidden series starts with [headless-baseline](performance/headless-baseline.md) ([JSON](performance/headless-baseline.json)), all seven scenes at the default protocol on the shot-list revision; the visible baselines above stay for history and for any visible run.
+

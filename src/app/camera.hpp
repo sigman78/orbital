@@ -33,6 +33,8 @@ struct Camera {
     constexpr CameraMode mode() const { return mode_; }
     // Explicit view discontinuities invalidate temporal history even for small jumps.
     constexpr std::size_t cut_serial() const { return cut_serial_; }
+    // Continue counting cuts after another camera's serial, so this one's view reads as a cut.
+    constexpr void resume_cuts(std::size_t previous) { cut_serial_ += previous + 1; }
     constexpr Vec3d forward() const { return forward_; }
     constexpr Vec3d right() const { return right_; }
     constexpr Vec3d up() const { return up_; }
