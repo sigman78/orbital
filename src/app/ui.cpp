@@ -18,6 +18,7 @@ Ui::Ui(platform::Window& window) : window_(window) {
     ImGuiStyle& style = ImGui::GetStyle();
     style.WindowRounding = 0;
     style.Colors[ImGuiCol_WindowBg].w = .88f;
+    style.Colors[ImGuiCol_PopupBg] = {.06f, .06f, .07f, .98f}; // tooltips over a bright scene stay readable
     platform::attach_overlay(window);
 }
 

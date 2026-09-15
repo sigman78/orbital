@@ -33,7 +33,8 @@ template <class Enum> void combo(const char* label, Enum& value, std::span<const
 // The pass timings: the groups across the bar's upper half, and in the lower half of
 // each group its children in proportion, alternating light and dark, with the group's
 // remainder (its barriers and transitions) as a gap; the tooltip lists the numbers.
-void gpu_time_bar(const render::Stats& stats) {
+void gpu_time_bar(const render::FrameStats& stats) {
+    using render::GpuPass;
     struct Child {
         const char* label;
         float ms;
@@ -44,44 +45,35 @@ void gpu_time_bar(const render::Stats& stats) {
         ImU32 color;
         std::vector<Child> children;
     };
-    std::array segments{
-        Segment{.label = "Culling", .ms = stats.cull_ms, .color = IM_COL32(86, 180, 233, 255)},
-        Segment{.label = "Body shadows", .ms = stats.body_shadow_ms, .color = IM_COL32(130, 120, 210, 255)},
-        Segment{.label = "Belt light", .ms = stats.belt_light_ms, .color = IM_COL32(230, 159, 0, 255)},
-        Segment{.label = "Belt discs", .ms = stats.belt_disc_ms, .color = IM_COL32(240, 228, 66, 255)},
-        Segment{.label = "Surface",
-                .ms = stats.surface_ms,
-                .color = IM_COL32(0, 158, 115, 255),
-                .children = {{"Sky", stats.surface_sky_ms},
-                             {"Bodies", stats.surface_bodies_ms},
-                             {"Rocks and splats", stats.surface_rocks_ms},
-                             {"Clouds", stats.surface_clouds_ms}}},
-        Segment{.label = "Atmosphere",
-                .ms = stats.atmosphere_ms,
-                .color = IM_COL32(204, 121, 167, 255),
-                .children = {{"Atmospheres", stats.atmospheres_ms},
-                             {"Belt dust", stats.belt_dust_ms},
-                             {"Splat mask", stats.splat_mask_ms}}},
-        Segment{.label = "Post FX",
-                .ms = stats.post_ms,
-                .color = IM_COL32(213, 94, 0, 255),
-                .children = {{"Temporal AA", stats.temporal_ms},
-                             {"Motion streaks", stats.streaks_ms},
-                             {"Bloom", stats.bloom_ms},
-                             {"Sun visibility", stats.sun_visibility_ms},
-                             {"Flare stack", stats.flare_ms},
-                             {"Composite", stats.composite_ms},
-                             {"Spatial AA", stats.spatial_aa_ms},
-                             {"Meter", stats.meter_ms},
-                             {"Present and UI", stats.present_ms}}},
-        Segment{.label = "Other", .ms = 0, .color = IM_COL32(140, 145, 155, 255)}};
+    // The bar's segments: the four cull-and-shadow passes on their own and the three
+    // shaded groups; each group's children come from the pass table.
+    struct Bar {
+        GpuPass pass;
+        ImU32 color;
+    };
+    static constexpr Bar bars[] = {
+        {GpuPass::Culling, IM_COL32(86, 180, 233, 255)},  {GpuPass::BodyShadows, IM_COL32(130, 120, 210, 255)},
+        {GpuPass::BeltLight, IM_COL32(230, 159, 0, 255)}, {GpuPass::BeltDiscs, IM_COL32(240, 228, 66, 255)},
+        {GpuPass::Surface, IM_COL32(0, 158, 115, 255)},   {GpuPass::Atmosphere, IM_COL32(204, 121, 167, 255)},
+        {GpuPass::Post, IM_COL32(213, 94, 0, 255)}};
+    std::vector<Segment> segments;
+    segments.reserve(std::size(bars) + 1);
+    for (const Bar& bar : bars) {
+        Segment segment{.label = render::pass_info(bar.pass).label, .ms = stats.gpu[bar.pass], .color = bar.color};
+        for (std::size_t i = 0; i < render::gpu_pass_count; i++)
+            if (render::gpu_pass_info[i].parent == bar.pass && GpuPass(i) != bar.pass)
+                segment.children.push_back({render::gpu_pass_info[i].label, stats.gpu.ms[i]});
+        segments.push_back(std::move(segment));
+    }
+    segments.push_back({.label = "Other", .ms = 0, .color = IM_COL32(140, 145, 155, 255)});
+    const float gpu_ms = stats.gpu[GpuPass::Frame];
     float sum = 0;
     for (auto& segment : segments) {
         segment.ms = std::max(segment.ms, 0.f);
         sum += segment.ms;
     }
-    segments.back().ms = std::max(stats.gpu_ms - sum, 0.f);
-    const float total = std::max(stats.gpu_ms, sum);
+    segments.back().ms = std::max(gpu_ms - sum, 0.f);
+    const float total = std::max(gpu_ms, sum);
     if (total <= 0) {
         ImGui::TextDisabled("Waiting for GPU timings...");
         return;
@@ -111,20 +103,39 @@ void gpu_time_bar(const render::Stats& stats) {
         }
         if (hovered && ImGui::GetIO().MousePos.x >= x && ImGui::GetIO().MousePos.x < end) {
             ImGui::BeginTooltip();
-            ImGui::Text("%s: %.2f ms (%.1f%% of the frame)", segment.label, segment.ms, 100 * segment.ms / total);
-            // Each child with its share of the group and of the whole frame.
+            ImGui::Text("%s  %.2f ms  %.1f%%", segment.label, segment.ms, 100 * segment.ms / total);
+            // Each child: milliseconds, share of the group, share of the frame; the
+            // remainder is the group's barriers. Alternating row backgrounds, as a sheet.
             const float group = std::max(segment.ms, 1e-6f);
-            float accounted = 0;
-            for (const auto& child : segment.children) {
-                const float ms = std::max(child.ms, 0.f);
-                ImGui::Text("  %-16s %6.3f ms  %5.1f%% of group  %5.1f%% of frame", child.label, ms, 100 * ms / group,
-                            100 * ms / total);
-                accounted += ms;
-            }
-            if (!segment.children.empty()) {
-                const float rest = std::max(segment.ms - accounted, 0.f);
-                ImGui::TextDisabled("  %-16s %6.3f ms  %5.1f%% of group  %5.1f%% of frame", "barriers, other", rest,
-                                    100 * rest / group, 100 * rest / total);
+            if (!segment.children.empty() &&
+                ImGui::BeginTable("##children", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
+                const auto row = [&](const char* label, float ms, bool dim) {
+                    ImGui::TableNextRow();
+                    if (dim)
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(label);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%8.3f ms", ms);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%5.1f%%", 100 * ms / group);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%5.1f%%", 100 * ms / total);
+                    if (dim)
+                        ImGui::PopStyleColor();
+                };
+                ImGui::TableNextRow();
+                for (const char* heading : {"", "", "group", "frame"}) {
+                    ImGui::TableNextColumn();
+                    ImGui::TextDisabled("%s", heading);
+                }
+                float accounted = 0;
+                for (const auto& child : segment.children) {
+                    row(child.label, std::max(child.ms, 0.f), false);
+                    accounted += std::max(child.ms, 0.f);
+                }
+                row("barriers, other", std::max(segment.ms - accounted, 0.f), true);
+                ImGui::EndTable();
             }
             ImGui::EndTooltip();
         }
@@ -148,7 +159,7 @@ void gpu_time_bar(const render::Stats& stats) {
         }
         ImGui::EndTable();
     }
-    if (sum > stats.gpu_ms)
+    if (sum > gpu_ms)
         ImGui::TextDisabled("Shares normalized to summed pass timings");
 }
 
@@ -216,19 +227,18 @@ void memory_bar(const render::MemoryStats& memory) {
     }
 }
 
-void frame_controls(const render::Stats& stats, std::span<const float> recent_frame_ms, bool& vsync) {
-    std::vector<float> sorted(recent_frame_ms.begin(), recent_frame_ms.end());
-    std::sort(sorted.begin(), sorted.end());
-    const float p95 = sorted.empty() ? 0
-                                     : sorted[std::min(sorted.size() - 1, std::size_t(double(sorted.size()) * .95))];
-    const float peak = sorted.empty() ? 1 : sorted.back();
-    ImGui::Text("%d FPS   %.1f ms (p95 %.1f)", int(1000 / std::max(stats.frame_ms, .1f)), stats.frame_ms, p95);
-    ImGui::PlotLines("##frame", recent_frame_ms.data(), int(recent_frame_ms.size()), 0, nullptr, 0, peak * 1.1f,
-                     {-1, 60});
-    ImGui::TextDisabled("Timings: 0.5 s average | graph: raw frames");
-    ImGui::Text("GPU %.2f ms", stats.gpu_ms);
+void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, bool& vsync) {
+    const render::FrameStats& stats = smoothed.frame;
+    const auto raw = history.values();
+    ImGui::Text("%d FPS   %.1f ms (p95 %.1f)", int(1000 / std::max(smoothed.frame_ms, .1f)), smoothed.frame_ms,
+                history.percentile(.95f));
+    ImGui::PlotLines("##frame", raw.data(), int(raw.size()), history.offset(), nullptr, 0,
+                     std::max(history.peak(), 1.f) * 1.1f, {-1, 60});
+    ImGui::TextDisabled("Timings: smoothed over 0.5 s | graph: raw frames");
+    ImGui::Text("Draw %.2f ms incl. GPU wait", stats.draw_ms);
+    ImGui::Text("GPU %.2f ms", stats.gpu[render::GpuPass::Frame]);
     gpu_time_bar(stats);
-    ImGui::Text("Cull + shadows %.2f ms", stats.shadow_ms);
+    ImGui::Text("Cull + shadows %.2f ms", stats.gpu[render::GpuPass::CullAndShadows]);
     ImGui::Text("CPU prepare %.2f ms", stats.prepare_ms);
     ImGui::Checkbox("VSync", &vsync);
     if (ImGui::IsItemHovered())
@@ -446,7 +456,7 @@ void tone_controls(render::ToneSettings& settings, const render::Stats& stats, c
     // The swapchain's output; the HDR pairs are offered only with the OS presenting in HDR.
     static constexpr const char* outputs[] = {"SDR (8-bit sRGB)", "HDR scRGB (16-bit float)", "HDR10 (10-bit PQ)"};
     combo("Output", settings.hdr_output, outputs);
-    if (stats.hdr_unsupported)
+    if (stats.output.hdr_unsupported)
         ImGui::TextDisabled("Not offered by the display; is HDR on in the OS?");
     if (display.hdr)
         ImGui::Text("Display: HDR, %.0f to %.0f nits, SDR white %.0f", display.min_nits, display.max_nits,
@@ -462,7 +472,7 @@ void tone_controls(render::ToneSettings& settings, const render::Stats& stats, c
         if (display.sdr_white_nits > 0)
             settings.paper_white_nits = display.sdr_white_nits;
     }
-    if (!stats.hdr_metadata)
+    if (!stats.output.hdr_metadata)
         ImGui::TextDisabled("No HDR metadata path on this device");
     ImGui::EndDisabled();
     ImGui::Spacing();
@@ -555,7 +565,7 @@ void overlay_controls(AppState& app) {
 
 } // namespace
 
-void draw_panel(AppState& app, const render::Stats& stats, std::span<const float> recent_frame_ms) {
+void draw_panel(AppState& app, const render::Stats& stats, const SmoothedStats& smoothed, const FrameHistory& history) {
     const ImGuiIO& io = ImGui::GetIO();
     ImGui::SetNextWindowPos({io.DisplaySize.x - panel_width, 0});
     ImGui::SetNextWindowSize({panel_width, io.DisplaySize.y});
@@ -567,7 +577,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
     }
     ImGui::PushItemWidth(150); // leaves room for the labels beside combos and sliders
     if (section("Frame", true)) {
-        frame_controls(stats, recent_frame_ms, app.vsync);
+        frame_controls(smoothed, history, app.vsync);
         ImGui::PopID();
     }
     if (section("Memory")) { // collapsed by default; the sums are refreshed every frame
@@ -583,7 +593,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::PopID();
     }
     if (section("Belt")) {
-        belt_controls(app.belt, app.belt_dust, stats.belt_lod);
+        belt_controls(app.belt, app.belt_dust, smoothed.frame.belt_lod);
         ImGui::PopID();
     }
     if (section("Gas giant")) {

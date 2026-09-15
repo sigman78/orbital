@@ -127,7 +127,7 @@ void Renderer::Impl::create_device(void* window) {
     panic_if(!device, "Vulkan device creation failed; check the console for missing features or driver errors");
     const auto& caps = gpu::get_device_caps(device);
     log::info("GPU: {} | conventional NoGraphicsAPI backend", caps.device_name);
-    stats.hdr_metadata = caps.hdr_metadata;
+    stats.output.hdr_metadata = caps.hdr_metadata;
     panic_if(!caps.conventional_descriptor_backend,
              "the demo's shaders require the conventional descriptor backend build option");
     submissions.initialize(device);
@@ -298,14 +298,14 @@ void Renderer::Impl::set_hdr_output(HdrOutput mode) {
     if (mode != HdrOutput::Off && !gpu::surface_format_supported(device, format, color_space)) {
         log::warn("{} output is not offered by the display surface (is HDR on in the OS?); staying at {}",
                   names[unsigned(mode)], names[unsigned(hdr_output)]);
-        stats.hdr_unsupported = true;
+        stats.output.hdr_unsupported = true;
         return;
     }
-    stats.hdr_unsupported = false;
+    stats.output.hdr_unsupported = false;
     gpu::wait_idle(device);
     gpu::set_swapchain_output(device, format, color_space);
     hdr_output = mode;
-    stats.hdr_output = mode;
+    stats.output.hdr_output = mode;
     if (extent.width) {
         const auto color_usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment;
         frame_targets.final_image.reset();
@@ -328,7 +328,7 @@ void Renderer::Impl::set_hdr_output(HdrOutput mode) {
 // otherwise the panel's peak; the content light level is the curve's peak and
 // the frame average the paper white, since a mostly dark sky never exceeds it.
 void Renderer::Impl::update_hdr_metadata(const ToneSettings& tone, const DisplaySettings& display) {
-    if (!hdr() || !stats.hdr_metadata) {
+    if (!hdr() || !stats.output.hdr_metadata) {
         hdr_metadata_valid = false;
         return;
     }
@@ -472,7 +472,7 @@ Renderer::Renderer(void* window, const SystemDescription& system, const std::fil
 
 Renderer::~Renderer() = default;
 
-Stats Renderer::stats() const {
+const Stats& Renderer::stats() const {
     return impl_->stats;
 }
 

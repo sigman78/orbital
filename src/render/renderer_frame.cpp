@@ -21,32 +21,8 @@ constexpr AccessScope cull_input_access{gpu::Stage::compute | gpu::Stage::vertex
 void Renderer::Impl::read_gpu_timings() {
     if (!frame_index)
         return;
-    const auto elapsed = [&](GpuPass pass) { return timings.milliseconds(pass).value_or(0.f); };
-    stats.gpu_ms = elapsed(GpuPass::Frame);
-    stats.shadow_ms = elapsed(GpuPass::CullAndShadows);
-    stats.cull_ms = elapsed(GpuPass::Culling);
-    stats.body_shadow_ms = elapsed(GpuPass::BodyShadows);
-    stats.belt_light_ms = elapsed(GpuPass::BeltLight);
-    stats.belt_disc_ms = elapsed(GpuPass::BeltDiscs);
-    stats.meter_ms = elapsed(GpuPass::Meter);
-    stats.surface_ms = elapsed(GpuPass::Surface);
-    stats.atmosphere_ms = elapsed(GpuPass::Atmosphere);
-    stats.post_ms = elapsed(GpuPass::Post);
-    stats.surface_sky_ms = elapsed(GpuPass::SurfaceSky);
-    stats.surface_bodies_ms = elapsed(GpuPass::SurfaceBodies);
-    stats.surface_rocks_ms = elapsed(GpuPass::SurfaceRocks);
-    stats.surface_clouds_ms = elapsed(GpuPass::SurfaceClouds);
-    stats.atmospheres_ms = elapsed(GpuPass::Atmospheres);
-    stats.belt_dust_ms = elapsed(GpuPass::BeltDust);
-    stats.splat_mask_ms = elapsed(GpuPass::SplatMask);
-    stats.temporal_ms = elapsed(GpuPass::Temporal);
-    stats.streaks_ms = elapsed(GpuPass::MotionStreaks);
-    stats.bloom_ms = elapsed(GpuPass::Bloom);
-    stats.sun_visibility_ms = elapsed(GpuPass::SunVisibility);
-    stats.flare_ms = elapsed(GpuPass::Flare);
-    stats.composite_ms = elapsed(GpuPass::Composite);
-    stats.spatial_aa_ms = elapsed(GpuPass::SpatialAA);
-    stats.present_ms = elapsed(GpuPass::Present);
+    for (std::size_t pass = 0; pass < gpu_pass_count; pass++)
+        stats.frame.gpu.ms[pass] = timings.milliseconds(GpuPass(pass)).value_or(0.f);
 }
 
 bool Renderer::draw(const FrameInput& supplied) {
@@ -89,8 +65,8 @@ bool Renderer::draw(const FrameInput& supplied) {
     s.bind(Slot::history_b, s.frame_targets.history[1 - history_write]);
     const FrameData frame = s.build_frame(input);
     s.write_body_instances(input, frame);
-    s.stats.triangles = 0;
-    s.stats.draw_calls = 0;
+    s.stats.frame.triangles = 0;
+    s.stats.frame.draw_calls = 0;
 
     // CPU stages frame constants, culling parameters and body instances only.
     // The completed GPU scratch is read before preparing the next submission.
@@ -183,7 +159,7 @@ bool Renderer::draw(const FrameInput& supplied) {
                                  frame_address + heap_layout.ui_offset());
         }
     }
-    s.stats.prepare_ms =
+    s.stats.frame.prepare_ms =
         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - prepare_start).count();
     s.submissions.submit_and_present(s.device, {cmd});
 
@@ -193,8 +169,8 @@ bool Renderer::draw(const FrameInput& supplied) {
     s.previous_vertical_fov = input.camera.vertical_fov;
     s.previous_camera_cut = input.camera.cut_serial;
     s.history_valid = true;
-    s.collect_memory_stats();
-    s.stats.frame_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count();
+    s.collect_memory_stats(); // a few dozen reads; cheaper than tracking when allocations change
+    s.stats.frame.draw_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count();
     return true;
 }
 

@@ -1,27 +1,60 @@
 #include "app/actions.hpp"
+#include "app/frame_history.hpp"
 #include "app/frame_input.hpp"
-#include "app/timing_average.hpp"
+#include "app/stats_smoothing.hpp"
 #include <cassert>
+#include <string_view>
 
 int main() {
     using namespace space;
     using namespace space::app;
-    TimingAverage average;
-    render::Stats sample;
-    sample.frame_ms = 250;
-    sample.gpu_ms = 10;
-    average.add(sample);
-    sample.gpu_ms = 30;
-    average.add(sample);
-    sample.draw_calls = 123;
-    assert(average.apply(sample).gpu_ms == 20 && average.apply(sample).draw_calls == 123);
-    sample.gpu_ms = 50;
-    average.add(sample);
-    assert(average.apply(sample).gpu_ms == 40); // oldest frame leaves the half-second window
-    sample.frame_ms = 1000;
-    sample.gpu_ms = 70;
-    average.add(sample);
-    assert(average.apply(sample).gpu_ms == 70); // a long frame stands alone
+    // The smoother: the first sample stands, then each reading eases toward the
+    // latest by dt over the time constant; counts round, other fields pass through,
+    // a camera cut restarts it.
+    SmoothedStats smoother;
+    const double half = SmoothedStats::time_constant_seconds * .5; // eases halfway
+    render::FrameStats sample;
+    sample.draw_ms = 250;
+    sample.gpu[render::GpuPass::Frame] = 10;
+    sample.visible_asteroids = 100;
+    smoother.add(sample, 16, half, 1);
+    assert(smoother.frame.gpu[render::GpuPass::Frame] == 10 && smoother.frame_ms == 16); // primed, not eased from zero
+    sample.gpu[render::GpuPass::Frame] = 30;
+    sample.visible_asteroids = 103;
+    sample.belt_lod = .5f;
+    sample.draw_calls = 7;
+    smoother.add(sample, 20, half, 1);
+    assert(smoother.frame.gpu[render::GpuPass::Frame] == 20 && smoother.frame_ms == 18);
+    assert(smoother.frame.visible_asteroids == 102);                          // 101.5 rounds up
+    assert(smoother.frame.belt_lod == .5f && smoother.frame.draw_calls == 7); // not smoothed
+    assert(smoother.frame.draw_ms == 250);                                    // constant readings stay exact
+    sample.gpu[render::GpuPass::Frame] = 50;
+    smoother.add(sample, 20, half, 1);
+    assert(smoother.frame.gpu[render::GpuPass::Frame] == 35);
+    smoother.add(sample, 20, 0, 1); // no time passed, nothing moves
+    assert(smoother.frame.gpu[render::GpuPass::Frame] == 35);
+    smoother.add(sample, 20, 10, 1); // a long gap lands on the sample
+    assert(smoother.frame.gpu[render::GpuPass::Frame] == 50);
+    sample.gpu[render::GpuPass::Frame] = 70;
+    smoother.add(sample, 20, half, 2); // a cut: the new view's first sample stands alone
+    assert(smoother.frame.gpu[render::GpuPass::Frame] == 70);
+    // The frame history: a ring of the last samples, plotted from its offset, with a percentile on demand.
+    FrameHistory history;
+    assert(history.values().empty() && history.percentile(.95f) == 0 && history.peak() == 0);
+    for (unsigned i = 1; i <= 10; i++)
+        history.push(float(i));
+    assert(history.values().size() == 10 && history.offset() == 0 && history.peak() == 10);
+    assert(history.percentile(.5f) == 6 && history.percentile(.95f) == 10);
+    for (unsigned i = 11; i <= FrameHistory::capacity + 3; i++)
+        history.push(float(i));
+    assert(history.values().size() == FrameHistory::capacity && history.offset() == 3);
+    assert(history.values()[0] == FrameHistory::capacity + 1); // the newest three overwrote the oldest
+    assert(history.values()[3] == 4 && history.peak() == FrameHistory::capacity + 3);
+    // The pass table: one column per pass, all distinct, every child after its parent.
+    for (std::size_t i = 0; i < render::gpu_pass_count; i++)
+        for (std::size_t j = 0; j < i; j++)
+            assert(std::string_view(render::gpu_pass_info[i].column) != render::gpu_pass_info[j].column);
+    assert(std::string_view(render::pass_info(render::GpuPass::Frame).column) == "gpu_ms");
     AppState app;
     app.bodies = evaluate_system(generate_system(showcase_seed), 0);
     app.belt_dust = {
