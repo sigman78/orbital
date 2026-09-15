@@ -14,8 +14,8 @@ inline constexpr Range<double> speed_scale{0.0, 100.0}; // guards against a runa
 inline constexpr double max_step_seconds = 0.25;        // a long stall must not teleport the camera
 inline constexpr double mouse_sensitivity = 0.0025;     // radians per pixel, divided by the zoom
 namespace telescope {
-inline constexpr double magnification = 5.0;  // the cap, reached while the middle button is held
-inline constexpr double travel_seconds = 0.5; // from 1x to the cap at a steady rate, and back at the same rate
+inline constexpr double magnification = 5.0;   // the cap, reached while the middle button is held
+inline constexpr double travel_seconds = 0.17; // from 1x to the cap at a steady rate, and back at the same rate
 } // namespace telescope
 inline constexpr double collision_margin = 1.08; // camera stays outside body radius * margin
 inline constexpr double basis_epsilon = 1e-8;
