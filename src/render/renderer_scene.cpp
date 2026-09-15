@@ -47,29 +47,43 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
     {
         RenderPassScope pass(cmd, {.colors = {&color, 1},
                                    .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::clear}});
-        gpu::bind_pso(cmd, pso.scene.background);
-        gpu::draw(cmd, root, 3);
-        stats.draw_calls++;
-        // The catalogue stars over the background, before the bodies paint over them.
-        if (star_count && frame.stars.y > 0) {
-            gpu::bind_pso(cmd, pso.scene.stars);
-            Root star_root = root;
-            star_root.vertices = star_data;
-            gpu::draw(cmd, star_root, 6, star_count);
+        // The timing children sit inside the pass; draws overlap in the pipeline, so
+        // each child is where its commands were issued rather than an exact cost.
+        {
+            GpuTimingScope sky(timings, GpuPass::SurfaceSky);
+            gpu::bind_pso(cmd, pso.scene.background);
+            gpu::draw(cmd, root, 3);
             stats.draw_calls++;
+            // The catalogue stars over the background, before the bodies paint over them.
+            if (star_count && frame.stars.y > 0) {
+                gpu::bind_pso(cmd, pso.scene.stars);
+                Root star_root = root;
+                star_root.vertices = star_data;
+                gpu::draw(cmd, star_root, 6, star_count);
+                stats.draw_calls++;
+            }
         }
         gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
-        for (unsigned i = 0; i < body_count; i++) {
-            const float distance = float(length(input.bodies[i].position - input.camera.position));
-            const float projected = float(input.bodies[i].radius) * float(extent.height) /
-                                    (distance * frame.right_tan.w);
-            gpu::bind_pso(cmd, surface_pso(surface_kind(system.bodies[i].body_class)));
-            draw_mesh(cmd, root, body_mesh(i, geometry::select_lod(projected, 2)), i, 1);
+        {
+            GpuTimingScope bodies(timings, GpuPass::SurfaceBodies);
+            for (unsigned i = 0; i < body_count; i++) {
+                const float distance = float(length(input.bodies[i].position - input.camera.position));
+                const float projected = float(input.bodies[i].radius) * float(extent.height) /
+                                        (distance * frame.right_tan.w);
+                gpu::bind_pso(cmd, surface_pso(surface_kind(system.bodies[i].body_class)));
+                draw_mesh(cmd, root, body_mesh(i, geometry::select_lod(projected, 2)), i, 1);
+            }
         }
-        draw_rock_batch(cmd, root, args_address);
-        gpu::bind_pso(cmd, pso.scene.cloud);
-        root.mode = std::uint32_t(SurfaceMode::cloud);
-        draw_mesh(cmd, root, spheres[geometry::lod_count - 1], showcase.earth(), 1);
+        {
+            GpuTimingScope rock_batch(timings, GpuPass::SurfaceRocks);
+            draw_rock_batch(cmd, root, args_address);
+        }
+        {
+            GpuTimingScope clouds(timings, GpuPass::SurfaceClouds);
+            gpu::bind_pso(cmd, pso.scene.cloud);
+            root.mode = std::uint32_t(SurfaceMode::cloud);
+            draw_mesh(cmd, root, spheres[geometry::lod_count - 1], showcase.earth(), 1);
+        }
     }
 }
 

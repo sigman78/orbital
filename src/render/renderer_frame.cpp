@@ -32,6 +32,21 @@ void Renderer::Impl::read_gpu_timings() {
     stats.surface_ms = elapsed(GpuPass::Surface);
     stats.atmosphere_ms = elapsed(GpuPass::Atmosphere);
     stats.post_ms = elapsed(GpuPass::Post);
+    stats.surface_sky_ms = elapsed(GpuPass::SurfaceSky);
+    stats.surface_bodies_ms = elapsed(GpuPass::SurfaceBodies);
+    stats.surface_rocks_ms = elapsed(GpuPass::SurfaceRocks);
+    stats.surface_clouds_ms = elapsed(GpuPass::SurfaceClouds);
+    stats.atmospheres_ms = elapsed(GpuPass::Atmospheres);
+    stats.belt_dust_ms = elapsed(GpuPass::BeltDust);
+    stats.splat_mask_ms = elapsed(GpuPass::SplatMask);
+    stats.temporal_ms = elapsed(GpuPass::Temporal);
+    stats.streaks_ms = elapsed(GpuPass::MotionStreaks);
+    stats.bloom_ms = elapsed(GpuPass::Bloom);
+    stats.sun_visibility_ms = elapsed(GpuPass::SunVisibility);
+    stats.flare_ms = elapsed(GpuPass::Flare);
+    stats.composite_ms = elapsed(GpuPass::Composite);
+    stats.spatial_aa_ms = elapsed(GpuPass::SpatialAA);
+    stats.present_ms = elapsed(GpuPass::Present);
 }
 
 bool Renderer::draw(const FrameInput& supplied) {
@@ -138,16 +153,25 @@ bool Renderer::draw(const FrameInput& supplied) {
         }
         {
             GpuTimingScope timing(s.timings, GpuPass::Surface);
-            s.record_galaxy_pass(cmd, root, frame);
+            s.record_galaxy_pass(cmd, root, frame); // counted in the group's remainder, not a child
             s.record_scene_pass(cmd, root, input, frame, args_address);
         }
         {
             GpuTimingScope timing(s.timings, GpuPass::Atmosphere);
-            s.record_atmosphere_passes(cmd, root);
-            s.record_belt_dust_passes(cmd, root, input.belt_dust.enabled, frame.belt_disc.y);
+            {
+                GpuTimingScope child(s.timings, GpuPass::Atmospheres);
+                s.record_atmosphere_passes(cmd, root);
+            }
+            {
+                GpuTimingScope child(s.timings, GpuPass::BeltDust);
+                s.record_belt_dust_passes(cmd, root, input.belt_dust.enabled, frame.belt_disc.y);
+            }
             // Coverage is also needed by sun visibility with TAA disabled.
             synchronize(cmd, access::fragment_sample, access::depth_read);
-            s.record_splat_mask_pass(cmd, root, args_address);
+            {
+                GpuTimingScope child(s.timings, GpuPass::SplatMask);
+                s.record_splat_mask_pass(cmd, root, args_address);
+            }
             synchronize(cmd, access::depth_read, access::fragment_sample);
             synchronize(cmd, access::color_write, access::fragment_sample);
         }

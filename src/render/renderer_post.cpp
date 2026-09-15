@@ -68,10 +68,16 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
                                         const ImDrawData* ui, std::uint8_t* ui_cpu, std::uint64_t ui_gpu) {
     const unsigned history_write = frame_index % 2;
     root.mode = 0;
-    fullscreen_pass(cmd, frame_targets.history[history_write], pso.post.temporal, root);
-    if (motion_streaks)
+    {
+        GpuTimingScope timing(timings, GpuPass::Temporal);
+        fullscreen_pass(cmd, frame_targets.history[history_write], pso.post.temporal, root);
+    }
+    if (motion_streaks) {
+        GpuTimingScope timing(timings, GpuPass::MotionStreaks);
         record_motion_streaks(cmd, root);
+    }
     if (bloom) { // off, the composite does not read the halo, so its images may hold stale content
+        GpuTimingScope timing(timings, GpuPass::Bloom);
         root.mode = std::uint32_t(BloomMode::prefilter);
         fullscreen_pass(cmd, frame_targets.bloom_a, pso.post.bloom, root);
         root.mode = std::uint32_t(BloomMode::horizontal);
@@ -82,24 +88,36 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
         fullscreen_pass(cmd, frame_targets.bloom_a, pso.post.bloom, root);
     }
     root.mode = 0;
-    fullscreen_pass(cmd, frame_targets.sun_visibility, pso.post.sun_visibility, root);
+    {
+        GpuTimingScope timing(timings, GpuPass::SunVisibility);
+        fullscreen_pass(cmd, frame_targets.sun_visibility, pso.post.sun_visibility, root);
+    }
     // The soft flare stack at a fraction of the frame; off, the composite does not read it.
-    if (flare)
+    if (flare) {
+        GpuTimingScope timing(timings, GpuPass::Flare);
         fullscreen_pass(cmd, frame_targets.flare, pso.post.flare, root);
-    // Tone map into the final image, or through an intermediate when a spatial pass follows.
-    // The HDR variants of these pipelines target the 16-bit float intermediates.
-    fullscreen_pass(cmd, spatial_aa != SpatialAA::Off ? frame_targets.ldr : frame_targets.final_image,
-                    hdr() ? pso.post.composite_hdr : pso.post.composite, root);
-    if (spatial_aa == SpatialAA::FXAA) {
-        fullscreen_pass(cmd, frame_targets.final_image, hdr() ? pso.post.fxaa_hdr : pso.post.fxaa, root);
-    } else if (spatial_aa == SpatialAA::SMAA) {
-        // SMAA: edges, blending weights, neighbourhood blend (modes 0, 1, 2 of smaa.slang).
-        root.mode = 0;
-        fullscreen_pass(cmd, frame_targets.smaa_edges, pso.post.smaa_edges, root);
-        root.mode = 1;
-        fullscreen_pass(cmd, frame_targets.smaa_weights, pso.post.smaa_weights, root);
-        root.mode = 2;
-        fullscreen_pass(cmd, frame_targets.final_image, hdr() ? pso.post.smaa_blend_hdr : pso.post.smaa_blend, root);
+    }
+    {
+        // Tone map into the final image, or through an intermediate when a spatial pass follows.
+        // The HDR variants of these pipelines target the 16-bit float intermediates.
+        GpuTimingScope timing(timings, GpuPass::Composite);
+        fullscreen_pass(cmd, spatial_aa != SpatialAA::Off ? frame_targets.ldr : frame_targets.final_image,
+                        hdr() ? pso.post.composite_hdr : pso.post.composite, root);
+    }
+    if (spatial_aa != SpatialAA::Off) {
+        GpuTimingScope timing(timings, GpuPass::SpatialAA);
+        if (spatial_aa == SpatialAA::FXAA) {
+            fullscreen_pass(cmd, frame_targets.final_image, hdr() ? pso.post.fxaa_hdr : pso.post.fxaa, root);
+        } else {
+            // SMAA: edges, blending weights, neighbourhood blend (modes 0, 1, 2 of smaa.slang).
+            root.mode = 0;
+            fullscreen_pass(cmd, frame_targets.smaa_edges, pso.post.smaa_edges, root);
+            root.mode = 1;
+            fullscreen_pass(cmd, frame_targets.smaa_weights, pso.post.smaa_weights, root);
+            root.mode = 2;
+            fullscreen_pass(cmd, frame_targets.final_image, hdr() ? pso.post.smaa_blend_hdr : pso.post.smaa_blend,
+                            root);
+        }
     }
     {
         // The exposure histogram: one slice of the tap grid a frame, zeroed at the
@@ -131,6 +149,7 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
     }
     gpu::ColorAttachment color{.render_view = swapchain_view, .load = gpu::LoadOp::clear};
     {
+        GpuTimingScope timing(timings, GpuPass::Present);
         RenderPassScope pass(cmd, {.colors = {&color, 1}});
         gpu::bind_pso(cmd, present_pso());
         gpu::draw(cmd, root, 3);

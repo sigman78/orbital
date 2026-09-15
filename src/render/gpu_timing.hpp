@@ -18,7 +18,24 @@ enum class GpuPass : unsigned {
     Surface,
     Atmosphere,
     Post,
-    Meter, // the exposure meter pass and its readback copy, on the frames it runs
+    Meter, // the exposure histogram's slice for the frame and the cycle's copies
+    // Children of the groups above, each one contiguous run of commands; a group's
+    // remainder over its children is the barriers and transitions between them.
+    SurfaceSky,    // the galaxy splat pass, the background and the stars
+    SurfaceBodies, // the planet surfaces
+    SurfaceRocks,  // the pooled rock multi-draw, meshes and splats together
+    SurfaceClouds, // the cloud shell
+    Atmospheres,   // the per-body shell marches
+    BeltDust,      // the dust march, its upsample and the disc blend
+    SplatMask,     // splat coverage and depth for TAA and sun visibility
+    Temporal,      // the temporal resolve
+    MotionStreaks,
+    Bloom, // prefilter and both blurs
+    SunVisibility,
+    Flare,     // the quarter-resolution stack
+    Composite, // tone map and the full-resolution lens work
+    SpatialAA, // FXAA, or the three SMAA passes
+    Present,   // the swapchain copy with the HUD and the panel
     Count
 };
 
