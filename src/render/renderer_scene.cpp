@@ -8,10 +8,10 @@ void Renderer::Impl::draw_mesh(gpu::CommandBuffer* cmd, Root& root, const GpuMes
                                unsigned instance_count) {
     root.base = base;
     root.vertices = mesh.vertices;
-    stats.draw_calls++;
+    stats.frame.draw_calls++;
     gpu::draw_indexed(cmd, root, {reinterpret_cast<void*>(mesh.indices), std::uint64_t(mesh.index_count) * 4},
                       gpu::IndexType::uint32, mesh.index_count, instance_count);
-    stats.triangles += mesh.index_count / 3 * instance_count;
+    stats.frame.triangles += mesh.index_count / 3 * instance_count;
 }
 
 void Renderer::Impl::record_shadow_pass(gpu::CommandBuffer* cmd, Root root) {
@@ -21,10 +21,10 @@ void Renderer::Impl::record_shadow_pass(gpu::CommandBuffer* cmd, Root root) {
                              {.depth = {.render_view = fixed_targets.shadow_map.view(), .load = gpu::LoadOp::clear}});
         gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
         gpu::bind_pso(cmd, pso.scene.shadow);
-        const unsigned triangles_before = stats.triangles;
+        const unsigned triangles_before = stats.frame.triangles;
         for (unsigned i = 0; i < body_count; i++)
             draw_mesh(cmd, root, body_mesh(i, 2), i, 1);
-        stats.triangles = triangles_before; // shadow geometry is not counted in the frame statistic
+        stats.frame.triangles = triangles_before; // shadow geometry is not counted in the frame statistic
     }
     synchronize(cmd, access::depth_write, access::fragment_sample);
 }
@@ -53,14 +53,14 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
             GpuTimingScope sky(timings, GpuPass::SurfaceSky);
             gpu::bind_pso(cmd, pso.scene.background);
             gpu::draw(cmd, root, 3);
-            stats.draw_calls++;
+            stats.frame.draw_calls++;
             // The catalogue stars over the background, before the bodies paint over them.
             if (star_count && frame.stars.y > 0) {
                 gpu::bind_pso(cmd, pso.scene.stars);
                 Root star_root = root;
                 star_root.vertices = star_data;
                 gpu::draw(cmd, star_root, 6, star_count);
-                stats.draw_calls++;
+                stats.frame.draw_calls++;
             }
         }
         gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
@@ -114,7 +114,7 @@ void Renderer::Impl::record_motion_streaks(gpu::CommandBuffer* cmd, Root& root) 
         gpu::bind_pso(cmd, pso.scene.motes);
         root.mode = 0;
         gpu::draw(cmd, root, 6, targets::mote_count);
-        stats.draw_calls++;
+        stats.frame.draw_calls++;
     }
     synchronize(cmd, access::depth_read, access::fragment_sample);
     synchronize(cmd, access::color_write, access::fragment_sample);

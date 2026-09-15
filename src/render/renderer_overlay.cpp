@@ -76,7 +76,7 @@ void Renderer::Impl::record_ui(gpu::CommandBuffer* cmd, const ImDrawData* ui, st
                                                        std::uint64_t(index_base + draw.IdxOffset) * sizeof(ImDrawIdx)),
                                std::uint64_t(draw.ElemCount) * sizeof(ImDrawIdx)},
                               gpu::IndexType::uint16, draw.ElemCount);
-            stats.draw_calls++;
+            stats.frame.draw_calls++;
         }
         vertex_base += unsigned(list->VtxBuffer.Size);
         index_base += unsigned(list->IdxBuffer.Size);

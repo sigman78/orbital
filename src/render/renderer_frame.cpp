@@ -22,7 +22,7 @@ void Renderer::Impl::read_gpu_timings() {
     if (!frame_index)
         return;
     for (std::size_t pass = 0; pass < gpu_pass_count; pass++)
-        stats.gpu.ms[pass] = timings.milliseconds(GpuPass(pass)).value_or(0.f);
+        stats.frame.gpu.ms[pass] = timings.milliseconds(GpuPass(pass)).value_or(0.f);
 }
 
 bool Renderer::draw(const FrameInput& supplied) {
@@ -65,8 +65,8 @@ bool Renderer::draw(const FrameInput& supplied) {
     s.bind(Slot::history_b, s.frame_targets.history[1 - history_write]);
     const FrameData frame = s.build_frame(input);
     s.write_body_instances(input, frame);
-    s.stats.triangles = 0;
-    s.stats.draw_calls = 0;
+    s.stats.frame.triangles = 0;
+    s.stats.frame.draw_calls = 0;
 
     // CPU stages frame constants, culling parameters and body instances only.
     // The completed GPU scratch is read before preparing the next submission.
@@ -159,7 +159,7 @@ bool Renderer::draw(const FrameInput& supplied) {
                                  frame_address + heap_layout.ui_offset());
         }
     }
-    s.stats.prepare_ms =
+    s.stats.frame.prepare_ms =
         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - prepare_start).count();
     s.submissions.submit_and_present(s.device, {cmd});
 
@@ -169,8 +169,9 @@ bool Renderer::draw(const FrameInput& supplied) {
     s.previous_vertical_fov = input.camera.vertical_fov;
     s.previous_camera_cut = input.camera.cut_serial;
     s.history_valid = true;
-    s.collect_memory_stats();
-    s.stats.frame_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count();
+    if (s.memory_dirty)
+        s.collect_memory_stats();
+    s.stats.frame.draw_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count();
     return true;
 }
 

@@ -31,6 +31,7 @@ Renderer::Impl::~Impl() {
         gpu::wait_idle(device);
     pipelines.clear();
     material_images.clear();
+    memory_dirty = true;
     frame_targets = {};
     fixed_targets = {};
     buffers = {};
@@ -67,6 +68,7 @@ void Renderer::Impl::bind(Slot slot, const GpuImage& image) {
 // begin_commands so the backend records their layout initialization first.
 void Renderer::Impl::upload_images(std::span<const Upload> uploads) {
     const auto first_image = material_images.size();
+    memory_dirty = true;
     material_images.reserve(first_image + uploads.size());
     std::uint64_t largest = 0;
     for (const auto& upload : uploads) {
@@ -127,7 +129,7 @@ void Renderer::Impl::create_device(void* window) {
     panic_if(!device, "Vulkan device creation failed; check the console for missing features or driver errors");
     const auto& caps = gpu::get_device_caps(device);
     log::info("GPU: {} | conventional NoGraphicsAPI backend", caps.device_name);
-    stats.hdr_metadata = caps.hdr_metadata;
+    stats.output.hdr_metadata = caps.hdr_metadata;
     panic_if(!caps.conventional_descriptor_backend,
              "the demo's shaders require the conventional descriptor backend build option");
     submissions.initialize(device);
@@ -250,6 +252,7 @@ void Renderer::Impl::resize_galaxy(unsigned divisor) {
     if (divisor == galaxy_divisor || extent.width == 0)
         return;
     gpu::wait_idle(device);
+    memory_dirty = true;
     galaxy_divisor = divisor;
     frame_targets.galaxy.reset();
     frame_targets.galaxy = create_image(
@@ -265,6 +268,7 @@ void Renderer::Impl::resize_flare(unsigned divisor) {
     if (divisor == flare_divisor || extent.width == 0)
         return;
     gpu::wait_idle(device);
+    memory_dirty = true;
     flare_divisor = divisor;
     frame_targets.flare.reset();
     frame_targets.flare = create_image(
@@ -284,6 +288,7 @@ void Renderer::Impl::resize_flare(unsigned divisor) {
 void Renderer::Impl::set_hdr_output(HdrOutput mode) {
     if (mode == hdr_output || mode == hdr_requested)
         return;
+    memory_dirty = true;
     hdr_requested = mode;
     gpu::Format format = gpu::Format::bgra8_srgb;
     gpu::ColorSpace color_space = gpu::ColorSpace::srgb_nonlinear;
@@ -298,14 +303,14 @@ void Renderer::Impl::set_hdr_output(HdrOutput mode) {
     if (mode != HdrOutput::Off && !gpu::surface_format_supported(device, format, color_space)) {
         log::warn("{} output is not offered by the display surface (is HDR on in the OS?); staying at {}",
                   names[unsigned(mode)], names[unsigned(hdr_output)]);
-        stats.hdr_unsupported = true;
+        stats.output.hdr_unsupported = true;
         return;
     }
-    stats.hdr_unsupported = false;
+    stats.output.hdr_unsupported = false;
     gpu::wait_idle(device);
     gpu::set_swapchain_output(device, format, color_space);
     hdr_output = mode;
-    stats.hdr_output = mode;
+    stats.output.hdr_output = mode;
     if (extent.width) {
         const auto color_usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment;
         frame_targets.final_image.reset();
@@ -328,7 +333,7 @@ void Renderer::Impl::set_hdr_output(HdrOutput mode) {
 // otherwise the panel's peak; the content light level is the curve's peak and
 // the frame average the paper white, since a mostly dark sky never exceeds it.
 void Renderer::Impl::update_hdr_metadata(const ToneSettings& tone, const DisplaySettings& display) {
-    if (!hdr() || !stats.hdr_metadata) {
+    if (!hdr() || !stats.output.hdr_metadata) {
         hdr_metadata_valid = false;
         return;
     }
@@ -350,6 +355,7 @@ void Renderer::Impl::update_hdr_metadata(const ToneSettings& tone, const Display
 }
 
 void Renderer::Impl::collect_memory_stats() {
+    memory_dirty = false;
     const auto images = [](std::initializer_list<const GpuImage*> list) {
         MemoryPool pool;
         for (const auto* image : list)
@@ -409,6 +415,7 @@ void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor, unsigned flar
     galaxy_divisor = divisor;
     flare_divisor = std::clamp(flare, 2u, 8u);
     gpu::wait_idle(device);
+    memory_dirty = true;
     log::info("Resizing frame targets {}x{} -> {}x{}", extent.width, extent.height, new_extent.width,
               new_extent.height);
     frame_targets = {};
@@ -472,7 +479,7 @@ Renderer::Renderer(void* window, const SystemDescription& system, const std::fil
 
 Renderer::~Renderer() = default;
 
-Stats Renderer::stats() const {
+const Stats& Renderer::stats() const {
     return impl_->stats;
 }
 

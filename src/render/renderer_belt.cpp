@@ -54,11 +54,11 @@ void Renderer::Impl::read_cull_counts(const CullScratch& scratch) {
         triangles += scratch.counts[group] * (scratch.params.index_counts[group] / 3);
         groups_drawn += scratch.counts[group] ? 1 : 0;
     }
-    stats.rock_groups_drawn = groups_drawn; // equals scratch.draw_count once the prefix pass has run
+    stats.frame.rock_groups_drawn = groups_drawn; // equals scratch.draw_count once the prefix pass has run
     rocks_visible += scratch.counts[rock_group_count];
     triangles += scratch.counts[rock_group_count] * 2;
-    stats.visible_asteroids = rocks_visible;
-    stats.rock_triangles = triangles;
+    stats.frame.visible_asteroids = rocks_visible;
+    stats.frame.rock_triangles = triangles;
 }
 
 void Renderer::Impl::record_cull_passes(gpu::CommandBuffer* cmd, const CullRoot& root) {
@@ -105,7 +105,7 @@ void Renderer::Impl::record_belt_light_pass(gpu::CommandBuffer* cmd, const CullR
         RenderPassScope pass(cmd, {.colors = {&attachment, 1}});
         gpu::bind_pso(cmd, pso.belt.splat);
         gpu::draw(cmd, cull_root, 6, rock_limit);
-        stats.draw_calls++;
+        stats.frame.draw_calls++;
     }
     synchronize(cmd, access::color_write, access::fragment_sample);
     root.mode = 0;
@@ -137,7 +137,7 @@ void Renderer::Impl::record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullR
             RenderPassScope pass(cmd, {.colors = {&attachment, 1}});
             gpu::bind_pso(cmd, pso.belt.disc_splat);
             gpu::draw(cmd, cull_root, 6, rock_limit);
-            stats.draw_calls++;
+            stats.frame.draw_calls++;
         }
         synchronize(cmd, access::color_write, access::fragment_sample);
     }
@@ -156,15 +156,15 @@ void Renderer::Impl::draw_rock_batch(gpu::CommandBuffer* cmd, Root& root, std::u
         {reinterpret_cast<void*>(args_address - offsetof(CullScratch, args) + offsetof(CullScratch, draw_count)),
          sizeof(std::uint32_t)},
         rock_group_count, sizeof(DrawArgs));
-    stats.draw_calls++;
-    stats.triangles += stats.rock_triangles;
+    stats.frame.draw_calls++;
+    stats.frame.triangles += stats.frame.rock_triangles;
     gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
     gpu::bind_pso(cmd, pso.belt.billboard);
     root.mode = std::uint32_t(SurfaceMode::billboard);
     gpu::draw_indirect(cmd, root,
                        {reinterpret_cast<void*>(args_address + rock_group_count * sizeof(DrawArgs)), sizeof(DrawArgs)},
                        1, sizeof(DrawArgs));
-    stats.draw_calls++;
+    stats.frame.draw_calls++;
 }
 
 // Record fractional coverage independently of opaque scene depth. Premultiplied
@@ -184,7 +184,7 @@ void Renderer::Impl::record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, 
         gpu::draw_indirect(
             cmd, root, {reinterpret_cast<void*>(args_address + rock_group_count * sizeof(DrawArgs)), sizeof(DrawArgs)},
             1, sizeof(DrawArgs));
-        stats.draw_calls++;
+        stats.frame.draw_calls++;
     }
 }
 

@@ -50,20 +50,32 @@ struct MemoryStats {
     }
 };
 
-struct Stats {
-    ExposureStats exposure;
-    MemoryStats memory;
-    HdrOutput hdr_output = HdrOutput::Off; // what the swapchain presents
-    bool hdr_unsupported = false;          // the requested HDR output is not offered by the surface
-    bool hdr_metadata = false;             // the device can pass mastering metadata to the display
-    float frame_ms = 0;                    // CPU time of draw(), including the wait for the previous frame
-    float prepare_ms = 0;                  // CPU work between acquiring the swapchain image and submitting
-    PassTimings gpu;                       // the GPU passes of the last completed frame, by GpuPass
+// What one call to draw() cost and drew.
+struct FrameStats {
+    float draw_ms = 0;    // CPU time of draw(), including the wait for the previous frame
+    float prepare_ms = 0; // CPU work between acquiring the swapchain image and submitting
+    PassTimings gpu;      // the GPU passes of the last completed frame, by GpuPass
     unsigned visible_asteroids = 0, triangles = 0,
              rock_triangles = 0;    // rock figures are from the previous frame's culling
     unsigned draw_calls = 0;        // API draw calls submitted this frame (an indirect multi-draw counts once)
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
     float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc
+};
+
+// What the swapchain presents, refreshed when the output mode changes.
+struct OutputStatus {
+    HdrOutput hdr_output = HdrOutput::Off; // what the swapchain presents
+    bool hdr_unsupported = false;          // the requested HDR output is not offered by the surface
+    bool hdr_metadata = false;             // the device can pass mastering metadata to the display
+};
+
+// The renderer's readings, each part refreshed at its own pace: the frame every
+// draw, the exposure as the meter cycles, the memory when allocations change.
+struct Stats {
+    FrameStats frame;
+    ExposureStats exposure;
+    MemoryStats memory;
+    OutputStatus output;
 };
 
 // Camera/settings are copied values; body and UI storage is borrowed for draw().
@@ -106,7 +118,7 @@ public:
     bool capture(const std::filesystem::path& path);
     // FIFO presentation on, or unsynchronized (mailbox where available) off; measurements want it off.
     void set_vsync(bool vsync);
-    Stats stats() const;
+    const Stats& stats() const;
     // The Dear ImGui font atlas, RGBA8; uploaded once, before the first frame that draws the overlay.
     void set_ui_font(assets::ImageView image);
 

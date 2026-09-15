@@ -1,12 +1,13 @@
 #include "app/actions.hpp"
 #include "app/app_state.hpp"
+#include "app/benchmark_log.hpp"
+#include "app/frame_history.hpp"
 #include "app/frame_input.hpp"
 #include "app/hud.hpp"
 #include "app/options.hpp"
 #include "app/stats_smoothing.hpp"
 #include "app/ui.hpp"
 #include "assets/image.hpp"
-#include "core/file.hpp"
 #include "core/log.hpp"
 #include "core/math.hpp"
 #include "platform/process.hpp"
@@ -20,6 +21,7 @@
 #include <filesystem>
 #include <format>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -32,13 +34,7 @@ using platform::Key;
 
 namespace window_limits {
 inline constexpr double title_refresh_seconds = 0.5;
-inline constexpr std::size_t timing_history_frames = 240; // recent CPU samples for the panel and title
 } // namespace window_limits
-
-namespace benchmark {
-inline constexpr std::size_t warmup_frames = 60;      // dropped before computing percentiles
-inline constexpr std::size_t expected_frames = 36000; // reserve for an open-ended run (10 minutes at 60 Hz)
-} // namespace benchmark
 
 constexpr std::string_view window_title = "ORBITAL  /  Procedural worlds";
 
@@ -99,25 +95,14 @@ Input gather_input(platform::Window& window, AppState& app, bool keyboard_free) 
     return input;
 }
 
-// 95th percentile of the most recent frame times, for the title bar.
-float recent_p95_ms(std::span<const float> frame_ms) {
-    constexpr std::size_t window = 120;
-    if (frame_ms.empty())
-        return 0;
-    const auto begin = frame_ms.size() > window ? frame_ms.end() - window : frame_ms.begin();
-    std::vector<float> recent(begin, frame_ms.end());
-    const auto nth = recent.begin() + std::ptrdiff_t(recent.size() * 95 / 100);
-    std::nth_element(recent.begin(), nth, recent.end());
-    return *nth;
-}
-
-void update_title(platform::Window& window, const render::Stats& stats, const AppState& app, float p95_ms) {
-    const int fps = int(1000 / std::max(stats.frame_ms, 0.1f));
+void update_title(platform::Window& window, const SmoothedStats& smoothed, const AppState& app, float p95_ms) {
+    const render::FrameStats& stats = smoothed.frame;
+    const int fps = int(1000 / std::max(smoothed.frame_ms, 0.1f));
     window.set_title(std::format(
         "ORBITAL  |  {} FPS  |  {:.1f} ms (p95 {:.1f})  |  GPU {:.1f} ms  |  {} draws ({} rock groups)  |  "
         "{} rocks  |  {:.2f} M tris  |  {}  |  belt map {} ext {} dust {}  |  TAA {} + {}  |  splats {} lit {}  |  "
         "tone {}",
-        fps, stats.frame_ms, p95_ms, stats.gpu[render::GpuPass::Frame], stats.draw_calls, stats.rock_groups_drawn,
+        fps, smoothed.frame_ms, p95_ms, stats.gpu[render::GpuPass::Frame], stats.draw_calls, stats.rock_groups_drawn,
         stats.visible_asteroids, stats.triangles / 1e6, app.high ? "HIGH" : "BASELINE",
         app.belt.light_map ? "on" : "off", app.belt.extinction ? "on" : "off", app.belt_dust.enabled ? "on" : "off",
         app.aa.temporal_aa ? "on" : "off",
@@ -129,38 +114,6 @@ void update_title(platform::Window& window, const render::Stats& stats, const Ap
         app.tone.tone_curve == render::ToneCurve::ACES  ? "ACES"
         : app.tone.tone_curve == render::ToneCurve::AgX ? "AgX"
                                                         : "Neutral"));
-}
-
-// Per-frame samples: the CPU frame time always, for the panel's graph; the rest
-// only for a benchmark, which writes every GPU pass as its own column.
-struct FrameTimes {
-    std::vector<float> cpu_ms, prepare_ms;
-    std::vector<render::PassTimings> gpu;
-};
-
-void write_benchmark(const std::filesystem::path& path, const FrameTimes& times) {
-    // The columns are read by name (tools/benchmark-suite.py), so their order follows the pass table.
-    std::string csv = "frame,cpu_submit_and_wait_ms,cpu_prepare_ms";
-    for (const auto& pass : render::gpu_pass_info)
-        std::format_to(std::back_inserter(csv), ",{}", pass.column);
-    csv += '\n';
-    for (std::size_t i = 0; i < times.cpu_ms.size(); i++) {
-        std::format_to(std::back_inserter(csv), "{},{},{}", i, times.cpu_ms[i], times.prepare_ms[i]);
-        for (const float ms : times.gpu[i].ms)
-            std::format_to(std::back_inserter(csv), ",{}", ms);
-        csv += '\n';
-    }
-    if (!file::write_text(path, csv))
-        log::error("cannot write benchmark {}", path.string());
-    auto sorted = times.cpu_ms;
-    if (sorted.size() > benchmark::warmup_frames)
-        sorted.erase(sorted.begin(), sorted.begin() + benchmark::warmup_frames);
-    std::sort(sorted.begin(), sorted.end());
-    if (!sorted.empty()) {
-        const auto p95 = sorted[std::min(sorted.size() - 1, std::size_t(double(sorted.size()) * .95))];
-        log::info("Frame timing median {} ms, p95 {} ms (CPU including GPU wait; not isolated GPU timing).",
-                  sorted[sorted.size() / 2], p95);
-    }
 }
 
 AppState initial_state(const Options& options, const SystemDescription& system) {
@@ -236,7 +189,7 @@ struct Session {
 };
 
 // Runs until the window closes or the frame/duration limit is reached; returns the frame count.
-unsigned frame_loop(const Session& session, FrameTimes& times) {
+unsigned frame_loop(const Session& session, FrameHistory& history, BenchmarkLog* benchmark) {
     const Options& options = session.options;
     AppState& app = session.app;
     platform::Window& window = session.window;
@@ -276,10 +229,8 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                         app.bodies);
         // The overlay is built every frame so its input state stays current; the panel itself is optional.
         ui.begin_frame();
-        if (app.show_ui) {
-            const std::size_t recent = std::min(times.cpu_ms.size(), window_limits::timing_history_frames);
-            draw_panel(app, smoother.apply(renderer.stats()), std::span<const float>(times.cpu_ms).last(recent));
-        }
+        if (app.show_ui)
+            draw_panel(app, renderer.stats(), smoother, history);
         const ImDrawData* ui_draw = ui.end_frame();
 
         const auto frame_input = make_frame_input(app, simulation_time, ui_draw);
@@ -292,15 +243,13 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                 window.maximize();
             if (options.fullscreen_at && frames == options.fullscreen_at)
                 window.toggle_fullscreen();
-            const auto stats = renderer.stats();
-            smoother.add(stats, dt, app.camera.cut_serial());
-            if (options.benchmark.empty() && times.cpu_ms.size() == window_limits::timing_history_frames)
-                times.cpu_ms.erase(times.cpu_ms.begin());
-            times.cpu_ms.push_back(stats.frame_ms);
-            if (!options.benchmark.empty()) {
-                times.prepare_ms.push_back(stats.prepare_ms);
-                times.gpu.push_back(stats.gpu);
-            }
+            // The frame time is the loop's delta: everything between two frames, not only draw().
+            const float frame_ms = float(dt * 1000);
+            const render::FrameStats& frame = renderer.stats().frame;
+            history.push(frame_ms);
+            smoother.add(frame, frame_ms, dt, app.camera.cut_serial());
+            if (benchmark)
+                benchmark->record(frame_ms, frame);
             if (!app.capture_request.empty()) {
                 const auto path = session.directory / app.capture_request;
                 if (renderer.capture(path))
@@ -317,7 +266,7 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
         }
         if (elapsed - title_clock > window_limits::title_refresh_seconds) {
             title_clock = elapsed;
-            update_title(window, renderer.stats(), app, recent_p95_ms(times.cpu_ms));
+            update_title(window, smoother, app, history.percentile(.95f));
         }
     }
     return frames;
@@ -353,14 +302,10 @@ int run(const Options& options) {
                           {atlas.rgba, std::size_t(atlas.width) * atlas.height * 4}});
     log::info(
         "Ready. RMB + WASD: fly | 1-6: views | T: tour | F12: control panel | F10: capture | --help for all controls");
-    FrameTimes times;
-    times.cpu_ms.reserve(options.benchmark.empty() ? window_limits::timing_history_frames
-                         : options.frame_limit     ? options.frame_limit
-                                                   : benchmark::expected_frames);
-    if (!options.benchmark.empty()) {
-        times.prepare_ms.reserve(times.cpu_ms.capacity());
-        times.gpu.reserve(times.cpu_ms.capacity());
-    }
+    FrameHistory history;
+    std::optional<BenchmarkLog> benchmark;
+    if (!options.benchmark.empty())
+        benchmark.emplace(options.benchmark);
     const unsigned frames = frame_loop({.options = options,
                                         .system = system,
                                         .directory = directory,
@@ -368,9 +313,9 @@ int run(const Options& options) {
                                         .window = *window,
                                         .renderer = renderer,
                                         .ui = ui},
-                                       times);
-    if (!options.benchmark.empty())
-        write_benchmark(options.benchmark, times);
+                                       history, benchmark ? &*benchmark : nullptr);
+    if (benchmark)
+        benchmark->finish();
     log::info("Completed {} frames.", frames);
     return 0;
 }

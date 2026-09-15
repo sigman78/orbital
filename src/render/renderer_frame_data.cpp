@@ -131,7 +131,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.belt_disc_up = f4(belt.disc.up, belt.disc.half_y);
     frame.belt_disc = {float(targets::belt_disc_map_size), belt.disc_weight, float(targets::belt_disc_rock_map_size),
                        input.belt.disc ? 1.f : 0.f};
-    stats.belt_lod = belt.disc_weight;
+    stats.frame.belt_lod = belt.disc_weight;
     frame.belt_normal = f4(belt_plane_normal);
     frame.options = {float(extent.width), float(extent.height), input.high_quality ? 1.f : 0.f,
                      input.overlay ? 1.f : 0.f};

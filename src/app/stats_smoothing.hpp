@@ -14,39 +14,37 @@ namespace space::app {
 struct SmoothedStats {
     static constexpr float time_constant_seconds = .5f;
 
-    render::PassTimings gpu;
-    float frame_ms = 0, prepare_ms = 0, rocks = 0, triangles = 0;
+    float frame_ms = 0;       // the loop's frame delta, what the frame rate is made of
+    render::FrameStats frame; // the latest frame stats with the jumping readings eased
     std::size_t cut_serial = 0;
     bool primed = false;
 
-    void add(const render::Stats& sample, double dt_seconds, std::size_t cut) {
-        if (sample.frame_ms <= 0)
-            return;
+    void add(const render::FrameStats& sample, float sample_frame_ms, double dt_seconds, std::size_t cut) {
         if (cut != cut_serial) {
             cut_serial = cut;
             primed = false;
         }
         const float a = primed ? std::clamp(float(dt_seconds) / time_constant_seconds, 0.f, 1.f) : 1.f;
-        primed = true;
         const auto ease = [a](float& value, float latest) { value += a * (latest - value); };
+        ease(frame_ms, sample_frame_ms);
+        ease(frame.draw_ms, sample.draw_ms);
+        ease(frame.prepare_ms, sample.prepare_ms);
         for (std::size_t i = 0; i < render::gpu_pass_count; i++)
-            ease(gpu.ms[i], sample.gpu.ms[i]);
-        ease(frame_ms, sample.frame_ms);
-        ease(prepare_ms, sample.prepare_ms);
-        ease(rocks, float(sample.visible_asteroids));
-        ease(triangles, float(sample.triangles));
+            ease(frame.gpu.ms[i], sample.gpu.ms[i]);
+        ease(rocks_, float(sample.visible_asteroids));
+        ease(triangles_, float(sample.triangles));
+        // The rest changes rarely or is a small count: shown as is.
+        frame.rock_triangles = sample.rock_triangles;
+        frame.draw_calls = sample.draw_calls;
+        frame.rock_groups_drawn = sample.rock_groups_drawn;
+        frame.belt_lod = sample.belt_lod;
+        frame.visible_asteroids = unsigned(rocks_ + .5f);
+        frame.triangles = unsigned(triangles_ + .5f);
+        primed = true;
     }
-    // The latest stats with the smoothed readings in place of the raw ones.
-    render::Stats apply(render::Stats latest) const {
-        if (!primed)
-            return latest;
-        latest.gpu = gpu;
-        latest.frame_ms = frame_ms;
-        latest.prepare_ms = prepare_ms;
-        latest.visible_asteroids = unsigned(rocks + .5f);
-        latest.triangles = unsigned(triangles + .5f);
-        return latest;
-    }
+
+private:
+    float rocks_ = 0, triangles_ = 0; // the counts as they ease, before rounding
 };
 
 } // namespace space::app

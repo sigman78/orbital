@@ -33,7 +33,7 @@ template <class Enum> void combo(const char* label, Enum& value, std::span<const
 // The pass timings: the groups across the bar's upper half, and in the lower half of
 // each group its children in proportion, alternating light and dark, with the group's
 // remainder (its barriers and transitions) as a gap; the tooltip lists the numbers.
-void gpu_time_bar(const render::Stats& stats) {
+void gpu_time_bar(const render::FrameStats& stats) {
     using render::GpuPass;
     struct Child {
         const char* label;
@@ -227,16 +227,15 @@ void memory_bar(const render::MemoryStats& memory) {
     }
 }
 
-void frame_controls(const render::Stats& stats, std::span<const float> recent_frame_ms, bool& vsync) {
-    std::vector<float> sorted(recent_frame_ms.begin(), recent_frame_ms.end());
-    std::sort(sorted.begin(), sorted.end());
-    const float p95 = sorted.empty() ? 0
-                                     : sorted[std::min(sorted.size() - 1, std::size_t(double(sorted.size()) * .95))];
-    const float peak = sorted.empty() ? 1 : sorted.back();
-    ImGui::Text("%d FPS   %.1f ms (p95 %.1f)", int(1000 / std::max(stats.frame_ms, .1f)), stats.frame_ms, p95);
-    ImGui::PlotLines("##frame", recent_frame_ms.data(), int(recent_frame_ms.size()), 0, nullptr, 0, peak * 1.1f,
-                     {-1, 60});
+void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, bool& vsync) {
+    const render::FrameStats& stats = smoothed.frame;
+    const auto raw = history.values();
+    ImGui::Text("%d FPS   %.1f ms (p95 %.1f)", int(1000 / std::max(smoothed.frame_ms, .1f)), smoothed.frame_ms,
+                history.percentile(.95f));
+    ImGui::PlotLines("##frame", raw.data(), int(raw.size()), history.offset(), nullptr, 0,
+                     std::max(history.peak(), 1.f) * 1.1f, {-1, 60});
     ImGui::TextDisabled("Timings: smoothed over 0.5 s | graph: raw frames");
+    ImGui::Text("Draw %.2f ms incl. GPU wait", stats.draw_ms);
     ImGui::Text("GPU %.2f ms", stats.gpu[render::GpuPass::Frame]);
     gpu_time_bar(stats);
     ImGui::Text("Cull + shadows %.2f ms", stats.gpu[render::GpuPass::CullAndShadows]);
@@ -457,7 +456,7 @@ void tone_controls(render::ToneSettings& settings, const render::Stats& stats, c
     // The swapchain's output; the HDR pairs are offered only with the OS presenting in HDR.
     static constexpr const char* outputs[] = {"SDR (8-bit sRGB)", "HDR scRGB (16-bit float)", "HDR10 (10-bit PQ)"};
     combo("Output", settings.hdr_output, outputs);
-    if (stats.hdr_unsupported)
+    if (stats.output.hdr_unsupported)
         ImGui::TextDisabled("Not offered by the display; is HDR on in the OS?");
     if (display.hdr)
         ImGui::Text("Display: HDR, %.0f to %.0f nits, SDR white %.0f", display.min_nits, display.max_nits,
@@ -473,7 +472,7 @@ void tone_controls(render::ToneSettings& settings, const render::Stats& stats, c
         if (display.sdr_white_nits > 0)
             settings.paper_white_nits = display.sdr_white_nits;
     }
-    if (!stats.hdr_metadata)
+    if (!stats.output.hdr_metadata)
         ImGui::TextDisabled("No HDR metadata path on this device");
     ImGui::EndDisabled();
     ImGui::Spacing();
@@ -566,7 +565,7 @@ void overlay_controls(AppState& app) {
 
 } // namespace
 
-void draw_panel(AppState& app, const render::Stats& stats, std::span<const float> recent_frame_ms) {
+void draw_panel(AppState& app, const render::Stats& stats, const SmoothedStats& smoothed, const FrameHistory& history) {
     const ImGuiIO& io = ImGui::GetIO();
     ImGui::SetNextWindowPos({io.DisplaySize.x - panel_width, 0});
     ImGui::SetNextWindowSize({panel_width, io.DisplaySize.y});
@@ -578,10 +577,10 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
     }
     ImGui::PushItemWidth(150); // leaves room for the labels beside combos and sliders
     if (section("Frame", true)) {
-        frame_controls(stats, recent_frame_ms, app.vsync);
+        frame_controls(smoothed, history, app.vsync);
         ImGui::PopID();
     }
-    if (section("Memory")) { // collapsed by default; the sums are refreshed every frame
+    if (section("Memory")) { // collapsed by default; the sums are refreshed when allocations change
         memory_bar(stats.memory);
         ImGui::PopID();
     }
@@ -594,7 +593,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::PopID();
     }
     if (section("Belt")) {
-        belt_controls(app.belt, app.belt_dust, stats.belt_lod);
+        belt_controls(app.belt, app.belt_dust, smoothed.frame.belt_lod);
         ImGui::PopID();
     }
     if (section("Gas giant")) {

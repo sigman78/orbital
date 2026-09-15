@@ -1,4 +1,6 @@
 #pragma once
+#include "app/frame_history.hpp"
+#include "app/stats_smoothing.hpp"
 
 #include <cstdint>
 #include <span>
@@ -41,6 +43,7 @@ private:
 };
 
 // The control panel, docked to the right edge: frame statistics and every toggle the hotkeys reach.
-void draw_panel(AppState& app, const render::Stats& stats, std::span<const float> recent_frame_ms);
+// stats is the renderer's (exposure, memory, output); the frame readings shown are the smoothed ones.
+void draw_panel(AppState& app, const render::Stats& stats, const SmoothedStats& smoothed, const FrameHistory& history);
 
 } // namespace space::app

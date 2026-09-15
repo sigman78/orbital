@@ -58,7 +58,7 @@ void Renderer::Impl::fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, 
         RenderPassScope pass(cmd, {.colors = {&attachment, 1}});
         gpu::bind_pso(cmd, pipeline);
         gpu::draw(cmd, root, 3);
-        stats.draw_calls++;
+        stats.frame.draw_calls++;
     }
     synchronize(cmd, access::color_write, access::fragment_sample);
 }
