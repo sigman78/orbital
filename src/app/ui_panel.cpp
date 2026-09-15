@@ -111,14 +111,21 @@ void gpu_time_bar(const render::Stats& stats) {
         }
         if (hovered && ImGui::GetIO().MousePos.x >= x && ImGui::GetIO().MousePos.x < end) {
             ImGui::BeginTooltip();
-            ImGui::Text("%s: %.2f ms (%.1f%%)", segment.label, segment.ms, 100 * segment.ms / total);
+            ImGui::Text("%s: %.2f ms (%.1f%% of the frame)", segment.label, segment.ms, 100 * segment.ms / total);
+            // Each child with its share of the group and of the whole frame.
+            const float group = std::max(segment.ms, 1e-6f);
             float accounted = 0;
             for (const auto& child : segment.children) {
-                ImGui::Text("  %-16s %6.3f ms", child.label, child.ms);
-                accounted += std::max(child.ms, 0.f);
+                const float ms = std::max(child.ms, 0.f);
+                ImGui::Text("  %-16s %6.3f ms  %5.1f%% of group  %5.1f%% of frame", child.label, ms, 100 * ms / group,
+                            100 * ms / total);
+                accounted += ms;
             }
-            if (!segment.children.empty())
-                ImGui::TextDisabled("  %-16s %6.3f ms", "barriers, other", std::max(segment.ms - accounted, 0.f));
+            if (!segment.children.empty()) {
+                const float rest = std::max(segment.ms - accounted, 0.f);
+                ImGui::TextDisabled("  %-16s %6.3f ms  %5.1f%% of group  %5.1f%% of frame", "barriers, other", rest,
+                                    100 * rest / group, 100 * rest / total);
+            }
             ImGui::EndTooltip();
         }
         x = end;
