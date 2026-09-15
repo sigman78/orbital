@@ -36,6 +36,7 @@ bool Renderer::draw(const FrameInput& supplied) {
     s.submissions.wait_last();
     s.read_gpu_timings();
     s.apply_metering(input.tone);
+    s.ensure_galaxy_textures(input.sky.galaxy_mode);
     const auto drawable = gpu::get_drawable_extent(s.device);
     if (!drawable.x || !drawable.y)
         return false;
