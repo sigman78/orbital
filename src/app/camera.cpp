@@ -14,8 +14,9 @@ inline constexpr Range<double> speed_scale{0.0, 100.0}; // guards against a runa
 inline constexpr double max_step_seconds = 0.25;        // a long stall must not teleport the camera
 inline constexpr double mouse_sensitivity = 0.0025;     // radians per pixel, divided by the zoom
 namespace telescope {
-inline constexpr double magnification = 5.0;   // the cap, reached while the middle button is held
-inline constexpr double travel_seconds = 0.17; // from 1x to the cap at a steady rate, and back at the same rate
+inline constexpr double magnification = 5.0; // the cap, reached while the middle button is held
+inline constexpr double in_seconds = 0.105,
+                        out_seconds = 0.17; // from 1x to the cap, and from the cap back to 1x, at steady rates
 } // namespace telescope
 inline constexpr double collision_margin = 1.08; // camera stays outside body radius * margin
 inline constexpr double basis_epsilon = 1e-8;
@@ -140,10 +141,11 @@ void Camera::step(double dt, double time, const Input& input, std::span<const Bo
         return;
     dt = std::min(dt, settings::max_step_seconds);
     // The telescope zooms at a steady rate in log space toward its cap while the
-    // button is held, and back to 1x at the same rate once it is released.
+    // button is held, and back to 1x at its own rate once it is released.
     const double log_cap = std::log(settings::telescope::magnification);
-    const double rate = log_cap / settings::telescope::travel_seconds * dt;
-    zoom_ = std::exp(std::clamp(std::log(zoom_) + (input.telescope ? rate : -rate), 0.0, log_cap));
+    const double step = input.telescope ? log_cap / settings::telescope::in_seconds * dt
+                                        : -log_cap / settings::telescope::out_seconds * dt;
+    zoom_ = std::exp(std::clamp(std::log(zoom_) + step, 0.0, log_cap));
     const double scale = std::isfinite(input.speed_scale) ? input.speed_scale : 1.0;
     const double speed = settings::base_speed * settings::speed_scale.clamp(scale);
     if (mode_ == CameraMode::Tour && !bodies.empty()) {
