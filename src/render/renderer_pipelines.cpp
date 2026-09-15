@@ -77,7 +77,7 @@ void Renderer::Impl::create_pipelines() {
     pso.scene.cloud = make("surface", "surface_earth", Format::rgba16_float, true, Blend::alpha, mesh_cull, -4.f);
     pso.scene.background = make("fullscreen", "background", Format::rgba16_float, true);
     pso.scene.galaxy = make("fullscreen", "galaxy", Format::rgba16_float);
-    pso.scene.atmosphere = make("fullscreen", "atmosphere", Format::rgba16_float, false, Blend::alpha);
+    pso.scene.atmosphere = make("atmosphere_bounds", "atmosphere", Format::rgba16_float, false, Blend::alpha);
     pso.scene.motes = make("motes", "motes", Format::rgba16_float, true, Blend::additive);
     pso.scene.stars = make("stars", "stars", Format::rgba16_float, true, Blend::additive);
     // Belt meshes, splats and dust pipelines.
