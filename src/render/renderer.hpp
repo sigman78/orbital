@@ -58,7 +58,12 @@ struct Stats {
     float frame_ms = 0, gpu_ms = 0, shadow_ms = 0, surface_ms = 0, atmosphere_ms = 0,
           post_ms = 0; // shadow_ms includes the belt culling passes
     float cull_ms = 0, body_shadow_ms = 0, belt_light_ms = 0, belt_disc_ms = 0;
-    float meter_ms = 0;   // the exposure meter, 0 on the frames it does not run
+    float meter_ms = 0; // the exposure histogram's slice and the cycle's copies
+    // Children of the surface, atmosphere and post groups; a group's remainder is its barriers.
+    float surface_sky_ms = 0, surface_bodies_ms = 0, surface_rocks_ms = 0, surface_clouds_ms = 0;
+    float atmospheres_ms = 0, belt_dust_ms = 0, splat_mask_ms = 0;
+    float temporal_ms = 0, streaks_ms = 0, bloom_ms = 0, sun_visibility_ms = 0, flare_ms = 0, composite_ms = 0,
+          spatial_aa_ms = 0, present_ms = 0;
     float prepare_ms = 0; // CPU work between acquiring the swapchain image and submitting
     unsigned visible_asteroids = 0, triangles = 0,
              rock_triangles = 0;    // rock figures are from the previous frame's culling

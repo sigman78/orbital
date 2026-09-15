@@ -30,20 +30,50 @@ template <class Enum> void combo(const char* label, Enum& value, std::span<const
         value = Enum(index);
 }
 
+// The pass timings: the groups across the bar's upper half, and in the lower half of
+// each group its children in proportion, alternating light and dark, with the group's
+// remainder (its barriers and transitions) as a gap; the tooltip lists the numbers.
 void gpu_time_bar(const render::Stats& stats) {
+    struct Child {
+        const char* label;
+        float ms;
+    };
     struct Segment {
         const char* label;
         float ms;
         ImU32 color;
+        std::vector<Child> children;
     };
     std::array segments{
         Segment{.label = "Culling", .ms = stats.cull_ms, .color = IM_COL32(86, 180, 233, 255)},
         Segment{.label = "Body shadows", .ms = stats.body_shadow_ms, .color = IM_COL32(130, 120, 210, 255)},
         Segment{.label = "Belt light", .ms = stats.belt_light_ms, .color = IM_COL32(230, 159, 0, 255)},
         Segment{.label = "Belt discs", .ms = stats.belt_disc_ms, .color = IM_COL32(240, 228, 66, 255)},
-        Segment{.label = "Surface", .ms = stats.surface_ms, .color = IM_COL32(0, 158, 115, 255)},
-        Segment{.label = "Atmosphere", .ms = stats.atmosphere_ms, .color = IM_COL32(204, 121, 167, 255)},
-        Segment{.label = "Post FX", .ms = stats.post_ms, .color = IM_COL32(213, 94, 0, 255)},
+        Segment{.label = "Surface",
+                .ms = stats.surface_ms,
+                .color = IM_COL32(0, 158, 115, 255),
+                .children = {{"Sky", stats.surface_sky_ms},
+                             {"Bodies", stats.surface_bodies_ms},
+                             {"Rocks and splats", stats.surface_rocks_ms},
+                             {"Clouds", stats.surface_clouds_ms}}},
+        Segment{.label = "Atmosphere",
+                .ms = stats.atmosphere_ms,
+                .color = IM_COL32(204, 121, 167, 255),
+                .children = {{"Atmospheres", stats.atmospheres_ms},
+                             {"Belt dust", stats.belt_dust_ms},
+                             {"Splat mask", stats.splat_mask_ms}}},
+        Segment{.label = "Post FX",
+                .ms = stats.post_ms,
+                .color = IM_COL32(213, 94, 0, 255),
+                .children = {{"Temporal AA", stats.temporal_ms},
+                             {"Motion streaks", stats.streaks_ms},
+                             {"Bloom", stats.bloom_ms},
+                             {"Sun visibility", stats.sun_visibility_ms},
+                             {"Flare stack", stats.flare_ms},
+                             {"Composite", stats.composite_ms},
+                             {"Spatial AA", stats.spatial_aa_ms},
+                             {"Meter", stats.meter_ms},
+                             {"Present and UI", stats.present_ms}}},
         Segment{.label = "Other", .ms = 0, .color = IM_COL32(140, 145, 155, 255)}};
     float sum = 0;
     for (auto& segment : segments) {
@@ -58,14 +88,46 @@ void gpu_time_bar(const render::Stats& stats) {
     }
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const ImVec2 size{ImGui::GetContentRegionAvail().x, 18};
+    const float split = origin.y + size.y * .5f;
     ImGui::InvisibleButton("##gpu-time", size);
     const bool hovered = ImGui::IsItemHovered();
+    auto* draw = ImGui::GetWindowDrawList();
     float x = origin.x;
     for (const auto& segment : segments) {
         const float end = x + size.x * segment.ms / total;
-        ImGui::GetWindowDrawList()->AddRectFilled({x, origin.y}, {end, origin.y + size.y}, segment.color);
-        if (hovered && ImGui::GetIO().MousePos.x >= x && ImGui::GetIO().MousePos.x < end)
-            ImGui::SetTooltip("%s: %.2f ms (%.1f%%)", segment.label, segment.ms, 100 * segment.ms / total);
+        const float bottom = segment.children.empty() ? origin.y + size.y : split;
+        draw->AddRectFilled({x, origin.y}, {end, bottom}, segment.color);
+        if (!segment.children.empty()) {
+            // Children in proportion to the group, the remainder left as a darker gap.
+            draw->AddRectFilled({x, split}, {end, origin.y + size.y}, IM_COL32(0, 0, 0, 120));
+            float cx = x;
+            for (std::size_t i = 0; i < segment.children.size(); i++) {
+                const float width = segment.ms > 0 ? (end - x) * std::max(segment.children[i].ms, 0.f) / segment.ms : 0;
+                const ImU32 shade = i % 2 ? IM_COL32(0, 0, 0, 60) : IM_COL32(255, 255, 255, 70);
+                draw->AddRectFilled({cx, split}, {std::min(cx + width, end), origin.y + size.y}, segment.color);
+                draw->AddRectFilled({cx, split}, {std::min(cx + width, end), origin.y + size.y}, shade);
+                cx += width;
+            }
+        }
+        if (hovered && ImGui::GetIO().MousePos.x >= x && ImGui::GetIO().MousePos.x < end) {
+            ImGui::BeginTooltip();
+            ImGui::Text("%s: %.2f ms (%.1f%% of the frame)", segment.label, segment.ms, 100 * segment.ms / total);
+            // Each child with its share of the group and of the whole frame.
+            const float group = std::max(segment.ms, 1e-6f);
+            float accounted = 0;
+            for (const auto& child : segment.children) {
+                const float ms = std::max(child.ms, 0.f);
+                ImGui::Text("  %-16s %6.3f ms  %5.1f%% of group  %5.1f%% of frame", child.label, ms, 100 * ms / group,
+                            100 * ms / total);
+                accounted += ms;
+            }
+            if (!segment.children.empty()) {
+                const float rest = std::max(segment.ms - accounted, 0.f);
+                ImGui::TextDisabled("  %-16s %6.3f ms  %5.1f%% of group  %5.1f%% of frame", "barriers, other", rest,
+                                    100 * rest / group, 100 * rest / total);
+            }
+            ImGui::EndTooltip();
+        }
         x = end;
     }
     if (ImGui::BeginTable("##gpu-passes", 2, ImGuiTableFlags_SizingStretchSame)) {

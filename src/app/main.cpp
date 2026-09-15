@@ -134,17 +134,25 @@ struct FrameTimes {
     std::vector<float> cpu_ms, gpu_ms, prepare_ms;
     std::vector<float> cull_ms, body_shadow_ms, belt_light_ms, belt_disc_ms, meter_ms;
     std::vector<float> cull_shadow_ms, surface_ms, atmosphere_ms, post_ms; // GPU pass timings
+    std::vector<float> children[15]; // the groups' children, in the CSV's column order
 };
 
 void write_benchmark(const std::filesystem::path& path, const FrameTimes& times) {
-    std::string csv = "frame,cpu_submit_and_wait_ms,gpu_ms,cpu_prepare_ms,gpu_cull_shadow_ms,gpu_surface_ms,"
-                      "gpu_atmosphere_ms,gpu_post_ms,gpu_cull_ms,gpu_body_shadow_ms,gpu_belt_light_ms,gpu_belt_disc_ms,"
-                      "gpu_meter_ms\n";
-    for (std::size_t i = 0; i < times.cpu_ms.size(); i++)
-        std::format_to(std::back_inserter(csv), "{},{},{},{},{},{},{},{},{},{},{},{},{}\n", i, times.cpu_ms[i],
+    std::string csv =
+        "frame,cpu_submit_and_wait_ms,gpu_ms,cpu_prepare_ms,gpu_cull_shadow_ms,gpu_surface_ms,"
+        "gpu_atmosphere_ms,gpu_post_ms,gpu_cull_ms,gpu_body_shadow_ms,gpu_belt_light_ms,gpu_belt_disc_ms,"
+        "gpu_meter_ms,gpu_surface_sky_ms,gpu_surface_bodies_ms,gpu_surface_rocks_ms,gpu_surface_clouds_ms,"
+        "gpu_atmospheres_ms,gpu_belt_dust_ms,gpu_splat_mask_ms,gpu_temporal_ms,gpu_streaks_ms,gpu_bloom_ms,"
+        "gpu_sun_visibility_ms,gpu_flare_ms,gpu_composite_ms,gpu_spatial_aa_ms,gpu_present_ms\n";
+    for (std::size_t i = 0; i < times.cpu_ms.size(); i++) {
+        std::format_to(std::back_inserter(csv), "{},{},{},{},{},{},{},{},{},{},{},{},{}", i, times.cpu_ms[i],
                        times.gpu_ms[i], times.prepare_ms[i], times.cull_shadow_ms[i], times.surface_ms[i],
                        times.atmosphere_ms[i], times.post_ms[i], times.cull_ms[i], times.body_shadow_ms[i],
                        times.belt_light_ms[i], times.belt_disc_ms[i], times.meter_ms[i]);
+        for (const auto& child : times.children)
+            std::format_to(std::back_inserter(csv), ",{}", child[i]);
+        csv += '\n';
+    }
     if (!file::write_text(path, csv))
         log::error("cannot write benchmark {}", path.string());
     auto sorted = times.cpu_ms;
@@ -301,6 +309,13 @@ unsigned frame_loop(const Session& session, FrameTimes& times) {
                 times.belt_light_ms.push_back(stats.belt_light_ms);
                 times.belt_disc_ms.push_back(stats.belt_disc_ms);
                 times.meter_ms.push_back(stats.meter_ms);
+                const float children[15] = {stats.surface_sky_ms,    stats.surface_bodies_ms, stats.surface_rocks_ms,
+                                            stats.surface_clouds_ms, stats.atmospheres_ms,    stats.belt_dust_ms,
+                                            stats.splat_mask_ms,     stats.temporal_ms,       stats.streaks_ms,
+                                            stats.bloom_ms,          stats.sun_visibility_ms, stats.flare_ms,
+                                            stats.composite_ms,      stats.spatial_aa_ms,     stats.present_ms};
+                for (std::size_t c = 0; c < 15; c++)
+                    times.children[c].push_back(children[c]);
                 times.surface_ms.push_back(stats.surface_ms);
                 times.atmosphere_ms.push_back(stats.atmosphere_ms);
                 times.post_ms.push_back(stats.post_ms);
@@ -370,6 +385,8 @@ int run(const Options& options) {
         times.belt_light_ms.reserve(times.cpu_ms.capacity());
         times.belt_disc_ms.reserve(times.cpu_ms.capacity());
         times.meter_ms.reserve(times.cpu_ms.capacity());
+        for (auto& child : times.children)
+            child.reserve(times.cpu_ms.capacity());
         times.surface_ms.reserve(times.cpu_ms.capacity());
         times.atmosphere_ms.reserve(times.cpu_ms.capacity());
         times.post_ms.reserve(times.cpu_ms.capacity());
