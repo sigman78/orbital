@@ -316,6 +316,10 @@ int run(const Options& options) {
                                        history, benchmark ? &*benchmark : nullptr);
     if (benchmark)
         benchmark->finish();
+    // The meter's last reading, so a scripted run can check where each view lands.
+    if (const auto& exposure = renderer.stats().exposure; app.tone.auto_exposure && exposure.ready)
+        log::info("Exposure: metered {:.4f}, peak {:.2f}, target {:.2f}x, adapted {:.2f}x", exposure.luminance,
+                  exposure.peak_luminance, exposure.target, exposure.adapted);
     log::info("Completed {} frames.", frames);
     return 0;
 }

@@ -16,7 +16,13 @@ and DLL hash. No global driver installation or registry changes are required.
 ctest --test-dir build/release --output-on-failure
 python tools/check-renderer.py --build build/release --gpu-assisted --output .scratch/render-validation-gpu
 python tools/check-motion-streaks.py --build build/release
+python tools/check-exposure.py
 ```
+
+`check-exposure.py` runs the six bookmarks with the auto exposure on and compares the
+meter's request at each, in stops, against the band recorded in the script from the
+reviewed readings (half a stop of slack), so a meter change that moves a view a stop
+from where it was reviewed fails; the captures are kept for a look.
 
 Requirements: Windows desktop GPU, MSVC/CMake/Ninja, Python with Pillow; the motion
 fixture also needs NumPy and the local Slang compiler. Set `ORBITAL_VCVARS` when MSVC
