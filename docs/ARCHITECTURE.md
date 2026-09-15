@@ -84,7 +84,12 @@ Between the rocks a half-resolution march through the same density field scatter
    brightens the film where the sun's direction grazes the pane.
    Tone mapping (PBR Neutral, AgX or ACES filmic) with vignette, chromatic fringe and grain into an
    intermediate, then the spatial pass (SMAA or FXAA) into the final image.
-8. Present, with the HUD and the Dear ImGui panel drawn last into the swapchain.
+8. Present, with the HUD and the Dear ImGui panel drawn last into the swapchain. The swapchain is
+   8-bit sRGB by default; with Output set to scRGB or HDR10 (Tone panel, `--hdr`) it is 16-bit float
+   extended linear sRGB or 10-bit PQ, the intermediates become 16-bit float holding the composite's
+   linear display value over the headroom (so the spatial pass, grain and dither see SDR values),
+   the neutral curve's shoulder extends to the headroom, and the present and overlay passes decode and
+   scale by the paper white and encode for the colour space. Captures clip at the curve's white.
 
 Scoped GPU timings separately bracket compute culling, body shadows, belt light maps, far-belt bakes, the scene,
 atmospheres with dust, and post-processing. The original cull/shadow aggregate is retained in the panel and CSV.
@@ -109,7 +114,8 @@ enforced and the control that scales it.
   their Sun & lens strengths; the Lens flare switch removes the stack and keeps the glare.
 - **The curve is the published PBR Neutral.** Black offset 1.0 by default (Post FX slider
   scales the subtraction); the per-curve exposure trims, the meter key and the adaptation
-  range are Tone panel controls. The published subtraction also removes faint coloured
+  range are Tone panel controls. On an HDR output the image below the curve's white is the
+  SDR image exactly; only the shoulder above it reaches for the display's peak. The published subtraction also removes faint coloured
   light such as the Milky Way band: the intended remedy is scene-driven exposure
   adaptation that brings the sky up when no bright body is in view, not a lifted black.
 - **Contrast reference.** The Sep 11 screenshots (`docs/images` at 7c9535b) are the target:

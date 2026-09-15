@@ -14,7 +14,7 @@ inline constexpr std::string_view usage =
     "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --pan-stop-frame N "
     "--rocks N --sun-at X Y (turn the camera so the sun projects there, 1 the frame edge; for lens review)\n"
     "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --disc 0|1 --lod-scale X --vsync 0|1 --splat 0..3 --tone "
-    "0|1|2 "
+    "0|1|2 --hdr 0|1|2 (SDR, scRGB, HDR10; needs the OS in HDR) "
     "--maximize-at N "
     "--fullscreen-at "
     "N\n"
@@ -47,6 +47,7 @@ struct Options {
     unsigned galaxy = unsigned(render::SkySettings{}.galaxy_mode);
     unsigned splat = unsigned(render::BeltSettings{}.splat_mode); // initial splat cut-off index
     unsigned tone = unsigned(render::ToneSettings{}.tone_curve);  // initial tone curve (PBR Neutral)
+    unsigned hdr = unsigned(render::ToneSettings{}.hdr_output);   // swapchain output: 0 SDR, 1 scRGB, 2 HDR10
     unsigned pan_stop_frame = 0;                                  // deterministic movement-to-rest regression
     float pan = 0;            // lateral drift as a fraction of the flight speed, stepped at a fixed 60 Hz for captures
     unsigned maximize_at = 0; // > 0 maximizes the window after this many frames, to test resizing in captures

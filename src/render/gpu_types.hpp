@@ -25,6 +25,6 @@ static_assert(offsetof(CullScratch, instances) == sizeof(CullParams) &&
               offsetof(CullScratch, counts) == sizeof(CullParams) + 8);
 static_assert(offsetof(CullScratch, draw_count) == sizeof(CullParams) + 8 + 8 * (ORBITAL_ROCK_GROUPS + 1));
 static_assert(offsetof(CullScratch, args) == offsetof(CullScratch, draw_count) + 16);
-static_assert(offsetof(FrameData, camera_time) == 64 && sizeof(FrameData) == 1056);
+static_assert(offsetof(FrameData, camera_time) == 64 && sizeof(FrameData) == 1072);
 static_assert(std::is_trivially_copyable_v<FrameData>);
 } // namespace space::render

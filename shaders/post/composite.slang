@@ -109,8 +109,17 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float3 veil = float3(1.0, .6, .3) * vis * .014 * lens.x / (dist * dist + .012) * exp(-dist * 1.5)
                   + lerp(float3(luma709(flare)), flare, root.frame.lens_stack.y);
     float exposure = root.frame.forward_exposure.w;
-    color = toneMap(color * exposure, veil * exposure, uint(root.frame.quality.y + .5), root.frame.post_more.z);
+    // HDR output: the curve's shoulder reaches the headroom (peak over paper
+    // white) instead of the curve's white; the 16-bit float intermediate then
+    // holds the linear display value over the headroom, so the spatial
+    // anti-aliasing, grain and dither see the same 0..1 values they do in SDR,
+    // and the present pass scales it by the paper white.
+    bool hdr = root.frame.display.x > 0.0;
+    float headroom = hdr ? max(root.frame.display.z, 1.0) : 1.0;
+    uint curve = uint(root.frame.quality.y + .5);
+    color = toneMap(color * exposure, veil * exposure, curve, root.frame.post_more.z, headroom);
     color *= 1.0 - root.frame.post_more.x * pow(length(p * .65), 2.0);
+    color /= headroom; // from here on the display value over the headroom, 0..1
     // Dither and grain in display-code space; linear-space noise is far too
     // bright in black space. Grain is strongest in the midtones.
     float luminance = luma709(color);
@@ -121,7 +130,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         float2 hp = (position.xy - float2(32.0, 26.0)) / float2(1024.0, 256.0);
         if (all(hp >= float2(0.0, 0.0)) && all(hp < float2(1.0, 1.0))) {
             float a = textures[TEX_HUD].Sample(samplers[SAMPLER_CLAMP], hp).a;
-            color = lerp(color, float3(.68, .75, .81), a * .8);
+            color = lerp(color, float3(.68, .75, .81) / headroom, a * .8);
         }
     }
     float3 encoded=linearToSRGB(color);

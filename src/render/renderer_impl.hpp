@@ -138,7 +138,7 @@ constexpr SurfaceKind surface_kind(BodyClass body_class) {
 // Culling counters and generated instances live in a separate device-only heap.
 struct HeapLayout {
     std::uint64_t dynamic_offset = 80ull << 20; // static mesh/rock records before this point
-    std::uint64_t cull_offset = 1280;           // FrameData (1056 bytes, padded), then culling parameters/counters
+    std::uint64_t cull_offset = 1280;           // FrameData (1072 bytes, padded), then culling parameters/counters
     std::uint64_t instance_offset = 1280 + 8192;
     std::uint64_t staging_budget = 64ull << 20; // bounded texture upload staging
     std::uint64_t ui_bytes = 4ull << 20;
@@ -276,18 +276,39 @@ struct Renderer::Impl {
         struct {
             gpu::PSO* bloom = nullptr;
             gpu::PSO* composite = nullptr;
+            gpu::PSO* composite_hdr = nullptr; // the HDR variants target the 16-bit float intermediates
             gpu::PSO* sun_visibility = nullptr;
             gpu::PSO* flare = nullptr;
             gpu::PSO* present = nullptr;
+            gpu::PSO* present_scrgb = nullptr; // the present and overlay pipelines follow the swapchain's format
+            gpu::PSO* present_hdr10 = nullptr;
             gpu::PSO* meter = nullptr;
             gpu::PSO* temporal = nullptr;
             gpu::PSO* fxaa = nullptr;
+            gpu::PSO* fxaa_hdr = nullptr;
             gpu::PSO* smaa_edges = nullptr;
             gpu::PSO* smaa_weights = nullptr;
             gpu::PSO* smaa_blend = nullptr;
+            gpu::PSO* smaa_blend_hdr = nullptr;
         } post;
         gpu::PSO* ui = nullptr;
+        gpu::PSO* ui_scrgb = nullptr;
+        gpu::PSO* ui_hdr10 = nullptr;
     } pso;
+    // The HDR output in effect, and the pipelines and formats that follow it.
+    HdrOutput hdr_output = HdrOutput::Off;
+    HdrOutput hdr_requested = HdrOutput::Off; // the last request, so an unsupported one is not re-queried every frame
+    unsigned ui_display = 0;                  // the overlay's output encoding: mode in the low byte, paper white above
+    bool hdr() const { return hdr_output != HdrOutput::Off; }
+    gpu::Format intermediate_format() const { return hdr() ? gpu::Format::rgba16_float : gpu::Format::rgba8_srgb; }
+    gpu::PSO* present_pso() const {
+        return hdr_output == HdrOutput::ScRgb   ? pso.post.present_scrgb
+               : hdr_output == HdrOutput::Hdr10 ? pso.post.present_hdr10
+                                                : pso.post.present;
+    }
+    gpu::PSO* ui_pso() const {
+        return hdr_output == HdrOutput::ScRgb ? pso.ui_scrgb : hdr_output == HdrOutput::Hdr10 ? pso.ui_hdr10 : pso.ui;
+    }
     gpu::PSO* surface_pso(SurfaceKind kind) const {
         switch (kind) {
         case SurfaceKind::earth: return pso.scene.surface_earth;
@@ -353,6 +374,7 @@ struct Renderer::Impl {
     void create_samplers();
     void create_fixed_targets();
     void resize(Extent2D new_extent, unsigned galaxy_divisor, unsigned flare_divisor);
+    void set_hdr_output(HdrOutput mode);
     void resize_galaxy(unsigned divisor);
     void resize_flare(unsigned divisor);
     unsigned galaxy_divisor = 4, flare_divisor = 4;

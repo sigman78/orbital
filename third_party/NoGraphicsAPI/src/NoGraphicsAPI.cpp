@@ -1503,6 +1503,7 @@ struct Swapchain
     uint32 width = 0;
     uint32 height = 0;
     Format format = Format::bgra8_srgb;
+    ColorSpace color_space = ColorSpace::srgb_nonlinear;
     VkSurfaceTransformFlagBitsKHR transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     VkCompositeAlphaFlagBitsKHR composite_alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     detail::PresentContext* present_context = nullptr;
@@ -1830,6 +1831,10 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     const bool ext_surface_maintenance1 = presentation && has_name(
         {instance_extensions, instance_extension_count},
         VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+    // Lists the HDR colour spaces among the surface formats; without it only sRGB non-linear is offered.
+    const bool ext_swapchain_colorspace = presentation && has_name(
+        {instance_extensions, instance_extension_count},
+        VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
     if (presentation &&
         (!has_name({instance_extensions, instance_extension_count},
                    VK_KHR_SURFACE_EXTENSION_NAME) ||
@@ -1886,6 +1891,8 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
             enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
         if (ext_surface_maintenance1)
             enabled_instance_extensions[enabled_instance_extension_count++] = VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
+        if (ext_swapchain_colorspace)
+            enabled_instance_extensions[enabled_instance_extension_count++] = VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME;
     }
 #endif
 
@@ -2153,6 +2160,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         state->swapchain = new Swapchain;
         state->swapchain->state = state;
         state->swapchain->format = desc.swapchain_format;
+        state->swapchain->color_space = desc.swapchain_color_space;
         state->swapchain->vsync = desc.vsync;
         error = recreate_swapchain(*state->swapchain);
         if (error != Error::none)
@@ -2404,6 +2412,17 @@ VkPresentModeKHR choose_present_mode(const Device& device, bool vsync) noexcept
     return immediate ? VK_PRESENT_MODE_IMMEDIATE_KHR : mailbox ? VK_PRESENT_MODE_MAILBOX_KHR : VK_PRESENT_MODE_FIFO_KHR;
 }
 
+VkColorSpaceKHR to_vk(ColorSpace color_space) noexcept
+{
+    switch (color_space)
+    {
+    case ColorSpace::extended_srgb_linear: return VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT;
+    case ColorSpace::hdr10_st2084: return VK_COLOR_SPACE_HDR10_ST2084_EXT;
+    case ColorSpace::srgb_nonlinear: break;
+    }
+    return VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+}
+
 Error recreate_swapchain(Swapchain& swapchain) noexcept
 {
     Device& device = *swapchain.state;
@@ -2458,7 +2477,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
     {
         if ((formats[index].format == requested_format ||
              formats[index].format == VK_FORMAT_UNDEFINED) &&
-            formats[index].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+            formats[index].colorSpace == to_vk(swapchain.color_space))
         {
             format_supported = true;
             break;
@@ -2485,7 +2504,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
         .surface = device.surface,
         .minImageCount = requested_image_count,
         .imageFormat = requested_format,
-        .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+        .imageColorSpace = to_vk(swapchain.color_space),
         .imageExtent = extent,
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
@@ -2581,12 +2600,46 @@ void set_vsync(Device* device, bool vsync) noexcept
     device->swapchain->recreate_required = true;
 }
 
+bool surface_format_supported(Device* device, Format format, ColorSpace color_space) noexcept
+{
+    assert(device && "surface_format_supported called with a null device");
+    if (!device->swapchain || device->surface == VK_NULL_HANDLE)
+        return false;
+    VkSurfaceFormatKHR formats[max_surface_formats]{};
+    uint32 count = 0;
+    if (vkGetPhysicalDeviceSurfaceFormatsKHR(device->physical_device, device->surface, &count, nullptr) != VK_SUCCESS ||
+        count == 0 || count > max_surface_formats)
+        return false;
+    if (vkGetPhysicalDeviceSurfaceFormatsKHR(device->physical_device, device->surface, &count, formats) != VK_SUCCESS)
+        return false;
+    const VkFormat vk_format = to_vk(format);
+    const VkColorSpaceKHR vk_color_space = to_vk(color_space);
+    for (uint32 index = 0; index < count; ++index)
+        if ((formats[index].format == vk_format || formats[index].format == VK_FORMAT_UNDEFINED) &&
+            formats[index].colorSpace == vk_color_space)
+            return true;
+    return false;
+}
+
+void set_swapchain_output(Device* device, Format format, ColorSpace color_space) noexcept
+{
+    assert(device && "set_swapchain_output called with a null device");
+    if (!device->swapchain ||
+        (device->swapchain->format == format && device->swapchain->color_space == color_space))
+        return;
+    device->swapchain->format = format;
+    device->swapchain->color_space = color_space;
+    device->swapchain->recreate_required = true;
+}
+
 SwapchainInfo get_swapchain_info(const Device* device) noexcept
 {
     SwapchainInfo info{};
     if (!device || !device->swapchain)
         return info;
     const Swapchain& swapchain = *device->swapchain;
+    info.format = swapchain.format;
+    info.color_space = swapchain.color_space;
     info.present_mode = swapchain.present_mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? PresentMode::immediate
                       : swapchain.present_mode == VK_PRESENT_MODE_MAILBOX_KHR ? PresentMode::mailbox
                                                                                : PresentMode::fifo;

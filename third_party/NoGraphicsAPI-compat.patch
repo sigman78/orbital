@@ -64,7 +64,7 @@ diff --git i/include/NoGraphicsAPI/NoGraphicsAPI.hpp w/include/NoGraphicsAPI/NoG
      case Format::undefined: return {};
      }
      return {};
-@@ -433,20 +439,27 @@ struct DeviceCaps
+@@ -433,20 +439,35 @@ struct DeviceCaps
      uint64 texture_descriptor_size = 0; // Bytes per descriptor slot.
      uint64 sampler_descriptor_size = 0; // Bytes per descriptor slot.
      float timestamp_period_ns = 0.0f; // Nanoseconds per timestamp tick.
@@ -80,6 +80,13 @@ diff --git i/include/NoGraphicsAPI/NoGraphicsAPI.hpp w/include/NoGraphicsAPI/NoG
 +    bool storage_image_read_without_format = false;
  };
  
++// The swapchain's colour space (conventional backend addition, for HDR output):
++// sRGB non-linear for 8-bit formats, extended linear sRGB (scRGB, 1.0 = 80 nits)
++// with a 16-bit float format, or HDR10 (SMPTE ST 2084 PQ, Rec. 2020) with a
++// 10-bit format. The surface offers the HDR pairs only when the OS presents in
++// HDR; see surface_format_supported.
++enum class ColorSpace : uint8 { srgb_nonlinear, extended_srgb_linear, hdr10_st2084 };
++
  // A windowed device and every call using it must remain on the native
  // window's message-pump thread. The window must outlive the device.
  struct DeviceDesc
@@ -87,13 +94,14 @@ diff --git i/include/NoGraphicsAPI/NoGraphicsAPI.hpp w/include/NoGraphicsAPI/NoG
 -    void* window = nullptr;
 +    void* window = nullptr; // HWND on Windows; SDL_Window* on Linux; null for a device without presentation.
      Format swapchain_format = Format::undefined;
++    ColorSpace swapchain_color_space = ColorSpace::srgb_nonlinear; // conventional backend addition
      uint32 desired_swapchain_image_count = 2; // 1..8 presentation contexts.
      uint32 timestamp_query_count = 256; // Per command buffer; zero disables timestamps.
 +    bool vsync = true; // FIFO presentation; false selects mailbox when available, else immediate (conventional backend addition).
  };
  
  struct DeviceInit
-@@ -648,6 +661,16 @@ void destroy_device(Device* device) noexcept;
+@@ -648,6 +669,23 @@ void destroy_device(Device* device) noexcept;
  [[nodiscard]] const DeviceCaps& get_device_caps(const Device* device) noexcept;
  [[nodiscard]] bool supports_texture_format(const Device* device, Format format, TextureUsage usage) noexcept;
  [[nodiscard]] uint32x2 get_drawable_extent(Device* device) noexcept;
@@ -104,13 +112,20 @@ diff --git i/include/NoGraphicsAPI/NoGraphicsAPI.hpp w/include/NoGraphicsAPI/NoG
 +{
 +    PresentMode present_mode = PresentMode::fifo;
 +    uint32 image_count = 0;
++    Format format = Format::undefined;
++    ColorSpace color_space = ColorSpace::srgb_nonlinear;
 +};
 +// What the driver granted at the last (re)creation.
 +[[nodiscard]] SwapchainInfo get_swapchain_info(const Device* device) noexcept;
++// Conventional backend additions for HDR output: whether the surface offers a
++// format and colour space pair, and switching the swapchain to one (recreated
++// on the next acquire; check support first, an unsupported pair fails there).
++[[nodiscard]] bool surface_format_supported(Device* device, Format format, ColorSpace color_space) noexcept;
++void set_swapchain_output(Device* device, Format format, ColorSpace color_space) noexcept;
  
  [[nodiscard]] TimelineSemaphore* create_timeline_semaphore(Device* device, uint64 initial_value = 0) noexcept;
  void destroy_timeline_semaphore(TimelineSemaphore* semaphore) noexcept;
-@@ -728,6 +751,10 @@ void draw_indexed(CommandBuffer* commands, ByteSpan root, GpuRange indices, Inde
+@@ -728,6 +766,10 @@ void draw_indexed(CommandBuffer* commands, ByteSpan root, GpuRange indices, Inde
  void draw_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments, uint32 draw_count = 1, uint32 stride = 0) noexcept;
  void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indices, IndexType type, GpuRange arguments, uint32 draw_count = 1,
                             uint32 stride = 0) noexcept;
@@ -278,7 +293,14 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      create_backing_buffer(heap->backing, backing_size, universal_buffer_usage | VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT, cpu_visible_memory_properties, 0);
  
      const VkDeviceAddress gpu_address = align_up(heap->backing.address, allocation_alignment);
-@@ -1467,6 +1509,8 @@ struct Swapchain
+@@ -1461,12 +1503,15 @@ struct Swapchain
+     uint32 width = 0;
+     uint32 height = 0;
+     Format format = Format::bgra8_srgb;
++    ColorSpace color_space = ColorSpace::srgb_nonlinear;
+     VkSurfaceTransformFlagBitsKHR transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+     VkCompositeAlphaFlagBitsKHR composite_alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+     detail::PresentContext* present_context = nullptr;
      CommandBuffer* transition_commands = nullptr;
      bool acquired = false;
      bool recreate_required = false;
@@ -287,7 +309,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
  
      Swapchain() = default;
      Swapchain(const Swapchain&) = delete;
-@@ -1550,13 +1594,13 @@ struct QueriedFeatures
+@@ -1550,13 +1595,13 @@ struct QueriedFeatures
      VkPhysicalDeviceMeshShaderFeaturesEXT mesh_shader{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
      VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swapchain_maintenance1{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR};
  
@@ -303,7 +325,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          descriptor_heap.pNext = &address_commands;
          address_commands.pNext = &untyped_pointers;
          untyped_pointers.pNext = include_unified_image_layouts ? static_cast<void*>(&unified_image_layouts) : static_cast<void*>(&mesh_shader);
-@@ -1569,6 +1613,7 @@ struct Candidate
+@@ -1569,6 +1614,7 @@ struct Candidate
  {
      VkPhysicalDevice physical_device = VK_NULL_HANDLE;
      uint32 queue_family = 0;
@@ -311,7 +333,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      VkPhysicalDeviceProperties properties{};
      VkPhysicalDeviceMemoryProperties memory_properties{};
      bool unified_image_layouts = false;
-@@ -1578,6 +1623,8 @@ struct Candidate
+@@ -1578,6 +1624,8 @@ struct Candidate
      bool texture_compression_etc2 = false;
      bool storage_input_output16 = false;
      bool khr_swapchain_maintenance1 = false;
@@ -320,7 +342,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      VkPhysicalDeviceDescriptorHeapPropertiesEXT heap_properties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT};
      VkPhysicalDeviceVulkan12Properties vulkan12_properties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
  };
-@@ -1599,11 +1646,18 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+@@ -1599,11 +1647,18 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
          VK_KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME,
          VK_EXT_MESH_SHADER_EXTENSION_NAME,
      };
@@ -340,7 +362,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const bool khr_swapchain_maintenance1 = khr_surface_maintenance1 &&
                                              has_name({extensions, extension_count}, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
      const bool ext_swapchain_maintenance1 = ext_surface_maintenance1 &&
-@@ -1617,6 +1671,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+@@ -1617,6 +1672,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
  
      Candidate result{
          .physical_device = physical_device,
@@ -348,7 +370,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      };
      result.heap_properties.pNext = &result.vulkan12_properties;
      VkPhysicalDeviceProperties2 properties2{
-@@ -1643,7 +1698,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+@@ -1643,7 +1699,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
      }
      if (!cpu_visible_memory) return Error::unsupported;
  
@@ -357,7 +379,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      vkGetPhysicalDeviceFeatures2(physical_device, &features.core);
      const bool required_features =
          features.core.features.shaderInt16 == VK_TRUE &&
-@@ -1652,25 +1707,27 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+@@ -1652,25 +1708,27 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
          features.core.features.independentBlend == VK_TRUE &&
          features.core.features.fragmentStoresAndAtomics == VK_TRUE &&
          features.core.features.vertexPipelineStoresAndAtomics == VK_TRUE &&
@@ -389,7 +411,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          (features.core.features.textureCompressionBC == VK_TRUE ||
           features.core.features.textureCompressionASTC_LDR == VK_TRUE) &&
          (!surface || features.swapchain_maintenance1.swapchainMaintenance1 == VK_TRUE);
-@@ -1682,6 +1739,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+@@ -1682,6 +1740,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
      result.texture_compression_astc = features.core.features.textureCompressionASTC_LDR == VK_TRUE;
      result.texture_compression_etc2 = features.core.features.textureCompressionETC2 == VK_TRUE;
      result.storage_input_output16 = features.vulkan11.storageInputOutput16 == VK_TRUE;
@@ -397,7 +419,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      result.khr_swapchain_maintenance1 = khr_swapchain_maintenance1;
  
      uint32 available_queue_count = 0;
-@@ -1695,7 +1753,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+@@ -1695,7 +1754,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
      constexpr VkQueueFlags required_queue_flags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
      for (uint32 index = 0; index < queue_count; ++index)
      {
@@ -406,7 +428,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
              (queues[index].queueFlags & required_queue_flags) != required_queue_flags)
              continue;
          VkBool32 presentation_supported = VK_TRUE;
-@@ -1715,6 +1773,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+@@ -1715,6 +1774,7 @@ Error inspect_candidate(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
          return Error::unsupported;
  
      result.queue_family = queue_family;
@@ -414,7 +436,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      output = result;
      return Error::none;
  }
-@@ -1743,7 +1802,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1743,7 +1803,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      const bool presentation = desc.window != nullptr;
      assert(desc.desired_swapchain_image_count != 0 && desc.desired_swapchain_image_count <= max_swapchain_images &&
             "swapchain image count must fit the wrapper's presentation context array");
@@ -423,7 +445,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      if (presentation)
          return {.error = Error::unsupported};
  #endif
-@@ -1756,6 +1815,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1756,6 +1816,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
          return { .error = Error::unsupported };
  
      Device* state = new Device;
@@ -431,7 +453,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      state->timestamp_query_count = desc.timestamp_query_count;
      state->present_context_count = presentation ? desc.desired_swapchain_image_count : 0;
      VkExtensionProperties instance_extensions[max_instance_extensions]{};
-@@ -1763,7 +1823,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1763,18 +1824,24 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      error = enumerate_instance_extensions({instance_extensions, max_instance_extensions}, instance_extension_count);
      if (error != Error::none)
          return fail_device_creation(state, error);
@@ -440,7 +462,13 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const bool khr_surface_maintenance1 = presentation && has_name(
          {instance_extensions, instance_extension_count},
          VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
-@@ -1773,8 +1833,10 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+     const bool ext_surface_maintenance1 = presentation && has_name(
+         {instance_extensions, instance_extension_count},
+         VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
++    // Lists the HDR colour spaces among the surface formats; without it only sRGB non-linear is offered.
++    const bool ext_swapchain_colorspace = presentation && has_name(
++        {instance_extensions, instance_extension_count},
++        VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
      if (presentation &&
          (!has_name({instance_extensions, instance_extension_count},
                     VK_KHR_SURFACE_EXTENSION_NAME) ||
@@ -451,7 +479,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
           !has_name({instance_extensions, instance_extension_count},
                     VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME) ||
           (!khr_surface_maintenance1 && !ext_surface_maintenance1)))
-@@ -1795,7 +1857,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1795,7 +1862,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      const bool validation_available = has_name({layers, layer_count}, "VK_LAYER_KHRONOS_validation");
  #endif
  
@@ -460,7 +488,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      uint32 enabled_instance_extension_count = 0;
      const char* enabled_layers[1]{};
      uint32 enabled_layer_count = 0;
-@@ -1803,11 +1865,22 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1803,16 +1870,29 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      if (debug_utils_available) enabled_instance_extensions[enabled_instance_extension_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
      if (validation_available) enabled_layers[enabled_layer_count++] = "VK_LAYER_KHRONOS_validation";
  #endif
@@ -484,7 +512,14 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME;
          if (khr_surface_maintenance1)
              enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
-@@ -1871,6 +1944,11 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+         if (ext_surface_maintenance1)
+             enabled_instance_extensions[enabled_instance_extension_count++] = VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
++        if (ext_swapchain_colorspace)
++            enabled_instance_extensions[enabled_instance_extension_count++] = VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME;
+     }
+ #endif
+ 
+@@ -1871,6 +1951,11 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      }
  #endif
  
@@ -496,7 +531,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      VkPhysicalDevice physical_devices[max_physical_devices]{};
      uint32 physical_device_count = 0;
      error = enumerate_physical_devices(state->instance, {physical_devices, max_physical_devices}, physical_device_count);
-@@ -1897,9 +1975,14 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1897,9 +1982,14 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
              break;
      }
      if (!has_selected)
@@ -511,7 +546,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      state->queue_family = selected.queue_family;
      state->physical_properties = selected.properties;
      state->heap_properties = selected.heap_properties;
-@@ -1912,7 +1995,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1912,7 +2002,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
              state->physical_device, static_cast<Format>(value));
      }
  
@@ -520,7 +555,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      state->texture_compression_etc2 = selected.texture_compression_etc2;
      enabled_features.core.features.imageCubeArray = selected.image_cube_array;
      enabled_features.core.features.samplerAnisotropy = VK_TRUE;
-@@ -1924,7 +2007,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1924,7 +2014,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      enabled_features.core.features.textureCompressionETC2 = selected.texture_compression_etc2;
      enabled_features.core.features.fragmentStoresAndAtomics = VK_TRUE;
      enabled_features.core.features.vertexPipelineStoresAndAtomics = VK_TRUE;
@@ -529,7 +564,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      enabled_features.core.features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
      enabled_features.core.features.multiDrawIndirect = VK_TRUE;
      enabled_features.core.features.drawIndirectFirstInstance = VK_TRUE;
-@@ -1932,19 +2015,21 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1932,19 +2022,21 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      enabled_features.vulkan11.storagePushConstant16 = VK_TRUE;
      enabled_features.vulkan11.storageInputOutput16 = selected.storage_input_output16;
      enabled_features.vulkan11.shaderDrawParameters = VK_TRUE;
@@ -556,7 +591,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      enabled_features.swapchain_maintenance1.swapchainMaintenance1 = VK_TRUE;
  
      constexpr float queue_priority = 1.0f;
-@@ -1956,15 +2041,18 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1956,15 +2048,18 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      };
      const char* enabled_device_extensions[7]{};
      uint32 enabled_device_extension_count = 0;
@@ -580,7 +615,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      if (presentation)
      {
          enabled_device_extensions[enabled_device_extension_count++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
-@@ -1985,6 +2073,25 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -1985,6 +2080,25 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      if (error != Error::none)
          return fail_device_creation(state, error);
      vkGetDeviceQueue(state->device, state->queue_family, 0, &state->queue);
@@ -606,7 +641,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      if (!supports_gpu_heap_memory(*state) || !select_texture_memory_type(*state))
          return fail_device_creation(state, Error::unsupported);
  
-@@ -2004,13 +2111,13 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -2004,13 +2118,13 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
      state->fn.cmd_copy_image_to_memory = load_device_proc<PFN_vkCmdCopyImageToMemoryKHR>(state->device, "vkCmdCopyImageToMemoryKHR");
      state->fn.cmd_copy_query_pool_results_to_memory =
          load_device_proc<PFN_vkCmdCopyQueryPoolResultsToMemoryKHR>(state->device, "vkCmdCopyQueryPoolResultsToMemoryKHR");
@@ -622,7 +657,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      {
          return fail_device_creation(state, Error::driver_error);
      }
-@@ -2027,21 +2134,26 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
+@@ -2027,21 +2141,27 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
  
      state->caps = {
          .device_name = state->physical_properties.deviceName,
@@ -648,11 +683,12 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          state->swapchain = new Swapchain;
          state->swapchain->state = state;
          state->swapchain->format = desc.swapchain_format;
++        state->swapchain->color_space = desc.swapchain_color_space;
 +        state->swapchain->vsync = desc.vsync;
          error = recreate_swapchain(*state->swapchain);
          if (error != Error::none)
              return fail_device_creation(state, error);
-@@ -2127,6 +2239,9 @@ void destroy_gpu_heap(const GpuHeap& heap) noexcept
+@@ -2127,6 +2247,9 @@ void destroy_gpu_heap(const GpuHeap& heap) noexcept
      if (!heap.owner) return;
      assert(heap.owner->state);
      const VkDevice device = heap.owner->state->device;
@@ -662,7 +698,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const detail::BackingBuffer& backing = heap.owner->backing;
      if (backing.mapped) vkUnmapMemory(device, backing.memory);
      vkDestroyBuffer(device, backing.buffer, nullptr);
-@@ -2228,13 +2343,38 @@ VkCompositeAlphaFlagBitsKHR choose_composite_alpha(VkCompositeAlphaFlagsKHR supp
+@@ -2228,13 +2351,38 @@ VkCompositeAlphaFlagBitsKHR choose_composite_alpha(VkCompositeAlphaFlagsKHR supp
      abort();
  }
  
@@ -702,7 +738,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const uint32 variable_extent = UINT_MAX;
      return extent.width == variable_extent ||
             extent.height == variable_extent ||
-@@ -2244,13 +2384,34 @@ VkCompositeAlphaFlagBitsKHR choose_composite_alpha(VkCompositeAlphaFlagsKHR supp
+@@ -2244,13 +2392,45 @@ VkCompositeAlphaFlagBitsKHR choose_composite_alpha(VkCompositeAlphaFlagsKHR supp
             choose_composite_alpha(capabilities.supportedCompositeAlpha) != swapchain.composite_alpha;
  }
  
@@ -726,6 +762,17 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
 +    return immediate ? VK_PRESENT_MODE_IMMEDIATE_KHR : mailbox ? VK_PRESENT_MODE_MAILBOX_KHR : VK_PRESENT_MODE_FIFO_KHR;
 +}
 +
++VkColorSpaceKHR to_vk(ColorSpace color_space) noexcept
++{
++    switch (color_space)
++    {
++    case ColorSpace::extended_srgb_linear: return VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT;
++    case ColorSpace::hdr10_st2084: return VK_COLOR_SPACE_HDR10_ST2084_EXT;
++    case ColorSpace::srgb_nonlinear: break;
++    }
++    return VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
++}
++
  Error recreate_swapchain(Swapchain& swapchain) noexcept
  {
      Device& device = *swapchain.state;
@@ -738,7 +785,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      };
      const VkPhysicalDeviceSurfaceInfo2KHR surface_info{
          .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR,
-@@ -2265,7 +2426,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
+@@ -2265,7 +2445,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
          return error;
      const VkSurfaceCapabilitiesKHR& capabilities = capabilities_info.surfaceCapabilities;
  
@@ -747,7 +794,16 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      if (extent.width == UINT_MAX)
          return Error::unsupported;
      if (extent.width == 0 || extent.height == 0)
-@@ -2316,7 +2477,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
+@@ -2297,7 +2477,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
+     {
+         if ((formats[index].format == requested_format ||
+              formats[index].format == VK_FORMAT_UNDEFINED) &&
+-            formats[index].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
++            formats[index].colorSpace == to_vk(swapchain.color_space))
+         {
+             format_supported = true;
+             break;
+@@ -2316,7 +2496,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
      const VkSwapchainPresentModesCreateInfoKHR present_modes_info{
          .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_KHR,
          .presentModeCount = 1,
@@ -756,7 +812,15 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      };
      const VkSwapchainCreateInfoKHR create_info{
          .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-@@ -2331,7 +2492,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
+@@ -2324,14 +2504,14 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
+         .surface = device.surface,
+         .minImageCount = requested_image_count,
+         .imageFormat = requested_format,
+-        .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
++        .imageColorSpace = to_vk(swapchain.color_space),
+         .imageExtent = extent,
+         .imageArrayLayers = 1,
+         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
          .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
          .preTransform = capabilities.currentTransform,
          .compositeAlpha = composite_alpha,
@@ -765,7 +829,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          .clipped = VK_TRUE,
          .oldSwapchain = old_handle,
      };
-@@ -2411,6 +2572,28 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
+@@ -2411,6 +2591,62 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
  
  } // namespace
  
@@ -778,12 +842,46 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
 +    device->swapchain->recreate_required = true;
 +}
 +
++bool surface_format_supported(Device* device, Format format, ColorSpace color_space) noexcept
++{
++    assert(device && "surface_format_supported called with a null device");
++    if (!device->swapchain || device->surface == VK_NULL_HANDLE)
++        return false;
++    VkSurfaceFormatKHR formats[max_surface_formats]{};
++    uint32 count = 0;
++    if (vkGetPhysicalDeviceSurfaceFormatsKHR(device->physical_device, device->surface, &count, nullptr) != VK_SUCCESS ||
++        count == 0 || count > max_surface_formats)
++        return false;
++    if (vkGetPhysicalDeviceSurfaceFormatsKHR(device->physical_device, device->surface, &count, formats) != VK_SUCCESS)
++        return false;
++    const VkFormat vk_format = to_vk(format);
++    const VkColorSpaceKHR vk_color_space = to_vk(color_space);
++    for (uint32 index = 0; index < count; ++index)
++        if ((formats[index].format == vk_format || formats[index].format == VK_FORMAT_UNDEFINED) &&
++            formats[index].colorSpace == vk_color_space)
++            return true;
++    return false;
++}
++
++void set_swapchain_output(Device* device, Format format, ColorSpace color_space) noexcept
++{
++    assert(device && "set_swapchain_output called with a null device");
++    if (!device->swapchain ||
++        (device->swapchain->format == format && device->swapchain->color_space == color_space))
++        return;
++    device->swapchain->format = format;
++    device->swapchain->color_space = color_space;
++    device->swapchain->recreate_required = true;
++}
++
 +SwapchainInfo get_swapchain_info(const Device* device) noexcept
 +{
 +    SwapchainInfo info{};
 +    if (!device || !device->swapchain)
 +        return info;
 +    const Swapchain& swapchain = *device->swapchain;
++    info.format = swapchain.format;
++    info.color_space = swapchain.color_space;
 +    info.present_mode = swapchain.present_mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? PresentMode::immediate
 +                      : swapchain.present_mode == VK_PRESENT_MODE_MAILBOX_KHR ? PresentMode::mailbox
 +                                                                               : PresentMode::fifo;
@@ -794,7 +892,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
  uint32x2 get_drawable_extent(Device* device) noexcept
  {
      assert(device && "get_drawable_extent called with a null device");
-@@ -2423,7 +2606,7 @@ uint32x2 get_drawable_extent(Device* device) noexcept
+@@ -2423,7 +2659,7 @@ uint32x2 get_drawable_extent(Device* device) noexcept
      VkSurfaceCapabilitiesKHR capabilities{};
      const Error error = error_from_vk(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device->physical_device, device->surface, &capabilities));
      require_error(error);
@@ -803,7 +901,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      if (extent.width == UINT_MAX || extent.height == UINT_MAX)
      {
          require_error(Error::unsupported);
-@@ -2644,6 +2827,18 @@ Texture* create_texture(Device* device, const TextureDesc& desc, const TextureHe
+@@ -2644,6 +2880,18 @@ Texture* create_texture(Device* device, const TextureDesc& desc, const TextureHe
  
  void destroy_texture(Texture* texture) noexcept
  {
@@ -822,7 +920,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      delete texture;
  }
  
-@@ -2689,6 +2884,28 @@ void write_texture_descriptor(Device* device, void* cpu_destination, const Textu
+@@ -2689,6 +2937,28 @@ void write_texture_descriptor(Device* device, void* cpu_destination, const Textu
                                const TextureDescriptorDesc& desc) noexcept
  {
      assert(device && texture);
@@ -851,7 +949,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
  
      const VkImageUsageFlags descriptor_usage = static_cast<VkImageUsageFlags>(
          type == TextureDescriptorType::sampled ? VK_IMAGE_USAGE_SAMPLED_BIT : VK_IMAGE_USAGE_STORAGE_BIT);
-@@ -2758,6 +2975,22 @@ void write_sampler_descriptor(Device* device, void* cpu_destination, const Sampl
+@@ -2758,6 +3028,22 @@ void write_sampler_descriptor(Device* device, void* cpu_destination, const Sampl
          .compareOp = static_cast<VkCompareOp>(desc.compare),
          .maxLod = VK_LOD_CLAMP_NONE,
      };
@@ -874,7 +972,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkHostAddressRangeEXT destination{
          .address = cpu_destination,
          .size = static_cast<size_t>(device->heap_properties.samplerDescriptorSize),
-@@ -2881,11 +3114,11 @@ PSO* create_raster_pso(Device* device, Span<const uint32> first_stage_spirv, Spa
+@@ -2881,11 +3167,11 @@ PSO* create_raster_pso(Device* device, Span<const uint32> first_stage_spirv, Spa
      const VkPipelineCreateFlags2CreateInfo flags_info{
          .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO,
          .pNext = &rendering_info,
@@ -888,7 +986,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          .stageCount = fragment_spirv.size ? 2u : 1u,
          .pStages = stages,
          .pVertexInputState = mesh ? nullptr : &vertex_input,
-@@ -2896,6 +3129,7 @@ PSO* create_raster_pso(Device* device, Span<const uint32> first_stage_spirv, Spa
+@@ -2896,6 +3182,7 @@ PSO* create_raster_pso(Device* device, Span<const uint32> first_stage_spirv, Spa
          .pDepthStencilState = &depth_stencil,
          .pColorBlendState = &color_blend,
          .pDynamicState = &dynamic_state,
@@ -896,7 +994,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          .basePipelineIndex = -1,
      };
      PSO* result = new PSO{
-@@ -2920,6 +3154,16 @@ PSO* create_mesh_pso(Device* device, const MeshPSODesc& desc) noexcept
+@@ -2920,6 +3207,16 @@ PSO* create_mesh_pso(Device* device, const MeshPSODesc& desc) noexcept
                               desc.stencil_format, desc.rasterization, true);
  }
  
@@ -913,7 +1011,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
  PSO* create_compute_pso(Device* device, Span<const uint32> compute_spirv) noexcept
  {
      assert(device && "create_compute_pso called with a null device");
-@@ -2941,8 +3185,9 @@ PSO* create_compute_pso(Device* device, Span<const uint32> compute_spirv) noexce
+@@ -2941,8 +3238,9 @@ PSO* create_compute_pso(Device* device, Span<const uint32> compute_spirv) noexce
      };
      const VkComputePipelineCreateInfo pso_info{
          .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
@@ -924,7 +1022,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
          .basePipelineIndex = -1,
      };
      PSO* result = new PSO{
-@@ -3053,6 +3298,20 @@ void submit_commands(Span<CommandBuffer* const> commands, Device* device, Timeli
+@@ -3053,6 +3351,20 @@ void submit_commands(Span<CommandBuffer* const> commands, Device* device, Timeli
          assert((current && current->state == device) && "command buffer batch contains an invalid handle");
          for (uint32 timestamp = 0; timestamp < current->timestamp_count; ++timestamp)
          {
@@ -945,7 +1043,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
              const VkStridedDeviceAddressRangeKHR destination{
                  .address = current->timestamp_destinations[timestamp],
                  .size = sizeof(uint64),
-@@ -3278,6 +3537,9 @@ void bind_pso(CommandBuffer* commands, const PSO* pso) noexcept
+@@ -3278,6 +3590,9 @@ void bind_pso(CommandBuffer* commands, const PSO* pso) noexcept
  {
      assert(commands && pso);
      vkCmdBindPipeline(commands->command_buffer, pso->bind_point, pso->pso);
@@ -955,7 +1053,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
  }
  
  VkDeviceMemoryImageCopyKHR make_texture_copy_region(const Texture& texture, const TextureCopyDesc& copy, GpuRange memory) noexcept
-@@ -3329,6 +3591,12 @@ void emit_root_data(CommandBuffer* commands, ByteSpan root) noexcept
+@@ -3329,6 +3644,12 @@ void emit_root_data(CommandBuffer* commands, ByteSpan root) noexcept
      if (root.size == 0)
          return;
      assert(commands->state);
@@ -968,7 +1066,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkPushDataInfoEXT info{
          .sType = VK_STRUCTURE_TYPE_PUSH_DATA_INFO_EXT,
          .data = {
-@@ -3342,6 +3610,7 @@ void emit_root_data(CommandBuffer* commands, ByteSpan root) noexcept
+@@ -3342,6 +3663,7 @@ void emit_root_data(CommandBuffer* commands, ByteSpan root) noexcept
  void set_texture_descriptor_heap(CommandBuffer* commands, GpuRange heap) noexcept
  {
      assert(commands && commands->state);
@@ -976,7 +1074,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkPhysicalDeviceDescriptorHeapPropertiesEXT& properties = commands->state->heap_properties;
      VkBindHeapInfoEXT bind_info{};
      make_heap_bind_info(
-@@ -3357,6 +3626,7 @@ void set_texture_descriptor_heap(CommandBuffer* commands, GpuRange heap) noexcep
+@@ -3357,6 +3679,7 @@ void set_texture_descriptor_heap(CommandBuffer* commands, GpuRange heap) noexcep
  void set_sampler_descriptor_heap(CommandBuffer* commands, GpuRange heap) noexcept
  {
      assert(commands && commands->state);
@@ -984,7 +1082,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkPhysicalDeviceDescriptorHeapPropertiesEXT& properties = commands->state->heap_properties;
      VkBindHeapInfoEXT bind_info{};
      make_heap_bind_info(heap, properties.samplerDescriptorAlignment, properties.minSamplerHeapReservedRange, bind_info);
-@@ -3499,6 +3769,16 @@ void draw_indexed(CommandBuffer* commands, ByteSpan root, GpuRange indices, Inde
+@@ -3499,6 +3822,16 @@ void draw_indexed(CommandBuffer* commands, ByteSpan root, GpuRange indices, Inde
  {
      assert(commands && commands->state);
      emit_root_data(commands, root);
@@ -1001,7 +1099,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkBindIndexBuffer3InfoKHR bind_info{
          .sType = VK_STRUCTURE_TYPE_BIND_INDEX_BUFFER_3_INFO_KHR,
          .addressRange = {
-@@ -3516,6 +3796,13 @@ void draw_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments, u
+@@ -3516,6 +3849,13 @@ void draw_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arguments, u
  {
      assert(commands && commands->state);
      emit_root_data(commands, root);
@@ -1015,7 +1113,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkDrawIndirect2InfoKHR info{
          .sType = VK_STRUCTURE_TYPE_DRAW_INDIRECT_2_INFO_KHR,
          .addressRange = {
-@@ -3534,6 +3821,17 @@ void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indi
+@@ -3534,6 +3874,17 @@ void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indi
  {
      assert(commands && commands->state);
      emit_root_data(commands, root);
@@ -1033,7 +1131,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkBindIndexBuffer3InfoKHR bind_info{
          .sType = VK_STRUCTURE_TYPE_BIND_INDEX_BUFFER_3_INFO_KHR,
          .addressRange = {
-@@ -3557,6 +3855,23 @@ void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indi
+@@ -3557,6 +3908,23 @@ void draw_indexed_indirect(CommandBuffer* commands, ByteSpan root, GpuRange indi
      commands->state->fn.cmd_draw_indexed_indirect(commands->command_buffer, &info);
  }
  
@@ -1057,7 +1155,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
  void dispatch(CommandBuffer* commands, ByteSpan root, uint32x3 group_count) noexcept
  {
      assert(commands);
-@@ -3606,6 +3921,20 @@ void draw_meshlets_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arg
+@@ -3606,6 +3974,20 @@ void draw_meshlets_indirect(CommandBuffer* commands, ByteSpan root, GpuRange arg
  void copy_memory(CommandBuffer* commands, GpuRange source, GpuRange destination) noexcept
  {
      assert(commands && commands->state);
@@ -1078,7 +1176,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkDeviceMemoryCopyKHR region{
          .sType = VK_STRUCTURE_TYPE_DEVICE_MEMORY_COPY_KHR,
          .srcRange = {
-@@ -3630,6 +3959,23 @@ void copy_memory(CommandBuffer* commands, GpuRange source, GpuRange destination)
+@@ -3630,6 +4012,23 @@ void copy_memory(CommandBuffer* commands, GpuRange source, GpuRange destination)
  void copy_memory_to_texture(CommandBuffer* commands, GpuRange source, Texture* destination, const TextureCopyDesc& copy) noexcept
  {
      assert(commands && commands->state && destination);
@@ -1102,7 +1200,7 @@ diff --git i/src/NoGraphicsAPI.cpp w/src/NoGraphicsAPI.cpp
      const VkDeviceMemoryImageCopyKHR region = make_texture_copy_region(*destination, copy, source);
      const VkCopyDeviceMemoryImageInfoKHR info{
          .sType = VK_STRUCTURE_TYPE_COPY_DEVICE_MEMORY_IMAGE_INFO_KHR,
-@@ -3643,6 +3989,23 @@ void copy_memory_to_texture(CommandBuffer* commands, GpuRange source, Texture* d
+@@ -3643,6 +4042,23 @@ void copy_memory_to_texture(CommandBuffer* commands, GpuRange source, Texture* d
  void copy_texture_to_memory(CommandBuffer* commands, Texture* source, GpuRange destination, const TextureCopyDesc& copy) noexcept
  {
      assert(commands && commands->state && source);

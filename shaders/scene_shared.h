@@ -75,6 +75,7 @@ struct Frame {
     SHADER_FLOAT4 galaxy;                // Milky Way splats drawn (the first n of the cloud), dust fBm amplitude (0 off), base feature size in degrees, galaxy mode (0 splats, 1 layers, 2 original)
     SHADER_FLOAT4 galaxy_layers;         // low-frequency, cloud and filament gains, unused
     SHADER_FLOAT4 galaxy_more;           // dust fBm lacunarity, gain, the galaxy pass's resolution divisor, band contrast exponent
+    SHADER_FLOAT4 display;               // HDR output (0 off, 1 scRGB, 2 HDR10), paper white in nits, headroom (peak over paper white), unused
 };
 struct Root {
 #ifdef __cplusplus

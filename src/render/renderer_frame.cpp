@@ -3,8 +3,11 @@
 
 #include "core/log.hpp"
 #include "core/panic.hpp"
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
+#include <limits>
 
 namespace space::render {
 
@@ -44,6 +47,7 @@ bool Renderer::draw(const FrameInput& supplied) {
     const auto drawable = gpu::get_drawable_extent(s.device);
     if (!drawable.x || !drawable.y)
         return false;
+    s.set_hdr_output(input.tone.hdr_output);
     s.resize({drawable.x, drawable.y}, unsigned(input.sky.galaxy_resolution), unsigned(input.sun.flare_resolution));
     const auto swap = gpu::acquire(s.device);
     if (!swap.render_view)
@@ -171,12 +175,31 @@ void Renderer::set_vsync(bool vsync) {
     gpu::set_vsync(impl_->device, vsync);
 }
 
+namespace {
+// The capture's conversion of the HDR intermediate: IEEE half to float, and the sRGB transfer.
+float half_to_float(std::uint16_t h) {
+    const unsigned sign = h >> 15, exponent = (h >> 10) & 0x1f, mantissa = h & 0x3ff;
+    float value;
+    if (exponent == 0)
+        value = std::ldexp(float(mantissa), -24);
+    else if (exponent == 31)
+        value = mantissa ? std::numeric_limits<float>::quiet_NaN() : std::numeric_limits<float>::infinity();
+    else
+        value = std::ldexp(float(mantissa | 0x400), int(exponent) - 25);
+    return sign ? -value : value;
+}
+float linear_to_srgb(float v) {
+    v = std::clamp(v, 0.f, 1.f);
+    return v <= .0031308f ? v * 12.92f : 1.055f * std::pow(v, 1.f / 2.4f) - .055f;
+}
+} // namespace
+
 bool Renderer::capture(const std::filesystem::path& path) {
     auto& s = *impl_;
     if (s.extent.empty())
         return false;
     s.submissions.wait_last();
-    auto readback = UniqueGpuHeap::create(s.device, std::uint64_t(s.extent.width) * s.extent.height * 4,
+    auto readback = UniqueGpuHeap::create(s.device, std::uint64_t(s.extent.width) * s.extent.height * (s.hdr() ? 8 : 4),
                                           gpu::MemoryType::readback);
     if (!readback.range().cpu) {
         log::error("screenshot readback allocation failed");
@@ -187,11 +210,25 @@ bool Renderer::capture(const std::filesystem::path& path) {
     gpu::copy_texture_to_memory(cmd, s.frame_targets.final_image.texture(), gpu::gpu_range(readback.get()));
     synchronize(cmd, access::transfer_write, access::host_read);
     s.submissions.submit_and_wait({cmd});
-    const auto* rgba = reinterpret_cast<const std::uint8_t*>(readback.range().cpu);
-    Bytes rgb(std::size_t(s.extent.width) * s.extent.height * 3);
-    for (std::size_t i = 0; i < std::size_t(s.extent.width) * s.extent.height; i++)
-        for (unsigned channel = 0; channel < 3; channel++)
-            rgb[i * 3 + channel] = rgba[i * 4 + channel];
+    const std::size_t pixels = std::size_t(s.extent.width) * s.extent.height;
+    Bytes rgb(pixels * 3);
+    if (s.hdr()) {
+        // The HDR intermediate holds the linear display value over the headroom;
+        // the capture is an SDR image, so anything above the tone curve's white
+        // clips, as it would on an SDR display.
+        const auto* half = reinterpret_cast<const std::uint16_t*>(readback.range().cpu);
+        const float headroom = std::max(s.previous_frame.display.z, 1.f);
+        for (std::size_t i = 0; i < pixels; i++)
+            for (unsigned channel = 0; channel < 3; channel++) {
+                const float display = half_to_float(half[i * 4 + channel]) * headroom;
+                rgb[i * 3 + channel] = std::uint8_t(std::lround(linear_to_srgb(std::min(display, 1.f)) * 255.f));
+            }
+    } else {
+        const auto* rgba = reinterpret_cast<const std::uint8_t*>(readback.range().cpu);
+        for (std::size_t i = 0; i < pixels; i++)
+            for (unsigned channel = 0; channel < 3; channel++)
+                rgb[i * 3 + channel] = rgba[i * 4 + channel];
+    }
     readback.reset();
     return assets::save_png(path, {s.extent, assets::PixelLayout::Rgb8, rgb});
 }

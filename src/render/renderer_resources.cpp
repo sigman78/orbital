@@ -269,6 +269,55 @@ void Renderer::Impl::resize_flare(unsigned divisor) {
     bind(Slot::flare, frame_targets.flare);
 }
 
+// The swapchain's output. HDR modes need the surface to offer the format and
+// colour space pair, which it does only with the OS presenting in HDR; an
+// unsupported request is reported through the stats and the output stays as
+// it was. A switch recreates the swapchain on the next acquire and the two
+// intermediates, which for HDR are 16-bit float holding the composite's linear
+// display value over the headroom, so the spatial anti-aliasing sees the same
+// values it does in SDR and the present pass scales them.
+void Renderer::Impl::set_hdr_output(HdrOutput mode) {
+    if (mode == hdr_output || mode == hdr_requested)
+        return;
+    hdr_requested = mode;
+    gpu::Format format = gpu::Format::bgra8_srgb;
+    gpu::ColorSpace color_space = gpu::ColorSpace::srgb_nonlinear;
+    if (mode == HdrOutput::ScRgb) {
+        format = gpu::Format::rgba16_float;
+        color_space = gpu::ColorSpace::extended_srgb_linear;
+    } else if (mode == HdrOutput::Hdr10) {
+        format = gpu::Format::rgb10a2_unorm;
+        color_space = gpu::ColorSpace::hdr10_st2084;
+    }
+    static constexpr const char* names[] = {"SDR", "scRGB", "HDR10"};
+    if (mode != HdrOutput::Off && !gpu::surface_format_supported(device, format, color_space)) {
+        log::warn("{} output is not offered by the display surface (is HDR on in the OS?); staying at {}",
+                  names[unsigned(mode)], names[unsigned(hdr_output)]);
+        stats.hdr_unsupported = true;
+        return;
+    }
+    stats.hdr_unsupported = false;
+    gpu::wait_idle(device);
+    gpu::set_swapchain_output(device, format, color_space);
+    hdr_output = mode;
+    stats.hdr_output = mode;
+    if (extent.width) {
+        const auto color_usage = gpu::TextureUsage::sampled | gpu::TextureUsage::color_attachment;
+        frame_targets.final_image.reset();
+        frame_targets.ldr.reset();
+        frame_targets.final_image = create_image({.extent = extent,
+                                                  .format = intermediate_format(),
+                                                  .usage = color_usage | gpu::TextureUsage::transfer_source});
+        frame_targets.ldr = create_image({.extent = extent, .format = intermediate_format(), .usage = color_usage});
+        bind(Slot::final_image, frame_targets.final_image);
+        bind(Slot::ldr, frame_targets.ldr);
+    }
+    log::info("Output: {} ({})", names[unsigned(mode)],
+              mode == HdrOutput::ScRgb   ? "16-bit float, extended linear sRGB"
+              : mode == HdrOutput::Hdr10 ? "10-bit, SMPTE ST 2084"
+                                         : "8-bit sRGB");
+}
+
 void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor, unsigned flare) {
     divisor = std::clamp(divisor, 1u, 4u);
     if (extent == new_extent) {
@@ -301,10 +350,9 @@ void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor, unsigned flar
         {.extent = {std::max(1u, extent.width / flare_divisor), std::max(1u, extent.height / flare_divisor)},
          .format = gpu::Format::rgba16_float,
          .usage = color_usage});
-    frame_targets.final_image = create_image({.extent = extent,
-                                              .format = gpu::Format::rgba8_srgb,
-                                              .usage = color_usage | gpu::TextureUsage::transfer_source});
-    frame_targets.ldr = create_image({.extent = extent, .format = gpu::Format::rgba8_srgb, .usage = color_usage});
+    frame_targets.final_image = create_image(
+        {.extent = extent, .format = intermediate_format(), .usage = color_usage | gpu::TextureUsage::transfer_source});
+    frame_targets.ldr = create_image({.extent = extent, .format = intermediate_format(), .usage = color_usage});
     for (auto& image : frame_targets.history)
         image = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
     frame_targets.splat_mask = create_image(

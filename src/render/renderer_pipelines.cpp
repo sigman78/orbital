@@ -82,15 +82,22 @@ void Renderer::Impl::create_pipelines() {
     pso.post.flare = make("fullscreen", "flare", Format::rgba16_float);
     pso.post.bloom = make("fullscreen", "bloom", Format::rgba16_float);
     pso.post.composite = make("fullscreen", "composite", Format::rgba8_srgb);
+    pso.post.composite_hdr = make("fullscreen", "composite", Format::rgba16_float);
     pso.post.present = make("fullscreen", "present", Format::bgra8_srgb);
+    pso.post.present_scrgb = make("fullscreen", "present", Format::rgba16_float);
+    pso.post.present_hdr10 = make("fullscreen", "present", Format::rgb10a2_unorm);
     pso.post.fxaa = make("fullscreen", "fxaa_pass", Format::rgba8_srgb);
+    pso.post.fxaa_hdr = make("fullscreen", "fxaa_pass", Format::rgba16_float);
     pso.post.meter = make("fullscreen", "meter", Format::rgba32_float);
     pso.post.temporal = make("fullscreen", "temporal", Format::rgba16_float);
     pso.post.smaa_edges = make("fullscreen", "smaa", Format::rg8_unorm);
     pso.post.smaa_weights = make("fullscreen", "smaa", Format::rgba8_unorm);
     pso.post.smaa_blend = make("fullscreen", "smaa", Format::rgba8_srgb);
+    pso.post.smaa_blend_hdr = make("fullscreen", "smaa", Format::rgba16_float);
     // Overlay pipeline.
     pso.ui = make("ui", "ui", Format::bgra8_srgb, false, Blend::alpha);
+    pso.ui_scrgb = make("ui", "ui", Format::rgba16_float, false, Blend::alpha);
+    pso.ui_hdr10 = make("ui", "ui", Format::rgb10a2_unorm, false, Blend::alpha);
     pso.belt.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
     panic_if(!pso.belt.cull, "compute pipeline creation failed: cull");
     pipelines.emplace_back(pso.belt.cull);

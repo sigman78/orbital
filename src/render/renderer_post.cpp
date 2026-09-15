@@ -89,10 +89,11 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
     if (flare)
         fullscreen_pass(cmd, frame_targets.flare, pso.post.flare, root);
     // Tone map into the final image, or through an intermediate when a spatial pass follows.
+    // The HDR variants of these pipelines target the 16-bit float intermediates.
     fullscreen_pass(cmd, spatial_aa != SpatialAA::Off ? frame_targets.ldr : frame_targets.final_image,
-                    pso.post.composite, root);
+                    hdr() ? pso.post.composite_hdr : pso.post.composite, root);
     if (spatial_aa == SpatialAA::FXAA) {
-        fullscreen_pass(cmd, frame_targets.final_image, pso.post.fxaa, root);
+        fullscreen_pass(cmd, frame_targets.final_image, hdr() ? pso.post.fxaa_hdr : pso.post.fxaa, root);
     } else if (spatial_aa == SpatialAA::SMAA) {
         // SMAA: edges, blending weights, neighbourhood blend (modes 0, 1, 2 of smaa.slang).
         root.mode = 0;
@@ -100,7 +101,7 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
         root.mode = 1;
         fullscreen_pass(cmd, frame_targets.smaa_weights, pso.post.smaa_weights, root);
         root.mode = 2;
-        fullscreen_pass(cmd, frame_targets.final_image, pso.post.smaa_blend, root);
+        fullscreen_pass(cmd, frame_targets.final_image, hdr() ? pso.post.smaa_blend_hdr : pso.post.smaa_blend, root);
     }
     if (frame_index % exposure_meter::interval == 0) {
         fullscreen_pass(cmd, fixed_targets.luminance, pso.post.meter, root);
@@ -113,7 +114,7 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
     gpu::ColorAttachment color{.render_view = swapchain_view, .load = gpu::LoadOp::clear};
     {
         RenderPassScope pass(cmd, {.colors = {&color, 1}});
-        gpu::bind_pso(cmd, pso.post.present);
+        gpu::bind_pso(cmd, present_pso());
         gpu::draw(cmd, root, 3);
         record_ui(cmd, ui, ui_cpu, ui_gpu);
     }

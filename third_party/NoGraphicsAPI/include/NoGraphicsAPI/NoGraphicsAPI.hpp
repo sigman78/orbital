@@ -451,12 +451,20 @@ struct DeviceCaps
     bool storage_image_read_without_format = false;
 };
 
+// The swapchain's colour space (conventional backend addition, for HDR output):
+// sRGB non-linear for 8-bit formats, extended linear sRGB (scRGB, 1.0 = 80 nits)
+// with a 16-bit float format, or HDR10 (SMPTE ST 2084 PQ, Rec. 2020) with a
+// 10-bit format. The surface offers the HDR pairs only when the OS presents in
+// HDR; see surface_format_supported.
+enum class ColorSpace : uint8 { srgb_nonlinear, extended_srgb_linear, hdr10_st2084 };
+
 // A windowed device and every call using it must remain on the native
 // window's message-pump thread. The window must outlive the device.
 struct DeviceDesc
 {
     void* window = nullptr; // HWND on Windows; SDL_Window* on Linux; null for a device without presentation.
     Format swapchain_format = Format::undefined;
+    ColorSpace swapchain_color_space = ColorSpace::srgb_nonlinear; // conventional backend addition
     uint32 desired_swapchain_image_count = 2; // 1..8 presentation contexts.
     uint32 timestamp_query_count = 256; // Per command buffer; zero disables timestamps.
     bool vsync = true; // FIFO presentation; false selects mailbox when available, else immediate (conventional backend addition).
@@ -668,9 +676,16 @@ struct SwapchainInfo
 {
     PresentMode present_mode = PresentMode::fifo;
     uint32 image_count = 0;
+    Format format = Format::undefined;
+    ColorSpace color_space = ColorSpace::srgb_nonlinear;
 };
 // What the driver granted at the last (re)creation.
 [[nodiscard]] SwapchainInfo get_swapchain_info(const Device* device) noexcept;
+// Conventional backend additions for HDR output: whether the surface offers a
+// format and colour space pair, and switching the swapchain to one (recreated
+// on the next acquire; check support first, an unsupported pair fails there).
+[[nodiscard]] bool surface_format_supported(Device* device, Format format, ColorSpace color_space) noexcept;
+void set_swapchain_output(Device* device, Format format, ColorSpace color_space) noexcept;
 
 [[nodiscard]] TimelineSemaphore* create_timeline_semaphore(Device* device, uint64 initial_value = 0) noexcept;
 void destroy_timeline_semaphore(TimelineSemaphore* semaphore) noexcept;

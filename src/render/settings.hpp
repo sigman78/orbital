@@ -12,6 +12,8 @@ enum class ToneCurve : unsigned { ACES = 0, AgX = 1, PbrNeutral = 2, Count };
 enum class SpatialAA : unsigned { Off = 0, FXAA = 1, SMAA = 2, Count };
 enum class SplatMode : unsigned { Off = 0, Pixels1_2 = 1, Pixels2_5 = 2, Pixels4 = 3, Count };
 enum class GalaxyResolution : unsigned { Full = 1, Half = 2, Quarter = 4 };
+// The swapchain's output: 8-bit sRGB, 16-bit float scRGB or 10-bit PQ; the HDR pairs need the OS presenting in HDR.
+enum class HdrOutput : unsigned { Off = 0, ScRgb = 1, Hdr10 = 2, Count };
 // The flare stack's target over the frame; an eighth is a defocused stack, a sixteenth was too blurred.
 enum class FlareResolution : unsigned { Half = 2, Quarter = 4, Eighth = 8 };
 
@@ -22,6 +24,9 @@ struct ToneSettings {
     float meter_key = .18f;                       // the metered luminance the auto exposure maps to (middle grey)
     float adapt_min = .6f, adapt_max = 1.8f;      // the auto exposure's range of multipliers
     float curve_trim[3] = {1.f, .37f, .75f}; // exposure trim per curve (ACES, AgX, PBR Neutral), fitted on captures
+    HdrOutput hdr_output = HdrOutput::Off;   // stays Off when the surface does not offer the pair (Stats reports it)
+    float paper_white_nits = 200.f;          // what the tone curve's white maps to on an HDR display
+    float peak_nits = 1000.f;                // the curve's shoulder reaches this; the headroom is peak over paper white
 };
 
 struct AntiAliasingSettings {

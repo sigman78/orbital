@@ -24,6 +24,8 @@ struct ExposureStats {
 
 struct Stats {
     ExposureStats exposure;
+    HdrOutput hdr_output = HdrOutput::Off; // what the swapchain presents
+    bool hdr_unsupported = false;          // the requested HDR output is not offered by the surface
     float frame_ms = 0, gpu_ms = 0, shadow_ms = 0, surface_ms = 0, atmosphere_ms = 0,
           post_ms = 0; // shadow_ms includes the belt culling passes
     float cull_ms = 0, body_shadow_ms = 0, belt_light_ms = 0, belt_disc_ms = 0;
