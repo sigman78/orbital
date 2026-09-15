@@ -317,10 +317,13 @@ void Renderer::Impl::set_hdr_output(HdrOutput mode) {
         bind(Slot::final_image, frame_targets.final_image);
         bind(Slot::ldr, frame_targets.ldr);
     }
-    log::info("Output: {} ({})", names[unsigned(mode)],
+    log::info("Output: {} ({}){}", names[unsigned(mode)],
               mode == HdrOutput::ScRgb   ? "16-bit float, extended linear sRGB"
               : mode == HdrOutput::Hdr10 ? "10-bit, SMPTE ST 2084"
-                                         : "8-bit sRGB");
+                                         : "8-bit sRGB",
+              mode == HdrOutput::Off      ? ""
+              : stats.output.hdr_metadata ? ", mastering metadata sent"
+                                          : ", no metadata path");
 }
 
 // SMPTE ST 2086 metadata for an HDR swapchain: the display's own range when
