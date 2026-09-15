@@ -13,6 +13,7 @@ GpuImage& GpuImage::operator=(GpuImage&& other) noexcept {
         heap_ = std::exchange(other.heap_, {});
         texture_ = std::exchange(other.texture_, nullptr);
         view_ = std::exchange(other.view_, nullptr);
+        bytes_ = std::exchange(other.bytes_, 0);
     }
     return *this;
 }
@@ -21,6 +22,7 @@ void GpuImage::reset() noexcept {
     gpu::destroy_render_view(std::exchange(view_, nullptr));
     gpu::destroy_texture(std::exchange(texture_, nullptr));
     gpu::destroy_texture_heap(std::exchange(heap_, {}));
+    bytes_ = 0;
 }
 
 GpuImage GpuImage::create(gpu::Device* device, const ImageDesc& desc) {
@@ -31,6 +33,7 @@ GpuImage GpuImage::create(gpu::Device* device, const ImageDesc& desc) {
     const auto size = gpu::get_texture_size_align(device, texture_desc);
     GpuImage result;
     result.heap_ = gpu::create_texture_heap(device, size.size);
+    result.bytes_ = size.size;
     result.texture_ = gpu::create_texture(device, texture_desc, result.heap_, 0);
     panic_if(!result.texture_, "texture allocation failed ({}x{}, {} mips)", desc.extent.width, desc.extent.height,
              desc.mips);

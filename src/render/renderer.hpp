@@ -1,6 +1,7 @@
 #pragma once
 #include "render/camera_view.hpp"
 #include "render/settings.hpp"
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <span>
@@ -27,8 +28,30 @@ struct ExposureStats {
     float stops_min = -14.f, stops_range = 20.f;
 };
 
+// GPU memory by resource type, for the panel: the allocations the renderer owns,
+// summed as their heaps report them (device memory for targets and materials, the
+// host-visible heaps for the mapped data, and the readback heaps).
+struct MemoryPool {
+    std::uint64_t bytes = 0; // allocated
+    std::uint64_t used = 0;  // the part in use where a heap is suballocated, else equal to bytes
+    unsigned count = 0;      // allocations in the pool
+};
+struct MemoryStats {
+    MemoryPool frame_targets;  // resized with the window
+    MemoryPool fixed_targets;  // shadow, belt and disc maps
+    MemoryPool materials;      // uploaded textures
+    MemoryPool mapped;         // the host-visible data heap: static records, then the per-frame region and the UI
+    MemoryPool device_buffers; // culling scratch and the exposure histogram
+    MemoryPool readback;       // CPU-visible copies and the descriptor heaps
+    std::uint64_t total() const {
+        return frame_targets.bytes + fixed_targets.bytes + materials.bytes + mapped.bytes + device_buffers.bytes +
+               readback.bytes;
+    }
+};
+
 struct Stats {
     ExposureStats exposure;
+    MemoryStats memory;
     HdrOutput hdr_output = HdrOutput::Off; // what the swapchain presents
     bool hdr_unsupported = false;          // the requested HDR output is not offered by the surface
     bool hdr_metadata = false;             // the device can pass mastering metadata to the display
