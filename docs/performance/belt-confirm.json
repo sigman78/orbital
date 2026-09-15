@@ -1,0 +1,904 @@
+{
+  "suite_version": 1,
+  "label": "belt-confirm",
+  "recorded_utc": "2026-09-15T19:39:02.941678+00:00",
+  "revision": "6adcd2fdfd0b035f8fef465ac37072af5579d547",
+  "source_dirty": true,
+  "source_diff_sha256": "0a45cc43d3c7aed17163593917cf99e2566478bf148dbcb3c2a4e0feecfe921e",
+  "executable_sha256": "9aba6bf0e6a74c5f3d1d625d54b3402fe5a1be2b2ef3864cf316a2d82be7eeaf",
+  "shaders_sha256": "d9af15547f5e396276df55f12ccfe337c8e40d6875a3ac2acc9a1fc22a69810e",
+  "assets_sha256": "182dcf1d7597972af5cb91266975818d08b83332d8647bf88b8a5dff33a3c694",
+  "machine": {
+    "os": "Windows-10-10.0.19045-SP0",
+    "cpu": "Intel64 Family 6 Model 158 Stepping 12, GenuineIntel",
+    "gpu": "NVIDIA GeForce GTX 1080 Ti | conventional NoGraphicsAPI backend",
+    "driver_info": "NVIDIA GeForce GTX 1080 Ti, 582.66"
+  },
+  "protocol": {
+    "settings": [
+      "--seed",
+      "20260911",
+      "--time",
+      "0",
+      "--taa",
+      "1",
+      "--spatial",
+      "2",
+      "--dust",
+      "1",
+      "--disc",
+      "1",
+      "--lod-scale",
+      "1",
+      "--splat",
+      "2",
+      "--tone",
+      "2",
+      "--galaxy",
+      "0",
+      "--exposure",
+      "1",
+      "--vsync",
+      "0",
+      "--no-hud"
+    ],
+    "scenes": {
+      "belt": [
+        "--bookmark",
+        "5"
+      ]
+    },
+    "quality": "default (no --high)",
+    "window": [
+      1920,
+      1080
+    ],
+    "frames": 360,
+    "warmup": 120,
+    "repeats": 2,
+    "fullscreen_at": 30
+  },
+  "cases": {
+    "belt/window": {
+      "resolution": [
+        1920,
+        1080
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 6.54865,
+          "p95": 7.1198,
+          "run_min": 6.5474,
+          "run_max": 6.5499
+        },
+        "gpu_ms": {
+          "median": 5.834327999999999,
+          "p95": 6.384656,
+          "run_min": 5.8276959999999995,
+          "run_max": 5.84096
+        },
+        "cpu_prepare_ms": {
+          "median": 0.27849999999999997,
+          "p95": 0.38639999999999997,
+          "run_min": 0.27825,
+          "run_max": 0.27875
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.6437199849999999,
+          "p95": 0.946544,
+          "run_min": 0.586032,
+          "run_max": 0.70140797
+        },
+        "gpu_surface_ms": {
+          "median": 1.447424,
+          "p95": 2.168832,
+          "run_min": 1.3931520000000002,
+          "run_max": 1.501696
+        },
+        "gpu_atmosphere_ms": {
+          "median": 2.1826559999999997,
+          "p95": 2.960384,
+          "run_min": 2.131968,
+          "run_max": 2.2333439999999998
+        },
+        "gpu_post_ms": {
+          "median": 1.075456,
+          "p95": 1.568768,
+          "run_min": 1.0695679999999999,
+          "run_max": 1.081344
+        },
+        "gpu_cull_ms": {
+          "median": 0.196232,
+          "p95": 0.197968,
+          "run_min": 0.19591999999999998,
+          "run_max": 0.196544
+        },
+        "gpu_body_shadow_ms": {
+          "median": 0.01944,
+          "p95": 0.021072,
+          "run_min": 0.019424,
+          "run_max": 0.019456
+        },
+        "gpu_belt_light_ms": {
+          "median": 0.42444799,
+          "p95": 0.729088,
+          "run_min": 0.365568,
+          "run_max": 0.48332798
+        },
+        "gpu_belt_disc_ms": {
+          "median": 0.0,
+          "p95": 0.0,
+          "run_min": 0.0,
+          "run_max": 0.0
+        },
+        "gpu_surface_prepass_ms": {
+          "median": 0.001024,
+          "p95": 0.002048,
+          "run_min": 0.001024,
+          "run_max": 0.001024
+        },
+        "gpu_surface_sky_ms": {
+          "median": 0.15923199999999998,
+          "p95": 0.345088,
+          "run_min": 0.15872,
+          "run_max": 0.159744
+        },
+        "gpu_surface_bodies_ms": {
+          "median": 0.548864,
+          "p95": 0.9343999999999999,
+          "run_min": 0.546816,
+          "run_max": 0.550912
+        },
+        "gpu_surface_rocks_ms": {
+          "median": 0.49407999999999996,
+          "p95": 0.848384,
+          "run_min": 0.493568,
+          "run_max": 0.494592
+        },
+        "gpu_surface_splats_ms": {
+          "median": 0.050176,
+          "p95": 0.263168,
+          "run_min": 0.050176,
+          "run_max": 0.050176
+        },
+        "gpu_surface_clouds_ms": {
+          "median": 0.0,
+          "p95": 0.0,
+          "run_min": 0.0,
+          "run_max": 0.0
+        },
+        "gpu_atmospheres_ms": {
+          "median": 1.137664,
+          "p95": 1.61792,
+          "run_min": 1.133568,
+          "run_max": 1.14176
+        },
+        "gpu_belt_dust_ms": {
+          "median": 0.918528,
+          "p95": 1.3798400000000002,
+          "run_min": 0.915456,
+          "run_max": 0.9216
+        },
+        "gpu_splat_mask_ms": {
+          "median": 0.062464,
+          "p95": 0.064512,
+          "run_min": 0.062464,
+          "run_max": 0.062464
+        },
+        "gpu_temporal_ms": {
+          "median": 0.30003199999999997,
+          "p95": 0.524287985,
+          "run_min": 0.299008,
+          "run_max": 0.301056
+        },
+        "gpu_streaks_ms": {
+          "median": 0.0,
+          "p95": 0.0,
+          "run_min": 0.0,
+          "run_max": 0.0
+        },
+        "gpu_bloom_ms": {
+          "median": 0.13772800000000002,
+          "p95": 0.139264,
+          "run_min": 0.137216,
+          "run_max": 0.13824
+        },
+        "gpu_sun_visibility_ms": {
+          "median": 0.027648,
+          "p95": 0.028672,
+          "run_min": 0.027648,
+          "run_max": 0.027648
+        },
+        "gpu_flare_ms": {
+          "median": 0.012288,
+          "p95": 0.138752,
+          "run_min": 0.012288,
+          "run_max": 0.012288
+        },
+        "gpu_composite_ms": {
+          "median": 0.228352,
+          "p95": 0.614912,
+          "run_min": 0.227328,
+          "run_max": 0.229376
+        },
+        "gpu_spatial_aa_ms": {
+          "median": 0.196096,
+          "p95": 0.530432,
+          "run_min": 0.195584,
+          "run_max": 0.196608
+        },
+        "gpu_meter_ms": {
+          "median": 0.009528,
+          "p95": 0.143872,
+          "run_min": 0.009248,
+          "run_max": 0.009808
+        },
+        "gpu_present_ms": {
+          "median": 0.034816,
+          "p95": 0.03584,
+          "run_min": 0.034816,
+          "run_max": 0.034816
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 6.5474,
+            "p95": 7.2385
+          },
+          "gpu_ms": {
+            "median": 5.8276959999999995,
+            "p95": 6.474912
+          },
+          "cpu_prepare_ms": {
+            "median": 0.27825,
+            "p95": 0.3866
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.586032,
+            "p95": 1.001952
+          },
+          "gpu_surface_ms": {
+            "median": 1.501696,
+            "p95": 2.166784
+          },
+          "gpu_atmosphere_ms": {
+            "median": 2.2333439999999998,
+            "p95": 3.047424
+          },
+          "gpu_post_ms": {
+            "median": 1.0695679999999999,
+            "p95": 1.570816
+          },
+          "gpu_cull_ms": {
+            "median": 0.19591999999999998,
+            "p95": 0.197632
+          },
+          "gpu_body_shadow_ms": {
+            "median": 0.019456,
+            "p95": 0.021792
+          },
+          "gpu_belt_light_ms": {
+            "median": 0.365568,
+            "p95": 0.78336
+          },
+          "gpu_belt_disc_ms": {
+            "median": 0.0,
+            "p95": 0.0
+          },
+          "gpu_surface_prepass_ms": {
+            "median": 0.001024,
+            "p95": 0.002048
+          },
+          "gpu_surface_sky_ms": {
+            "median": 0.15872,
+            "p95": 0.32256
+          },
+          "gpu_surface_bodies_ms": {
+            "median": 0.546816,
+            "p95": 0.929792
+          },
+          "gpu_surface_rocks_ms": {
+            "median": 0.493568,
+            "p95": 0.843776
+          },
+          "gpu_surface_splats_ms": {
+            "median": 0.050176,
+            "p95": 0.18432
+          },
+          "gpu_surface_clouds_ms": {
+            "median": 0.0,
+            "p95": 0.0
+          },
+          "gpu_atmospheres_ms": {
+            "median": 1.133568,
+            "p95": 1.624064
+          },
+          "gpu_belt_dust_ms": {
+            "median": 0.915456,
+            "p95": 1.36704
+          },
+          "gpu_splat_mask_ms": {
+            "median": 0.062464,
+            "p95": 0.064512
+          },
+          "gpu_temporal_ms": {
+            "median": 0.299008,
+            "p95": 0.59084797
+          },
+          "gpu_streaks_ms": {
+            "median": 0.0,
+            "p95": 0.0
+          },
+          "gpu_bloom_ms": {
+            "median": 0.137216,
+            "p95": 0.13824
+          },
+          "gpu_sun_visibility_ms": {
+            "median": 0.027648,
+            "p95": 0.028672
+          },
+          "gpu_flare_ms": {
+            "median": 0.012288,
+            "p95": 0.139264
+          },
+          "gpu_composite_ms": {
+            "median": 0.227328,
+            "p95": 0.612352
+          },
+          "gpu_spatial_aa_ms": {
+            "median": 0.195584,
+            "p95": 0.53248
+          },
+          "gpu_meter_ms": {
+            "median": 0.009808,
+            "p95": 0.154624
+          },
+          "gpu_present_ms": {
+            "median": 0.034816,
+            "p95": 0.03584
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 6.5499,
+            "p95": 7.0011
+          },
+          "gpu_ms": {
+            "median": 5.84096,
+            "p95": 6.2944
+          },
+          "cpu_prepare_ms": {
+            "median": 0.27875,
+            "p95": 0.3862
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.70140797,
+            "p95": 0.891136
+          },
+          "gpu_surface_ms": {
+            "median": 1.3931520000000002,
+            "p95": 2.17088
+          },
+          "gpu_atmosphere_ms": {
+            "median": 2.131968,
+            "p95": 2.873344
+          },
+          "gpu_post_ms": {
+            "median": 1.081344,
+            "p95": 1.56672
+          },
+          "gpu_cull_ms": {
+            "median": 0.196544,
+            "p95": 0.198304
+          },
+          "gpu_body_shadow_ms": {
+            "median": 0.019424,
+            "p95": 0.020352
+          },
+          "gpu_belt_light_ms": {
+            "median": 0.48332798,
+            "p95": 0.674816
+          },
+          "gpu_belt_disc_ms": {
+            "median": 0.0,
+            "p95": 0.0
+          },
+          "gpu_surface_prepass_ms": {
+            "median": 0.001024,
+            "p95": 0.002048
+          },
+          "gpu_surface_sky_ms": {
+            "median": 0.159744,
+            "p95": 0.367616
+          },
+          "gpu_surface_bodies_ms": {
+            "median": 0.550912,
+            "p95": 0.939008
+          },
+          "gpu_surface_rocks_ms": {
+            "median": 0.494592,
+            "p95": 0.852992
+          },
+          "gpu_surface_splats_ms": {
+            "median": 0.050176,
+            "p95": 0.342016
+          },
+          "gpu_surface_clouds_ms": {
+            "median": 0.0,
+            "p95": 0.0
+          },
+          "gpu_atmospheres_ms": {
+            "median": 1.14176,
+            "p95": 1.611776
+          },
+          "gpu_belt_dust_ms": {
+            "median": 0.9216,
+            "p95": 1.39264
+          },
+          "gpu_splat_mask_ms": {
+            "median": 0.062464,
+            "p95": 0.064512
+          },
+          "gpu_temporal_ms": {
+            "median": 0.301056,
+            "p95": 0.457728
+          },
+          "gpu_streaks_ms": {
+            "median": 0.0,
+            "p95": 0.0
+          },
+          "gpu_bloom_ms": {
+            "median": 0.13824,
+            "p95": 0.140288
+          },
+          "gpu_sun_visibility_ms": {
+            "median": 0.027648,
+            "p95": 0.028672
+          },
+          "gpu_flare_ms": {
+            "median": 0.012288,
+            "p95": 0.13824
+          },
+          "gpu_composite_ms": {
+            "median": 0.229376,
+            "p95": 0.617472
+          },
+          "gpu_spatial_aa_ms": {
+            "median": 0.196608,
+            "p95": 0.528384
+          },
+          "gpu_meter_ms": {
+            "median": 0.009248,
+            "p95": 0.13312
+          },
+          "gpu_present_ms": {
+            "median": 0.034816,
+            "p95": 0.03584
+          }
+        }
+      ]
+    },
+    "belt/fullscreen": {
+      "resolution": [
+        3440,
+        1440
+      ],
+      "metrics": {
+        "cpu_submit_and_wait_ms": {
+          "median": 13.087250000000001,
+          "p95": 16.45165,
+          "run_min": 12.97095,
+          "run_max": 13.20355
+        },
+        "gpu_ms": {
+          "median": 12.153896,
+          "p95": 15.719391250000001,
+          "run_min": 12.020223999999999,
+          "run_max": 12.287568
+        },
+        "cpu_prepare_ms": {
+          "median": 0.343875,
+          "p95": 0.5977,
+          "run_min": 0.3125,
+          "run_max": 0.37525
+        },
+        "gpu_cull_shadow_ms": {
+          "median": 0.7083199925,
+          "p95": 0.908032,
+          "run_min": 0.7073119999999999,
+          "run_max": 0.709327985
+        },
+        "gpu_surface_ms": {
+          "median": 3.243264,
+          "p95": 4.20864,
+          "run_min": 3.166208,
+          "run_max": 3.3203199999999997
+        },
+        "gpu_atmosphere_ms": {
+          "median": 5.51168,
+          "p95": 9.153023999999998,
+          "run_min": 5.372928,
+          "run_max": 5.650432
+        },
+        "gpu_post_ms": {
+          "median": 2.4122879999999998,
+          "p95": 3.101696,
+          "run_min": 2.2912,
+          "run_max": 2.5333759999999996
+        },
+        "gpu_cull_ms": {
+          "median": 0.207048,
+          "p95": 0.209696,
+          "run_min": 0.20656,
+          "run_max": 0.207536
+        },
+        "gpu_body_shadow_ms": {
+          "median": 0.019456,
+          "p95": 0.02064,
+          "run_min": 0.019392,
+          "run_max": 0.01952
+        },
+        "gpu_belt_light_ms": {
+          "median": 0.48,
+          "p95": 0.679424,
+          "run_min": 0.47872000000000003,
+          "run_max": 0.48128
+        },
+        "gpu_belt_disc_ms": {
+          "median": 0.0,
+          "p95": 0.0,
+          "run_min": 0.0,
+          "run_max": 0.0
+        },
+        "gpu_surface_prepass_ms": {
+          "median": 0.001024,
+          "p95": 0.196608,
+          "run_min": 0.001024,
+          "run_max": 0.001024
+        },
+        "gpu_surface_sky_ms": {
+          "median": 0.495616,
+          "p95": 1.032192,
+          "run_min": 0.494592,
+          "run_max": 0.49664
+        },
+        "gpu_surface_bodies_ms": {
+          "median": 0.911872,
+          "p95": 1.6686079999999999,
+          "run_min": 0.910336,
+          "run_max": 0.913408
+        },
+        "gpu_surface_rocks_ms": {
+          "median": 1.3048320000000002,
+          "p95": 2.045952,
+          "run_min": 1.2958720000000001,
+          "run_max": 1.313792
+        },
+        "gpu_surface_splats_ms": {
+          "median": 0.06656,
+          "p95": 0.25344,
+          "run_min": 0.06656,
+          "run_max": 0.06656
+        },
+        "gpu_surface_clouds_ms": {
+          "median": 0.0,
+          "p95": 0.0,
+          "run_min": 0.0,
+          "run_max": 0.0
+        },
+        "gpu_atmospheres_ms": {
+          "median": 2.879232,
+          "p95": 6.0032,
+          "run_min": 2.796544,
+          "run_max": 2.96192
+        },
+        "gpu_belt_dust_ms": {
+          "median": 2.502912,
+          "p95": 3.703296,
+          "run_min": 2.471424,
+          "run_max": 2.5343999999999998
+        },
+        "gpu_splat_mask_ms": {
+          "median": 0.085504,
+          "p95": 0.088576,
+          "run_min": 0.084992,
+          "run_max": 0.086016
+        },
+        "gpu_temporal_ms": {
+          "median": 0.7505919999999999,
+          "p95": 1.09568,
+          "run_min": 0.7019519999999999,
+          "run_max": 0.7992319999999999
+        },
+        "gpu_streaks_ms": {
+          "median": 0.0,
+          "p95": 0.0,
+          "run_min": 0.0,
+          "run_max": 0.0
+        },
+        "gpu_bloom_ms": {
+          "median": 0.27392,
+          "p95": 0.41728,
+          "run_min": 0.273408,
+          "run_max": 0.274432
+        },
+        "gpu_sun_visibility_ms": {
+          "median": 0.029696,
+          "p95": 0.030208,
+          "run_min": 0.029696,
+          "run_max": 0.029696
+        },
+        "gpu_flare_ms": {
+          "median": 0.022528,
+          "p95": 0.151552,
+          "run_min": 0.022528,
+          "run_max": 0.022528
+        },
+        "gpu_composite_ms": {
+          "median": 0.5376000000000001,
+          "p95": 0.941056,
+          "run_min": 0.536576,
+          "run_max": 0.538624
+        },
+        "gpu_spatial_aa_ms": {
+          "median": 0.44390399999999997,
+          "p95": 0.784384,
+          "run_min": 0.443392,
+          "run_max": 0.444416
+        },
+        "gpu_meter_ms": {
+          "median": 0.018432,
+          "p95": 0.022656,
+          "run_min": 0.018432,
+          "run_max": 0.018432
+        },
+        "gpu_present_ms": {
+          "median": 0.07678399799999999,
+          "p95": 0.077824,
+          "run_min": 0.076768,
+          "run_max": 0.076799996
+        }
+      },
+      "runs": [
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 12.97095,
+            "p95": 16.8626
+          },
+          "gpu_ms": {
+            "median": 12.020223999999999,
+            "p95": 16.178623
+          },
+          "cpu_prepare_ms": {
+            "median": 0.37525,
+            "p95": 0.5436
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.7073119999999999,
+            "p95": 1.005056
+          },
+          "gpu_surface_ms": {
+            "median": 3.166208,
+            "p95": 4.153344
+          },
+          "gpu_atmosphere_ms": {
+            "median": 5.372928,
+            "p95": 9.78432
+          },
+          "gpu_post_ms": {
+            "median": 2.5333759999999996,
+            "p95": 3.191808
+          },
+          "gpu_cull_ms": {
+            "median": 0.20656,
+            "p95": 0.20944
+          },
+          "gpu_body_shadow_ms": {
+            "median": 0.01952,
+            "p95": 0.020832
+          },
+          "gpu_belt_light_ms": {
+            "median": 0.47872000000000003,
+            "p95": 0.779264
+          },
+          "gpu_belt_disc_ms": {
+            "median": 0.0,
+            "p95": 0.0
+          },
+          "gpu_surface_prepass_ms": {
+            "median": 0.001024,
+            "p95": 0.157696
+          },
+          "gpu_surface_sky_ms": {
+            "median": 0.494592,
+            "p95": 1.048576
+          },
+          "gpu_surface_bodies_ms": {
+            "median": 0.910336,
+            "p95": 1.503232
+          },
+          "gpu_surface_rocks_ms": {
+            "median": 1.2958720000000001,
+            "p95": 2.16576
+          },
+          "gpu_surface_splats_ms": {
+            "median": 0.06656,
+            "p95": 0.086016
+          },
+          "gpu_surface_clouds_ms": {
+            "median": 0.0,
+            "p95": 0.0
+          },
+          "gpu_atmospheres_ms": {
+            "median": 2.796544,
+            "p95": 6.059008
+          },
+          "gpu_belt_dust_ms": {
+            "median": 2.471424,
+            "p95": 3.689472
+          },
+          "gpu_splat_mask_ms": {
+            "median": 0.084992,
+            "p95": 0.088064
+          },
+          "gpu_temporal_ms": {
+            "median": 0.7019519999999999,
+            "p95": 1.098752
+          },
+          "gpu_streaks_ms": {
+            "median": 0.0,
+            "p95": 0.0
+          },
+          "gpu_bloom_ms": {
+            "median": 0.273408,
+            "p95": 0.420864
+          },
+          "gpu_sun_visibility_ms": {
+            "median": 0.029696,
+            "p95": 0.03072
+          },
+          "gpu_flare_ms": {
+            "median": 0.022528,
+            "p95": 0.152576
+          },
+          "gpu_composite_ms": {
+            "median": 0.536576,
+            "p95": 0.904192
+          },
+          "gpu_spatial_aa_ms": {
+            "median": 0.443392,
+            "p95": 0.787456
+          },
+          "gpu_meter_ms": {
+            "median": 0.018432,
+            "p95": 0.023808
+          },
+          "gpu_present_ms": {
+            "median": 0.076768,
+            "p95": 0.077824
+          }
+        },
+        {
+          "cpu_submit_and_wait_ms": {
+            "median": 13.20355,
+            "p95": 16.0407
+          },
+          "gpu_ms": {
+            "median": 12.287568,
+            "p95": 15.2601595
+          },
+          "cpu_prepare_ms": {
+            "median": 0.3125,
+            "p95": 0.6518
+          },
+          "gpu_cull_shadow_ms": {
+            "median": 0.709327985,
+            "p95": 0.811008
+          },
+          "gpu_surface_ms": {
+            "median": 3.3203199999999997,
+            "p95": 4.263936
+          },
+          "gpu_atmosphere_ms": {
+            "median": 5.650432,
+            "p95": 8.521728
+          },
+          "gpu_post_ms": {
+            "median": 2.2912,
+            "p95": 3.011584
+          },
+          "gpu_cull_ms": {
+            "median": 0.207536,
+            "p95": 0.209952
+          },
+          "gpu_body_shadow_ms": {
+            "median": 0.019392,
+            "p95": 0.020448
+          },
+          "gpu_belt_light_ms": {
+            "median": 0.48128,
+            "p95": 0.579584
+          },
+          "gpu_belt_disc_ms": {
+            "median": 0.0,
+            "p95": 0.0
+          },
+          "gpu_surface_prepass_ms": {
+            "median": 0.001024,
+            "p95": 0.23552
+          },
+          "gpu_surface_sky_ms": {
+            "median": 0.49664,
+            "p95": 1.015808
+          },
+          "gpu_surface_bodies_ms": {
+            "median": 0.913408,
+            "p95": 1.833984
+          },
+          "gpu_surface_rocks_ms": {
+            "median": 1.313792,
+            "p95": 1.926144
+          },
+          "gpu_surface_splats_ms": {
+            "median": 0.06656,
+            "p95": 0.420864
+          },
+          "gpu_surface_clouds_ms": {
+            "median": 0.0,
+            "p95": 0.0
+          },
+          "gpu_atmospheres_ms": {
+            "median": 2.96192,
+            "p95": 5.947392
+          },
+          "gpu_belt_dust_ms": {
+            "median": 2.5343999999999998,
+            "p95": 3.71712
+          },
+          "gpu_splat_mask_ms": {
+            "median": 0.086016,
+            "p95": 0.089088
+          },
+          "gpu_temporal_ms": {
+            "median": 0.7992319999999999,
+            "p95": 1.092608
+          },
+          "gpu_streaks_ms": {
+            "median": 0.0,
+            "p95": 0.0
+          },
+          "gpu_bloom_ms": {
+            "median": 0.274432,
+            "p95": 0.413696
+          },
+          "gpu_sun_visibility_ms": {
+            "median": 0.029696,
+            "p95": 0.029696
+          },
+          "gpu_flare_ms": {
+            "median": 0.022528,
+            "p95": 0.150528
+          },
+          "gpu_composite_ms": {
+            "median": 0.538624,
+            "p95": 0.97792
+          },
+          "gpu_spatial_aa_ms": {
+            "median": 0.444416,
+            "p95": 0.781312
+          },
+          "gpu_meter_ms": {
+            "median": 0.018432,
+            "p95": 0.021504
+          },
+          "gpu_present_ms": {
+            "median": 0.076799996,
+            "p95": 0.077824
+          }
+        }
+      ]
+    }
+  },
+  "comparisons": {}
+}

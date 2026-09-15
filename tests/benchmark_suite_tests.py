@@ -26,6 +26,20 @@ class BenchmarkTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             suite.summarize(rows, 60)
 
+    def test_children_summarized_and_optional_in_baselines(self):
+        fields = suite.METRICS + ['gpu_child_ms', 'frame_ms']
+        self.assertEqual(suite.csv_metrics(fields), suite.METRICS + ['gpu_child_ms'])
+        rows = [{key: str(i) for key in fields} for i in [999] * 60 + list(range(1, 101))]
+        stats = suite.summarize(rows, 60, suite.csv_metrics(fields))
+        self.assertEqual(stats['gpu_child_ms']['median'], 50.5)
+        self.assertNotIn('frame_ms', stats)
+        # A report with children compares with a baseline without them, on the shared metrics.
+        current = report()
+        current['cases']['belt/fullscreen']['metrics']['gpu_child_ms'] = {'median': 1, 'p95': 1, 'run_min': 1, 'run_max': 1}
+        changes = suite.compare(current, report())['belt/fullscreen']
+        self.assertIn('gpu_ms', changes)
+        self.assertNotIn('gpu_child_ms', changes)
+
     def test_noise_and_absolute_floor(self):
         base = report()
         self.assertEqual(suite.compare(report(11, 10.9, 11.1), base)['belt/fullscreen']['gpu_ms']['status'], 'regression')
