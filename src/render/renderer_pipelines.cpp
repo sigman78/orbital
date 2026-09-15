@@ -41,7 +41,8 @@ gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
         device, {.vertex_spirv = vertex,
                  .fragment_spirv = fragment,
                  .color_targets = {&target, 1},
-                 .depth_format = desc.has_depth_attachment ? gpu::Format::d32_float : gpu::Format::undefined});
+                 .depth_format = desc.has_depth_attachment ? gpu::Format::d32_float : gpu::Format::undefined,
+                 .rasterization = {.cull = desc.cull}});
     panic_if(!pipeline, "pipeline creation failed for {} + {}", desc.vertex_shader, desc.fragment_shader);
     pipelines.emplace_back(pipeline);
     return pipeline;
@@ -50,19 +51,23 @@ gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
 void Renderer::Impl::create_pipelines() {
     using gpu::Format;
     const auto make = [&](const char* vertex, const char* fragment, Format format, bool has_depth_attachment = false,
-                          Blend blend = Blend::none) {
+                          Blend blend = Blend::none, gpu::CullMode cull = gpu::CullMode::none) {
         return create_pipeline({.vertex_shader = vertex,
                                 .fragment_shader = fragment,
                                 .color_format = format,
                                 .has_depth_attachment = has_depth_attachment,
-                                .blend = blend});
+                                .blend = blend,
+                                .cull = cull});
     };
+    // The sphere and rock meshes are closed, wound counter-clockwise from outside, so
+    // their clockwise back faces are culled in every pass that draws them.
+    constexpr auto mesh_cull = gpu::CullMode::clockwise;
     // Scene, sky and atmosphere pipelines.
-    pso.scene.surface_earth = make("surface", "surface_earth", Format::rgba16_float, true);
-    pso.scene.surface_giant = make("surface", "surface_giant", Format::rgba16_float, true);
-    pso.scene.surface_airless = make("surface", "surface_airless", Format::rgba16_float, true);
-    pso.scene.surface_rock = make("surface", "surface_rock", Format::rgba16_float, true);
-    pso.scene.cloud = make("surface", "surface_earth", Format::rgba16_float, true, Blend::alpha);
+    pso.scene.surface_earth = make("surface", "surface_earth", Format::rgba16_float, true, Blend::none, mesh_cull);
+    pso.scene.surface_giant = make("surface", "surface_giant", Format::rgba16_float, true, Blend::none, mesh_cull);
+    pso.scene.surface_airless = make("surface", "surface_airless", Format::rgba16_float, true, Blend::none, mesh_cull);
+    pso.scene.surface_rock = make("surface", "surface_rock", Format::rgba16_float, true, Blend::none, mesh_cull);
+    pso.scene.cloud = make("surface", "surface_earth", Format::rgba16_float, true, Blend::alpha, mesh_cull);
     pso.scene.background = make("fullscreen", "background", Format::rgba16_float, true);
     pso.scene.galaxy = make("fullscreen", "galaxy", Format::rgba16_float);
     pso.scene.atmosphere = make("fullscreen", "atmosphere", Format::rgba16_float, false, Blend::alpha);
@@ -108,9 +113,15 @@ void Renderer::Impl::create_pipelines() {
     pso.scene.shadow = gpu::create_graphics_pso(
         device, {.vertex_spirv = shadow_vertex,
                  .depth_format = Format::d32_float,
-                 .rasterization = {.depth_bias_constant = 1, .depth_bias_slope = 1.5f}});
+                 .rasterization = {.cull = mesh_cull, .depth_bias_constant = 1, .depth_bias_slope = 1.5f}});
     panic_if(!pso.scene.shadow, "shadow pipeline creation failed");
     pipelines.emplace_back(pso.scene.shadow);
+    // The bodies' depth pre-pass: the same vertex shader and view, so the scene pass matches it exactly.
+    pso.scene.depth_prepass = gpu::create_graphics_pso(
+        device,
+        {.vertex_spirv = shadow_vertex, .depth_format = Format::d32_float, .rasterization = {.cull = mesh_cull}});
+    panic_if(!pso.scene.depth_prepass, "depth pre-pass pipeline creation failed");
+    pipelines.emplace_back(pso.scene.depth_prepass);
 }
 
 } // namespace space::render

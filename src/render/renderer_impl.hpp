@@ -19,6 +19,7 @@
 
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
 #include <array>
+#include <bitset>
 #include <chrono>
 #include <cstdint>
 #include <initializer_list>
@@ -203,6 +204,7 @@ struct PipelineDesc {
     gpu::Format color_format;
     bool has_depth_attachment = false;
     Blend blend = Blend::none;
+    gpu::CullMode cull = gpu::CullMode::none; // closed meshes cull their back faces
 };
 
 inline gpu::Format texture_format(const assets::TextureData& data) {
@@ -261,6 +263,7 @@ struct Renderer::Impl {
             gpu::PSO* galaxy = nullptr;
             gpu::PSO* atmosphere = nullptr;
             gpu::PSO* shadow = nullptr;
+            gpu::PSO* depth_prepass = nullptr; // the bodies' depth, no colour
             gpu::PSO* motes = nullptr;
             gpu::PSO* stars = nullptr;
         } scene;
@@ -338,6 +341,10 @@ struct Renderer::Impl {
         float tan_y, disc_weight;
     };
     std::optional<FrozenCull> frozen_cull;
+    // Per body this frame, from cull_bodies: inside the (cull) view frustum with
+    // its atmosphere shell, and the mesh level for its projected size.
+    std::bitset<max_body_count> body_visible;
+    std::array<unsigned, max_body_count> body_level{};
     SystemDescription system;
     std::filesystem::path directory;
     // The bodies occupy instance slots 0..body_count-1 in system order. The
@@ -415,10 +422,14 @@ struct Renderer::Impl {
     GpuMesh upload_mesh(const geometry::Mesh& mesh);
     void upload_rock_pool(std::span<const geometry::Mesh> meshes);
     const GpuMesh& body_mesh(unsigned body, unsigned lod) const;
+    void record_depth_prepass(gpu::CommandBuffer* cmd, Root root);
+    void draw_rock_meshes(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address);
+    void draw_rock_splats(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address);
 
     // CPU frame packing (renderer_frame_data.cpp).
     FrameData build_frame(const FrameInput& input);
     void write_body_instances(const FrameInput& input, const FrameData& frame);
+    void cull_bodies(const FrameInput& input, const FrameData& frame);
     void write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
                             std::uint64_t instance_address);
 
@@ -432,7 +443,6 @@ struct Renderer::Impl {
     void record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root, unsigned rock_limit,
                                 float far_weight);
     // Records draws inside the scene pass; other record_* methods own their render passes.
-    void draw_rock_batch(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address);
     void record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, std::uint64_t args_address);
     void record_belt_dust_passes(gpu::CommandBuffer* cmd, Root& root, bool enabled, float far_weight);
 

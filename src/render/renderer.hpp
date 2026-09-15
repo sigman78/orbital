@@ -58,6 +58,7 @@ struct FrameStats {
     unsigned visible_asteroids = 0, triangles = 0,
              rock_triangles = 0;    // rock figures are from the previous frame's culling
     unsigned draw_calls = 0;        // API draw calls submitted this frame (an indirect multi-draw counts once)
+    unsigned bodies_drawn = 0;      // bodies inside the view frustum this frame
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
     float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc
 };

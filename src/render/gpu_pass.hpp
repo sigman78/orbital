@@ -19,14 +19,16 @@ enum class GpuPass : unsigned {
     Surface,
     Atmosphere,
     Post,
-    SurfaceSky,    // the galaxy splat pass, the background and the stars
-    SurfaceBodies, // the planet surfaces
-    SurfaceRocks,  // the pooled rock multi-draw, meshes and splats together
-    SurfaceClouds, // the cloud shell
-    Atmospheres,   // the per-body shell marches
-    BeltDust,      // the dust march, its upsample and the disc blend
-    SplatMask,     // splat coverage and depth for TAA and sun visibility
-    Temporal,      // the temporal resolve
+    SurfacePrepass, // the bodies' depth ahead of the scene pass
+    SurfaceSky,     // the background and the stars, behind whatever was drawn
+    SurfaceBodies,  // the planet surfaces
+    SurfaceRocks,   // the pooled rock mesh multi-draw
+    SurfaceSplats,  // the rock billboards and splats, blended over the sky
+    SurfaceClouds,  // the cloud shell
+    Atmospheres,    // the per-body shell marches
+    BeltDust,       // the dust march, its upsample and the disc blend
+    SplatMask,      // splat coverage and depth for TAA and sun visibility
+    Temporal,       // the temporal resolve
     MotionStreaks,
     Bloom, // prefilter and both blurs
     SunVisibility,
@@ -60,9 +62,11 @@ inline constexpr std::array<GpuPassInfo, gpu_pass_count> gpu_pass_info{{
     {"gpu_surface_ms", "Surface", GpuPass::Frame},
     {"gpu_atmosphere_ms", "Atmosphere", GpuPass::Frame},
     {"gpu_post_ms", "Post FX", GpuPass::Frame},
+    {"gpu_surface_prepass_ms", "Depth pre-pass", GpuPass::Surface},
     {"gpu_surface_sky_ms", "Sky", GpuPass::Surface},
     {"gpu_surface_bodies_ms", "Bodies", GpuPass::Surface},
-    {"gpu_surface_rocks_ms", "Rocks and splats", GpuPass::Surface},
+    {"gpu_surface_rocks_ms", "Rocks", GpuPass::Surface},
+    {"gpu_surface_splats_ms", "Splats", GpuPass::Surface},
     {"gpu_surface_clouds_ms", "Clouds", GpuPass::Surface},
     {"gpu_atmospheres_ms", "Atmospheres", GpuPass::Atmosphere},
     {"gpu_belt_dust_ms", "Belt dust", GpuPass::Atmosphere},

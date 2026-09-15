@@ -40,21 +40,60 @@ void Renderer::Impl::record_galaxy_pass(gpu::CommandBuffer* cmd, Root root, cons
     }
 }
 
+// The bodies' depth ahead of the scene pass, so the surface shaders run once
+// per pixel: rocks in front of a body reject the body's pixels and a body in
+// front of another rejects those, whichever order they are drawn in. The same
+// vertex shader and matrices give the same depth, so the scene pass passes its
+// own pixels on equal depth.
+void Renderer::Impl::record_depth_prepass(gpu::CommandBuffer* cmd, Root root) {
+    root.mode = std::uint32_t(SurfaceMode::opaque);
+    {
+        RenderPassScope pass(cmd, {.depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::clear}});
+        gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
+        gpu::bind_pso(cmd, pso.scene.depth_prepass);
+        const unsigned triangles_before = stats.frame.triangles;
+        for (unsigned i = 0; i < body_count; i++)
+            if (body_visible[i])
+                draw_mesh(cmd, root, body_mesh(i, body_level[i]), i, 1);
+        stats.frame.triangles = triangles_before; // counted once, in the scene pass
+    }
+    synchronize(cmd, access::depth_write, access::depth_read);
+}
+
+// Opaque geometry first, then the sky depth-tested behind it, then everything
+// that blends: the rock splats, the cloud shell and the stars. The sky and the
+// blends never write depth. Bodies outside the view frustum are skipped, with
+// their pre-pass, atmosphere and clouds.
 void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input,
                                        const FrameData& frame, std::uint64_t args_address) {
+    (void)input;
     root.mode = std::uint32_t(SurfaceMode::opaque);
     gpu::ColorAttachment color{.render_view = frame_targets.hdr.view(), .load = gpu::LoadOp::clear};
     {
         RenderPassScope pass(cmd, {.colors = {&color, 1},
-                                   .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::clear}});
+                                   .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});
+        gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
         // The timing children sit inside the pass; draws overlap in the pipeline, so
         // each child is where its commands were issued rather than an exact cost.
         {
+            GpuTimingScope rock_batch(timings, GpuPass::SurfaceRocks);
+            draw_rock_meshes(cmd, root, args_address);
+        }
+        {
+            GpuTimingScope bodies(timings, GpuPass::SurfaceBodies);
+            for (unsigned i = 0; i < body_count; i++) {
+                if (!body_visible[i])
+                    continue;
+                gpu::bind_pso(cmd, surface_pso(surface_kind(system.bodies[i].body_class)));
+                draw_mesh(cmd, root, body_mesh(i, body_level[i]), i, 1);
+            }
+        }
+        gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
+        {
             GpuTimingScope sky(timings, GpuPass::SurfaceSky);
-            gpu::bind_pso(cmd, pso.scene.background);
+            gpu::bind_pso(cmd, pso.scene.background); // at the far plane: only where nothing was drawn
             gpu::draw(cmd, root, 3);
             stats.frame.draw_calls++;
-            // The catalogue stars over the background, before the bodies paint over them.
             if (star_count && frame.stars.y > 0) {
                 gpu::bind_pso(cmd, pso.scene.stars);
                 Root star_root = root;
@@ -63,22 +102,11 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
                 stats.frame.draw_calls++;
             }
         }
-        gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
         {
-            GpuTimingScope bodies(timings, GpuPass::SurfaceBodies);
-            for (unsigned i = 0; i < body_count; i++) {
-                const float distance = float(length(input.bodies[i].position - input.camera.position));
-                const float projected = float(input.bodies[i].radius) * float(extent.height) /
-                                        (distance * frame.right_tan.w);
-                gpu::bind_pso(cmd, surface_pso(surface_kind(system.bodies[i].body_class)));
-                draw_mesh(cmd, root, body_mesh(i, geometry::select_lod(projected, 2)), i, 1);
-            }
+            GpuTimingScope splats(timings, GpuPass::SurfaceSplats);
+            draw_rock_splats(cmd, root, args_address);
         }
-        {
-            GpuTimingScope rock_batch(timings, GpuPass::SurfaceRocks);
-            draw_rock_batch(cmd, root, args_address);
-        }
-        {
+        if (body_visible[showcase.earth()]) {
             GpuTimingScope clouds(timings, GpuPass::SurfaceClouds);
             gpu::bind_pso(cmd, pso.scene.cloud);
             root.mode = std::uint32_t(SurfaceMode::cloud);
@@ -95,6 +123,8 @@ void Renderer::Impl::record_atmosphere_passes(gpu::CommandBuffer* cmd, Root& roo
     // geometry, and Earth's goes last so it stays on top where shells overlap.
     root.mode = 0;
     for (unsigned body : {showcase.giant(), showcase.desert(), showcase.earth()}) {
+        if (!body_visible[body])
+            continue; // the shell is inside the culled sphere
         root.base = body;
         fullscreen_pass(cmd, frame_targets.hdr, pso.scene.atmosphere, root, true);
     }

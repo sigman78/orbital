@@ -1,4 +1,5 @@
 #include "render/frame_calculations.hpp"
+#include "scene/geometry.hpp"
 #include "scene/system.hpp"
 #include <algorithm>
 #include <cassert>
@@ -11,6 +12,25 @@ using namespace space;
 using namespace space::render;
 
 int main() {
+    {
+        // The view frustum: a sphere ahead is in, behind is out, and a sphere past a
+        // side plane is out unless its radius reaches back inside.
+        using namespace space;
+        using namespace space::render;
+        CameraView camera;
+        camera.forward = {0, 0, -1};
+        camera.right = {1, 0, 0};
+        camera.up = {0, 1, 0};
+        const auto frustum = view_frustum(camera, 1.f, .5f); // 90 degrees wide, 53 high
+        assert(geometry::sphere_in_frustum(frustum, {0, 0, -10}, 1));
+        assert(!geometry::sphere_in_frustum(frustum, {0, 0, 10}, 1));
+        assert(geometry::sphere_in_frustum(frustum, {0, 0, 0.5f}, 1)); // straddles the near plane
+        assert(geometry::sphere_in_frustum(frustum, {9, 0, -10}, .5f));
+        assert(!geometry::sphere_in_frustum(frustum, {12, 0, -10}, .5f));
+        assert(geometry::sphere_in_frustum(frustum, {12, 0, -10}, 2.f)); // reaches back across the side
+        assert(!geometry::sphere_in_frustum(frustum, {0, 7, -10}, .5f)); // the narrower vertical angle
+        assert(geometry::sphere_in_frustum(frustum, {0, 4, -10}, .5f));
+    }
     CameraView camera;
     CameraHistory previous{.position = camera.position,
                            .forward = camera.forward,
