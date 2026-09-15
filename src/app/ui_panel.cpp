@@ -104,20 +104,38 @@ void gpu_time_bar(const render::Stats& stats) {
         if (hovered && ImGui::GetIO().MousePos.x >= x && ImGui::GetIO().MousePos.x < end) {
             ImGui::BeginTooltip();
             ImGui::Text("%s  %.2f ms  %.1f%%", segment.label, segment.ms, 100 * segment.ms / total);
-            // Each child: milliseconds, share of the group, share of the frame.
+            // Each child: milliseconds, share of the group, share of the frame; the
+            // remainder is the group's barriers. Alternating row backgrounds, as a sheet.
             const float group = std::max(segment.ms, 1e-6f);
-            float accounted = 0;
-            if (!segment.children.empty())
-                ImGui::TextDisabled("  %-16s %9s  %6s  %6s", "", "ms", "group", "frame");
-            for (const auto& child : segment.children) {
-                const float ms = std::max(child.ms, 0.f);
-                ImGui::Text("  %-16s %9.3f  %5.1f%%  %5.1f%%", child.label, ms, 100 * ms / group, 100 * ms / total);
-                accounted += ms;
-            }
-            if (!segment.children.empty()) {
-                const float rest = std::max(segment.ms - accounted, 0.f);
-                ImGui::TextDisabled("  %-16s %9.3f  %5.1f%%  %5.1f%%", "barriers, other", rest, 100 * rest / group,
-                                    100 * rest / total);
+            if (!segment.children.empty() &&
+                ImGui::BeginTable("##children", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
+                const auto row = [&](const char* label, float ms, bool dim) {
+                    ImGui::TableNextRow();
+                    if (dim)
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(label);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%8.3f ms", ms);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%5.1f%%", 100 * ms / group);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%5.1f%%", 100 * ms / total);
+                    if (dim)
+                        ImGui::PopStyleColor();
+                };
+                ImGui::TableNextRow();
+                for (const char* heading : {"", "", "group", "frame"}) {
+                    ImGui::TableNextColumn();
+                    ImGui::TextDisabled("%s", heading);
+                }
+                float accounted = 0;
+                for (const auto& child : segment.children) {
+                    row(child.label, std::max(child.ms, 0.f), false);
+                    accounted += std::max(child.ms, 0.f);
+                }
+                row("barriers, other", std::max(segment.ms - accounted, 0.f), true);
+                ImGui::EndTable();
             }
             ImGui::EndTooltip();
         }
