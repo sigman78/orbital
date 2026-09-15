@@ -9,7 +9,7 @@ constexpr render::CameraView make_camera_view(const Camera& camera) {
             .forward = camera.forward(),
             .right = camera.right(),
             .up = camera.up(),
-            .vertical_fov = camera.vertical_fov,
+            .vertical_fov = camera.effective_fov(),
             .cut_serial = camera.cut_serial()};
 }
 

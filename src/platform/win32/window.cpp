@@ -84,6 +84,7 @@ struct Window::Impl {
     HBRUSH background_brush = nullptr;
     bool closed = false;
     bool mouse_look = false, mouse_look_began = false;
+    bool middle_button = false;
     POINT previous_cursor{};
     MouseDelta delta;
     SmallVec<Key, inline_press_count> presses;
@@ -121,11 +122,13 @@ struct Window::Impl {
         }
         case WM_CLOSE: closed = true; return 0;
         case WM_DESTROY: PostQuitMessage(0); return 0;
-        case WM_KILLFOCUS:
+        case WM_KILLFOCUS: middle_button = false; [[fallthrough]];
         case WM_RBUTTONUP:
             mouse_look = false;
             ReleaseCapture();
             return 0;
+        case WM_MBUTTONDOWN: middle_button = true; return 0;
+        case WM_MBUTTONUP: middle_button = false; return 0;
         case WM_RBUTTONDOWN:
             mouse_look = mouse_look_began = true;
             GetCursorPos(&previous_cursor);
@@ -222,6 +225,10 @@ bool Window::pump_events() {
 
 std::span<const Key> Window::key_presses() const {
     return impl_->presses;
+}
+
+bool Window::middle_button_down() const {
+    return impl_->middle_button;
 }
 
 bool Window::mouse_look_active() const {

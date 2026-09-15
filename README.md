@@ -31,7 +31,7 @@ For Linux setup, build presets, validation and SSH launch instructions, see [Lin
 
 ## Explore
 
-RMB + mouse looks around; WASD flies, Q/E moves vertically, Shift accelerates. Keys 1–6 select the Earth, Jupiter, Moon, Mars, dawn and belt views. T starts and stops the tour, O orbits the selected body, F returns to free flight. Space pauses the system; +/- changes exposure, X toggles adaptation.
+RMB + mouse looks around; holding the middle button is a 5x telescope; WASD flies, Q/E moves vertically, Shift accelerates. Keys 1–6 select the Earth, Jupiter, Moon, Mars, dawn and belt views. T starts and stops the tour, O orbits the selected body, F returns to free flight. Space pauses the system; +/- changes exposure, X toggles adaptation.
 
 F12 opens the control panel (`--ui` opens it at start), which holds frame statistics and every toggle below. The hotkeys: F1 HUD, F2 quality tier, F3 belt transmittance map, F4 belt extinction, F5 temporal anti-aliasing, F6 rock splat cut-off (off, 1.2, 2.5, 4 px), F7 splat lighting in both culling passes, F8 tone curve (PBR Neutral, AgX, ACES filmic), F9 spatial anti-aliasing (off, FXAA, SMAA), F10 capture, F11 belt dust, Alt+Enter borderless fullscreen, Esc exit.
 

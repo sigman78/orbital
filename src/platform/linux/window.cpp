@@ -39,6 +39,7 @@ struct Window::Impl {
     SDL_Window* handle = nullptr;
     bool closed = false;
     bool mouse_look = false, mouse_look_began = false;
+    bool middle_button = false;
     MouseDelta delta;
     SmallVec<Key, 16> presses;
 
@@ -88,18 +89,24 @@ bool Window::pump_events() {
         case SDL_WINDOWEVENT:
             if (event.window.event == SDL_WINDOWEVENT_CLOSE)
                 state.closed = true;
-            if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+            if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
                 state.stop_mouse_look();
+                state.middle_button = false;
+            }
             break;
         case SDL_MOUSEBUTTONDOWN:
             if (event.button.button == SDL_BUTTON_RIGHT && !capture_mouse) {
                 state.mouse_look = state.mouse_look_began = true;
                 SDL_SetRelativeMouseMode(SDL_TRUE);
             }
+            if (event.button.button == SDL_BUTTON_MIDDLE)
+                state.middle_button = true;
             break;
         case SDL_MOUSEBUTTONUP:
             if (event.button.button == SDL_BUTTON_RIGHT)
                 state.stop_mouse_look();
+            if (event.button.button == SDL_BUTTON_MIDDLE)
+                state.middle_button = false;
             break;
         case SDL_MOUSEMOTION:
             if (state.mouse_look) {
@@ -125,6 +132,10 @@ bool Window::pump_events() {
 std::span<const Key> Window::key_presses() const {
     return impl_->presses;
 }
+bool Window::middle_button_down() const {
+    return impl_->middle_button;
+}
+
 bool Window::mouse_look_active() const {
     return impl_->mouse_look;
 }

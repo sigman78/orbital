@@ -12,8 +12,12 @@ namespace settings {
 inline constexpr double base_speed = 8.0;               // scene units per second at speed_scale 1
 inline constexpr Range<double> speed_scale{0.0, 100.0}; // guards against a runaway scale from input
 inline constexpr double max_step_seconds = 0.25;        // a long stall must not teleport the camera
-inline constexpr double mouse_sensitivity = 0.0025;     // radians per pixel
-inline constexpr double collision_margin = 1.08;        // camera stays outside body radius * margin
+inline constexpr double mouse_sensitivity = 0.0025;     // radians per pixel, divided by the zoom
+namespace telescope {
+inline constexpr double magnification = 5.0;  // the cap, reached while the middle button is held
+inline constexpr double travel_seconds = 0.5; // from 1x to the cap at a steady rate, and back at the same rate
+} // namespace telescope
+inline constexpr double collision_margin = 1.08; // camera stays outside body radius * margin
 inline constexpr double basis_epsilon = 1e-8;
 namespace orbit {
 inline constexpr Range<double> pitch{-1.45, 1.45}; // radians, keeps the orbit camera off the poles
@@ -135,6 +139,11 @@ void Camera::step(double dt, double time, const Input& input, std::span<const Bo
     if (!std::isfinite(dt) || dt <= 0.0)
         return;
     dt = std::min(dt, settings::max_step_seconds);
+    // The telescope zooms at a steady rate in log space toward its cap while the
+    // button is held, and back to 1x at the same rate once it is released.
+    const double log_cap = std::log(settings::telescope::magnification);
+    const double rate = log_cap / settings::telescope::travel_seconds * dt;
+    zoom_ = std::exp(std::clamp(std::log(zoom_) + (input.telescope ? rate : -rate), 0.0, log_cap));
     const double scale = std::isfinite(input.speed_scale) ? input.speed_scale : 1.0;
     const double speed = settings::base_speed * settings::speed_scale.clamp(scale);
     if (mode_ == CameraMode::Tour && !bodies.empty()) {
@@ -177,8 +186,8 @@ void Camera::step_tour(double time, std::span<const BodyState> bodies) {
 void Camera::step_orbit(double dt, double speed, const Input& input, const BodyState& body) {
     const double minimum_zoom = body.radius * settings::collision_margin;
     orbit_zoom_ = std::max(minimum_zoom, orbit_zoom_ - input.move_forward * speed * dt);
-    orbit_yaw_ += input.mouse_dx * settings::mouse_sensitivity;
-    orbit_pitch_ = settings::orbit::pitch.clamp(orbit_pitch_ - input.mouse_dy * settings::mouse_sensitivity);
+    orbit_yaw_ += input.mouse_dx * settings::mouse_sensitivity / zoom_;
+    orbit_pitch_ = settings::orbit::pitch.clamp(orbit_pitch_ - input.mouse_dy * settings::mouse_sensitivity / zoom_);
     const double cp = std::cos(orbit_pitch_);
     const Vec3d from{orbit_zoom_ * cp * std::sin(orbit_yaw_), orbit_zoom_ * std::sin(orbit_pitch_),
                      orbit_zoom_ * cp * std::cos(orbit_yaw_)};
@@ -187,8 +196,8 @@ void Camera::step_orbit(double dt, double speed, const Input& input, const BodyS
 }
 
 void Camera::step_free(double dt, double speed, const Input& input) {
-    const double yaw = input.mouse_dx * settings::mouse_sensitivity;
-    const double pitch = settings::free::pitch_step.clamp(-input.mouse_dy * settings::mouse_sensitivity);
+    const double yaw = input.mouse_dx * settings::mouse_sensitivity / zoom_;
+    const double pitch = settings::free::pitch_step.clamp(-input.mouse_dy * settings::mouse_sensitivity / zoom_);
     forward_ = normalized(rotate_y(forward_, yaw));
     forward_.y = settings::free::forward_y.clamp(forward_.y + pitch);
     forward_ = normalized(forward_);

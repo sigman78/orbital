@@ -89,6 +89,7 @@ Input gather_input(platform::Window& window, AppState& app, bool keyboard_free) 
     }
     input.move_right += app.pan;
     input.speed_scale = window.key_down(Key::shift) ? control::fast_speed_scale : 1.0f;
+    input.telescope = window.middle_button_down();
     const platform::MouseDelta mouse = window.take_mouse_look_delta();
     input.mouse_dx = mouse.dx;
     input.mouse_dy = mouse.dy;
