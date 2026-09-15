@@ -109,8 +109,17 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     const auto light_matrix = light_projection(body_light);
     std::memcpy(frame.light_projection, light_matrix.m, sizeof frame.light_projection);
     const auto& ring = system.belts.front();
-    const auto belt = prepare_belt(ring, input.bodies[showcase.belt_parent()].position - camera.position, sun_relative,
-                                   input.belt.disc, input.belt.lod_scale);
+    auto belt = prepare_belt(ring, input.bodies[showcase.belt_parent()].position - camera.position, sun_relative,
+                             input.belt.disc, input.belt.lod_scale);
+    // Frozen culling keeps the cull camera, and with it the far-tier weight, of
+    // the frame it was switched on in, so the disc and the splats it replaces
+    // stay in step while the live camera inspects them.
+    if (!input.belt.freeze_culling)
+        frozen_cull.reset();
+    else if (!frozen_cull)
+        frozen_cull = FrozenCull{.camera = camera, .tan_y = view.tan_half_fov, .disc_weight = belt.disc_weight};
+    if (frozen_cull)
+        belt.disc_weight = frozen_cull->disc_weight;
     const auto belt_light_matrix = light_projection(belt.light);
     const auto belt_disc_matrix = light_projection(belt.disc);
     std::memcpy(frame.belt_light_projection, belt_light_matrix.m, sizeof frame.belt_light_projection);
@@ -204,17 +213,21 @@ void Renderer::Impl::write_body_instances(const FrameInput& input, const FrameDa
 // expanded tiny billboards.
 void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
                                         std::uint64_t instance_address) {
-    const CameraView& camera = input.camera;
-    const float tan_y = frame.right_tan.w, tan_x = tan_y * frame.up_aspect.w;
+    // build_frame has already captured or released the frozen cull camera; the
+    // frame's far-tier weight is the frozen one when it holds.
+    const CameraView& camera = frozen_cull ? frozen_cull->camera : input.camera;
+    const float tan_y = frozen_cull ? frozen_cull->tan_y : frame.right_tan.w, tan_x = tan_y * frame.up_aspect.w;
     const BeltTransform transform = belt_transform(system.belts.front(), float(input.time * belt_culling::spin_rate));
     CullParams& p = scratch.params;
     p = {};
     p.right = f4(to_float(camera.right), tan_x);
     p.up = f4(to_float(camera.up), tan_y);
     p.forward = f4(to_float(camera.forward), tan_y * 4 / float(extent.height));
-    p.view = {float(extent.height) / (2 * frame.right_tan.w), std::sqrt(1 + tan_x * tan_x),
-              std::sqrt(1 + tan_y * tan_y), float(input.time * belt_culling::rock_spin_rate)};
-    p.giant = f4(input.bodies[showcase.belt_parent()].position - camera.position);
+    p.view = {float(extent.height) / (2 * tan_y), std::sqrt(1 + tan_x * tan_x), std::sqrt(1 + tan_y * tan_y),
+              float(input.time * belt_culling::rock_spin_rate)};
+    // Rocks stay live camera relative for the draw; the offset moves the tests to the cull camera.
+    p.giant = f4(input.bodies[showcase.belt_parent()].position - input.camera.position);
+    p.freeze = f4(input.camera.position - camera.position);
     p.belt_tilt = {belt_tilt.y_scale, belt_tilt.y_from_z, belt_tilt.z_scale, 0};
     for (unsigned band = 0; band < belt::radial_bands; band++)
         p.band_spin[band] = {transform.cos_spin[band], transform.sin_spin[band], 0, 0};

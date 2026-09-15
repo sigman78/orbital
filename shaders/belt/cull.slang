@@ -39,9 +39,11 @@ struct Placement {
 // in its fraction; billboards carry their coverage there instead.
 #include "rockclass.slang"
 
-// True when the rock's sphere lies entirely behind one of the bodies.
-bool occludedByBodies(float3 target, float targetRadius)
+// True when the rock's sphere lies entirely behind one of the bodies, seen from
+// the cull camera; both are live camera relative, so the frozen offset shifts both.
+bool occludedByBodies(float3 target, float targetRadius, float3 offset)
 {
+    target += offset;
     float targetDistance = length(target);
     if (targetDistance <= targetRadius) return false;
     float3 direction = target / targetDistance;
@@ -51,6 +53,7 @@ bool occludedByBodies(float3 target, float targetRadius)
     {
         if (i >= bodyCount) break;
         float4 body = root.frame->bodies[i];
+        body.xyz += offset;
         float bodyDistance = length(body.xyz);
         if (bodyDistance <= body.w || targetDistance - targetRadius <= bodyDistance + body.w) continue;
         float separation = acos(clamp(dot(direction, body.xyz / bodyDistance), -1.0, 1.0));
@@ -76,17 +79,21 @@ Placement placeRock(uint id, bool lightSplats)
     float3 local = float3(bx, v.y * p->belt_tilt.x - bz * p->belt_tilt.y, bz * p->belt_tilt.z);
     float3 position = p->giant.xyz + local;
     float radius = rock.position_radius.w;
+    // Visibility, level and coverage are judged from the cull camera, which the
+    // panel can freeze while the live camera moves on; the instance keeps the
+    // live camera relative position, so what was culled draws where it is.
+    float3 eye = position + p->freeze.xyz;
 
-    float z = dot(position, p->forward.xyz);
+    float z = dot(eye, p->forward.xyz);
     if (z < -radius) return result;
     float pixelRadius = radius * p->view.x / max(z, .1);
     if (pixelRadius < p->billboard.z) return result;
     // Frustum planes with non-unit normals; padding covers jitter and expanded billboards.
     float zc = max(z, 0.0);
     float padding = radius + zc * p->forward.w;
-    if (abs(dot(position, p->right.xyz)) > zc * p->right.w + padding * p->view.y) return result;
-    if (abs(dot(position, p->up.xyz)) > zc * p->up.w + padding * p->view.z) return result;
-    if (occludedByBodies(position, radius)) return result;
+    if (abs(dot(eye, p->right.xyz)) > zc * p->right.w + padding * p->view.y) return result;
+    if (abs(dot(eye, p->up.xyz)) > zc * p->up.w + padding * p->view.z) return result;
+    if (occludedByBodies(position, radius, p->freeze.xyz)) return result;
 
     result.visible = true;
     float4 ring = root.frame->belt_ring;
