@@ -38,6 +38,8 @@ struct SmoothedStats {
         frame.draw_calls = sample.draw_calls;
         frame.rock_groups_drawn = sample.rock_groups_drawn;
         frame.belt_lod = sample.belt_lod;
+        frame.cull_frozen = sample.cull_frozen;
+        frame.cull_camera = sample.cull_camera;
         frame.visible_asteroids = unsigned(rocks_ + .5f);
         frame.triangles = unsigned(triangles_ + .5f);
         primed = true;

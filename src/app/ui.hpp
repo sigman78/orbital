@@ -46,4 +46,8 @@ private:
 // stats is the renderer's (exposure, memory, output); the frame readings shown are the smoothed ones.
 void draw_panel(AppState& app, const render::Stats& stats, const SmoothedStats& smoothed, const FrameHistory& history);
 
+// While Freeze culling holds the cull camera, its frustum drawn as lines over the
+// scene through the live camera, so the cut the freeze holds is visible from outside.
+void draw_cull_frustum(const AppState& app, const render::Stats& stats);
+
 } // namespace space::app

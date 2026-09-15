@@ -61,6 +61,10 @@ struct FrameStats {
     unsigned bodies_drawn = 0;      // bodies inside the view frustum this frame
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
     float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc
+    // The cull camera while BeltSettings::freeze_culling holds it (the view the
+    // switch was thrown in), so the app can outline its frustum from outside.
+    bool cull_frozen = false;
+    CameraView cull_camera;
 };
 
 // What the swapchain presents, refreshed when the output mode changes.

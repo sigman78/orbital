@@ -563,7 +563,59 @@ void overlay_controls(AppState& app) {
     ImGui::TextDisabled("F12 hides this panel");
 }
 
+// The frozen frustum's edges: the four from the eye to a far rectangle, and the
+// rectangle itself, far enough out to cross the belt from any view inside it. The
+// frozen eye usually sits behind the live camera once the view has moved away, so
+// each edge is clipped to the live near plane before it is projected.
+struct FrustumOutline {
+    Vec3d eye, corners[4]; // the far rectangle's corners, counter-clockwise from the bottom left
+};
+FrustumOutline frustum_outline(const render::CameraView& cull, double aspect) {
+    constexpr double far_units = 40;
+    const double tan_y = std::tan(cull.vertical_fov * .5), tan_x = tan_y * aspect;
+    const Vec3d centre = cull.position + cull.forward * far_units;
+    const Vec3d dx = cull.right * (far_units * tan_x), dy = cull.up * (far_units * tan_y);
+    return {cull.position, {centre - dx - dy, centre + dx - dy, centre + dx + dy, centre - dx + dy}};
+}
+
 } // namespace
+
+void draw_cull_frustum(const AppState& app, const render::Stats& stats) {
+    if (!stats.frame.cull_frozen)
+        return;
+    const ImVec2 size = ImGui::GetIO().DisplaySize;
+    if (size.x <= 0 || size.y <= 0)
+        return;
+    const double aspect = double(size.x) / double(size.y);
+    const FrustumOutline outline = frustum_outline(stats.frame.cull_camera, aspect);
+    // Live camera space (x right, y up, z forward), then the screen.
+    const Camera& live = app.camera;
+    const double tan_y = std::tan(live.effective_fov() * .5), tan_x = tan_y * aspect;
+    const auto to_view = [&](Vec3d world) {
+        const Vec3d d = world - live.position;
+        return Vec3d{dot(d, live.right()), dot(d, live.up()), dot(d, live.forward())};
+    };
+    const auto to_screen = [&](Vec3d v) {
+        return ImVec2(float((v.x / (v.z * tan_x) * .5 + .5) * size.x), float((.5 - v.y / (v.z * tan_y) * .5) * size.y));
+    };
+    constexpr double near = 1e-3;
+    constexpr ImU32 color = IM_COL32(255, 200, 60, 200);
+    ImDrawList* draw = ImGui::GetBackgroundDrawList();
+    const auto edge = [&](Vec3d a, Vec3d b) {
+        Vec3d va = to_view(a), vb = to_view(b);
+        if (va.z < near && vb.z < near)
+            return;
+        if (va.z < near)
+            va = va + (vb - va) * ((near - va.z) / (vb.z - va.z));
+        else if (vb.z < near)
+            vb = vb + (va - vb) * ((near - vb.z) / (va.z - vb.z));
+        draw->AddLine(to_screen(va), to_screen(vb), color, 1.5f);
+    };
+    for (int i = 0; i < 4; i++) {
+        edge(outline.eye, outline.corners[i]);
+        edge(outline.corners[i], outline.corners[(i + 1) % 4]);
+    }
+}
 
 void draw_panel(AppState& app, const render::Stats& stats, const SmoothedStats& smoothed, const FrameHistory& history) {
     const ImGuiIO& io = ImGui::GetIO();

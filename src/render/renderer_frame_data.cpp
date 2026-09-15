@@ -120,6 +120,8 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
         frozen_cull = FrozenCull{.camera = camera, .tan_y = view.tan_half_fov, .disc_weight = belt.disc_weight};
     if (frozen_cull)
         belt.disc_weight = frozen_cull->disc_weight;
+    stats.frame.cull_frozen = frozen_cull.has_value();
+    stats.frame.cull_camera = frozen_cull ? frozen_cull->camera : camera;
     const auto belt_light_matrix = light_projection(belt.light);
     const auto belt_disc_matrix = light_projection(belt.disc);
     std::memcpy(frame.belt_light_projection, belt_light_matrix.m, sizeof frame.belt_light_projection);

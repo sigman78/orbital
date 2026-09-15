@@ -229,6 +229,8 @@ unsigned frame_loop(const Session& session, FrameHistory& history, BenchmarkLog*
                         app.bodies);
         // The overlay is built every frame so its input state stays current; the panel itself is optional.
         ui.begin_frame();
+        if (app.belt.freeze_culling)
+            draw_cull_frustum(app, renderer.stats());
         if (app.show_ui)
             draw_panel(app, renderer.stats(), smoother, history);
         const ImDrawData* ui_draw = ui.end_frame();
