@@ -146,7 +146,7 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
                        input.sun.ghost_spread, input.sun.ghost_size};
     frame.post = {input.post.bloom ? input.post.bloom_intensity : 0.f, input.post.bloom_threshold,
                   input.post.bloom_knee, input.post.aberration};
-    frame.post_more = {input.post.vignette, input.post.grain, input.post.black_offset, 0};
+    frame.post_more = {input.post.vignette, input.post.grain, input.post.black_offset, input.sun.flare_adaptation};
     frame.giant = {input.gas.time_scale, std::max(input.gas.cycle, .1f), input.gas.turbulence,
                    input.gas.flow ? 1.f : 0.f};
     frame.giant_more = {input.gas.haze, input.gas.terminator, input.gas.relief, input.gas.cap_opacity};
@@ -173,7 +173,9 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.screen_sun = {sun.x, sun.y, sun.visible ? 1.f : 0.f, sun_flare::screen_size};
     // The output encoding for the composite and the present pass; the overlay packs the same into its root.
     const float paper_white = std::max(input.tone.paper_white_nits, 1.f);
-    frame.display = {float(hdr_output), paper_white, std::max(input.tone.peak_nits / paper_white, 1.f), 0};
+    // The auto exposure's multiplier alone, so the composite can hold the flare out of it.
+    frame.display = {float(hdr_output), paper_white, std::max(input.tone.peak_nits / paper_white, 1.f),
+                     input.tone.auto_exposure ? adapted_exposure : 1.f};
     ui_display = unsigned(hdr_output) | (unsigned(std::lround(paper_white)) << 8);
     // The glass is lit by the sun wherever it is unless a body covers it; it blurs regardless.
     const bool glass = input.post.dirty_glass && lens_dirt;

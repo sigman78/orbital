@@ -114,7 +114,9 @@ enforced and the control that scales it.
   default 0.25 of the former constants, 0 for none. City lights and faint cloud cover are
   what a night side shows.
 - **The lens is additive.** The sun glare, starburst, streak and the flare stack are light
-  the lens adds and never darken the scene. The composite passes them to the tone map
+  the lens adds and never darken the scene. They follow the manual exposure but, by default,
+  not the auto exposure (Sun & lens > Follows adaptation), so a sun in frame stopping the
+  scene down leaves the flare at its tuned level. The composite passes them to the tone map
   apart from the scene, so the neutral curve's black offset is taken from the scene alone
   (ACES and AgX just sum); the glare's 1/d² tail is cut with exp(-1.5 d) so it does not
   veil the frame once nothing subtracts it. The stack's veils are intended and scale with

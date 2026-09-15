@@ -109,6 +109,10 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float3 veil = float3(1.0, .6, .3) * vis * .014 * lens.x / (dist * dist + .012) * exp(-dist * 1.5)
                   + lerp(float3(luma709(flare)), flare, root.frame.lens_stack.y);
     float exposure = root.frame.forward_exposure.w;
+    // The flare is a display-level veil tuned against the scene at 1x: it follows the
+    // manual exposure but only as much of the auto exposure as the panel allows, so a
+    // sun in frame stopping the scene down does not take the flare with it.
+    float veilExposure = exposure * pow(max(root.frame.display.w, 1e-3), root.frame.post_more.w - 1.0);
     // HDR output: the curve's shoulder reaches the headroom (peak over paper
     // white) instead of the curve's white; the 16-bit float intermediate then
     // holds the linear display value over the headroom, so the spatial
@@ -117,7 +121,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     bool hdr = root.frame.display.x > 0.0;
     float headroom = hdr ? max(root.frame.display.z, 1.0) : 1.0;
     uint curve = uint(root.frame.quality.y + .5);
-    color = toneMap(color * exposure, veil * exposure, curve, root.frame.post_more.z, headroom);
+    color = toneMap(color * exposure, veil * veilExposure, curve, root.frame.post_more.z, headroom);
     color *= 1.0 - root.frame.post_more.x * pow(length(p * .65), 2.0);
     color /= headroom; // from here on the display value over the headroom, 0..1
     // Dither and grain in display-code space; linear-space noise is far too

@@ -203,6 +203,8 @@ void sun_lens_controls(render::SunSettings& settings) {
     ImGui::SliderFloat("Ghost spread", &settings.ghost_spread, .5f, 2.f, "%.2f x");
     ImGui::SliderFloat("Ghost size", &settings.ghost_size, .5f, 2.f, "%.2f x");
     ImGui::SliderFloat("Saturation", &settings.flare_saturation, 0.f, 2.f, "%.2f x");
+    ImGui::SliderFloat("Follows adaptation", &settings.flare_adaptation, 0.f, 1.f,
+                       "%.2f"); // 0 fixed level, 1 dims with the scene
     {
         const char* labels[] = {"half", "quarter", "eighth"};
         int choice = settings.flare_resolution == render::FlareResolution::Eighth ? 2

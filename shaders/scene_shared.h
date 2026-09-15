@@ -64,7 +64,7 @@ struct Frame {
     SHADER_FLOAT4 lens_more;             // mini crescent strength, streak strength, ghost spread, ghost size
     SHADER_FLOAT4 lens_stack;            // flare stack target divisor (0: the pass is skipped), flare saturation, dirty glass light (0 off), dirty glass blur (0 off)
     SHADER_FLOAT4 post;                  // bloom intensity (0 off), bloom threshold, bloom knee, chromatic aberration scale
-    SHADER_FLOAT4 post_more;             // vignette, film grain, black offset of the neutral tone curve, unused
+    SHADER_FLOAT4 post_more;             // vignette, film grain, black offset of the neutral tone curve, flare adaptation (0 fixed, 1 follows)
     SHADER_FLOAT4 giant;                 // flow time scale (x real), advection cycle (seconds), turbulence, flow map on
     SHADER_FLOAT4 giant_more;            // limb haze optical depth, terminator wrap, cloud relief exaggeration, polar cap opacity
     SHADER_FLOAT4 giant_night;           // lightning flashes per second, lightning brightness, polar cap size (0 off), polar cap blend width
@@ -75,7 +75,7 @@ struct Frame {
     SHADER_FLOAT4 galaxy;                // Milky Way splats drawn (the first n of the cloud), dust fBm amplitude (0 off), base feature size in degrees, galaxy mode (0 splats, 1 layers, 2 original)
     SHADER_FLOAT4 galaxy_layers;         // low-frequency, cloud and filament gains, unused
     SHADER_FLOAT4 galaxy_more;           // dust fBm lacunarity, gain, the galaxy pass's resolution divisor, band contrast exponent
-    SHADER_FLOAT4 display;               // HDR output (0 off, 1 scRGB, 2 HDR10), paper white in nits, headroom (peak over paper white), unused
+    SHADER_FLOAT4 display;               // HDR output (0 off, 1 scRGB, 2 HDR10), paper white in nits, headroom (peak over paper white), the auto exposure's multiplier
 };
 struct Root {
 #ifdef __cplusplus

@@ -94,6 +94,8 @@ struct SunSettings {
     float ghost_size = 1.f;             // scales the ghosts' radii
     float streak_strength = 1.f;        // the axis streak and its spindle knots
     float flare_saturation = 1.f;       // colour of the whole flare: 0 neutral, 1 as fitted, above exaggerates
+    float flare_adaptation = 0.f; // how much the flare follows the auto exposure: 0 stays at its tuned level, 1 dims
+                                  // and brightens with the scene
     FlareResolution flare_resolution = FlareResolution::Quarter; // coarser is softer, as a defocused stack
 };
 
