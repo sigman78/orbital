@@ -9,16 +9,16 @@ namespace space::render {
 
 namespace {
 namespace exposure_meter {
-inline constexpr unsigned interval = 16;       // frames between readbacks
-inline constexpr float max_step_seconds = 1.f; // a stalled frame does not snap the adaptation
+inline constexpr unsigned interval = ORBITAL_METER_PHASES; // frames per histogram cycle, one slice of the taps each
+inline constexpr float max_step_seconds = 1.f;             // a stalled frame does not snap the adaptation
 } // namespace exposure_meter
 } // namespace
 
 void Renderer::Impl::apply_metering(const ToneSettings& tone) {
     if (meter_pending) {
-        // The meter's readback: four floats per cell, read by meter_exposure (frame_calculations).
-        const auto* values = reinterpret_cast<const float*>(buffers.luminance_readback.range().cpu);
-        const auto reading = meter_exposure({values, std::size_t(targets::meter_size) * targets::meter_size * 4}, tone);
+        // The histogram of the last cycle, read by meter_exposure (frame_calculations).
+        const auto* histogram = reinterpret_cast<const MeterHistogram*>(buffers.meter_readback.range().cpu);
+        const auto reading = meter_exposure(histogram->bins, histogram->peak, tone);
         stats.exposure.ready = true;
         stats.exposure.has_samples = reading.has_samples;
         stats.exposure.luminance = reading.luminance;
@@ -93,14 +93,33 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
         root.mode = 2;
         fullscreen_pass(cmd, frame_targets.final_image, hdr() ? pso.post.smaa_blend_hdr : pso.post.smaa_blend, root);
     }
-    if (frame_index % exposure_meter::interval == 0) {
+    {
+        // The exposure histogram: one slice of the tap grid a frame, zeroed at the
+        // start of a cycle and read back at its end, so no frame carries the whole
+        // meter. Its timing scope brackets the slice, and the copies on the cycle's ends.
         GpuTimingScope timing(timings, GpuPass::Meter);
-        fullscreen_pass(cmd, fixed_targets.luminance, pso.post.meter, root);
-        synchronize(cmd, access::color_write, access::transfer_read);
-        gpu::copy_texture_to_memory(cmd, fixed_targets.luminance.texture(),
-                                    gpu::gpu_range(buffers.luminance_readback.get()));
-        synchronize(cmd, access::transfer_write, access::host_read);
-        meter_pending = true;
+        const unsigned phase = frame_index % exposure_meter::interval;
+        const gpu::GpuRange histogram = gpu::gpu_range(buffers.meter_device.get());
+        if (phase == 0) {
+            gpu::copy_memory(cmd, gpu::gpu_range(buffers.meter_zero.get()), histogram);
+            synchronize(cmd, access::transfer_write, access::compute_read_write);
+        }
+        const MeterRoot meter_root{.frame = root.frame,
+                                   .histogram = reinterpret_cast<std::uint64_t>(histogram.gpu),
+                                   .phase = phase,
+                                   .unused = 0};
+        const unsigned taps_x = (extent.width + 3) / 4;
+        const unsigned rows = ((extent.height + 3) / 4 + exposure_meter::interval - 1) / exposure_meter::interval;
+        gpu::bind_pso(cmd, pso.post.meter);
+        gpu::dispatch(cmd, meter_root, {(taps_x + 7) / 8, (rows + 7) / 8, 1});
+        if (phase + 1 == exposure_meter::interval) {
+            synchronize(cmd, access::compute_write, access::transfer_read);
+            gpu::copy_memory(cmd, histogram, gpu::gpu_range(buffers.meter_readback.get()));
+            synchronize(cmd, access::transfer_write, access::host_read);
+            meter_pending = true;
+        } else {
+            synchronize(cmd, access::compute_write, access::compute_read_write);
+        }
     }
     gpu::ColorAttachment color{.render_view = swapchain_view, .load = gpu::LoadOp::clear};
     {

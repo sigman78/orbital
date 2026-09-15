@@ -88,7 +88,6 @@ void Renderer::Impl::create_pipelines() {
     pso.post.present_hdr10 = make("fullscreen", "present", Format::rgb10a2_unorm);
     pso.post.fxaa = make("fullscreen", "fxaa_pass", Format::rgba8_srgb);
     pso.post.fxaa_hdr = make("fullscreen", "fxaa_pass", Format::rgba16_float);
-    pso.post.meter = make("fullscreen", "meter", Format::rgba32_float);
     pso.post.temporal = make("fullscreen", "temporal", Format::rgba16_float);
     pso.post.smaa_edges = make("fullscreen", "smaa", Format::rg8_unorm);
     pso.post.smaa_weights = make("fullscreen", "smaa", Format::rgba8_unorm);
@@ -101,6 +100,9 @@ void Renderer::Impl::create_pipelines() {
     pso.belt.cull = gpu::create_compute_pso(device, read_spirv(directory / "shaders/cull.compute.spv"));
     panic_if(!pso.belt.cull, "compute pipeline creation failed: cull");
     pipelines.emplace_back(pso.belt.cull);
+    pso.post.meter = gpu::create_compute_pso(device, read_spirv(directory / "shaders/meter_histogram.compute.spv"));
+    panic_if(!pso.post.meter, "compute pipeline creation failed: meter_histogram");
+    pipelines.emplace_back(pso.post.meter);
     // Depth-only shadow pass reuses the surface vertex shader with a slope bias.
     const auto shadow_vertex = read_spirv(directory / "shaders/surface.vertex.spv");
     pso.scene.shadow = gpu::create_graphics_pso(

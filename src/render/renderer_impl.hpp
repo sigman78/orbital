@@ -166,7 +166,6 @@ inline constexpr unsigned belt_light_map_size = 2048;    // the whole belt in li
 inline constexpr unsigned belt_disc_map_size = 1024;     // the whole belt over its plane, for the far tier: sunlight
 inline constexpr unsigned belt_disc_rock_map_size = 256; // rock coverage, coarse so each texel averages many rocks
 inline constexpr unsigned belt_disc_light_interval = 16, belt_disc_rock_interval = 32; // frames between bakes
-inline constexpr unsigned meter_size = 16;             // luminance meter edge, texels of rgba32f
 inline constexpr unsigned mote_cell_size_units = 5;    // motion streak lattice cell, scene units
 inline constexpr unsigned mote_count = 4 * 4 * 4 * 16; // MOTE_CELLS^3 * MOTES_PER_CELL in motes.slang
 } // namespace targets
@@ -237,7 +236,9 @@ struct Renderer::Impl {
     gpu::Device* device = nullptr;
     SubmissionTimeline submissions;
     struct BufferResources {
-        UniqueGpuHeap data, texture_descriptors, sampler_descriptors, luminance_readback;
+        UniqueGpuHeap data, texture_descriptors, sampler_descriptors;
+        UniqueGpuHeap meter_device, meter_zero,
+            meter_readback;                       // the exposure histogram, its zero source and its readback
         UniqueGpuHeap cull_device, cull_readback; // GPU output and completed scratch for CPU statistics
     } buffers;
     std::uint64_t static_cursor = 0;
@@ -282,7 +283,7 @@ struct Renderer::Impl {
             gpu::PSO* present = nullptr;
             gpu::PSO* present_scrgb = nullptr; // the present and overlay pipelines follow the swapchain's format
             gpu::PSO* present_hdr10 = nullptr;
-            gpu::PSO* meter = nullptr;
+            gpu::PSO* meter = nullptr; // the histogram compute pass
             gpu::PSO* temporal = nullptr;
             gpu::PSO* fxaa = nullptr;
             gpu::PSO* fxaa_hdr = nullptr;

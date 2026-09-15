@@ -22,8 +22,9 @@ struct ToneSettings {
     bool auto_exposure = true;
     ToneCurve tone_curve = ToneCurve::PbrNeutral; // 0 ACES filmic, 1 AgX, 2 Khronos PBR Neutral (F8)
     float meter_key =
-        .09f; // the metered luminance the auto exposure maps to 1x: the Earth bookmark, as the screenshots
-    float highlight_bias = .1f;  // share of the brightest meter cell added to the metered luminance
+        .15f; // the metered luminance the auto exposure maps to 1x: the Earth bookmark, as the screenshots
+    float highlight_bias =
+        .1f; // share of the mean of the brightest thousandth of the taps added to the metered luminance
     float adapt_strength = 1.f;  // scales the adaptation in stops: 0 none, 1 the full metered change
     float adapt_deadzone = .33f; // stops the metered target must move before the adaptation follows
     float brighten_seconds = 5.f,

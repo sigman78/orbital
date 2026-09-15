@@ -42,9 +42,11 @@ frame root. GPU records and surface mode/kind values remain in `scene_shared.h`.
 
 ## Post-processing passes
 
-`post/bloom.slang`, `post/composite.slang`, `post/flare.slang`, `post/meter.slang`,
+`post/bloom.slang`, `post/composite.slang`, `post/flare.slang`,
 `post/sun_visibility.slang`, `post/present.slang`, and `aa/fxaa_pass.slang` compile
-as separate fragment entry points, sharing the fullscreen vertex shader. Bloom's
+as separate fragment entry points, sharing the fullscreen vertex shader;
+`post/meter_histogram.slang` is a compute entry point with its own push-constant root
+(`MeterRoot` in `scene_shared.h`), accumulating the exposure histogram over sixteen frames. Bloom's
 prefilter and two blur directions use `Root.mode`, with the C++/shader contract in
 `post/bloom_shared.h`. Other post entry points do not use a global effect selector.
 The lens flare stack lives in `post/lens.slang`: its soft elements (main ring,

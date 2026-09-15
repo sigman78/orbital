@@ -74,11 +74,13 @@ Between the rocks a half-resolution march through the same density field scatter
    area-prefiltered bloom with adjacent-texel separable blur at quarter resolution;
    one shared 1×1 sun-visibility estimate for lens effects; the soft part of the lens flare stack
    (main ring, crescents, coloured ghosts, streak spindles) into a quarter-resolution target;
-   exposure metering every sixteenth frame from a 16x16 image whose cells integrate their whole
-   area at a four pixel stride plus the sun's glare; the CPU averages the cells by centre weight,
-   adds a tenth of the brightest cell and maps the meter key to 1x, scaled in stops by the
-   adaptation strength, within -2 to +3 stops; the target moves only when the request differs by a
-   third of a stop, and the exposure eases toward it over five seconds up and one down.
+   exposure metering as a luminance histogram: a compute pass bins one sixteenth of a four pixel
+   tap grid each frame (with the sun's glare added as the composite draws it) into 64 log bins
+   accumulated over the cycle, zeroed at its start and read back at its end, so no frame carries
+   the whole meter; the CPU takes the weighted mean below the 99.5th percentile plus a tenth of the
+   mean of the brightest thousandth and maps the meter key to 1x, scaled in stops by the adaptation
+   strength, within -2 to +3 stops; the target moves only when the request differs by a third of a
+   stop, and the exposure eases toward it over five seconds up and one down.
 7. The composite adds the sun glare, the aperture starburst and the thin axis streak at full
    resolution and samples the flare stack target, all in HDR using the shared sun visibility. The
    stack lies along the axis through the image centre and the projected sun; its major elements

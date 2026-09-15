@@ -45,7 +45,7 @@ struct FrameTargets {
 
 // Independent of the window size; released before the device at shutdown.
 struct FixedTargets {
-    GpuImage shadow_map, luminance, belt_light, belt_light_blur, belt_disc_light, belt_disc_rocks;
+    GpuImage shadow_map, belt_light, belt_light_blur, belt_disc_light, belt_disc_rocks;
 };
 
 } // namespace space::render
