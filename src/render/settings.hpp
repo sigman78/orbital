@@ -29,6 +29,13 @@ struct ToneSettings {
     float peak_nits = 1000.f;                // the curve's shoulder reaches this; the headroom is peak over paper white
 };
 
+// What the OS reports about the display, passed through from the platform layer: the HDR
+// metadata's mastering range and the panel's readout. Zero nits means unknown.
+struct DisplaySettings {
+    bool hdr = false;
+    float min_nits = 0, max_nits = 0, max_full_frame_nits = 0, sdr_white_nits = 0;
+};
+
 struct AntiAliasingSettings {
     bool temporal_aa = true;                // temporal anti-aliasing (F5)
     SpatialAA spatial_aa = SpatialAA::SMAA; // spatial pass over the tone-mapped image: 0 off, 1 FXAA, 2 SMAA (F9)

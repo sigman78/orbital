@@ -90,6 +90,10 @@ Between the rocks a half-resolution march through the same density field scatter
    linear display value over the headroom (so the spatial pass, grain and dither see SDR values),
    the neutral curve's shoulder extends to the headroom, and the present and overlay passes decode and
    scale by the paper white and encode for the colour space. Captures clip at the curve's white.
+   The platform layer reports the display's HDR state, luminance range and SDR white level (DXGI
+   and the display configuration on Windows; nothing on Linux), polled once a second: they seed the
+   paper white and peak defaults at startup, feed the ST 2086 metadata the swapchain carries, and
+   show in the Tone panel.
 
 Scoped GPU timings separately bracket compute culling, body shadows, belt light maps, far-belt bakes, the scene,
 atmospheres with dust, and post-processing. The original cull/shadow aggregate is retained in the panel and CSV.

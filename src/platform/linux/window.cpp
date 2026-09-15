@@ -167,6 +167,10 @@ void Window::toggle_fullscreen() {
              "cannot toggle fullscreen: {}", SDL_GetError());
 }
 
+DisplayInfo Window::display_info() const {
+    return {}; // SDL2 reports no HDR state; the desktop's HDR output is not queried on Linux
+}
+
 bool Window::fullscreen() const {
     return (SDL_GetWindowFlags(impl_->handle) & SDL_WINDOW_FULLSCREEN) != 0;
 }

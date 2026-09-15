@@ -289,7 +289,7 @@ void post_fx_controls(render::PostSettings& settings) {
     if (ImGui::SmallButton("Reset post"))
         settings = {};
 }
-void tone_controls(render::ToneSettings& settings, const render::Stats& stats) {
+void tone_controls(render::ToneSettings& settings, const render::Stats& stats, const render::DisplaySettings& display) {
     const auto& exposure = stats.exposure;
     static constexpr const char* curves[] = {"ACES filmic", "AgX", "PBR Neutral"};
     combo("Curve (F8)", settings.tone_curve, curves);
@@ -309,10 +309,22 @@ void tone_controls(render::ToneSettings& settings, const render::Stats& stats) {
     combo("Output", settings.hdr_output, outputs);
     if (stats.hdr_unsupported)
         ImGui::TextDisabled("Not offered by the display; is HDR on in the OS?");
+    if (display.hdr)
+        ImGui::Text("Display: HDR, %.0f to %.0f nits, SDR white %.0f", display.min_nits, display.max_nits,
+                    display.sdr_white_nits);
+    else
+        ImGui::TextDisabled("Display: SDR desktop");
     ImGui::BeginDisabled(settings.hdr_output == render::HdrOutput::Off);
     ImGui::SliderFloat("Paper white", &settings.paper_white_nits, 80.f, 400.f, "%.0f nits");
     ImGui::SliderFloat("Peak brightness", &settings.peak_nits, 200.f, 4000.f, "%.0f nits",
                        ImGuiSliderFlags_Logarithmic);
+    if (display.hdr && display.max_nits > 0 && ImGui::SmallButton("From display")) {
+        settings.peak_nits = display.max_nits;
+        if (display.sdr_white_nits > 0)
+            settings.paper_white_nits = display.sdr_white_nits;
+    }
+    if (!stats.hdr_metadata)
+        ImGui::TextDisabled("No HDR metadata path on this device");
     ImGui::EndDisabled();
     ImGui::Spacing();
     if (!exposure.ready) {
@@ -419,7 +431,7 @@ void draw_panel(AppState& app, const render::Stats& stats, std::span<const float
         ImGui::PopID();
     }
     if (section("Tone")) {
-        tone_controls(app.tone, stats);
+        tone_controls(app.tone, stats, app.display);
         ImGui::PopID();
     }
     if (section("Camera")) {

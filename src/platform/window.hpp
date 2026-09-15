@@ -63,6 +63,14 @@ struct WindowDesc {
     std::string_view title;
 };
 
+// What the OS reports about the display the window is on, for HDR output.
+// Zero nits means the OS did not say; hdr is whether the desktop presents in HDR.
+struct DisplayInfo {
+    bool hdr = false;
+    float min_nits = 0, max_nits = 0, max_full_frame_nits = 0; // the panel's luminance range
+    float sdr_white_nits = 0;                                  // where the OS puts SDR white on an HDR desktop
+};
+
 class Window {
 public:
     // Panics if the window cannot be created; there is no demo without one.
@@ -90,6 +98,8 @@ public:
     void maximize();          // as the maximize button would; the drawable size changes on the next pump
     void toggle_fullscreen(); // borderless window over the monitor, and back to the previous placement
     bool fullscreen() const;
+    // The display under the window; cheap enough to poll once a second, not every frame.
+    DisplayInfo display_info() const;
 
     struct Impl;
 

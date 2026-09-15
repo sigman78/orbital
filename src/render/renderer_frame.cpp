@@ -48,6 +48,7 @@ bool Renderer::draw(const FrameInput& supplied) {
     if (!drawable.x || !drawable.y)
         return false;
     s.set_hdr_output(input.tone.hdr_output);
+    s.update_hdr_metadata(input.tone, input.display);
     s.resize({drawable.x, drawable.y}, unsigned(input.sky.galaxy_resolution), unsigned(input.sun.flare_resolution));
     const auto swap = gpu::acquire(s.device);
     if (!swap.render_view)

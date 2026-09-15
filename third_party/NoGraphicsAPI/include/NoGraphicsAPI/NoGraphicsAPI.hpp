@@ -449,6 +449,7 @@ struct DeviceCaps
     bool conventional_descriptor_backend = false;
     bool mesh_shaders = false;
     bool storage_image_read_without_format = false;
+    bool hdr_metadata = false; // VK_EXT_hdr_metadata: set_hdr_metadata reaches the display (conventional backend addition)
 };
 
 // The swapchain's colour space (conventional backend addition, for HDR output):
@@ -686,6 +687,18 @@ struct SwapchainInfo
 // on the next acquire; check support first, an unsupported pair fails there).
 [[nodiscard]] bool surface_format_supported(Device* device, Format format, ColorSpace color_space) noexcept;
 void set_swapchain_output(Device* device, Format format, ColorSpace color_space) noexcept;
+// SMPTE ST 2086 mastering metadata and the content light levels, in nits and
+// CIE xy, for an HDR swapchain (conventional backend addition over
+// VK_EXT_hdr_metadata). Kept and re-applied whenever the swapchain is
+// recreated; a no-op when the device lacks the extension.
+struct HdrMetadata
+{
+    float red_x = .708f, red_y = .292f, green_x = .170f, green_y = .797f, blue_x = .131f, blue_y = .046f; // Rec. 2020
+    float white_x = .3127f, white_y = .3290f;                                                             // D65
+    float max_luminance = 1000.0f, min_luminance = 0.0f;
+    float max_content_light_level = 1000.0f, max_frame_average_light_level = 200.0f;
+};
+void set_hdr_metadata(Device* device, const HdrMetadata& metadata) noexcept;
 
 [[nodiscard]] TimelineSemaphore* create_timeline_semaphore(Device* device, uint64 initial_value = 0) noexcept;
 void destroy_timeline_semaphore(TimelineSemaphore* semaphore) noexcept;

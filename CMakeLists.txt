@@ -144,7 +144,7 @@ if(ORBITAL_BUILD_DEMO)
   if(WIN32)
     add_library(orbital_platform STATIC src/platform/win32/window.cpp src/platform/win32/process.cpp src/platform/win32/text.cpp
                                         src/platform/win32/overlay.cpp third_party/imgui/backends/imgui_impl_win32.cpp)
-    target_link_libraries(orbital_platform PUBLIC orbital_core imgui PRIVATE user32 gdi32 dwmapi imm32)
+    target_link_libraries(orbital_platform PUBLIC orbital_core imgui PRIVATE user32 gdi32 dwmapi imm32 dxgi)
     target_compile_definitions(orbital_platform PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
   else()
     find_package(SDL2 REQUIRED CONFIG)

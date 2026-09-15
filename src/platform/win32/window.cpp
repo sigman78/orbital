@@ -6,7 +6,10 @@
 
 #include <windows.h>
 
+#include <dxgi1_6.h>
+
 #include <string>
+#include <vector>
 
 namespace space::platform {
 namespace {
@@ -278,6 +281,80 @@ void Window::toggle_fullscreen() {
             ShowWindow(handle, SW_MAXIMIZE);
         i.fullscreen = false;
     }
+}
+
+// DXGI describes the output whose monitor holds the window: its colour space
+// (HDR10 when the desktop presents in HDR) and its luminance range. The SDR
+// white level comes from the display configuration, in 1/1000 of 80 nits.
+DisplayInfo Window::display_info() const {
+    DisplayInfo info;
+    const HMONITOR monitor = MonitorFromWindow(impl_->handle, MONITOR_DEFAULTTONEAREST);
+    IDXGIFactory1* factory = nullptr;
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) || !factory)
+        return info;
+    bool found = false;
+    for (UINT a = 0; !found; ++a) {
+        IDXGIAdapter1* adapter = nullptr;
+        if (factory->EnumAdapters1(a, &adapter) != S_OK)
+            break;
+        for (UINT o = 0; !found; ++o) {
+            IDXGIOutput* output = nullptr;
+            if (adapter->EnumOutputs(o, &output) != S_OK)
+                break;
+            DXGI_OUTPUT_DESC desc{};
+            if (SUCCEEDED(output->GetDesc(&desc)) && desc.Monitor == monitor) {
+                IDXGIOutput6* output6 = nullptr;
+                if (SUCCEEDED(output->QueryInterface(IID_PPV_ARGS(&output6))) && output6) {
+                    DXGI_OUTPUT_DESC1 desc1{};
+                    if (SUCCEEDED(output6->GetDesc1(&desc1))) {
+                        info.hdr = desc1.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+                        info.min_nits = desc1.MinLuminance;
+                        info.max_nits = desc1.MaxLuminance;
+                        info.max_full_frame_nits = desc1.MaxFullFrameLuminance;
+                        found = true;
+                    }
+                    output6->Release();
+                }
+            }
+            output->Release();
+        }
+        adapter->Release();
+    }
+    factory->Release();
+    if (!found)
+        return info;
+    // The SDR white level: the display configuration path whose source is this monitor's device.
+    MONITORINFOEXW monitor_info{};
+    monitor_info.cbSize = sizeof(monitor_info);
+    if (!GetMonitorInfoW(monitor, &monitor_info))
+        return info;
+    UINT32 path_count = 0, mode_count = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &path_count, &mode_count) != ERROR_SUCCESS)
+        return info;
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths(path_count);
+    std::vector<DISPLAYCONFIG_MODE_INFO> modes(mode_count);
+    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &path_count, paths.data(), &mode_count, modes.data(), nullptr) !=
+        ERROR_SUCCESS)
+        return info;
+    for (UINT32 i = 0; i < path_count; ++i) {
+        DISPLAYCONFIG_SOURCE_DEVICE_NAME source{};
+        source.header = {.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                         .size = sizeof(source),
+                         .adapterId = paths[i].sourceInfo.adapterId,
+                         .id = paths[i].sourceInfo.id};
+        if (DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS ||
+            wcscmp(source.viewGdiDeviceName, monitor_info.szDevice) != 0)
+            continue;
+        DISPLAYCONFIG_SDR_WHITE_LEVEL white{};
+        white.header = {.type = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL,
+                        .size = sizeof(white),
+                        .adapterId = paths[i].targetInfo.adapterId,
+                        .id = paths[i].targetInfo.id};
+        if (DisplayConfigGetDeviceInfo(&white.header) == ERROR_SUCCESS)
+            info.sdr_white_nits = float(white.SDRWhiteLevel) / 1000.f * 80.f;
+        break;
+    }
+    return info;
 }
 
 bool Window::fullscreen() const {

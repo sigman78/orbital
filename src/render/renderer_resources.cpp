@@ -126,6 +126,7 @@ void Renderer::Impl::create_device(void* window) {
     panic_if(!device, "Vulkan device creation failed; check the console for missing features or driver errors");
     const auto& caps = gpu::get_device_caps(device);
     log::info("GPU: {} | conventional NoGraphicsAPI backend", caps.device_name);
+    stats.hdr_metadata = caps.hdr_metadata;
     panic_if(!caps.conventional_descriptor_backend,
              "the demo's shaders require the conventional descriptor backend build option");
     submissions.initialize(device);
@@ -316,6 +317,32 @@ void Renderer::Impl::set_hdr_output(HdrOutput mode) {
               mode == HdrOutput::ScRgb   ? "16-bit float, extended linear sRGB"
               : mode == HdrOutput::Hdr10 ? "10-bit, SMPTE ST 2084"
                                          : "8-bit sRGB");
+}
+
+// SMPTE ST 2086 metadata for an HDR swapchain: the display's own range when
+// the OS reported it (mastering the content to the display it is shown on),
+// otherwise the panel's peak; the content light level is the curve's peak and
+// the frame average the paper white, since a mostly dark sky never exceeds it.
+void Renderer::Impl::update_hdr_metadata(const ToneSettings& tone, const DisplaySettings& display) {
+    if (!hdr() || !stats.hdr_metadata) {
+        hdr_metadata_valid = false;
+        return;
+    }
+    gpu::HdrMetadata metadata;
+    if (hdr_output == HdrOutput::ScRgb) { // scRGB carries Rec. 709 primaries
+        metadata.red_x = .640f, metadata.red_y = .330f;
+        metadata.green_x = .300f, metadata.green_y = .600f;
+        metadata.blue_x = .150f, metadata.blue_y = .060f;
+    }
+    metadata.max_luminance = display.max_nits > 0 ? display.max_nits : tone.peak_nits;
+    metadata.min_luminance = display.min_nits;
+    metadata.max_content_light_level = tone.peak_nits;
+    metadata.max_frame_average_light_level = std::min(tone.paper_white_nits, metadata.max_luminance);
+    if (hdr_metadata_valid && std::memcmp(&metadata, &hdr_metadata_sent, sizeof(metadata)) == 0)
+        return;
+    gpu::set_hdr_metadata(device, metadata);
+    hdr_metadata_sent = metadata;
+    hdr_metadata_valid = true;
 }
 
 void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor, unsigned flare) {

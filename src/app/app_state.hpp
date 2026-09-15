@@ -32,6 +32,7 @@ struct AppState {
     bool vsync = true;
     float pan = 0; // lateral drift added to the move axis (--pan)
     render::ToneSettings tone;
+    render::DisplaySettings display; // polled from the window once a second
     render::AntiAliasingSettings aa;
     render::BeltSettings belt;
     render::BeltDustSettings belt_dust;
