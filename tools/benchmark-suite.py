@@ -155,9 +155,10 @@ def main():
     parser.add_argument('--warmup', type=int, default=120)
     parser.add_argument('--width', type=int, default=1600)
     parser.add_argument('--height', type=int, default=900)
-    # A hidden window is not composed by the desktop, and the GPU frame reads 8 to 10 percent lower
-    # for it; the protocol records it, so a headless run never compares with a windowed baseline.
-    parser.add_argument('--headless', action='store_true', help='run with the window hidden: a separate protocol, see docs/PERFORMANCE.md')
+    # The window is hidden by default: not composed by the desktop, the GPU frame reads 7 to 12
+    # percent lower and steadier. The protocol records it, so a hidden run never compares with
+    # a visible baseline (the series before 2026-09-15) and a visible run never with a hidden one.
+    parser.add_argument('--visible', action='store_true', help='run with the window shown: the protocol of the baselines before 2026-09-15')
     args = parser.parse_args()
     if args.repeats < 2 or args.warmup < 60 or args.frames - args.warmup < 100:
         parser.error('Use >=2 repeats, >=60 warmup frames and >=100 measured frames')
@@ -189,7 +190,7 @@ def main():
               'protocol': {'settings': SETTINGS, 'scenes': {s: SCENES[s] for s in args.scenes},
                            'quality': 'default (no --high)', 'window': [args.width, args.height],
                            'frames': args.frames, 'warmup': args.warmup, 'repeats': args.repeats,
-                           'fullscreen_at': 30, **({'headless': True} if args.headless else {})}, 'cases': {}}
+                           'fullscreen_at': 30, **({} if args.visible else {'headless': True})}, 'cases': {}}
     runs = {}
     # Repeat complete rounds to expose clock/temperature drift across the suite.
     for repeat in range(args.repeats):
@@ -202,7 +203,7 @@ def main():
                            '--height', str(args.height), '--frames', str(args.frames), '--benchmark', str(csv_path)]
                 if mode == 'fullscreen':
                     command += ['--fullscreen-at', '30']
-                if args.headless:
+                if not args.visible:
                     command.append('--headless')
                 process = subprocess.run(command, capture_output=True, text=True, timeout=120,
                                          creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
