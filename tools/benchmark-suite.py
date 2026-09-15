@@ -23,6 +23,12 @@ METRICS = ['cpu_submit_and_wait_ms', 'gpu_ms', 'cpu_prepare_ms', 'gpu_cull_shado
            'gpu_surface_ms', 'gpu_atmosphere_ms', 'gpu_post_ms']
 
 
+def csv_metrics(fieldnames):
+    # The group metrics above, then every other GPU scope the CSV carries (the
+    # groups' children); older baselines without them still compare on the groups.
+    return METRICS + [f for f in fieldnames if f.startswith('gpu_') and f.endswith('_ms') and f not in METRICS]
+
+
 def sha(path):
     with path.open('rb') as f:
         return hashlib.file_digest(f, 'sha256').hexdigest()
@@ -43,12 +49,12 @@ def command_output(command, cwd=ROOT):
     return subprocess.check_output(command, cwd=cwd, text=True).strip()
 
 
-def summarize(rows, warmup):
+def summarize(rows, warmup, metrics):
     rows = rows[warmup:]
     if len(rows) < 100:
         raise ValueError('At least 100 measured frames required after warmup')
     result = {}
-    for key in METRICS:
+    for key in metrics:
         values = sorted(float(r[key]) for r in rows)
         if any(not math.isfinite(v) or v < 0 for v in values):
             raise ValueError(f'Invalid timestamps in {key}')
@@ -63,7 +69,7 @@ def aggregate(runs):
     return {key: {'median': statistics.median(r[key]['median'] for r in runs),
                   'p95': statistics.median(r[key]['p95'] for r in runs),
                   'run_min': min(r[key]['median'] for r in runs),
-                  'run_max': max(r[key]['median'] for r in runs)} for key in METRICS}
+                  'run_max': max(r[key]['median'] for r in runs)} for key in runs[0]}
 
 
 def compare(current, baseline):
@@ -81,7 +87,7 @@ def compare(current, baseline):
         if now['resolution'] != old['resolution']:
             raise ValueError(f'Incompatible baseline: {case} resolution differs')
         changes[case] = {}
-        for metric in METRICS:
+        for metric in [m for m in now['metrics'] if m in old['metrics']]:
             a, b = now['metrics'][metric], old['metrics'][metric]
             delta = a['median'] - b['median']
             percent = 100 * delta / b['median'] if b['median'] else None
@@ -108,12 +114,22 @@ def write_report(report, baselines, output):
         writer.writerow(['case', 'width', 'height', 'metric', 'median_ms', 'p95_ms', 'run_min_ms', 'run_max_ms'])
         for name, case in report['cases'].items():
             m = case['metrics']
-            for key in METRICS:
+            for key in m:
                 writer.writerow([name, *case['resolution'], key, *[m[key][v] for v in ['median', 'p95', 'run_min', 'run_max']]])
             vals = [m[k]['median'] for k in METRICS if k != 'cpu_prepare_ms']
             vals.insert(2, m['gpu_ms']['p95'])
             lines.append(f'| {name} | {case["resolution"][0]}×{case["resolution"][1]} | ' +
                          ' | '.join(f'{v:.3f}' for v in vals) + ' |')
+    children = [(name, [k for k in case['metrics'] if k not in METRICS]) for name, case in report['cases'].items()]
+    if any(keys for _, keys in children):
+        lines += ['', '## Children', '', 'The scopes inside the groups: indicative, since a scope reads where its '
+                  'commands were issued rather than an exact cost.', '',
+                  '| Scene / mode | Scope | Median | p95 | Run range |', '| --- | --- | ---: | ---: | ---: |']
+        for name, keys in children:
+            for key in keys:
+                m = report['cases'][name]['metrics'][key]
+                lines.append(f'| {name} | {key} | {m["median"]:.3f} | {m["p95"]:.3f} | '
+                             f'{m["run_min"]:.3f} to {m["run_max"]:.3f} |')
     for label, changes in comparisons.items():
         lines += ['', f'## Compared with {label}', '',
                   'Flags require both >5% and >0.2 ms increase. Overlapping run ranges are marked noisy; confirm flagged results with another run.', '',
@@ -200,10 +216,11 @@ def main():
                 if case in report['cases'] and report['cases'][case]['resolution'] != resolution:
                     raise ValueError(f'{case}: resolution changed between repeats')
                 with csv_path.open(newline='') as f:
-                    rows = list(csv.DictReader(f))
+                    reader = csv.DictReader(f)
+                    rows = list(reader)
                 if len(rows) != args.frames:
                     raise ValueError(f'{case}: incomplete frame capture')
-                metrics = summarize(rows, args.warmup)
+                metrics = summarize(rows, args.warmup, csv_metrics(reader.fieldnames))
                 runs.setdefault(case, []).append(metrics)
                 report['cases'][case] = {'resolution': resolution, 'metrics': aggregate(runs[case]),
                                          'runs': runs[case]}
