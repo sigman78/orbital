@@ -277,7 +277,7 @@ ShotReadings frame_loop(const Session& session, FrameHistory& history, Benchmark
             if (benchmark)
                 benchmark->record(frame_ms, frame);
             if (!app.capture_request.empty()) {
-                const auto path = session.directory / app.capture_request;
+                const auto path = numbered_capture_path(session.directory / app.capture_request);
                 if (renderer.capture(path))
                     log::info("Saved {}", path.string());
                 app.capture_request.clear();
