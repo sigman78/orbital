@@ -40,6 +40,9 @@ int main() {
            (*shot->options.sun_at)[1] == -.7);
     assert(shot->options.capture == "m.png" && shot->options.back == 25);
     assert(shot->options.size.width == 960 && shot->options.frame_limit == 80); // the base's defaults
+    const auto chart = parse_shot(*base, "chart=brdf taa=0 frames=1", 5);
+    assert(chart && chart->options.chart == "brdf" && chart->options.taa == 0);
+    assert(!parse({"orbital", "--chart", ""}));
     const auto unnamed = parse_shot(*base, "bookmark=1", 7);
     assert(unnamed && unnamed->name == "shot 7" && unnamed->options.capture.empty()); // outputs are per shot
     assert(!parse_shot(*base, "# a comment", 1) && !parse_shot(*base, "   ", 2));

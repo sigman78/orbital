@@ -25,6 +25,7 @@ inline constexpr std::string_view usage =
     "view)\n"
     "--belt-sun-view (sun through the gas giant's belt, for bloom/occlusion checks)\n"
     "--back units (move away from the bookmark's body along its line, aimed at it) --fov-div X (telescope-like zoom)\n"
+    "--chart name (a parameter chart in place of the scene: brdf, earth)\n"
     "--shots file (one shot per line: key=value tokens named as the options above, e.g. bookmark=3 frames=80 "
     "capture=mars.png; the command line sets the defaults) --report file.json (per-shot readings) --headless "
     "(hidden window)\n"
@@ -69,6 +70,7 @@ struct Options {
     std::filesystem::path capture, benchmark;
     std::filesystem::path shots;  // a shot list to run in one process, one shot per line
     std::filesystem::path report; // JSON with each shot's readings, written when the run ends
+    std::string chart;            // a chart drawn in place of the scene (shaders/chart_<name>), for checks
 };
 
 // argv includes the program name. Invalid options log an option-specific error.

@@ -27,6 +27,13 @@ using ShaderMatrix4 = float[16];
 #define ORBITAL_ROOT_FOLD_CLOUDS 1 // the cloud shell is not drawn: the ground shader blends the clouds in
 // The Earth's cloud shell above the surface, in radii (the mesh scale and the shadow geometry).
 #define ORBITAL_CLOUD_HEIGHT 0.009
+// Charts (shaders/charts): the grid's margins and each chart's grid.
+#define ORBITAL_CHART_TOP 16
+#define ORBITAL_CHART_MARGIN 16
+#define ORBITAL_CHART_BRDF_COLUMNS 8
+#define ORBITAL_CHART_BRDF_ROWS 6
+#define ORBITAL_CHART_EARTH_COLUMNS 6
+#define ORBITAL_CHART_EARTH_ROWS 8
 // Instance.rotation_kind.w (SurfaceKind on the C++ side); each kind has its own fragment shader.
 #define ORBITAL_KIND_EARTH 0
 #define ORBITAL_KIND_GIANT 1

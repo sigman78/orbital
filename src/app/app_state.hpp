@@ -5,6 +5,7 @@
 #include "scene/system.hpp"
 
 #include <filesystem>
+#include <string>
 #include <string_view>
 
 // Interactive state that key presses, the control panel and the frame loop
@@ -43,6 +44,7 @@ struct AppState {
     render::GasSettings gas;
     unsigned selected_body = 0;
     std::filesystem::path capture_request;
+    std::string chart; // drawn in place of the scene while set (--chart)
 };
 
 // Startup, hotkeys and panel buttons must select the same camera and orbit target.

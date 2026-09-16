@@ -31,6 +31,15 @@ of one view as key=value tokens (`name=mars bookmark=3 back=25 fov-div=5 capture
 the command line setting the defaults, and the report holding each shot's GPU pass
 medians and exposure reading. `orbital --help` lists the keys.
 
+Charts are shots that draw a parameter sheet instead of the scene, through the
+production shader functions: `chart=brdf taa=0 frames=1 capture=...` (the surface BRDF
+on a sphere per tile, phase across, roughness down, the ocean last) and `chart=earth`
+(the Earth's ground on a window of its map, sun elevation across, texels per pixel and
+the draw tier down). A shader change that alters lighting shows on the BRDF sheet; a
+tier pop shows as a step between rows of the Earth sheet. A new chart is a Slang file
+under shaders/charts named chart_<name> plus its line in CMakeLists.txt; the grid
+helpers are in charts/chart.slang.
+
 Frames per shot, measured on the belt view against a 240-frame reference (pixels off
 by more than two codes): with TAA off one frame is converged (0.007 percent, the
 run-to-run floor at any count); with TAA on 32 frames leave 0.7 percent, 64 leave

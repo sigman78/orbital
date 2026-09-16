@@ -122,6 +122,7 @@ if(ORBITAL_BUILD_DEMO)
   endforeach()
   foreach(source IN ITEMS
       planets/surface_earth planets/surface_giant planets/surface_airless planets/atmosphere
+      charts/chart_brdf charts/chart_earth
       surface/surface_rock sky/background sky/galaxy sky/stars
       belt/beltsplat belt/beltblur belt/dust belt/disc belt/discsplat
       aa/temporal aa/smaa aa/fxaa_pass

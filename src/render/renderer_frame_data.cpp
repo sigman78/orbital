@@ -189,7 +189,8 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
                           input.gas.streaks ? input.gas.streak_strength : 0.f, 0};
 
     const auto sun = project_sun(camera, system.star.position, input.bodies, view.tan_half_fov, view.aspect);
-    frame.screen_sun = {sun.x, sun.y, sun.visible ? 1.f : 0.f, sun_flare::screen_size};
+    // A chart has no sun: no glare, flare or starburst over it.
+    frame.screen_sun = {sun.x, sun.y, sun.visible && input.chart.empty() ? 1.f : 0.f, sun_flare::screen_size};
     // The output encoding for the composite and the present pass; the overlay packs the same into its root.
     const float paper_white = std::max(input.tone.paper_white_nits, 1.f);
     // The auto exposure's multiplier alone, so the composite can hold the flare out of it.
