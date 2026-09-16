@@ -104,9 +104,12 @@ def write_report(report, baselines, output):
         raise ValueError('Baseline labels must be unique')
     report['comparisons'] = comparisons
     (output / 'summary.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+    aperture = report.get('aperture', {})
     lines = [f'# Render performance: {report["label"]}', '',
              f'GPU: {report["machine"]["gpu"]}. Revision: `{report["revision"]}`. '
              f'Dirty source: {report["source_dirty"]}.', '',
+             *([f'**{aperture["report"]}: under the minimum, so buffer reads may have crossed PCIe; '
+                'compare with care (tools/check-bar1.py).**', ''] if aperture.get('low') else []),
              'Times are milliseconds, medians of repeated run medians; p95 is the median of run p95s.', '',
              '| Scene / mode | Resolution | CPU + wait | GPU | GPU p95 | Cull/maps | Surface | Atmosphere group | Post |',
              '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
@@ -169,10 +172,14 @@ def main():
         running = command_output(['tasklist', '/FI', 'IMAGENAME eq orbital.exe', '/FO', 'CSV', '/NH'])
         if '"orbital.exe"' in running.lower():
             raise RuntimeError('Close running Orbital instances before benchmarking')
-    # A full host-visible aperture puts the mapped heaps in system memory: the numbers would be about the
-    # machine, not the change (tools/check-bar1.py explains).
-    if subprocess.run([sys.executable, str(ROOT / 'tools/check-bar1.py')]).returncode:
-        raise RuntimeError('The host-visible aperture is too full to benchmark; free it first')
+    # A full host-visible aperture puts the mapped heaps in system memory and the numbers describe the
+    # machine, not the change (tools/check-bar1.py explains). The run goes ahead; the state is printed
+    # now and recorded in the report, so a comparison against such a run is read with that in mind.
+    aperture = subprocess.run([sys.executable, str(ROOT / 'tools/check-bar1.py')], capture_output=True, text=True)
+    aperture_line = (aperture.stdout.strip().splitlines() or ['BAR1: not reported'])[-1]
+    print(aperture_line, flush=True)
+    if aperture.returncode:
+        print(f'WARNING: {aperture.stderr.strip()}', flush=True)
     baselines = [json.loads(p.read_text(encoding='utf-8')) for p in args.baseline]
     exe = args.executable.resolve()
     output = args.output.resolve()
@@ -192,6 +199,7 @@ def main():
               'executable_sha256': sha(exe), 'shaders_sha256': tree_hash(exe.parent / 'shaders', '*.spv'),
               'assets_sha256': tree_hash(exe.parent / 'assets'),
               'machine': {'os': platform.platform(), 'cpu': platform.processor(), 'gpu': None, 'driver_info': nvidia},
+              'aperture': {'report': aperture_line, 'low': bool(aperture.returncode)},
               'protocol': {'settings': SETTINGS, 'scenes': {s: SCENES[s] for s in args.scenes},
                            'quality': 'default (no --high)', 'window': [args.width, args.height],
                            'frames': args.frames, 'warmup': args.warmup, 'repeats': args.repeats,
