@@ -18,7 +18,8 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float3 L = normalize(float3(sin(phase), .3, cos(phase)));
     float3 V = float3(0.0, 0.0, 1.0);
     bool ocean = tile.row == ORBITAL_CHART_BRDF_ROWS - 1;
-    static const float roughness[ORBITAL_CHART_BRDF_ROWS - 1] = {.05, .2, .4, .6, .85};
+    // Perceptual roughness; the BRDF squares it, so below .1 the lobe is under a pixel wide.
+    static const float roughness[ORBITAL_CHART_BRDF_ROWS - 1] = {.1, .2, .35, .5, .7};
     Material m;
     m.albedo = ocean ? float3(.02, .05, .12) : float3(.4, .4, .4);
     m.N = N;

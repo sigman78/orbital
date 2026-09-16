@@ -163,9 +163,12 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
                       input.sun.crescent_strength * flare};
     frame.lens_more = {input.sun.mini_crescent_strength * flare, input.sun.streak_strength * flare,
                        input.sun.ghost_spread, input.sun.ghost_size};
+    // A chart keeps the tone map and the bloom but not the lens defects, which would sit over its tiles.
+    const bool chart = !input.chart.empty();
     frame.post = {input.post.bloom ? input.post.bloom_intensity : 0.f, input.post.bloom_threshold,
-                  input.post.bloom_knee, input.post.aberration};
-    frame.post_more = {input.post.vignette, input.post.grain, input.post.black_offset, input.sun.flare_adaptation};
+                  input.post.bloom_knee, chart ? 0.f : input.post.aberration};
+    frame.post_more = {chart ? 0.f : input.post.vignette, chart ? 0.f : input.post.grain, input.post.black_offset,
+                       input.sun.flare_adaptation};
     frame.giant = {input.gas.time_scale, std::max(input.gas.cycle, .1f), input.gas.turbulence,
                    input.gas.flow ? 1.f : 0.f};
     frame.giant_more = {input.gas.haze, input.gas.terminator, input.gas.relief, input.gas.cap_opacity};

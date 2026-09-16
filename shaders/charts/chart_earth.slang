@@ -4,13 +4,13 @@
 // The Earth's ground shading on a flat window of its map per tile, through the
 // production material: columns sweep the sun's elevation over the patch from
 // overhead to below the horizon (the terminator and the city lights in the last
-// two), rows the texels per pixel (the window widens, so the derivative-driven
-// terms minify) at the full draw tier and then at the smallest, so a step
+// two), rows the albedo texels per pixel from one to eight (the window widens, so
+// the derivative-driven terms minify) at the full draw tier and then at the smallest, so a step
 // between two rows is a tier pop and a step along a column a lighting fault.
 
-static const float2 EARTH_CHART_CENTRE = float2(.56, .36); // the window's centre on the map
+static const float2 EARTH_CHART_CENTRE = float2(.535, .245); // the window's centre on the map: the Alps, Italy, the Adriatic
 static const float elevation[ORBITAL_CHART_EARTH_COLUMNS] = {90.0, 60.0, 30.0, 10.0, 0.0, -10.0};
-static const float texelsPerPixel[ORBITAL_CHART_EARTH_ROWS / 2] = {.5, 1.0, 2.0, 4.0};
+static const float texelsPerPixel[ORBITAL_CHART_EARTH_ROWS / 2] = {1.0, 2.0, 4.0, 8.0}; // minification only: the tiers' range
 
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
