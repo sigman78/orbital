@@ -376,7 +376,7 @@ Shader dependencies follow [shaders/README.md](../shaders/README.md). Pure utili
 and take their inputs explicitly; frame access and descriptor bindings belong in the scene or
 feature layer. Every reusable include declares its own dependencies and compiles independently.
 Do not restore an umbrella include or numeric texture/sampler indices. The compiler-generated
-depfile tracks consumers when a helper changes; run `python tools/check-shader-helpers.py` to check
+depfile tracks consumers when a helper changes; run `python tools/check-shaders.py` to check
 include independence and fixed-time capture comparisons to check rendering behavior.
 
 App navigation and CLI parsing are built as `orbital_app_cpu`, used by the executable and camera/app/options tests. Scene tests do not link it. Renderer headers accept `CameraView` values and app-supplied HUD pixels; they do not include app headers.

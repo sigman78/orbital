@@ -62,14 +62,14 @@ void Renderer::Impl::read_cull_counts(const CullScratch& scratch) {
 }
 
 void Renderer::Impl::record_cull_passes(gpu::CommandBuffer* cmd, const CullRoot& root) {
-    constexpr unsigned pass_count = 3, prefix_pass = 1;
+    constexpr unsigned passes[] = {ORBITAL_CULL_PASS_COUNT, ORBITAL_CULL_PASS_PREFIX, ORBITAL_CULL_PASS_SCATTER};
     gpu::bind_pso(cmd, pso.belt.cull);
     const unsigned groups = (rock_count + ORBITAL_CULL_THREADS - 1) / ORBITAL_CULL_THREADS;
-    for (unsigned pass = 0; pass < pass_count; pass++) {
+    for (unsigned pass : passes) {
         CullRoot pass_root = root;
         pass_root.pass = pass;
-        gpu::dispatch(cmd, pass_root, {pass == prefix_pass ? 1u : groups, 1, 1});
-        const bool last = pass + 1 == pass_count;
+        gpu::dispatch(cmd, pass_root, {pass == ORBITAL_CULL_PASS_PREFIX ? 1u : groups, 1, 1});
+        const bool last = pass == ORBITAL_CULL_PASS_SCATTER;
         synchronize(cmd, access::compute_write, last ? culled_draw_access : access::compute_read_write);
     }
 }
@@ -108,9 +108,9 @@ void Renderer::Impl::record_belt_light_pass(gpu::CommandBuffer* cmd, const CullR
         stats.frame.draw_calls++;
     }
     synchronize(cmd, access::color_write, access::fragment_sample);
-    root.mode = 0;
+    root.mode = ORBITAL_BELT_BLUR_HORIZONTAL;
     fullscreen_pass(cmd, fixed_targets.belt_light_blur, pso.belt.blur, root);
-    root.mode = 1;
+    root.mode = ORBITAL_BELT_BLUR_VERTICAL;
     fullscreen_pass(cmd, fixed_targets.belt_light, pso.belt.blur, root);
 }
 

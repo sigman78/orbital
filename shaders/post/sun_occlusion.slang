@@ -1,10 +1,12 @@
 #pragma once
 #include "../scene_shared.h"
+#include "../lib/projection.slang"
 
 // Opaque geometry blocks fully; billboards attenuate by their actual alpha.
 float sunPixelVisibility(Texture2D<float4> depth, Texture2D<float4> splats, int2 pixel)
 {
-    return step(.999999, depth.Load(int3(pixel, 0)).r) * (1.0 - saturate(splats.Load(int3(pixel, 0)).a));
+    float open = isBackgroundDepth(depth.Load(int3(pixel, 0)).r) ? 1.0 : 0.0;
+    return open * (1.0 - saturate(splats.Load(int3(pixel, 0)).a));
 }
 
 // Fraction of the solar disc not covered by scene geometry: depth taps over

@@ -21,7 +21,7 @@ static const float2 GAS_POLAR_TEXELS = float2(1024.0, 1024.0);
 
 // The polar cap's albedo at a local normal, advected on the cap's own flow the
 // same way as the map: Juno's cyclone clusters, since the map is smeared there.
-float3 giantPolar(float3 localN, float2 uv, float2 dx, float2 dy, float t, float4 giant)
+float3 giantPolar(float3 localN, float2 uv, float2 dx, float2 dy, float fine, float t, float4 giant)
 {
     // uv is the cap coordinate already scaled by the cap size.
     float south = localN.y < 0.0 ? .5 : 0.0;
@@ -34,7 +34,6 @@ float3 giantPolar(float3 localN, float2 uv, float2 dx, float2 dy, float t, float
     float2 d0 = -flow * (p0 - .5) * cycle, d1 = -flow * (p1 - .5) * cycle;
     float3 c0 = textures[TEX_GAS_POLAR].SampleGrad(samplers[SAMPLER_CLAMP], atlas + d0 * float2(1.0, .5), dx, dy).rgb;
     float3 c1 = textures[TEX_GAS_POLAR].SampleGrad(samplers[SAMPLER_CLAMP], atlas + d1 * float2(1.0, .5), dx, dy).rgb;
-    float fine = magnification(uv, GAS_POLAR_TEXELS) * giant.z;
     float3 colour = lerp(c1, c0, w0);
     return colour * (1.0 + (fbm2((uv + lerp(d1, d0, w0)) * float2(2400, 2400) - t * .003, 2) - .5) * .12 * fine);
 }
@@ -56,10 +55,10 @@ float giantStreaks(float2 uv, float2 along, float frequency)
 // beyond the 4K they hold. Closer still, where a filament texel would cover
 // several pixels and bilinear filtering draws the texels as a comb, the baked
 // map fades here and the per-pixel streaks of giantCloseDetail take over.
-float giantDetail(float2 uv, float t, float fine, float extreme)
+float giantDetail(float2 uv, float2 dx, float2 dy, float t, float fine, float extreme)
 {
     if (fine <= 0.0) return 1.0; // the map minified: nothing to add, so the taps are skipped
-    float filaments = (sampleSphere(textures[TEX_GAS_DETAIL], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).r - .5) * 6.0;
+    float filaments = (sampleSphereGrad(textures[TEX_GAS_DETAIL], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv, dx, dy).r - .5) * 6.0;
     float detail = 1.0 + filaments * .11 * fine * (1.0 - .65 * extreme);
     return detail * (1.0 + (fbm2(uv * float2(2400, 480) - t * .003, 2) - .5) * .12 * fine);
 }
@@ -67,9 +66,8 @@ float giantDetail(float2 uv, float t, float fine, float extreme)
 // The streaks, once per pixel on the phase-blended advected coordinate (which
 // is continuous through the handover, since a phase resets only while its
 // weight is zero), a second octave arriving closer in.
-float giantCloseDetail(float2 uv, float2 along, float fine, float extreme)
+float giantCloseDetail(float2 uv, float2 along, float fine, float extreme, float closer)
 {
-    float closer = magnification(uv, GAS_DETAIL_TEXELS * 12.0);
     float detail = 1.0 + giantStreaks(uv, along, 9000.0) * .07 * fine * extreme;
     if (closer > 0.0) detail *= 1.0 + giantStreaks(uv, along, 24000.0) * .05 * fine * closer;
     return detail;
@@ -104,9 +102,12 @@ float upperDeck(float2 uv) { return smoothstep(.3, .7, sampleSphere(textures[TEX
 
 float3 layeredDeck(float2 uv, float2 lift, float2 cast, float2 layers, float t, float fine, float extreme)
 {
-    float3 lower = sampleSphere(textures[TEX_GAS_ALBEDO], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).rgb * giantDetail(uv, t, fine, extreme);
+    float2 dx, dy, liftDx, liftDy; // footprints before giantDetail's per-fragment branch
+    sphereFootprint(uv, dx, dy);
+    sphereFootprint(uv + lift, liftDx, liftDy);
+    float3 lower = sampleSphereGrad(textures[TEX_GAS_ALBEDO], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv, dx, dy).rgb * giantDetail(uv, dx, dy, t, fine, extreme);
     if (layers.x <= 0.0) return lower;
-    float3 upper = sampleSphere(textures[TEX_GAS_ALBEDO], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv + lift).rgb * giantDetail(uv + lift, t, fine, extreme);
+    float3 upper = sampleSphereGrad(textures[TEX_GAS_ALBEDO], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv + lift, liftDx, liftDy).rgb * giantDetail(uv + lift, liftDx, liftDy, t, fine, extreme);
     float upperHere = upperDeck(uv + lift);
     float shade = 1.0 - layers.y * upperDeck(uv + cast) * (1.0 - upperHere);
     return lerp(lower * shade, upper, upperHere);
@@ -127,6 +128,9 @@ Material giantMaterial(Frame* frame, SurfaceVaryings input, float3x3 rotate, flo
     float p0 = frac(t / cycle + phase), p1 = frac(p0 + .5);
     float w0 = 1.0 - abs(2.0 * p0 - 1.0);
     float2 uv0 = uv - flow * (p0 - .5) * cycle, uv1 = uv - flow * (p1 - .5) * cycle;
+    float2 d0x, d0y, d1x, d1y; // footprints for the samples inside per-fragment branches below
+    sphereFootprint(uv0, d0x, d0y);
+    sphereFootprint(uv1, d1x, d1y);
     float fine = magnification(uv, GAS_TEXELS) * giant.z * (.5 + flowMap.b);
     // The wind's direction in texture space, for the per-pixel streaks (the map's, not the switch's).
     float2 windUV = flowMap.rg * 2.0 - 1.0;
@@ -146,15 +150,19 @@ Material giantMaterial(Frame* frame, SurfaceVaryings input, float3x3 rotate, flo
     float3 c1 = layeredDeck(uv1, lift, cast, layers, t, fine, extreme);
     Material m;
     m.albedo = lerp(c1, c0, w0);
-    if (extreme > 0.0) m.albedo *= giantCloseDetail(lerp(uv1, uv0, w0), along, fine * streaks, extreme);
+    float2 uvBlend = lerp(uv1, uv0, w0);
+    float closer = magnification(uvBlend, GAS_DETAIL_TEXELS * 12.0);
+    if (extreme > 0.0) m.albedo *= giantCloseDetail(uvBlend, along, fine * streaks, extreme, closer);
     // Over the outer part of the cap's radius the map gives way to the baked polar caps.
     float capSin = GAS_CAP_SIN * max(frame->giant_night.z, 1e-3);
     float capEdge = length(localN.xz) / capSin; // 1 at the cap's edge
     float polar = frame->giant_night.z > 0.0
                       ? (1.0 - smoothstep(1.0 - frame->giant_night.w, 1.0, capEdge)) * frame->giant_more.w : 0.0;
     float2 capUV = .5 + .5 * localN.xz / capSin; // and its footprint, taken outside the branch
-    float2 capDx = ddx(capUV) * float2(1.0, .5), capDy = ddy(capUV) * float2(1.0, .5);
-    if (polar > 0.0) m.albedo = lerp(m.albedo, giantPolar(localN, capUV, capDx, capDy, t, giant), polar);
+    float2 capDx = ddx(capUV), capDy = ddy(capUV);
+    float capFine = magnificationGrad(capDx, capDy, GAS_POLAR_TEXELS) * giant.z;
+    capDx *= float2(1.0, .5); capDy *= float2(1.0, .5);
+    if (polar > 0.0) m.albedo = lerp(m.albedo, giantPolar(localN, capUV, capDx, capDy, capFine, t, giant), polar);
     m.rough = .95;
     m.water = 0.0;
     m.visibility = visibility * beltShadow(frame, input.worldPosition);
@@ -166,7 +174,8 @@ Material giantMaterial(Frame* frame, SurfaceVaryings input, float3x3 rotate, flo
     m.N = N;
     if (strength > 0.0)
     {
-        float2 encoded = lerp(sampleSphere(textures[TEX_GAS_RELIEF], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv1).xy, sampleSphere(textures[TEX_GAS_RELIEF], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv0).xy, w0) * 2.0 - 1.0;
+        float2 encoded = lerp(sampleSphereGrad(textures[TEX_GAS_RELIEF], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv1, d1x, d1y).xy,
+                              sampleSphereGrad(textures[TEX_GAS_RELIEF], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv0, d0x, d0y).xy, w0) * 2.0 - 1.0;
         float2 slope = encoded * abs(encoded) * GAS_SLOPE_MAX * strength;
         m.N = normalize(N - T * slope.x - B * slope.y);
     }

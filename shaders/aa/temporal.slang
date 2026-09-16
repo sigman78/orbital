@@ -63,7 +63,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float deviceDepth = textures[TEX_DEPTH].Load(int3(pixel, 0)).r;
     float4 metadata = textures[TEX_SPLAT_MASK].Load(int3(pixel, 0));
     bool splat = metadata.a > 1e-5;
-    bool sky = deviceDepth >= .999999 && !splat;
+    bool sky = isBackgroundDepth(deviceDepth) && !splat;
     float currentZ = splat ? metadata.r / metadata.a : (sky ? FAR_Z : linearViewDepth(deviceDepth));
     if (root.frame.previous_camera_delta.w < .5 || root.frame.quality.x < .5) return float4(current, currentZ);
 

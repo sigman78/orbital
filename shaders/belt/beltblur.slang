@@ -1,8 +1,9 @@
 #include "../scene/frame_bindings.slang"
+#include "beltblur_shared.h"
 
-// Separable blur of the belt transmittance map: mode 0 reads the splat
-// target and writes the scratch map horizontally, mode 1 reads the scratch
-// map and writes back vertically. The width approximates the sun's penumbra.
+// Separable blur of the belt transmittance map: horizontal reads the splat
+// target and writes the scratch map, vertical reads the scratch map and
+// writes back. The width approximates the sun's penumbra.
 
 static const int BLUR_RADIUS = 4;
 static const float BLUR_SIGMA = 2.0;
@@ -10,7 +11,7 @@ static const float BLUR_SIGMA = 2.0;
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
-    bool horizontal = root.mode == 0;
+    bool horizontal = root.mode == ORBITAL_BELT_BLUR_HORIZONTAL;
     float2 step = horizontal ? float2(1.0, 0.0) : float2(0.0, 1.0);
     float4 sum = float4(0.0, 0.0, 0.0, 0.0);
     float weights = 0.0;

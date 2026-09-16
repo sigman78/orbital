@@ -22,15 +22,16 @@ static const float MARS_HEIGHT_RANGE = 29334.0 / 3396200.0;
 
 // Short shadow trace through the DEM height stored in the normal map's alpha:
 // marches up-sun in texture space and darkens where terrain rises above the
-// light ray. heightRange converts alpha to radii.
+// light ray. heightRange converts alpha to radii; cosLatitude widens the
+// longitude step where the equirectangular texels narrow toward the poles.
 float reliefShadow(Texture2D<float4> normalMap, float2 uv, float3 L, float3 N, float3 T, float3 B, float heightRange,
-                   float tier)
+                   float cosLatitude, float tier)
 {
     float2 lightUV = float2(dot(L, T), dot(L, B));
     float lightRise = max(dot(L, N), .02) / max(length(lightUV), 1e-4); // rise per unit of tangent distance
     lightUV = normalize(lightUV + 1e-6);
-    float2 texel = 1.0 / RELIEF_TEXELS;
-    float arc = 2.0 * PI / RELIEF_TEXELS.x; // tangent distance of one texel, in radii
+    float2 texel = float2(1.0 / max(cosLatitude, .05), 1.0) / RELIEF_TEXELS;
+    float arc = 2.0 * PI / RELIEF_TEXELS.x; // tangent distance of one equatorial texel, in radii
     float h0 = normalMap.SampleLevel(samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv, 1.0).a * heightRange;
     float shadow = 0.0;
     for (int s = 1; s <= 6; ++s)
@@ -60,7 +61,7 @@ Material reliefMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3
         float3 mapN = sampleSphere(normalMap, samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).xyz * 2.0 - 1.0;
         float tilt = strength * tier;
         m.N = normalize(T * mapN.x * tilt + B * mapN.y * tilt + N * lerp(1.0, max(mapN.z, .2), tier));
-        m.visibility *= reliefShadow(normalMap, uv, L, N, T, B, heightRange, tier);
+        m.visibility *= reliefShadow(normalMap, uv, L, N, T, B, heightRange, length(localN.xz), tier);
     }
     m.albedo = sampleSphere(albedoMap, samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).rgb;
     // Regolith grain where the 4K maps are magnified.

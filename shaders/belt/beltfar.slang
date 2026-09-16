@@ -38,7 +38,7 @@ float dustPhase(float c) { return lerp(henyeyGreenstein(c, DUST_FORWARD), 1.0 / 
 float sceneDepthAt(int2 pixel)
 {
     float d = textures[TEX_DEPTH].Load(int3(pixel, 0)).r;
-    return d >= .999999 ? FAR_Z : linearViewDepth(d);
+    return isBackgroundDepth(d) ? FAR_Z : linearViewDepth(d);
 }
 
 // The dust colour after the panel's tint and saturation.

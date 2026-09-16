@@ -188,7 +188,7 @@ block for the scalar mask; a single-channel GPU format is a possible later exper
 `python tools/check-galaxy-layers.py` checks composition constraints, wrapped
 bilinear sampling, Adam convergence, BC7 round-trip and source/cache fingerprints.
 It also compares Python mip bytes with the C++ material preparer at odd dimensions.
-`python tools/check-shader-helpers.py` checks independent shader compilation and
+`python tools/check-shaders.py` checks independent shader compilation and
 the conventional backend's descriptor count against the shared slot definitions.
 
 The release build and all nine CTest suites pass, and all 27 shader helpers compile

@@ -5,9 +5,9 @@
 // indirect draw arguments. Everything is addressed through buffer pointers;
 // the conventional descriptor set carries no storage buffers.
 //
-//   pass 0  count    each visible rock bumps its group's counter
-//   pass 1  prefix   one thread turns counts into bases and draw arguments
-//   pass 2  scatter  each visible rock claims a slot and writes its instance
+//   ORBITAL_CULL_PASS_COUNT    each visible rock bumps its group's counter
+//   ORBITAL_CULL_PASS_PREFIX   one thread turns counts into bases and draw arguments
+//   ORBITAL_CULL_PASS_SCATTER  each visible rock claims a slot and writes its instance
 
 #include "../scene/bindings.slang"
 [[vk::push_constant]] ConstantBuffer<CullRoot> root;
@@ -162,7 +162,7 @@ void computeMain(uint3 thread : SV_DispatchThreadID)
 {
     CullScratch* scratch = root.scratch;
     uint id = thread.x;
-    if (root.pass == 1)
+    if (root.pass == ORBITAL_CULL_PASS_PREFIX)
     {
         if (id != 0) return;
         uint running = scratch->params.body_count, drawCount = 0;
@@ -198,9 +198,9 @@ void computeMain(uint3 thread : SV_DispatchThreadID)
         return;
     }
     if (id >= scratch->params.rock_limit) return;
-    Placement placement = placeRock(id, root.pass != 0 || scratch->params.light_in_count_pass != 0);
+    Placement placement = placeRock(id, root.pass != ORBITAL_CULL_PASS_COUNT || scratch->params.light_in_count_pass != 0);
     if (!placement.visible) return;
-    if (root.pass == 0)
+    if (root.pass == ORBITAL_CULL_PASS_COUNT)
         scratch->counts[placement.group].add(1);
     else
     {

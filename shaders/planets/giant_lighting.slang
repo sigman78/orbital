@@ -27,9 +27,9 @@ float3 shadeGiant(Frame* frame, Material m, float3 N, float3 geometricN, float3 
     float3 colour = (deck + scattered) * sunlight(frame) * m.visibility + m.albedo * float3(.003, .004, .008) * frame->quality.w;
     // Lightning shows where the sun does not.
     float dark = 1.0 - smoothstep(-.12, .02, dot(geometricN, L));
+    float2 footprint = max(abs(ddx(uv)), abs(ddy(uv))); // before the branch: derivatives need uniform flow
     if (dark > 0.0)
     {
-        float2 footprint = max(abs(ddx(uv)), abs(ddy(uv)));
         colour += giantLightning(frame->giant_night, uv, frame->camera_time.w, shear, footprint) * dark * (m.albedo * 1.5 + .25);
     }
     return colour;

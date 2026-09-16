@@ -16,14 +16,14 @@ Configure NoGraphicsAPI with `NOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND=ON`. `Dev
 
 - Root bytes are ordinary Vulkan push constants, visible to all stages. The maximum is `DeviceCaps::max_push_data_size`.
 - GPU buffer pointers remain Vulkan buffer device addresses, exposed to shaders as typed Slang pointers.
-- Set 0, binding 0 is a fixed array of 40 separate sampled images.
+- Set 0, binding 0 is a fixed array of `ORBITAL_TEXTURE_COUNT` (53) separate sampled images.
 - Set 0, binding 1 is a fixed array of 4 separate samplers.
 - Entry points are `vertexMain` and `fragmentMain` on both backends, as upstream; Slang is compiled with `-fvk-use-entrypoint-name`.
 - Mesh shaders and storage image descriptors are unsupported. `DeviceCaps::mesh_shaders` is false.
 
 The descriptor-heap allocation/write/bind calls retain their signatures. Writes update the conventional descriptor set using the byte offset as the descriptor index. Direct and indexed draw, push roots, dynamic rendering, HDR/depth attachments, buffer copies, texture upload/readback, barriers, and swapchain presentation use core Vulkan operations.
 
-The Slang shaders implement this ABI in `shaders/scene/bindings.slang`, `shaders/scene/frame_bindings.slang` and `shaders/scene_shared.h`. Reflection verifies texture binding 0/count 51 (`ORBITAL_TEXTURE_COUNT`), sampler binding 1/count 4, and a 32-byte push root per pipeline: three typed 64-bit GPU pointers plus `base` and `mode` for the surface and fullscreen shaders (the surface pipelines share one vertex stage, `surface.slang`, and have one fragment shader per body kind over `surface/types.slang` and the material/lighting helpers; the kind and mode numbers are defined once in `scene_shared.h`), the rock data and scratch pointers for the culling compute shader, and a vertex pointer with a pixel scale for the overlay. Compile with SPIR-V 1.6, column-major matrix layout and `-fvk-use-entrypoint-name`.
+The Slang shaders implement this ABI in `shaders/scene/bindings.slang`, `shaders/scene/frame_bindings.slang` and `shaders/scene_shared.h`. The layout is checked by the C++ size and offset assertions in `src/render/gpu_types.hpp` and by `tools/check-shaders.py`, which compares the backend's descriptor count with `ORBITAL_TEXTURE_COUNT`: texture binding 0/count 53, sampler binding 1/count 4, and a 40-byte push root per pipeline: three typed 64-bit GPU pointers plus `base`, `mode`, `flags` and `detail` for the surface and fullscreen shaders (the surface pipelines share one vertex stage, `surface.slang`, and have one fragment shader per body kind over `surface/types.slang` and the material/lighting helpers; the kind and mode numbers are defined once in `scene_shared.h`), the rock data and scratch pointers for the culling compute shader, and a vertex pointer with a pixel scale for the overlay. Compile with SPIR-V 1.6, column-major matrix layout and `-fvk-use-entrypoint-name`.
 
 ## Build evidence and remaining validation
 
