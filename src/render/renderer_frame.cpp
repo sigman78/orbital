@@ -71,8 +71,8 @@ bool Renderer::draw(const FrameInput& supplied) {
 
     // CPU stages frame constants, culling parameters and body instances only.
     // The completed GPU scratch is read before preparing the next submission.
-    const auto frame_address = reinterpret_cast<std::uint64_t>(s.buffers.data.range().gpu) + heap_layout.dynamic_offset;
-    auto* dynamic = s.buffers.data.range().cpu + heap_layout.dynamic_offset;
+    const auto frame_address = reinterpret_cast<std::uint64_t>(s.buffers.data.range().gpu);
+    auto* dynamic = s.buffers.data.range().cpu;
     auto* scratch = reinterpret_cast<CullScratch*>(dynamic + heap_layout.cull_offset);
     if (s.frame_index)
         s.read_cull_counts(*reinterpret_cast<const CullScratch*>(s.buffers.cull_readback.range().cpu));

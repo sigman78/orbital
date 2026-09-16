@@ -41,12 +41,13 @@ struct MemoryStats {
     MemoryPool frame_targets;  // resized with the window
     MemoryPool fixed_targets;  // shadow, belt and disc maps
     MemoryPool materials;      // uploaded textures
-    MemoryPool mapped;         // the host-visible data heap: static records, then the per-frame region and the UI
+    MemoryPool static_data;    // the device-only heap of meshes, rock records and sky tables
+    MemoryPool mapped;         // the host-visible data heap: the per-frame region and the UI
     MemoryPool device_buffers; // culling scratch and the exposure histogram
     MemoryPool readback;       // CPU-visible copies and the descriptor heaps
     std::uint64_t total() const {
-        return frame_targets.bytes + fixed_targets.bytes + materials.bytes + mapped.bytes + device_buffers.bytes +
-               readback.bytes;
+        return frame_targets.bytes + fixed_targets.bytes + materials.bytes + static_data.bytes + mapped.bytes +
+               device_buffers.bytes + readback.bytes;
     }
 };
 
