@@ -61,6 +61,9 @@ GROUPS = {
                   f'name=earth-far bookmark=0 back=205 fov-div=8 {STILL}',
                   f'name=giant-55 bookmark=1 back=55 {STILL}',
                   f'name=giant-zoom bookmark=1 back=205 fov-div=8 {STILL}',
+                  f'name=giant-200 bookmark=1 back=200 {STILL}',  # mid-fade, about 45 px of radius
+                  f'name=giant-400 bookmark=1 back=400 {STILL}',  # the smallest tier, about 22 px
+                  f'name=giant-400-zoom bookmark=1 back=400 fov-div=5 {STILL}',  # the zoom brings the detail back
                   f'name=moon-25 bookmark=2 back=25 {STILL}',
                   f'name=moon-zoom bookmark=2 back=55 fov-div=5 {STILL}',
                   f'name=moon-far bookmark=2 back=205 fov-div=8 {STILL}',
