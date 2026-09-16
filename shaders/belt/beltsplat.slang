@@ -48,7 +48,7 @@ SplatVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_In
     output.weightSlice.y = clamp((along / belt.lightSlice * .5 + .5) * SLICES, 0.0, SLICES - .001);
 
     // Splat at least one texel wide; the weight keeps the covered area right.
-    float4 clip = mul(belt.lightProjection, float4(position, 1.0));
+    float4 clip = mul(beltLightProjection(root.frame), float4(position, 1.0));
     float2 halfNdc = radius / belt.lightHalf;
     float2 texelNdc = 1.0 / float2(belt.lightTexels, belt.lightTexels); // half a texel each way
     float2 extent = max(halfNdc, texelNdc);

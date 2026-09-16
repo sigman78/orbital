@@ -15,7 +15,6 @@ struct ViewParams
     float exposure;
     float time; // seconds
     bool highQuality, hud;
-    float4x4 viewProjection;
 };
 
 ViewParams viewParams(Frame* frame)
@@ -34,7 +33,6 @@ ViewParams viewParams(Frame* frame)
     v.time = frame->camera_time.w;
     v.highQuality = frame->options.z > .5;
     v.hud = frame->options.w > .5;
-    v.viewProjection = frame->view_projection;
     return v;
 }
 
@@ -44,13 +42,11 @@ struct LightParams
     float radiance;  // solar radiance scale
     float discRadius, limbDarkening; // angular radius in radians
     float ambientFill; // starlight fill on shadow sides
-    float4x4 shadowProjection; // the shadow map's view from the sun
 };
 
 LightParams lightParams(Frame* frame)
 {
     LightParams l;
-    l.shadowProjection = frame->light_projection;
     l.position = frame->sun.xyz;
     l.radiance = frame->sun.w;
     l.discRadius = frame->sun_disc.x;
@@ -97,7 +93,6 @@ struct BeltParams
     float3 normal;
     float3 centre; // the giant's
     bool lightMap, extinction;
-    float4x4 lightProjection; // orthographic box over the belt from the sun
     float2 lightHalf;         // box half width and height
     float lightTexels, lightSlice; // map size, half span of the slice range along the light
 };
@@ -113,7 +108,6 @@ BeltParams beltParams(Frame* frame)
     b.centre = frame->bodies[int(frame->scene.y)].xyz;
     b.lightMap = frame->scene.z > .5;
     b.extinction = frame->scene.w > .5;
-    b.lightProjection = frame->belt_light_projection;
     b.lightHalf = frame->belt_light.xy;
     b.lightTexels = frame->belt_light.z;
     b.lightSlice = frame->belt_light.w;
@@ -122,7 +116,6 @@ BeltParams beltParams(Frame* frame)
 
 struct BeltDiscParams
 {
-    float4x4 projection; // orthographic box over the belt plane
     float3 right, up;
     float2 half; // extents along right and up
     float lightTexels, rockTexels;
@@ -132,7 +125,6 @@ struct BeltDiscParams
 BeltDiscParams beltDiscParams(Frame* frame)
 {
     BeltDiscParams d;
-    d.projection = frame->belt_disc_projection;
     d.right = frame->belt_disc_right.xyz;
     d.up = frame->belt_disc_up.xyz;
     d.half = float2(frame->belt_disc_right.w, frame->belt_disc_up.w);
@@ -214,7 +206,6 @@ GiantParams giantParams(Frame* frame)
 struct TemporalParams
 {
     bool enabled, historyValid;
-    float4x4 previousProjection;
     float3 cameraDelta, previousForward;
 };
 
@@ -223,7 +214,6 @@ TemporalParams temporalParams(Frame* frame)
     TemporalParams t;
     t.enabled = frame->quality.x > .5;
     t.historyValid = frame->previous_camera_delta.w > .5;
-    t.previousProjection = frame->previous_projection;
     t.cameraDelta = frame->previous_camera_delta.xyz;
     t.previousForward = frame->previous_forward.xyz;
     return t;
@@ -345,3 +335,11 @@ MoteParams moteParams(Frame* frame)
     m.streaks = frame->camera_cell.w;
     return m;
 }
+
+// The matrices stay out of the records: a record is decoded per fragment or per
+// rock, and an unused matrix load is not always removed.
+float4x4 viewProjection(Frame* frame) { return frame->view_projection; }
+float4x4 previousProjection(Frame* frame) { return frame->previous_projection; }
+float4x4 shadowProjection(Frame* frame) { return frame->light_projection; }
+float4x4 beltLightProjection(Frame* frame) { return frame->belt_light_projection; }
+float4x4 beltDiscProjection(Frame* frame) { return frame->belt_disc_projection; }

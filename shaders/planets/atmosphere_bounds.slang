@@ -26,7 +26,7 @@ FullscreenVaryings vertexMain(uint vertexIndex : SV_VertexID)
     for (int corner = 0; corner < 8; ++corner) {
         float3 offset = float3((corner & 1) != 0 ? half : -half, (corner & 2) != 0 ? half : -half,
                                (corner & 4) != 0 ? half : -half);
-        float4 clip = mul(view.viewProjection, float4(centre + offset, 1.0));
+        float4 clip = mul(viewProjection(frame), float4(centre + offset, 1.0));
         if (clip.w <= 1e-4) { clipped = true; break; }
         float2 ndc = clip.xy / clip.w;
         lower = min(lower, ndc);

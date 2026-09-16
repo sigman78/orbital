@@ -48,7 +48,7 @@ SplatVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_In
 
     // Splat at least one texel wide; the weight keeps the covered area right.
     BeltDiscParams disc = beltDiscParams(root.frame);
-    float4 clip = mul(disc.projection, float4(position, 1.0));
+    float4 clip = mul(beltDiscProjection(root.frame), float4(position, 1.0));
     float halfExtent = disc.half.x, texels = disc.rockTexels;
     float2 halfNdc = radius / halfExtent;
     float2 texelNdc = 1.0 / texels; // half a texel each way

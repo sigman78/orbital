@@ -74,13 +74,13 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float4 previousClip;
     float predictedPreviousZ = FAR_Z;
     if (sky) {
-        previousClip = mul(temporal.previousProjection, float4(rd, 0.0));
+        previousClip = mul(previousProjection(root.frame), float4(rd, 0.0));
     } else {
         float forwardCosine = max(dot(rd, view.forward), 1e-4);
         float3 currentPosition = rd * (currentZ / forwardCosine);
         float3 previousPosition = currentPosition + temporal.cameraDelta;
         predictedPreviousZ = dot(previousPosition, temporal.previousForward);
-        previousClip = mul(temporal.previousProjection, float4(previousPosition, 1.0));
+        previousClip = mul(previousProjection(root.frame), float4(previousPosition, 1.0));
     }
     bool behind = previousClip.w <= 1e-5;
     float2 previousUV = previousClip.xy / max(previousClip.w, 1e-5) * .5 + .5

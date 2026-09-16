@@ -45,8 +45,8 @@ MoteVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_Ins
                       hash(absoluteCell * 3.1 + float(k) * 3.3 + 9.0));
     float3 relative = (float3(offset) + h) * mote.cellSize - mote.latticeOffset; // camera-relative, as the scene is
     float3 previous = relative + temporal.cameraDelta;
-    float4 now = mul(view.viewProjection, float4(relative, 1.0));
-    float4 before = mul(view.viewProjection, float4(previous, 1.0)); // this frame's view: translation only
+    float4 now = mul(viewProjection(root.frame), float4(relative, 1.0));
+    float4 before = mul(viewProjection(root.frame), float4(previous, 1.0)); // this frame's view: translation only
     if (now.w <= NEAR_Z || before.w <= NEAR_Z) return o;
 
     float2 resolution = view.size;

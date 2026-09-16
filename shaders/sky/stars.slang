@@ -35,7 +35,7 @@ StarVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_Ins
     float brightness = sky.starBrightness;
     if (brightness <= 0.0) return o;
     // At infinity: the direction alone, far along the ray; positions are camera-relative anyway.
-    float4 clip = mul(view.viewProjection, float4(star.position.xyz * (FAR_Z * .5), 1.0));
+    float4 clip = mul(viewProjection(root.frame), float4(star.position.xyz * (FAR_Z * .5), 1.0));
     if (clip.w <= NEAR_Z) return o;
     float2 resolution = view.size;
     float2 centre = (clip.xy / clip.w * .5 + .5) * resolution;

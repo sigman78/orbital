@@ -27,7 +27,7 @@ SurfaceVaryings vertexMain(uint vertexIndex : SV_VertexID, uint firstVertex : SV
         float2 q = corners[vertexIndex];
         output.worldPosition = inst.center_radius.xyz + (view.right*q.x + view.up*q.y)*inst.center_radius.w;
         output.worldNormal = -view.forward; output.localNormal = float3(q,0);
-        output.position = mul(view.viewProjection, float4(output.worldPosition,1));
+        output.position = mul(viewProjection(root.frame), float4(output.worldPosition,1));
         return output;
     }
     Vertex vertex = root.vertices[vertexIndex];
@@ -35,6 +35,6 @@ SurfaceVaryings vertexMain(uint vertexIndex : SV_VertexID, uint firstVertex : SV
     float scale = inst.center_radius.w * (root.mode == MODE_CLOUD ? 1.0 + CLOUD_HEIGHT : 1.0);
     output.worldPosition = inst.center_radius.xyz + mul(rotate, vertex.position.xyz) * scale;
     output.worldNormal = normalize(mul(rotate, vertex.normal.xyz)); output.localNormal = normalize(vertex.position.xyz);
-    output.position = mul(root.mode == MODE_SHADOW ? lightParams(root.frame).shadowProjection : view.viewProjection, float4(output.worldPosition, 1.0));
+    output.position = mul(root.mode == MODE_SHADOW ? shadowProjection(root.frame) : viewProjection(root.frame), float4(output.worldPosition, 1.0));
     return output;
 }

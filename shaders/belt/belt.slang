@@ -69,7 +69,7 @@ float beltRockTransmittance(Frame* frame, float3 point)
 {
     BeltParams belt = beltParams(frame);
     if (!belt.lightMap) return 1.0;
-    float4 clip = mul(belt.lightProjection, float4(point, 1.0));
+    float4 clip = mul(beltLightProjection(frame), float4(point, 1.0));
     float2 uv = clip.xy * .5 + .5;
     if (any(uv < 0.0) || any(uv > 1.0)) return 1.0;
     float4 coverage = textures[TEX_BELT_LIGHT_MAP].SampleLevel(samplers[SAMPLER_CLAMP], uv, 0.0);

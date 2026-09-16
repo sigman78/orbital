@@ -6,7 +6,7 @@
 
 float localShadow(Frame* frame, float3 point, float3 normal)
 {
-    float4 light = mul(lightParams(frame).shadowProjection, float4(point + normal * 0.015, 1.0));
+    float4 light = mul(shadowProjection(frame), float4(point + normal * 0.015, 1.0));
     float3 coord = light.xyz / light.w;
     float2 uv = coord.xy * 0.5 + 0.5;
     if (any(uv < 0.001) || any(uv > 0.999) || coord.z < 0.0 || coord.z > 1.0) return 1.0;

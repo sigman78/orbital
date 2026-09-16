@@ -91,7 +91,7 @@ bool beltSegment(Frame* frame, float3 rd, int2 depthPixel, out float t0, out flo
 }
 
 // Plane-space uv of a camera-relative point.
-float2 discUv(Frame* frame, float3 p) { return mul(beltDiscParams(frame).projection, float4(p, 1.0)).xy * .5 + .5; }
+float2 discUv(Frame* frame, float3 p) { return mul(beltDiscProjection(frame), float4(p, 1.0)).xy * .5 + .5; }
 
 // --- Sunlight bake over the belt plane -------------------------------------------
 // R: transmittance through the dust's own thin medium (what the near march
