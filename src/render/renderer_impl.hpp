@@ -137,18 +137,20 @@ constexpr SurfaceKind surface_kind(BodyClass body_class) {
 
 // --- Shared heap layout and limits ------------------------------------------
 
-// CPU-written static data and a small per-frame upload region are host-visible.
-// Culling counters and generated instances live in a separate device-only heap.
+// Static records fill a device-only heap once through staging; only the per-frame
+// region and the UI are host-visible, so the host-visible aperture (256 MiB on a
+// GTX 1080 Ti, shared by every process) never holds what the GPU reads each frame.
+// Culling counters and generated instances live in another device-only heap.
 struct HeapLayout {
-    std::uint64_t dynamic_offset = 80ull << 20; // static mesh/rock records before this point
-    std::uint64_t cull_offset = 1280;           // FrameData (1072 bytes, padded), then culling parameters/counters
+    std::uint64_t static_budget = 80ull << 20; // meshes, rock records and sky tables, written once
+    std::uint64_t cull_offset = 1280;          // FrameData (1072 bytes, padded), then culling parameters/counters
     std::uint64_t instance_offset = 1280 + 8192;
-    std::uint64_t staging_budget = 64ull << 20; // bounded texture upload staging
+    std::uint64_t staging_budget = 64ull << 20; // bounded upload staging, released after start-up
     std::uint64_t ui_bytes = 4ull << 20;
     std::uint64_t instance_budget = (44ull << 20) - instance_offset; // retain the former instance limit
 
     constexpr std::uint64_t ui_offset() const { return instance_offset + max_body_count * sizeof(Instance); }
-    constexpr std::uint64_t mapped_size() const { return dynamic_offset + ui_offset() + ui_bytes; }
+    constexpr std::uint64_t mapped_size() const { return ui_offset() + ui_bytes; }
     constexpr std::uint64_t instance_capacity() const { return instance_budget / sizeof(Instance); }
     constexpr std::uint64_t cull_size(unsigned rocks, unsigned bodies) const {
         return instance_offset + std::uint64_t(bodies) * sizeof(Instance) +
@@ -242,12 +244,18 @@ struct Renderer::Impl {
     gpu::Device* device = nullptr;
     SubmissionTimeline submissions;
     struct BufferResources {
-        UniqueGpuHeap data, texture_descriptors, sampler_descriptors;
+        UniqueGpuHeap static_data; // device-only: meshes, rock records and sky tables, filled once
+        UniqueGpuHeap data, texture_descriptors, sampler_descriptors; // host-visible: the per-frame region and the UI
         UniqueGpuHeap meter_device, meter_zero,
             meter_readback;                       // the exposure histogram, its zero source and its readback
         UniqueGpuHeap cull_device, cull_readback; // GPU output and completed scratch for CPU statistics
     } buffers;
     std::uint64_t static_cursor = 0;
+    struct StaticUpload { // the staging path of upload_static, open until finish_static_uploads
+        UniqueGpuHeap staging;
+        gpu::CommandBuffer* cmd = nullptr;
+        std::uint64_t offset = 0;
+    } static_upload;
 
     // Resources.
     std::vector<GpuImage> material_images;
@@ -415,6 +423,7 @@ struct Renderer::Impl {
     void resize_flare(unsigned divisor);
     unsigned galaxy_divisor = 4, flare_divisor = 4;
     std::uint64_t upload_static(ByteView bytes);
+    void finish_static_uploads();
     GpuImage create_image(const ImageDesc& desc);
     void bind(Slot slot, const GpuImage& image);
     void upload_images(std::span<const Upload> uploads);

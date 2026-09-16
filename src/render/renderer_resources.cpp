@@ -18,10 +18,17 @@ std::uint64_t padded_size(const assets::TextureMip& mip) {
     return (mip.bytes.size() + 15) & ~15ull;
 }
 
-void flush_upload(gpu::CommandBuffer*& cmd, std::uint64_t& offset, SubmissionTimeline& submissions) {
+// Everything that reads the static records: the draws (indices, vertices, rock and
+// sky tables) and the culling compute.
+constexpr AccessScope static_read_access{gpu::Stage::indirect | gpu::Stage::index_input | gpu::Stage::vertex |
+                                             gpu::Stage::fragment | gpu::Stage::compute,
+                                         gpu::Access::index_read | gpu::Access::shader_read};
+
+void flush_upload(gpu::CommandBuffer*& cmd, std::uint64_t& offset, SubmissionTimeline& submissions,
+                  AccessScope readers) {
     if (!cmd)
         return;
-    synchronize(cmd, access::transfer_write, access::fragment_sample);
+    synchronize(cmd, access::transfer_write, readers);
     submissions.submit_and_wait({cmd});
     cmd = nullptr;
     offset = 0;
@@ -42,13 +49,34 @@ Renderer::Impl::~Impl() {
     gpu::destroy_device(device);
 }
 
+// Copies the bytes into the device-only static heap through a bounded staging heap.
+// The copies are submitted when the staging fills and by finish_static_uploads.
 std::uint64_t Renderer::Impl::upload_static(ByteView bytes) {
     static_cursor = (static_cursor + 15) & ~15ull;
-    panic_if(static_cursor + bytes.size() > heap_layout.dynamic_offset, "static GPU heap exhausted");
-    const auto address = reinterpret_cast<std::uint64_t>(buffers.data.range().gpu) + static_cursor;
-    std::memcpy(buffers.data.range().cpu + static_cursor, bytes.data(), bytes.size());
+    panic_if(static_cursor + bytes.size() > heap_layout.static_budget, "static GPU heap exhausted");
+    auto& upload = static_upload;
+    const auto padded = (bytes.size() + 15) & ~15ull;
+    if (upload.offset + padded > upload.staging.range().size)
+        finish_static_uploads();
+    if (!upload.staging.range().cpu) {
+        upload.staging = UniqueGpuHeap::create(device, std::max<std::uint64_t>(padded, heap_layout.staging_budget));
+        panic_if(!upload.staging.range().cpu, "static staging allocation failed");
+    }
+    std::memcpy(upload.staging.range().cpu + upload.offset, bytes.data(), bytes.size());
+    if (!upload.cmd)
+        upload.cmd = gpu::begin_commands(device);
+    const auto address = reinterpret_cast<std::uint64_t>(buffers.static_data.range().gpu) + static_cursor;
+    gpu::copy_memory(upload.cmd, {upload.staging.range().gpu + upload.offset, bytes.size()},
+                     {reinterpret_cast<void*>(address), bytes.size()});
+    upload.offset += padded;
     static_cursor += bytes.size();
     return address;
+}
+
+// Submits the pending static copies and releases the staging heap.
+void Renderer::Impl::finish_static_uploads() {
+    flush_upload(static_upload.cmd, static_upload.offset, submissions, static_read_access);
+    static_upload.staging.reset();
 }
 
 GpuImage Renderer::Impl::create_image(const ImageDesc& desc) {
@@ -95,7 +123,7 @@ void Renderer::Impl::upload_images(std::span<const Upload> uploads) {
         for (const auto& mip : uploads[i].data.mips)
             bytes += padded_size(mip);
         if (offset + bytes > staging.range().size)
-            flush_upload(cmd, offset, submissions);
+            flush_upload(cmd, offset, submissions, access::fragment_sample);
         if (!cmd)
             cmd = gpu::begin_commands(device);
         for (unsigned level = 0; level < uploads[i].data.mips.size(); level++) {
@@ -107,7 +135,7 @@ void Renderer::Impl::upload_images(std::span<const Upload> uploads) {
             offset += padded_size(mip);
         }
     }
-    flush_upload(cmd, offset, submissions);
+    flush_upload(cmd, offset, submissions, access::fragment_sample);
     staging.reset();
 }
 
@@ -134,13 +162,16 @@ void Renderer::Impl::create_device(void* window) {
     panic_if(!caps.conventional_descriptor_backend,
              "the demo's shaders require the conventional descriptor backend build option");
     submissions.initialize(device);
+    buffers.static_data = UniqueGpuHeap::create(device, heap_layout.static_budget, gpu::MemoryType::gpu_only);
     buffers.data = UniqueGpuHeap::create(device, heap_layout.mapped_size());
     buffers.cull_device = UniqueGpuHeap::create(
         device, heap_layout.cull_size(std::max(high_quality.belt_count, belt_count_override), body_count),
         gpu::MemoryType::gpu_only);
     buffers.cull_readback = UniqueGpuHeap::create(device, sizeof(CullScratch), gpu::MemoryType::readback);
-    panic_if(!buffers.cull_device.range().gpu || !buffers.cull_readback.range().cpu, "culling heap allocation failed");
-    log::info("Buffer heaps: {} KiB mapped, {} KiB device-only culling", buffers.data.range().size / 1024,
+    panic_if(!buffers.static_data.range().gpu || !buffers.cull_device.range().gpu || !buffers.cull_readback.range().cpu,
+             "device heap allocation failed");
+    log::info("Buffer heaps: {} KiB device-only static, {} KiB mapped, {} KiB device-only culling",
+              buffers.static_data.range().size / 1024, buffers.data.range().size / 1024,
               buffers.cull_device.range().size / 1024);
     buffers.texture_descriptors = UniqueGpuHeap::create(device, caps.texture_descriptor_size * unsigned(Slot::count),
                                                         gpu::MemoryType::texture_descriptor_heap);
@@ -241,6 +272,7 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     phase("belt");
     log::info("Loading planetary maps and scanned rock PBR materials...");
     load_materials();
+    finish_static_uploads();
     phase("materials and sky");
     upload_rgba(Slot::hud, hud);
     // Embedded SMAA lookup tables, widened to RGBA8 for the upload path.
@@ -408,11 +440,14 @@ void Renderer::Impl::collect_memory_stats() {
             memory.materials.count++;
         }
     memory.materials.used = memory.materials.bytes;
-    // The mapped heap is one allocation: the static records fill from the front up to the
-    // dynamic region, which with the UI region is always in use.
+    // The static heap fills from the front once; the mapped heap is the per-frame region
+    // and the UI, always in use.
+    memory.static_data = {};
+    heap(memory.static_data, buffers.static_data);
+    memory.static_data.used = static_cursor;
     memory.mapped = {};
     heap(memory.mapped, buffers.data);
-    memory.mapped.used = static_cursor + (heap_layout.mapped_size() - heap_layout.dynamic_offset);
+    memory.mapped.used = memory.mapped.bytes;
     memory.device_buffers = {};
     heap(memory.device_buffers, buffers.cull_device);
     heap(memory.device_buffers, buffers.meter_device);

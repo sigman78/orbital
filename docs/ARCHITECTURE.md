@@ -185,8 +185,12 @@ dependencies, not resource-state tracking. Unusual compute/combined-stage barrie
 explicit, and no pass destructor inserts a barrier.
 
 
-An approximately 84 MiB host-visible heap holds static meshes/rock records, frame constants, staged
-culling parameters/body instances and 4 MiB of overlay space. GPU-written culling scratch, indirect
+Static meshes, rock records and sky tables fill an 80 MiB device-only heap once at start-up, through
+a bounded staging heap released afterwards, so the records the GPU reads every frame never depend on
+the host-visible aperture (256 MiB on a GTX 1080 Ti, shared by every process; when it is full the
+driver backs host-visible heaps with system memory and the belt cull runs 40x slower). A host-visible
+heap of about 4 MiB holds frame constants, staged culling parameters/body instances and the overlay
+space. GPU-written culling scratch, indirect
 commands and generated instances use a separate device-only heap sized for the configured maximum
 rock count (about 16 MiB by default). A small readback heap returns completed culling statistics;
 only parameters and body instances are uploaded each frame. Rock-count overrides are checked against

@@ -176,6 +176,7 @@ void memory_bar(const render::MemoryStats& memory) {
         Pool{.label = "Frame targets", .pool = &memory.frame_targets, .color = IM_COL32(86, 180, 233, 255)},
         Pool{.label = "Fixed targets", .pool = &memory.fixed_targets, .color = IM_COL32(130, 120, 210, 255)},
         Pool{.label = "Materials", .pool = &memory.materials, .color = IM_COL32(0, 158, 115, 255)},
+        Pool{.label = "Static records", .pool = &memory.static_data, .color = IM_COL32(240, 228, 66, 255)},
         Pool{.label = "Mapped heap", .pool = &memory.mapped, .color = IM_COL32(230, 159, 0, 255)},
         Pool{.label = "Device buffers", .pool = &memory.device_buffers, .color = IM_COL32(213, 94, 0, 255)},
         Pool{.label = "Readback", .pool = &memory.readback, .color = IM_COL32(204, 121, 167, 255)}};
