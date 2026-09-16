@@ -22,7 +22,8 @@ inline constexpr float fast_speed_scale = 4.0f;  // Shift
 inline constexpr double orbit_zoom_radii = 2.3;  // O key orbits at this many body radii
 } // namespace control
 
-inline constexpr std::string_view hotkey_capture_path = "captures/orbital.png";
+inline constexpr std::string_view hotkey_capture_path =
+    "captures/orbital.png"; // numbered per capture, see numbered_capture_path
 
 struct AppState {
     Camera camera;

@@ -3,6 +3,8 @@
 #include "app/frame_input.hpp"
 #include "app/stats_smoothing.hpp"
 #include <cassert>
+#include <filesystem>
+#include <fstream>
 #include <string_view>
 
 int main() {
@@ -109,6 +111,19 @@ int main() {
     assert(app.camera.mode() == CameraMode::Free);
     request_capture(app);
     assert(app.capture_request == hotkey_capture_path);
+    {
+        // Captures are numbered past the highest already there; other files and a missing directory do not matter.
+        const auto directory = std::filesystem::temp_directory_path() / "orbital-app-tests" / "captures";
+        std::filesystem::remove_all(directory.parent_path());
+        const auto request = directory / "orbital.png";
+        assert(numbered_capture_path(request) == directory / "orbital-0001.png");
+        assert(std::filesystem::is_directory(directory));
+        for (const char* name :
+             {"orbital-0003.png", "orbital-0012.png", "orbital-x.png", "orbital-0020.bmp", "other-0099.png"})
+            std::ofstream(directory / name) << "x";
+        assert(numbered_capture_path(request) == directory / "orbital-0013.png");
+        std::filesystem::remove_all(directory.parent_path());
+    }
     app.aa.spatial_aa = render::SpatialAA(unsigned(render::SpatialAA::Count) - 1);
     cycle_choice(app.aa.spatial_aa);
     assert(unsigned(app.aa.spatial_aa) == 0);
