@@ -58,6 +58,7 @@ float giantStreaks(float2 uv, float2 along, float frequency)
 // map fades here and the per-pixel streaks of giantCloseDetail take over.
 float giantDetail(float2 uv, float t, float fine, float extreme)
 {
+    if (fine <= 0.0) return 1.0; // the map minified: nothing to add, so the taps are skipped
     float filaments = (sampleSphere(textures[TEX_GAS_DETAIL], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).r - .5) * 6.0;
     float detail = 1.0 + filaments * .11 * fine * (1.0 - .65 * extreme);
     return detail * (1.0 + (fbm2(uv * float2(2400, 480) - t * .003, 2) - .5) * .12 * fine);
@@ -87,6 +88,13 @@ float giantCloseDetail(float2 uv, float2 along, float fine, float extreme)
 // which shows only where the sun is low. The height in its alpha is not traced
 // for shadows: on a height field this smooth the trace's discrete steps drew
 // coherent contour bands along the terminator, worst seen from a low angle.
+//
+// Draw tier (detail, set per draw from the projected size): the deck parallax
+// with its cast shading and the relief tilt fade out toward the smallest mesh
+// level, their taps skipped at zero, while the albedo, its advection, the polar
+// caps and the lighting stay as they are at every size. The fine structure needs
+// no fading: it is scaled by the map's magnification, which is zero out there.
+//
 // Two decks: the zones' high ammonia clouds ride above the belts' deeper cloud.
 // The upper deck is the albedo displaced toward the viewer by a lift that grows
 // with the view's obliquity, masked by the baked relief height, so at oblique
@@ -104,7 +112,8 @@ float3 layeredDeck(float2 uv, float2 lift, float2 cast, float2 layers, float t, 
     return lerp(lower * shade, upper, upperHere);
 }
 
-Material giantMaterial(Frame* frame, SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float3 V, float visibility)
+Material giantMaterial(Frame* frame, SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float3 V, float visibility,
+                       float detail)
 {
     float4 giant = frame->giant;
     if (giant.w < .5) giant.x = 0.0; // the panel's flow switch off: the deck and the caps hold still
@@ -125,6 +134,7 @@ Material giantMaterial(Frame* frame, SurfaceVaryings input, float3x3 rotate, flo
     float3 T, B;
     tangentFrame(localN, rotate, N, T, B);
     float2 layers = frame->giant_layers.xy;
+    layers.x *= detail; // the parallax lift and the cast go with the tier
     float3 viewTS = float3(dot(V, T), dot(V, B), max(dot(V, N), .15));
     float3 lightTS = float3(dot(L, T), dot(L, B), max(dot(L, N), .2));
     float2 lift = viewTS.xy / viewTS.z * layers.x;  // toward the viewer, in texture units
@@ -152,10 +162,14 @@ Material giantMaterial(Frame* frame, SurfaceVaryings input, float3x3 rotate, flo
     // terminator; under a high sun the same tilt would emboss the whole disc,
     // so it fades to a fraction there, where the true slopes are invisible anyway.
     float grazing = 1.0 - smoothstep(.05, .5, dot(N, L));
-    float strength = frame->giant_more.z * lerp(.15, 1.0, grazing) * (1.0 - polar);
-    float2 encoded = lerp(sampleSphere(textures[TEX_GAS_RELIEF], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv1).xy, sampleSphere(textures[TEX_GAS_RELIEF], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv0).xy, w0) * 2.0 - 1.0;
-    float2 slope = encoded * abs(encoded) * GAS_SLOPE_MAX * strength;
-    m.N = normalize(N - T * slope.x - B * slope.y);
+    float strength = frame->giant_more.z * lerp(.15, 1.0, grazing) * (1.0 - polar) * detail;
+    m.N = N;
+    if (strength > 0.0)
+    {
+        float2 encoded = lerp(sampleSphere(textures[TEX_GAS_RELIEF], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv1).xy, sampleSphere(textures[TEX_GAS_RELIEF], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv0).xy, w0) * 2.0 - 1.0;
+        float2 slope = encoded * abs(encoded) * GAS_SLOPE_MAX * strength;
+        m.N = normalize(N - T * slope.x - B * slope.y);
+    }
     return m;
 }
 
