@@ -2,6 +2,10 @@
 
 Requires a desktop GPU, the demo and render_validation_probe targets, and Pillow.
 Core/synchronization validation is mandatory; --gpu-assisted adds shader checks.
+The scene cases run as one shot list in a hidden window, so nothing opens on
+screen; --show keeps that window visible, and --window adds the Windows
+lifecycle smoke test (resize, minimize and restore, quality changes), which
+drives a real window and is not part of the default run.
 Never use this test's timings as performance measurements.
 """
 import argparse
@@ -23,7 +27,8 @@ def main():
     parser.add_argument('--output', type=Path, default=ROOT / '.scratch/render-validation')
     parser.add_argument('--layers', type=Path, default=ROOT / '.tools/Vulkan-ValidationLayers/bin')
     parser.add_argument('--gpu-assisted', action='store_true')
-    parser.add_argument('--skip-window', action='store_true')
+    parser.add_argument('--window', action='store_true', help='also run the Windows lifecycle smoke test, which shows a window')
+    parser.add_argument('--show', action='store_true', help='run the scene cases with the window visible')
     args = parser.parse_args()
     build, output, layers = args.build.resolve(), args.output.resolve(), args.layers.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -84,25 +89,32 @@ def main():
     # Prove the layer is loaded, sync validation enabled and diagnostics captured.
     run('negative-control', [probe, '--missing-barrier'], negative=True)
     run('synchronized-control', [probe])
+    # One process for every scene case, a shot list: each line the case's options
+    # as key=value tokens, the command line the defaults, the capture its own.
     cases = {
-        'earth': ['--bookmark', '0'],
-        'belt-taa': ['--bookmark', '5', '--taa', '1'],
-        'belt-no-taa': ['--bookmark', '5', '--taa', '0'],
-        'belt-stop': ['--bookmark', '5', '--pan', '.25', '--pan-stop-frame', '40'],
-        'tour': ['--tour'],
-        'ui': ['--bookmark', '5', '--ui'],
-        'fullscreen': ['--bookmark', '5', '--fullscreen-at', '20'],
+        'earth': 'bookmark=0',
+        'belt-taa': 'bookmark=5 taa=1',
+        'belt-no-taa': 'bookmark=5 taa=0',
+        'belt-stop': 'bookmark=5 pan=.25 pan-stop-frame=40',
+        'tour': 'tour',
+        'ui': 'bookmark=5 ui',
+        'fullscreen': 'bookmark=5 fullscreen-at=20',
     }
-    for name, options in cases.items():
+    shots = output / 'scenes.shots'
+    for name in cases:
+        (output / f'{name}.png').unlink(missing_ok=True)
+    shots.write_text(''.join(f'name={name} {options} capture={(output / name).as_posix()}.png\n'
+                             for name, options in cases.items()), encoding='utf-8')
+    run('scenes', [demo, '--shots', shots, '--report', output / 'scenes.json', '--time', '0', '--frames', '80',
+                   '--width', '960', '--height', '540', '--vsync', '0', '--no-hud', *([] if args.show else ['--headless'])])
+    for name in cases:
         capture = output / f'{name}.png'
-        capture.unlink(missing_ok=True)
-        run(name, [demo, '--time', '0', '--frames', '80', '--width', '960', '--height', '540',
-                   '--vsync', '0', '--no-hud', '--capture', capture, *options])
         with Image.open(capture) as image:
             image.load()
             if min(image.size) < 64 or max(ImageStat.Stat(image.convert('RGB')).stddev) < 1:
                 raise RuntimeError(f'Empty or flat render: {capture}')
-    if os.name == 'nt' and not args.skip_window and not args.gpu_assisted:
+        results.append(name)
+    if args.window and os.name == 'nt' and not args.gpu_assisted:
         run('window-lifecycle', ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
                                 ROOT / 'tools/smoke-window.ps1', '-Executable', demo,
                                 '-Capture', output / 'window.png', '-TimeoutSeconds', '120'])

@@ -249,7 +249,8 @@ helper on its own to catch accidental include-order dependencies.
 
 Ten CTest suites cover core, system, geometry, camera, image, kernels, materials, SMAA, texture and app boundaries. They
 use assertions as executable invariants and also run under GCC. `tools/check-gcc.ps1` runs that build
-locally; `tools/smoke-window.ps1` drives the window through resize, minimize and key transitions;
+locally; `tools/smoke-window.ps1` drives the window through resize, minimize and key transitions (opt-in,
+`check-renderer.py --window`; the validation run itself is hidden);
 `tools/check-stability.ps1` compares two fixed-time captures pixel by pixel.
 
 The optional Gaia texture-layer sky path samples a global colour map, a cropped
