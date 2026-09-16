@@ -43,6 +43,7 @@ Renderer::Impl::~Impl() {
     material_images.clear();
     frame_targets = {};
     fixed_targets = {};
+    static_upload.staging.reset(); // empty after start-up; here for an init that stopped early
     buffers = {};
     timings.reset();
     submissions.reset();
