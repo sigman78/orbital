@@ -90,8 +90,10 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
                                  .cut_serial = previous_camera_cut,
                                  .valid = history_valid,
                                  .temporal_aa = previous_frame.quality.x > .5f};
-    const auto view = prepare_camera(camera, previous, extent, frame_index, input.aa.temporal_aa, targets::depth.min,
-                                     targets::depth.max, targets::mote_cell_size_units);
+    if (camera.cut_serial != previous_camera_cut)
+        frames_since_cut = 0;
+    const auto view = prepare_camera(camera, previous, extent, frames_since_cut, input.aa.temporal_aa,
+                                     targets::depth.min, targets::depth.max, targets::mote_cell_size_units);
     std::memcpy(frame.view_projection, view.projection.m, sizeof frame.view_projection);
     frame.right_tan = f4(view.right, view.tan_half_fov);
     frame.up_aspect = f4(view.up, view.aspect);

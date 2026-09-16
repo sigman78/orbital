@@ -173,7 +173,7 @@ ScreenSun project_sun(const CameraView& camera, Vec3d sun, std::span<const BodyS
 }
 
 PreparedCamera prepare_camera(const CameraView& camera, const CameraHistory& previous, Extent2D extent,
-                              unsigned frame_index, bool temporal_aa, float near_plane, float far_plane,
+                              unsigned jitter_phase, bool temporal_aa, float near_plane, float far_plane,
                               unsigned lattice_cell_size) {
     constexpr float jitter[8][2] = {{0, -.166667f},    {-.25f, .166667f},   {.25f, -.388889f}, {-.375f, -.055556f},
                                     {.125f, .277778f}, {-.125f, -.277778f}, {.375f, .055556f}, {-.4375f, .388889f}};
@@ -185,8 +185,8 @@ PreparedCamera prepare_camera(const CameraView& camera, const CameraHistory& pre
     result.aspect = extent.aspect();
     result.projection = perspective_matrix(result.tan_half_fov, result.aspect, near_plane, far_plane) *
                         view_matrix(result.right, result.up, result.forward);
-    result.jitter_x = temporal_aa ? jitter[frame_index % 8][0] : 0;
-    result.jitter_y = temporal_aa ? jitter[frame_index % 8][1] : 0;
+    result.jitter_x = temporal_aa ? jitter[jitter_phase % 8][0] : 0;
+    result.jitter_y = temporal_aa ? jitter[jitter_phase % 8][1] : 0;
     for (unsigned column = 0; column < 4; ++column) {
         result.projection.m[column * 4] += 2 * result.jitter_x / float(extent.width) *
                                            result.projection.m[column * 4 + 3];

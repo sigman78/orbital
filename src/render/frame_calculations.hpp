@@ -32,7 +32,7 @@ struct PreparedCamera {
 };
 
 PreparedCamera prepare_camera(const CameraView& camera, const CameraHistory& previous, Extent2D extent,
-                              unsigned frame_index, bool temporal_aa, float near_plane, float far_plane,
+                              unsigned jitter_phase, bool temporal_aa, float near_plane, float far_plane,
                               unsigned lattice_cell_size);
 
 // Orthographic box, camera relative. No shader layout or resource handles.
