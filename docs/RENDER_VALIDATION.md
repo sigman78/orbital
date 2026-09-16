@@ -83,17 +83,19 @@ It first runs a deliberate overlapping-transfer write without a barrier and requ
 that synchronization validation is active and its messages are captured.
 
 Scene cases cover Earth, belt with TAA on/off, movement followed by rest, tour, UI and
-a scripted fullscreen transition. Captures must decode and contain non-flat content.
-The normal core/synchronization run also exercises the Windows lifecycle smoke test,
-including resize, minimize/restore and quality changes. Findings fail the test; a fresh
-passing report is written only after every case succeeds.
+a scripted fullscreen transition, run as one shot list in a hidden window (since
+2026-09-16; before that each case was its own visible launch). Captures must decode and
+contain non-flat content. The Windows lifecycle smoke test, resize, minimize/restore and
+quality changes through a real window, is opt-in with `--window`: it is the one check
+that puts a window on screen, and the CTest run does not include it. Findings fail the
+test; a fresh passing report is written only after every case succeeds.
 
 GPU-assisted validation runs separately with synchronization checks and shader
 instrumentation. Core checks are disabled in this mode as advised by the layer;
 the normal suite supplies those checks. Unused ray-tracing/mesh instrumentation is
 disabled. Only `WARNING-Setting-Limit-Adjusted` setup notices are accepted and retained
-in the report; other warnings/errors fail. Interactive lifecycle checks are reserved
-for the normal suite, while scripted fullscreen runs in both modes.
+in the report; other warnings/errors fail. The lifecycle test is never run in this mode,
+while scripted fullscreen runs in both.
 
 Validation timings are not performance measurements. These finite scenes also do not
 prove every shader path or resource lifetime correct.
