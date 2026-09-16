@@ -19,6 +19,32 @@ python tools/check-motion-streaks.py --build build/release
 python tools/check-exposure.py
 ```
 
+`tools/check.py` is the quick check, the first thing to run after a render change.
+It draws its shots in one hidden-window process and diffs every capture against the
+accepted reference in `.scratch/check/reference` (the share of pixels off by more than
+two display codes, the share over eight, the largest difference); a shot fails past its
+tolerance, 0.1 percent of pixels (0.5 with TAA on), against measured run-to-run floors
+of up to 0.03 percent on the belt views. The groups are in the script: `quick` (the six
+bookmarks and the belt-sun view, TAA off, one frame, under three seconds), `bodies`
+(each body pulled back and under the telescope zoom, for the draw tiers), `belt`,
+`taa` (64 frames, the pan-and-stop), `post` (sun positions, tone curves, a fixed
+exposure), `sky` (the galaxy modes at 16x) and `exposure` (the meter's request per
+bookmark against the bands in check-exposure.py, not a diff). Every run includes
+`quick`; `--changed` adds the groups whose source paths the working tree touches
+against main, `--group name` picks them, `--all` runs the lot (44 shots, 11 seconds).
+`--accept` makes the run the reference for the shots it ran, so the routine is: accept
+on main (or `--executable` pointed at a worktree build of it), change, run; the report
+names what changed and by how much, the captures in `.scratch/check/run` show it.
+`--validate` runs the same shots under the local validation layer (core and sync) and
+fails on a finding. The TAA jitter phase restarts at every camera cut, so a shot draws
+the same wherever it sits in a list; before that, inserting a shot moved every later
+TAA capture by a jitter step.
+
+```powershell
+python tools/check.py --all --accept     # on main, before the change
+python tools/check.py --changed          # after it
+```
+
 `check-exposure.py` runs the six bookmarks as one shot list in a single hidden-window
 process with the auto exposure on and compares the meter's request at each, in stops,
 against the band recorded in the script from the reviewed readings (half a stop of

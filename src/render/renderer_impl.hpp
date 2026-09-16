@@ -375,6 +375,8 @@ struct Renderer::Impl {
     // Frame state.
     Extent2D extent{};
     unsigned frame_index = 0;
+    unsigned frames_since_cut =
+        0; // the jitter phase; restarts at a cut so a scripted shot draws the same wherever it sits
     GpuTimings timings;
     Stats stats{};
     float adapted_exposure = 1, exposure_target = 1; // the filtered exposure and the meter's last target

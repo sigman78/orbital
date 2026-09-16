@@ -170,6 +170,7 @@ bool Renderer::draw(const FrameInput& supplied) {
     s.submissions.submit_and_present(s.device, {cmd});
 
     s.frame_index++;
+    s.frames_since_cut++;
     s.previous_frame = frame;
     s.previous_camera = input.camera.position;
     s.previous_vertical_fov = input.camera.vertical_fov;
