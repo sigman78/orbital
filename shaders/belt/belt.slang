@@ -1,5 +1,6 @@
 #pragma once
 #include "../scene/bindings.slang"
+#include "../scene/frame_records.slang"
 #include "../scene/visibility.slang"
 
 // Belt lighting shared by the surface shaders and the culling pass, which
@@ -27,13 +28,13 @@ float beltRingDensity(float t)
 static const float BELT_EXTINCTION = .4;     // optical depth per unit path at density 1; the far side of a full-thickness path loses about half its light
 static const int BELT_EXTINCTION_STEPS = 8;
 
-float beltDensity(float3 q, float4 ring, float3 n)
+float beltDensity(float3 q, BeltParams belt)
 {
-    float h = dot(q, n);
-    float r = length(q - n * h);
-    float t = (r - ring.x) / (ring.y - ring.x);
+    float h = dot(q, belt.normal);
+    float r = length(q - belt.normal * h);
+    float t = (r - belt.inner) / (belt.outer - belt.inner);
     // Gaussian in height with the scale height flaring outward, as the population does.
-    float scaleHeight = ring.w * .5 * lerp(.6, 1.4, saturate(t));
+    float scaleHeight = belt.thickness * .5 * lerp(.6, 1.4, saturate(t));
     float vertical = exp(-h * h / (2.0 * scaleHeight * scaleHeight));
     return vertical * beltRingDensity(t);
 }
@@ -44,19 +45,18 @@ float beltDensity(float3 q, float4 ring, float3 n)
 // sit in a smooth dusk. No texels, so nothing shimmers.
 float beltExtinction(Frame* frame, float3 point)
 {
-    float4 ring = frame->belt_ring;
-    if (ring.z <= 0.0 || frame->scene.w < .5) return 1.0;
-    float3 n = frame->belt_normal.xyz;
-    float3 q = point - frame->bodies[int(frame->scene.y)].xyz;
-    float3 light = normalize(frame->sun.xyz - point);
+    BeltParams belt = beltParams(frame);
+    if (belt.density <= 0.0 || !belt.extinction) return 1.0;
+    float3 q = point - belt.centre;
+    float3 light = normalize(lightParams(frame).position - point);
     // Distance until the ray has left the slab's height band, capped for the near-grazing case.
-    float climb = max(abs(dot(light, n)), .08);
-    float length = min((ring.w * .5 * 1.3 + abs(dot(q, n))) / climb, ring.y - ring.x);
+    float climb = max(abs(dot(light, belt.normal)), .08);
+    float length = min((belt.thickness * .5 * 1.3 + abs(dot(q, belt.normal))) / climb, belt.outer - belt.inner);
     float ds = length / float(BELT_EXTINCTION_STEPS);
     float tau = 0.0;
     for (int i = 0; i < BELT_EXTINCTION_STEPS; ++i)
-        tau += beltDensity(q + light * ((float(i) + .5) * ds), ring, n) * ds;
-    return exp(-tau * ring.z * BELT_EXTINCTION);
+        tau += beltDensity(q + light * ((float(i) + .5) * ds), belt) * ds;
+    return exp(-tau * belt.density * BELT_EXTINCTION);
 }
 
 // Sunlight left after the rocks between a belt point and the sun: the
@@ -67,16 +67,16 @@ static const float BELT_MAP_SLICES = 4.0;
 
 float beltRockTransmittance(Frame* frame, float3 point)
 {
-    if (frame->scene.z < .5) return 1.0;
-    float4 clip = mul(frame->belt_light_projection, float4(point, 1.0));
+    BeltParams belt = beltParams(frame);
+    if (!belt.lightMap) return 1.0;
+    float4 clip = mul(beltLightProjection(frame), float4(point, 1.0));
     float2 uv = clip.xy * .5 + .5;
     if (any(uv < 0.0) || any(uv > 1.0)) return 1.0;
     float4 coverage = textures[TEX_BELT_LIGHT_MAP].SampleLevel(samplers[SAMPLER_CLAMP], uv, 0.0);
-    float3 n = frame->belt_normal.xyz;
-    float3 q = point - frame->bodies[int(frame->scene.y)].xyz;
-    float3 light = normalize(frame->sun.xyz - point);
-    float along = dot(q, n) / (dot(light, n) + 1e-6);
-    float c = clamp((along / frame->belt_light.w * .5 + .5) * BELT_MAP_SLICES, 0.0, BELT_MAP_SLICES);
+    float3 q = point - belt.centre;
+    float3 light = normalize(lightParams(frame).position - point);
+    float along = dot(q, belt.normal) / (dot(light, belt.normal) + 1e-6);
+    float c = clamp((along / belt.lightSlice * .5 + .5) * BELT_MAP_SLICES, 0.0, BELT_MAP_SLICES);
     // Only slices wholly on the sun side count: the receiver's own slice holds
     // its own splat, which must not shadow it.
     float sum = 0.0;

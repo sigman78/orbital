@@ -1,4 +1,5 @@
 #include "../scene/frame_bindings.slang"
+#include "../scene/frame_records.slang"
 #include "../lib/color.slang"
 
 // SMAA 1x, Jimenez et al. 2012, ported from SMAA.hlsl (see third_party/smaa/LICENSE.txt):
@@ -333,7 +334,7 @@ float4 neighbourhoodBlending(float2 uv)
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
-    float2 size = root.frame.options.xy;
+    float2 size = viewParams(root.frame).size;
     rt = float4(1.0 / size, size);
     float2 uv = position.xy / size;
     if (root.mode == MODE_EDGES) return float4(edgeDetection(uv), 0.0, 1.0);

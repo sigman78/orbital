@@ -1,5 +1,6 @@
 #pragma once
 #include "../scene_shared.h"
+#include "../scene/frame_records.slang"
 #include "../lib/projection.slang"
 
 // Opaque geometry blocks fully; billboards attenuate by their actual alpha.
@@ -14,14 +15,16 @@ float sunPixelVisibility(Texture2D<float4> depth, Texture2D<float4> splats, int2
 // flare as they cross the sun (the planets are handled analytically).
 float sunDepthVisibility(Frame* frame, Texture2D<float4> depth, Texture2D<float4> splats, float2 sun, float2 aspect)
 {
-    float2 uv = sun * .5 + .5 + frame->jitter.xy / frame->options.xy;
+    ViewParams view = viewParams(frame);
+    LightParams light = lightParams(frame);
+    float2 uv = sun * .5 + .5 + view.jitter / view.size;
     if (any(uv < 0.0) || any(uv > 1.0)) return 1.0;
-    float2 radius = frame->sun_disc.x / frame->right_tan.w / aspect * .5; // disc radius in uv
+    float2 radius = light.discRadius / view.tanHalfFov / aspect * .5; // disc radius in uv
     float open = 0.0;
     // Evaluated once into a 1x1 target, not once per tone-mapped pixel. Dense
     // fixed disc samples avoid the old 1/12 jumps as thin rocks cross the sun.
     static const int samples = 256;
-    int2 size = int2(frame->options.xy);
+    int2 size = int2(view.size);
     for (int i = 0; i < samples; ++i)
     {
         float r = sqrt((float(i) + .5) / float(samples)), a = float(i) * 2.399963;

@@ -1,4 +1,5 @@
 #include "../scene/frame_bindings.slang"
+#include "../scene/frame_records.slang"
 #include "../scene/view.slang"
 #include "../lib/color.slang"
 
@@ -53,10 +54,12 @@ float4 reconstruct(Texture2D<float4> source, float2 uv, float2 size)
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
-    int2 size = int2(root.frame.options.xy);
+    ViewParams view = viewParams(root.frame);
+    TemporalParams temporal = temporalParams(root.frame);
+    int2 size = int2(view.size);
     int2 pixel = clamp(int2(position.xy), int2(0, 0), size - 1);
     float2 uv = (float2(pixel) + .5) / float2(size);
-    float2 rasterPosition = position.xy + root.frame.jitter.xy;
+    float2 rasterPosition = position.xy + view.jitter;
     float2 rasterUV = rasterPosition / float2(size);
     float3 current = reconstruct(textures[TEX_HDR], rasterUV, float2(size)).rgb;
     pixel = clamp(int2(rasterPosition), int2(0, 0), size - 1);
@@ -65,23 +68,23 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     bool splat = metadata.a > 1e-5;
     bool sky = isBackgroundDepth(deviceDepth) && !splat;
     float currentZ = splat ? metadata.r / metadata.a : (sky ? FAR_Z : linearViewDepth(deviceDepth));
-    if (root.frame.previous_camera_delta.w < .5 || root.frame.quality.x < .5) return float4(current, currentZ);
+    if (!temporal.historyValid || !temporal.enabled) return float4(current, currentZ);
 
     float3 rd = rayDirection(root.frame, rasterPosition);
     float4 previousClip;
     float predictedPreviousZ = FAR_Z;
     if (sky) {
-        previousClip = mul(root.frame.previous_projection, float4(rd, 0.0));
+        previousClip = mul(previousProjection(root.frame), float4(rd, 0.0));
     } else {
-        float forwardCosine = max(dot(rd, root.frame.forward_exposure.xyz), 1e-4);
+        float forwardCosine = max(dot(rd, view.forward), 1e-4);
         float3 currentPosition = rd * (currentZ / forwardCosine);
-        float3 previousPosition = currentPosition + root.frame.previous_camera_delta.xyz;
-        predictedPreviousZ = dot(previousPosition, root.frame.previous_forward.xyz);
-        previousClip = mul(root.frame.previous_projection, float4(previousPosition, 1.0));
+        float3 previousPosition = currentPosition + temporal.cameraDelta;
+        predictedPreviousZ = dot(previousPosition, temporal.previousForward);
+        previousClip = mul(previousProjection(root.frame), float4(previousPosition, 1.0));
     }
     bool behind = previousClip.w <= 1e-5;
     float2 previousUV = previousClip.xy / max(previousClip.w, 1e-5) * .5 + .5
-                      - root.frame.jitter.zw / float2(size);
+                      - view.previousJitter / float2(size);
     bool outside = any(previousUV < float2(0.0, 0.0)) || any(previousUV > float2(1.0, 1.0));
     if (behind || outside || (!sky && predictedPreviousZ <= 0.0)) return float4(current, currentZ);
 

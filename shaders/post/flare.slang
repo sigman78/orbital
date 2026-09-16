@@ -1,4 +1,5 @@
 #include "../scene/frame_bindings.slang"
+#include "../scene/frame_records.slang"
 #include "lens.slang"
 
 // The soft part of the lens flare stack into a target at the frame over the
@@ -9,12 +10,15 @@
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
-    float2 resolution = root.frame.options.xy;
-    float2 size = max(floor(resolution / root.frame.lens_stack.x), float2(1.0, 1.0));
+    ViewParams view = viewParams(root.frame);
+    LensParams lens = lensParams(root.frame);
+    ScreenSun sunScreen = screenSun(root.frame);
+    float2 resolution = view.size;
+    float2 size = max(floor(resolution / lens.stackDivisor), float2(1.0, 1.0));
     float2 p = position.xy / size * 2.0 - 1.0;
     float2 aspect = float2(resolution.x / resolution.y, 1.0);
-    float vis = root.frame.screen_sun.z * textures[TEX_SUN_VISIBILITY].Load(int3(0, 0, 0)).r;
-    float4 strengths = float4(root.frame.sun_disc.z, root.frame.sun_disc.w, root.frame.lens_more.x, root.frame.lens.y);
-    float3 tune = float3(root.frame.lens_more.z, root.frame.lens_more.w, root.frame.lens_more.y);
-    return float4(lensStack(p, root.frame.screen_sun.xy, vis, aspect, strengths, tune), 1.0);
+    float vis = float(sunScreen.visible) * textures[TEX_SUN_VISIBILITY].Load(int3(0, 0, 0)).r;
+    float4 strengths = float4(lens.mainRing, lens.bigCrescent, lens.miniCrescents, lens.ghosts);
+    float3 tune = float3(lens.ghostSpread, lens.ghostSize, lens.streak);
+    return float4(lensStack(p, sunScreen.position, vis, aspect, strengths, tune), 1.0);
 }

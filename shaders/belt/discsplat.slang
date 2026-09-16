@@ -1,4 +1,5 @@
 #include "../scene_shared.h"
+#include "../scene/frame_records.slang"
 #include "rockclass.slang"
 
 // Far-belt map, rock layer: every rock adds its projected cross-section,
@@ -40,14 +41,15 @@ SplatVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_In
     float3 position = p->giant.xyz + local;
     float radius = rock.position_radius.w;
 
-    float4 ring = root.frame->belt_ring;
-    float radial = (length(v.xz) - ring.x) / (ring.y - ring.x);
+    BeltParams belt = beltParams(root.frame);
+    float radial = (length(v.xz) - belt.inner) / (belt.outer - belt.inner);
     uint composition = rockClass(instanceId, radial);
     float3 albedo = rockColour(composition, instanceId) * (composition == CLASS_C ? ROCK_SET_AVERAGE_C : ROCK_SET_AVERAGE_S);
 
     // Splat at least one texel wide; the weight keeps the covered area right.
-    float4 clip = mul(root.frame->belt_disc_projection, float4(position, 1.0));
-    float halfExtent = root.frame->belt_disc_right.w, texels = root.frame->belt_disc.z;
+    BeltDiscParams disc = beltDiscParams(root.frame);
+    float4 clip = mul(beltDiscProjection(root.frame), float4(position, 1.0));
+    float halfExtent = disc.half.x, texels = disc.rockTexels;
     float2 halfNdc = radius / halfExtent;
     float2 texelNdc = 1.0 / texels; // half a texel each way
     float2 extent = max(halfNdc, texelNdc);

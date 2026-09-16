@@ -1,12 +1,13 @@
 #pragma once
 #include "../scene_shared.h"
+#include "frame_records.slang"
 #include "../belt/rockclass.slang"
 
 // The draw indices still count bodies first, then compacted asteroids.
 // Only the storage stride changes at the body/asteroid boundary.
 Instance loadInstance(Frame* frame, Instance* instances, uint index, bool billboard)
 {
-    uint bodies = uint(frame->scene.x);
+    uint bodies = uint(bodyCount(frame));
     if (index < bodies) return instances[index];
     AsteroidInstance* asteroids = (AsteroidInstance*)(instances + bodies);
     AsteroidInstance packed = asteroids[index - bodies];

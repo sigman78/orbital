@@ -34,9 +34,9 @@ float stormWeight(float lat, float shear)
     return saturate(bands + polar) * (.4 + .6 * shear);
 }
 
-float3 giantLightning(float4 night, float2 uv, float t, float shear, float2 footprint)
+float3 giantLightning(float rate, float brightness, float2 uv, float t, float shear, float2 footprint)
 {
-    if (night.x <= 0.0 || night.y <= 0.0) return float3(0.0, 0.0, 0.0);
+    if (rate <= 0.0 || brightness <= 0.0) return float3(0.0, 0.0, 0.0);
     float lat = (.5 - uv.y) * 180.0;
     float weight = stormWeight(lat, shear);
     if (weight < .01) return float3(0.0, 0.0, 0.0);
@@ -45,7 +45,7 @@ float3 giantLightning(float4 night, float2 uv, float t, float shear, float2 foot
     float life = smoothstep(0.0, .07, epochPhase) * (1.0 - smoothstep(.93, 1.0, epochPhase));
     // Flash probability per storm per slot that gives the panel's rate over the planet's storms.
     float storms = STORM_CELLS.x * STORM_CELLS.y * STORM_DENSITY * .45; // .45: the mean of the weight over the map
-    float chance = night.x * FLASH_SLOT / storms;
+    float chance = rate * FLASH_SLOT / storms;
     float cosLat = max(cos(radians(lat)), .05);
     float2 cellSize = 1.0 / STORM_CELLS;
     float2 base = floor(uv * STORM_CELLS);
@@ -79,6 +79,6 @@ float3 giantLightning(float4 night, float2 uv, float t, float shear, float2 foot
             total += (core + glow) * envelope * strength;
         }
     }
-    return total * life * night.y * 40.0 * float3(.85, .9, 1.0);
+    return total * life * brightness * 40.0 * float3(.85, .9, 1.0);
 }
 

@@ -1,4 +1,5 @@
 #include "frame_bindings.slang"
+#include "frame_records.slang"
 #include "../lib/projection.slang"
 #include "../lib/noise.slang"
 
@@ -31,23 +32,24 @@ MoteVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_Ins
     o.position = float4(2.0, 2.0, 2.0, 1.0); // off screen unless the mote qualifies
     o.local = float2(0.0, 0.0);
     o.tint = float3(0.0, 0.0, 0.0);
-    float4 lattice = root.frame->camera_lattice; // the camera's offset within its cell, and the cell size
-    float4 cellIndex = root.frame->camera_cell;  // the camera's cell, and the panel's intensity
-    if (cellIndex.w <= 0.0 || root.frame->previous_camera_delta.w < .5) return o;
+    MoteParams mote = moteParams(root.frame);
+    TemporalParams temporal = temporalParams(root.frame);
+    ViewParams view = viewParams(root.frame);
+    if (mote.streaks <= 0.0 || !temporal.historyValid) return o;
 
     uint cell = instanceId / MOTES_PER_CELL, k = instanceId % MOTES_PER_CELL;
     int3 offset = int3(cell % MOTE_CELLS, (cell / MOTE_CELLS) % MOTE_CELLS, cell / (MOTE_CELLS * MOTE_CELLS))
                   - int(MOTE_CELLS / 2);
-    float3 absoluteCell = cellIndex.xyz + float3(offset);
+    float3 absoluteCell = mote.cell + float3(offset);
     float3 h = float3(hash(absoluteCell * 1.7 + float(k) * 13.1), hash(absoluteCell * 2.3 + float(k) * 7.7 + 5.0),
                       hash(absoluteCell * 3.1 + float(k) * 3.3 + 9.0));
-    float3 relative = (float3(offset) + h) * lattice.w - lattice.xyz; // camera-relative, as the scene is
-    float3 previous = relative + root.frame->previous_camera_delta.xyz;
-    float4 now = mul(root.frame->view_projection, float4(relative, 1.0));
-    float4 before = mul(root.frame->view_projection, float4(previous, 1.0)); // this frame's view: translation only
+    float3 relative = (float3(offset) + h) * mote.cellSize - mote.latticeOffset; // camera-relative, as the scene is
+    float3 previous = relative + temporal.cameraDelta;
+    float4 now = mul(viewProjection(root.frame), float4(relative, 1.0));
+    float4 before = mul(viewProjection(root.frame), float4(previous, 1.0)); // this frame's view: translation only
     if (now.w <= NEAR_Z || before.w <= NEAR_Z) return o;
 
-    float2 resolution = root.frame->options.xy;
+    float2 resolution = view.size;
     float2 p1 = (now.xy / now.w * .5 + .5) * resolution, p0 = (before.xy / before.w * .5 + .5) * resolution;
     float2 d = p1 - p0;
     float length_ = length(d);
@@ -55,9 +57,9 @@ MoteVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_Ins
     float2 across = float2(-along.y, along.x);
     // Nothing at rest, a dot at a crawl, a streak in flight; long streaks spread their light.
     float show = smoothstep(2.0, 12.0, length_);
-    float distance = length(relative), range = float(MOTE_CELLS / 2) * lattice.w;
+    float distance = length(relative), range = float(MOTE_CELLS / 2) * mote.cellSize;
     float reach = smoothstep(.3, 1.0, distance) * (1.0 - smoothstep(range * .6, range, distance));
-    float energy = cellIndex.w * show * reach * .35 / sqrt(max(length_ / 6.0, 1.0));
+    float energy = mote.streaks * show * reach * .35 / sqrt(max(length_ / 6.0, 1.0));
     if (energy <= 0.0) return o;
 
     const float2 corners[6] = {float2(0, -1), float2(1, -1), float2(1, 1), float2(0, -1), float2(1, 1), float2(0, 1)};

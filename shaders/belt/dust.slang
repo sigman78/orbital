@@ -1,4 +1,5 @@
 #include "../scene/frame_bindings.slang"
+#include "../scene/frame_records.slang"
 #include "../scene/view.slang"
 #include "../lib/noise.slang"
 #include "beltfar.slang"
@@ -28,31 +29,32 @@ static const float UPSAMPLE_DEPTH_TOLERANCE = .05; // relative depth difference 
 // Sunlight left at a belt point through the dust itself: as beltExtinction
 // but for the thin medium and with fewer samples, since the view march
 // integrates over many of them.
-float sunTransmittance(float3 q, float3 light, float4 ring, float3 n)
+float sunTransmittance(float3 q, float3 light, BeltParams belt)
 {
-    float climb = max(abs(dot(light, n)), .08);
-    float length = min((ring.w * .5 * 1.3 + abs(dot(q, n))) / climb, ring.y - ring.x);
+    float climb = max(abs(dot(light, belt.normal)), .08);
+    float length = min((belt.thickness * .5 * 1.3 + abs(dot(q, belt.normal))) / climb, belt.outer - belt.inner);
     float ds = length / float(DUST_SUN_STEPS);
     float tau = 0.0;
     for (int i = 0; i < DUST_SUN_STEPS; ++i)
-        tau += beltDensity(q + light * ((float(i) + .5) * ds), ring, n) * ds;
-    return exp(-tau * ring.z * BELT_EXTINCTION * DUST_DENSITY);
+        tau += beltDensity(q + light * ((float(i) + .5) * ds), belt) * ds;
+    return exp(-tau * belt.density * BELT_EXTINCTION * DUST_DENSITY);
 }
 
 float4 march(float2 fullResPixel, int2 depthPixel)
 {
     Frame* frame = root.frame;
-    float4 ring = frame->belt_ring;
+    BeltParams belt = beltParams(frame);
+    DustParams dustSettings = dustParams(frame);
+    LightParams sunLight = lightParams(frame);
+    ViewParams view = viewParams(frame);
     float3 rd = rayDirection(root.frame, fullResPixel);
-    float3 n = frame->belt_normal.xyz;
-    float3 giant = frame->bodies[int(frame->scene.y)].xyz;
     float t0, t1, aboveSlab, beyondEdge, halfHeight;
     if (!beltSegment(frame, rd, depthPixel, t0, t1, aboveSlab, beyondEdge, halfHeight))
         return float4(0.0, 0.0, 0.0, 0.0);
-    float farScale = dustFarScale(aboveSlab, beyondEdge, halfHeight, frame->dust.z);
+    float farScale = dustFarScale(aboveSlab, beyondEdge, halfHeight, dustSettings.farScale);
     float3 colour = dustColour(frame);
 
-    float jitter = hash(float3(fullResPixel, frac(frame->camera_time.w * 13.0) * 100.0 + frame->jitter.x * 37.0));
+    float jitter = hash(float3(fullResPixel, frac(view.time * 13.0) * 100.0 + view.jitter.x * 37.0));
     float ds = (t1 - t0) / float(DUST_STEPS);
     float transmittance = 1.0;
     float3 radiance = float3(0.0, 0.0, 0.0);
@@ -60,14 +62,14 @@ float4 march(float2 fullResPixel, int2 depthPixel)
     {
         float t = t0 + (float(i) + jitter) * ds;
         float3 p = rd * t;
-        float3 q = p - giant;
-        float density = beltDensity(q, ring, n) * ring.z * farScale;
+        float3 q = p - belt.centre;
+        float density = beltDensity(q, belt) * belt.density * farScale;
         if (density < 1e-5) continue;
-        float sigma = density * BELT_EXTINCTION * DUST_DENSITY * frame->dust.x; // extinction per unit length
-        float3 light = normalize(frame->sun.xyz - p);
-        float sunlight = frame->sun.w * sunTransmittance(q, light, ring, n) * solarVisibility(frame, p, -1)
+        float sigma = density * BELT_EXTINCTION * DUST_DENSITY * dustSettings.density; // extinction per unit length
+        float3 light = normalize(sunLight.position - p);
+        float sunlight = sunLight.radiance * sunTransmittance(q, light, belt) * solarVisibility(frame, p, -1)
                        * beltRockTransmittance(frame, p);
-        float3 inscatter = colour * DUST_ALBEDO * frame->dust.y * sigma * dustPhase(dot(light, rd)) * sunlight;
+        float3 inscatter = colour * DUST_ALBEDO * dustSettings.brightness * sigma * dustPhase(dot(light, rd)) * sunlight;
         // Analytic integral of the in-scatter over the step under constant density.
         float stepTransmittance = exp(-sigma * ds);
         radiance += transmittance * inscatter * (1.0 - stepTransmittance) / sigma;
@@ -84,7 +86,7 @@ float4 upsampleNear(float2 position)
 {
     int2 pixel = int2(position);
     float depth = sceneDepthAt(pixel);
-    float2 halfSize = floor(root.frame->options.xy * .5);
+    float2 halfSize = floor(viewParams(root.frame).size * .5);
     float2 coordinate = position * .5 - .5;
     float2 base = floor(coordinate);
     float2 f = coordinate - base;
@@ -110,16 +112,17 @@ float4 upsampleNear(float2 position)
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
     Frame* frame = root.frame;
-    if (frame->belt_ring.z <= 0.0) return float4(0.0, 0.0, 0.0, 0.0);
-    bool dustOn = frame->quality.z >= .5;
-    float weight = frame->belt_disc.y;
+    BeltParams belt = beltParams(frame);
+    if (belt.density <= 0.0) return float4(0.0, 0.0, 0.0, 0.0);
+    DustParams dust = dustParams(frame);
+    float weight = beltDiscParams(frame).weight;
     if (root.mode == MODE_MARCH)
     {
         int2 depthPixel = int2(position.xy) * 2;
         return march(float2(depthPixel) + .5, depthPixel);
     }
     // One blend: the near march and the far disc mixed by the LOD weight.
-    float4 near = dustOn && weight < 1.0 ? upsampleNear(position.xy) : float4(0.0, 0.0, 0.0, 0.0);
+    float4 near = dust.enabled && weight < 1.0 ? upsampleNear(position.xy) : float4(0.0, 0.0, 0.0, 0.0);
     float4 far = weight > 0.0 ? farBelt(position.xy) : float4(0.0, 0.0, 0.0, 0.0);
     return near * (1.0 - weight) + far * weight;
 }
