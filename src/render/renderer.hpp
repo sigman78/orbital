@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <memory>
 #include <span>
+#include <string_view>
 
 struct ImDrawData;
 namespace space {
@@ -86,6 +87,10 @@ struct FrameInput {
     double time = 0;                   // simulation seconds; drives belt spin and rock rotation
     bool high_quality = false;
     bool overlay = true;
+    // A chart drawn in place of the scene (shaders/chart_<name>.fragment.spv, a
+    // full-screen pass through the production functions over a parameter grid);
+    // empty for the scene. The name is resolved and its pipeline created on first use.
+    std::string_view chart;
     const ImDrawData* ui = nullptr; // drawn over the presented frame
     ToneSettings tone;
     DisplaySettings display;

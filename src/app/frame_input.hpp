@@ -19,6 +19,7 @@ inline render::FrameInput make_frame_input(const AppState& app, double time, con
             .time = time,
             .high_quality = app.high,
             .overlay = app.overlay,
+            .chart = app.chart,
             .ui = ui,
             .tone = app.tone,
             .display = app.display,

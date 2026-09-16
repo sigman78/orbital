@@ -134,7 +134,12 @@ bool apply_arguments(Options& options, std::span<const std::string_view> args) {
             ok = parse_path(value(), options.shots);
         else if (arg == "--report")
             ok = parse_path(value(), options.report);
-        else {
+        else if (arg == "--chart") {
+            const auto name = value();
+            ok = name && !name->empty();
+            if (ok)
+                options.chart = std::string(*name);
+        } else {
             log::error("unknown option {}", arg);
             return false;
         }

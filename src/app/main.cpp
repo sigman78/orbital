@@ -135,6 +135,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.tone.exposure = options.exposure;
     app.tone.hdr_output = render::HdrOutput(options.hdr);
     app.tone.auto_exposure = options.fixed_time < 0;
+    app.chart = options.chart;
     app.bodies = evaluate_system(system, std::max(0.0, options.fixed_time));
     if (options.bookmark >= 0)
         select_bookmark(app, unsigned(options.bookmark));

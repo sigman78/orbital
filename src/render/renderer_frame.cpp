@@ -134,7 +134,7 @@ bool Renderer::draw(const FrameInput& supplied) {
             s.record_galaxy_pass(cmd, root, frame); // counted in the group's remainder, not a child
             {
                 GpuTimingScope child(s.timings, GpuPass::SurfacePrepass);
-                s.record_depth_prepass(cmd, root);
+                s.record_depth_prepass(cmd, root, input.chart.empty());
             }
             s.record_scene_pass(cmd, root, input, frame, args_address);
         }
@@ -142,11 +142,13 @@ bool Renderer::draw(const FrameInput& supplied) {
             GpuTimingScope timing(s.timings, GpuPass::Atmosphere);
             {
                 GpuTimingScope child(s.timings, GpuPass::Atmospheres);
-                s.record_atmosphere_passes(cmd, root);
+                if (input.chart.empty())
+                    s.record_atmosphere_passes(cmd, root);
             }
             {
                 GpuTimingScope child(s.timings, GpuPass::BeltDust);
-                s.record_belt_dust_passes(cmd, root, input.belt_dust.enabled, frame.belt_disc.y);
+                if (input.chart.empty()) // a chart has no belt over it, near or far
+                    s.record_belt_dust_passes(cmd, root, input.belt_dust.enabled, frame.belt_disc.y);
             }
             // Coverage is also needed by sun visibility with TAA disabled.
             synchronize(cmd, access::fragment_sample, access::depth_read);

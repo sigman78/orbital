@@ -25,6 +25,8 @@
 #include <initializer_list>
 #include <optional>
 #include <span>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace space::render {
@@ -435,7 +437,7 @@ struct Renderer::Impl {
     GpuMesh upload_mesh(const geometry::Mesh& mesh);
     void upload_rock_pool(std::span<const geometry::Mesh> meshes);
     const GpuMesh& body_mesh(unsigned body, unsigned lod) const;
-    void record_depth_prepass(gpu::CommandBuffer* cmd, Root root);
+    void record_depth_prepass(gpu::CommandBuffer* cmd, Root root, bool bodies);
     void draw_rock_meshes(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address);
     void draw_rock_splats(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address);
 
@@ -462,6 +464,10 @@ struct Renderer::Impl {
     // Bodies, sky and atmosphere (renderer_scene.cpp).
     void record_shadow_pass(gpu::CommandBuffer* cmd, Root root);
     void record_galaxy_pass(gpu::CommandBuffer* cmd, Root root, const FrameData& frame);
+    // The chart pipelines, created on first use from shaders/chart_<name>.fragment.spv;
+    // a name without a shader is warned about once and draws the scene instead.
+    std::unordered_map<std::string, gpu::PSO*> chart_pipelines;
+    gpu::PSO* chart_pipeline(std::string_view name);
     void record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input, const FrameData& frame,
                            std::uint64_t args_address);
     void record_atmosphere_passes(gpu::CommandBuffer* cmd, Root& root);

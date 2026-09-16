@@ -45,14 +45,14 @@ void Renderer::Impl::record_galaxy_pass(gpu::CommandBuffer* cmd, Root root, cons
 // front of another rejects those, whichever order they are drawn in. The same
 // vertex shader and matrices give the same depth, so the scene pass passes its
 // own pixels on equal depth.
-void Renderer::Impl::record_depth_prepass(gpu::CommandBuffer* cmd, Root root) {
+void Renderer::Impl::record_depth_prepass(gpu::CommandBuffer* cmd, Root root, bool bodies) {
     root.mode = std::uint32_t(SurfaceMode::opaque);
     {
         RenderPassScope pass(cmd, {.depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::clear}});
         gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
         gpu::bind_pso(cmd, pso.scene.depth_prepass);
         const unsigned triangles_before = stats.frame.triangles;
-        for (unsigned i = 0; i < body_count; i++)
+        for (unsigned i = 0; bodies && i < body_count; i++)
             if (body_visible[i])
                 draw_mesh(cmd, root, body_mesh(i, body_level[i]), i, 1);
         stats.frame.triangles = triangles_before; // counted once, in the scene pass
@@ -66,9 +66,18 @@ void Renderer::Impl::record_depth_prepass(gpu::CommandBuffer* cmd, Root root) {
 // their pre-pass, atmosphere and clouds.
 void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input,
                                        const FrameData& frame, std::uint64_t args_address) {
-    (void)input;
     root.mode = std::uint32_t(SurfaceMode::opaque);
     gpu::ColorAttachment color{.render_view = frame_targets.hdr.view(), .load = gpu::LoadOp::clear};
+    // A chart takes the scene's place: one full-screen pass over the parameter grid.
+    if (gpu::PSO* chart = input.chart.empty() ? nullptr : chart_pipeline(input.chart)) {
+        RenderPassScope pass(cmd, {.colors = {&color, 1},
+                                   .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});
+        gpu::set_depth_stencil(cmd, {.depth_test = false, .depth_write = false});
+        gpu::bind_pso(cmd, chart);
+        gpu::draw(cmd, root, 3);
+        stats.frame.draw_calls++;
+        return;
+    }
     {
         RenderPassScope pass(cmd, {.colors = {&color, 1},
                                    .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});

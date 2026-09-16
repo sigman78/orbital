@@ -163,9 +163,12 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
                       input.sun.crescent_strength * flare};
     frame.lens_more = {input.sun.mini_crescent_strength * flare, input.sun.streak_strength * flare,
                        input.sun.ghost_spread, input.sun.ghost_size};
+    // A chart keeps the tone map and the bloom but not the lens defects, which would sit over its tiles.
+    const bool chart = !input.chart.empty();
     frame.post = {input.post.bloom ? input.post.bloom_intensity : 0.f, input.post.bloom_threshold,
-                  input.post.bloom_knee, input.post.aberration};
-    frame.post_more = {input.post.vignette, input.post.grain, input.post.black_offset, input.sun.flare_adaptation};
+                  input.post.bloom_knee, chart ? 0.f : input.post.aberration};
+    frame.post_more = {chart ? 0.f : input.post.vignette, chart ? 0.f : input.post.grain, input.post.black_offset,
+                       input.sun.flare_adaptation};
     frame.giant = {input.gas.time_scale, std::max(input.gas.cycle, .1f), input.gas.turbulence,
                    input.gas.flow ? 1.f : 0.f};
     frame.giant_more = {input.gas.haze, input.gas.terminator, input.gas.relief, input.gas.cap_opacity};
@@ -189,7 +192,8 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
                           input.gas.streaks ? input.gas.streak_strength : 0.f, 0};
 
     const auto sun = project_sun(camera, system.star.position, input.bodies, view.tan_half_fov, view.aspect);
-    frame.screen_sun = {sun.x, sun.y, sun.visible ? 1.f : 0.f, sun_flare::screen_size};
+    // A chart has no sun: no glare, flare or starburst over it.
+    frame.screen_sun = {sun.x, sun.y, sun.visible && input.chart.empty() ? 1.f : 0.f, sun_flare::screen_size};
     // The output encoding for the composite and the present pass; the overlay packs the same into its root.
     const float paper_white = std::max(input.tone.paper_white_nits, 1.f);
     // The auto exposure's multiplier alone, so the composite can hold the flare out of it.

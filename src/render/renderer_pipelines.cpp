@@ -1,9 +1,12 @@
 #include "render/renderer_impl.hpp"
 
 #include "core/file.hpp"
+#include "core/log.hpp"
 #include "core/panic_if.hpp"
 #include <cstring>
+#include <filesystem>
 #include <format>
+#include <string>
 
 namespace space::render {
 
@@ -19,6 +22,26 @@ std::vector<std::uint32_t> read_spirv(const std::filesystem::path& path) {
 }
 
 } // namespace
+
+// A chart's pipeline: the full-screen vertex stage and the chart's fragment
+// shader, drawn inside the scene pass (its colour and depth attachments) with
+// the depth test off. Missing shaders are reported once and the scene drawn.
+gpu::PSO* Renderer::Impl::chart_pipeline(std::string_view name) {
+    const std::string key(name);
+    if (const auto found = chart_pipelines.find(key); found != chart_pipelines.end())
+        return found->second;
+    const std::string shader = "chart_" + key;
+    gpu::PSO* pipeline = nullptr;
+    if (std::filesystem::exists(directory / "shaders" / (shader + ".fragment.spv")))
+        pipeline = create_pipeline({.vertex_shader = "fullscreen",
+                                    .fragment_shader = shader.c_str(),
+                                    .color_format = gpu::Format::rgba16_float,
+                                    .has_depth_attachment = true});
+    else
+        log::warn("no chart named {} (shaders/{}.fragment.spv); drawing the scene", name, shader);
+    chart_pipelines.emplace(key, pipeline);
+    return pipeline;
+}
 
 gpu::PSO* Renderer::Impl::create_pipeline(const PipelineDesc& desc) {
     const auto vertex = read_spirv(directory / "shaders" / std::format("{}.vertex.spv", desc.vertex_shader));
