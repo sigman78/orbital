@@ -5,6 +5,7 @@
 
 #include "assets/image.hpp"
 #include "assets/texture.hpp"
+#include "belt/beltblur_shared.h"
 #include "core/types.hpp"
 #include "post/bloom_shared.h"
 #include "render/gpu_commands.hpp"

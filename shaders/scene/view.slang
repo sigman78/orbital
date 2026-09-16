@@ -12,6 +12,6 @@ float3 rayDirection(Frame* frame, float2 pixel)
 float sceneDistance(Frame* frame, Texture2D<float4> depth, float2 pixel, float3 rd)
 {
     float d = depth.Load(int3(int2(pixel), 0)).r;
-    if (d >= .999999) return 1e9;
+    if (isBackgroundDepth(d)) return 1e9;
     return linearViewDepth(d) / max(dot(rd, frame->forward_exposure.xyz), 1e-4);
 }

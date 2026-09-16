@@ -65,13 +65,14 @@ so changing a nested include rebuilds its consumers without a hand-maintained li
 
 ```powershell
 ./tools/build.ps1 -Preset release
-python tools/check-shader-helpers.py
+python tools/check-shaders.py
 ctest --preset release
 ```
 
-The helper check compiles each include independently, catching dependencies that
-would otherwise be supplied accidentally by a preceding include. It also runs on
-Linux; `--compiler` selects an alternate Slang installation.
+The shader check compiles every entry point with the production flags and validates
+the SPIR-V, and compiles each include independently, catching dependencies that
+would otherwise be supplied accidentally by a preceding include. CI runs it on
+Linux; `--compiler` and `--validator` select the tools.
 
 For behavior-preserving changes, compare fixed-time captures using identical flags,
 including the tone and AA modes, before and after. GPU accumulation can vary slightly

@@ -242,8 +242,8 @@ presentation and FXAA fragment entry points. Only bloom selects its internal
 stage through a shared C++/shader mode contract. The composite keeps its finishing
 effects together; splitting sources does not add passes or intermediate images.
 
-Slang-generated depfiles track transitive includes. `tools/check-shader-helpers.py` compiles each
-helper on its own to catch accidental include-order dependencies.
+Slang-generated depfiles track transitive includes. `tools/check-shaders.py` compiles each
+helper on its own to catch accidental include-order dependencies, and every entry point with SPIR-V validation.
 
 ## Tools and tests
 

@@ -179,6 +179,10 @@ struct CullScratch {
     DrawArgs args[ORBITAL_ROCK_GROUPS + 1];   // the billboard entry stays at index ORBITAL_ROCK_GROUPS
 };
 
+// CullRoot.pass of the culling compute shader, dispatched in this order.
+#define ORBITAL_CULL_PASS_COUNT 0
+#define ORBITAL_CULL_PASS_PREFIX 1
+#define ORBITAL_CULL_PASS_SCATTER 2
 // The belt splat pass reuses this root with rocks pointing at the size-tail
 // records and pass holding their count.
 struct CullRoot {
