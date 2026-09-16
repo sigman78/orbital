@@ -1,5 +1,6 @@
 #include "bloom_shared.h"
 #include "hdr.slang"
+#include "../scene/frame_records.slang"
 
 static const float2 REFERENCE_FRAME = float2(1600.0, 900.0); // halo size reference
 
@@ -11,7 +12,8 @@ static const float2 REFERENCE_FRAME = float2(1600.0, 900.0); // halo size refere
 // instead of drifting toward its saturated channel.
 float bloomWeight(float3 c)
 {
-    float threshold = root.frame.post.y, knee = max(root.frame.post.z, .0001);
+    PostParams post = postParams(root.frame);
+    float threshold = post.bloomThreshold, knee = max(post.bloomKnee, .0001);
     float brightness = max(c.r, max(c.g, c.b));
     float soft = clamp(brightness - threshold + knee, 0.0, 2.0 * knee);
     soft = soft * soft / (4.0 * knee);
@@ -21,7 +23,7 @@ float bloomWeight(float3 c)
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
-    float2 resolution = root.frame.options.xy;
+    float2 resolution = viewParams(root.frame).size;
     if (root.mode == ORBITAL_BLOOM_PREFILTER) {
         float2 size = max(floor(resolution * .25), float2(1.0, 1.0));
         float3 sum = float3(0.0, 0.0, 0.0);

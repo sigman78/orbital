@@ -18,8 +18,11 @@ own; shared utilities and scene interfaces have separate directories.
 Feature folders contain both entry points and reusable helpers. Every helper includes
 its own dependencies and uses `#pragma once`; callers must not depend on include order
 or include an entry point. General utilities take explicit inputs and do not depend on
-scene or feature code. Frame-aware helpers take `Frame*`; resource bindings belong to
-`scene/bindings.slang`.
+scene or feature code. Frame settings are read through the typed records of
+`scene/frame_records.slang` (view, light, bodies, belt, dust, Earth, giant, temporal,
+lens, post, display, sky, motes), never by component; a helper that needs one family
+takes its record, and only scene-level helpers take `Frame*`. Resource bindings belong
+to `scene/bindings.slang`.
 
 Dependencies follow actual reuse: shared surface geometry uses planet cloud-shell
 geometry, and scene shadows use belt extinction. These are narrow helper dependencies,

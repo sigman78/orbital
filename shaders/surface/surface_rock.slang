@@ -1,4 +1,5 @@
 #include "../scene/frame_bindings.slang"
+#include "../scene/frame_records.slang"
 #include "lighting.slang"
 #include "brdf.slang"
 #include "../lib/math.slang"
@@ -155,9 +156,10 @@ float4 shadeBillboard(SurfaceVaryings input, Instance inst)
     {
         float edge = fwidth(rr); // a soft-edged disc of the rock's true size
         float footprint = 1.0 - smoothstep(1.0 - edge, 1.0 + edge, rr);
-        float3 n = normalize(root.frame->right_tan.xyz * q.x + root.frame->up_aspect.xyz * q.y
-                             - root.frame->forward_exposure.xyz * sqrt(max(0.0, 1.0 - rr)));
-        float3 l = normalize(root.frame->sun.xyz - input.worldPosition);
+        ViewParams view = viewParams(root.frame);
+        float3 n = normalize(view.right * q.x + view.up * q.y
+                             - view.forward * sqrt(max(0.0, 1.0 - rr)));
+        float3 l = normalize(lightParams(root.frame).position - input.worldPosition);
         float shading = max(dot(n, l), 0.0) + inst.rotation_kind.y + inst.rotation_kind.z;
         return float4(inst.tint.xyz * shading, saturate(inst.tint.w * footprint));
     }
@@ -172,11 +174,11 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     if (root.mode == MODE_SPLAT_MASK)
     {
         float coverage = shadeBillboard(input, loadInstance(root.frame, root.instances, input.instanceIndex, true)).a;
-        float z = dot(input.worldPosition, root.frame.forward_exposure.xyz);
+        float z = dot(input.worldPosition, viewParams(root.frame).forward);
         return float4(z * coverage, 0.0, 0.0, coverage);
     }
     Surface s = surfaceAt(root.frame, root.instances, input, true);
     float3x3 rotate = rotation(s.inst.rotation_kind.xyz);
     Material m = rockMaterial(input, s.inst, rotate, s.N, s.V, s.visibility);
-    return float4(shadeSurface(m, s.L, s.V, sunlight(root.frame), root.frame->earth.y, root.frame->quality.w), 1);
+    return float4(shadeSurface(m, s.L, s.V, sunlight(root.frame), earthParams(root.frame).glint, lightParams(root.frame).ambientFill), 1);
 }

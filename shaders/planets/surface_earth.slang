@@ -1,4 +1,5 @@
 #include "../scene/frame_bindings.slang"
+#include "../scene/frame_records.slang"
 #include "../surface/lighting.slang"
 #include "../surface/brdf.slang"
 #include "../lib/math.slang"
@@ -31,19 +32,19 @@ float cloudDensity(float2 uv, float t, float detail)
 
 float4 shadeClouds(float3 localDirection, float3 N, float3 L, float visibility, float nl)
 {
-    float t = root.frame->camera_time.w;
+    float t = viewParams(root.frame).time;
+    LightParams light = lightParams(root.frame);
     float2 uv = sphereUV(localDirection);
-    float alpha = cloudDensity(cloudUV(uv, t, root.detail), t, magnification(uv, EARTH_TEXELS)) * root.frame->earth_more.y;
+    float alpha = cloudDensity(cloudUV(uv, t, root.detail), t, magnification(uv, EARTH_TEXELS)) * earthParams(root.frame).cloudOpacity;
     // The clouds' starlight fill follows the panel's ambient fill, as the ground's does.
-    float3 cloudLight = float3(.002, .004, .008) * root.frame->quality.w + float3(1.0, .99, .97) * pow(nl, .8) * visibility * root.frame->sun.w / PI * .8;
+    float3 cloudLight = float3(.002, .004, .008) * light.ambientFill + float3(1.0, .99, .97) * pow(nl, .8) * visibility * light.radiance / PI * .8;
     return float4(cloudLight, alpha);
 }
 
 // --- Ground -----------------------------------------------------------------------
 
-Material earthMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility)
+Material earthMaterial(EarthParams earth, float t, SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility)
 {
-    float t = root.frame->camera_time.w;
     float3 localN = normalize(input.localNormal);
     float2 uv = sphereUV(localN);
     float detail = magnification(uv, EARTH_TEXELS);
@@ -54,9 +55,8 @@ Material earthMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     m.albedo *= 1.0 + (fbm2(uv * float2(8192, 4096), 3) - .5) * .3 * detail * (1.0 - m.water * .7);
     // Sea state: the panel's roughness, patchy with a slow wind field so the glint
     // breaks into brighter and calmer stretches instead of one even highlight.
-    float4 earth = root.frame->earth;
-    float wind = 1.0 + (fbm2(uv * float2(48, 24) + t * .0004, 2) - .5) * root.frame->earth_more.x;
-    m.rough = lerp(.85, max(earth.x * wind, .03), m.water);
+    float wind = 1.0 + (fbm2(uv * float2(48, 24) + t * .0004, 2) - .5) * earth.windPatchiness;
+    m.rough = lerp(.85, max(earth.oceanRoughness * wind, .03), m.water);
     // The normal map's tilt fades with the draw tier toward the geometric normal.
     m.N = N;
     if (root.detail > 0.0) {
@@ -70,8 +70,8 @@ Material earthMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     // Cloud shadow: the cloud above this point along the sun direction.
     float3 localL = mul(transpose(rotate), L);
     float3 towardSun = cloudShellDirection(localN, 0.0, localL);
-    float shadowCloud = cloudShadowDensity(cloudUV(sphereUV(towardSun), t, root.detail), earth.w);
-    m.visibility = visibility * (1.0 - shadowCloud * earth.z);
+    float shadowCloud = cloudShadowDensity(cloudUV(sphereUV(towardSun), t, root.detail), earth.cloudShadowSoftness);
+    m.visibility = visibility * (1.0 - shadowCloud * earth.cloudShadow);
     return m;
 }
 
@@ -82,8 +82,10 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     if (root.mode == MODE_CLOUD)
         return shadeClouds(normalize(input.localNormal), s.N, s.L, s.visibility, max(dot(s.N, s.L), 0.0));
     float3x3 rotate = rotation(s.inst.rotation_kind.xyz);
-    Material m = earthMaterial(input, rotate, s.N, s.L, s.visibility);
-    float3 colour = shadeSurface(m, s.L, s.V, sunlight(root.frame), root.frame->earth.y, root.frame->quality.w);
+    EarthParams earth = earthParams(root.frame);
+    LightParams light = lightParams(root.frame);
+    Material m = earthMaterial(earth, viewParams(root.frame).time, input, rotate, s.N, s.L, s.visibility);
+    float3 colour = shadeSurface(m, s.L, s.V, sunlight(light), earth.glint, light.ambientFill);
     // City lights come up past the terminator. The night map carries a blue
     // floor over the whole globe (4 to 16 sRGB codes with faint cloud and land
     // texture in it; linear below) that the neutral curve keeps at full

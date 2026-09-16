@@ -1,4 +1,5 @@
 #include "../scene_shared.h"
+#include "../scene/frame_records.slang"
 
 // Belt transmittance map, splat pass: every rock adds its cross-section to
 // the light-space texel column it falls in, into one of four depth slices
@@ -41,16 +42,15 @@ SplatVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_In
     float radius = rock.position_radius.w;
 
     // Slice along the sun ray, relative to where this column crosses the belt plane.
-    float3 n = root.frame->belt_normal.xyz;
-    float3 light = normalize(root.frame->sun.xyz - position);
-    float along = dot(position - p->giant.xyz, n) / (dot(light, n) + 1e-6);
-    float halfSpan = root.frame->belt_light.w;
-    output.weightSlice.y = clamp((along / halfSpan * .5 + .5) * SLICES, 0.0, SLICES - .001);
+    BeltParams belt = beltParams(root.frame);
+    float3 light = normalize(lightParams(root.frame).position - position);
+    float along = dot(position - p->giant.xyz, belt.normal) / (dot(light, belt.normal) + 1e-6);
+    output.weightSlice.y = clamp((along / belt.lightSlice * .5 + .5) * SLICES, 0.0, SLICES - .001);
 
     // Splat at least one texel wide; the weight keeps the covered area right.
-    float4 clip = mul(root.frame->belt_light_projection, float4(position, 1.0));
-    float2 halfNdc = radius / root.frame->belt_light.xy;
-    float2 texelNdc = 1.0 / root.frame->belt_light.zz; // half a texel each way
+    float4 clip = mul(belt.lightProjection, float4(position, 1.0));
+    float2 halfNdc = radius / belt.lightHalf;
+    float2 texelNdc = 1.0 / float2(belt.lightTexels, belt.lightTexels); // half a texel each way
     float2 extent = max(halfNdc, texelNdc);
     output.weightSlice.x = min(1.0, (halfNdc.x * halfNdc.y) / (extent.x * extent.y));
     output.position = float4(clip.xy + output.disk * extent, clip.z, 1.0);

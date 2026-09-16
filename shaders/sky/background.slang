@@ -1,4 +1,5 @@
 #include "../scene/frame_bindings.slang"
+#include "../scene/frame_records.slang"
 #include "../scene/view.slang"
 #include "../lib/noise.slang"
 #include "galaxy_layers.slang"
@@ -8,7 +9,7 @@
 // radiance, w a dust depth: how much the dark splats take from the bright.
 float4 milkyWay(float2 pixel)
 {
-    return textures[TEX_MILKY_WAY].SampleLevel(samplers[SAMPLER_CLAMP], pixel / root.frame.options.xy, 0.0);
+    return textures[TEX_MILKY_WAY].SampleLevel(samplers[SAMPLER_CLAMP], pixel / viewParams(root.frame).size, 0.0);
 }
 
 // The dust's structure below the splats' scale: the dust depth is
@@ -19,10 +20,11 @@ float4 milkyWay(float2 pixel)
 static const int DUST_OCTAVES = 3;
 float3 milkyDust(float3 rd, float depth, float footprint)
 {
-    float amplitude = root.frame.galaxy.y;
+    SkyParams sky = skyParams(root.frame);
+    float amplitude = sky.dustAmplitude;
     if (amplitude <= 0.0 || depth <= 0.0) return float3(1.0, 1.0, 1.0);
-    float frequency = 1.0 / max(radians(root.frame.galaxy.z), 1e-4); // the base feature size in degrees to lattice cells per radian
-    float lacunarity = root.frame.galaxy_more.x, gain = root.frame.galaxy_more.y;
+    float frequency = 1.0 / max(radians(sky.featureSize), 1e-4); // the base feature size in degrees to lattice cells per radian
+    float lacunarity = sky.dustLacunarity, gain = sky.dustGain;
     // Lattices turned against each other: a rotation about (1, 1, 1) by a third of a turn per octave.
     const float3x3 turn = float3x3(.6667, -.3333, .6667, .6667, .6667, -.3333, -.3333, .6667, .6667);
     float clumping = 0.0, weight = 0.0, octaveAmplitude = 1.0;
@@ -46,6 +48,7 @@ float3 milkyDust(float3 rd, float depth, float footprint)
 
 float3 filteredStars(float3 p)
 {
+    SkyParams sky = skyParams(root.frame);
     // Gaussian pixel convolution: derivative variance broadens undersampled
     // points while the area ratio keeps their integrated screen energy stable.
     const float baseVariance = 1.0 / 220.0;
@@ -70,10 +73,10 @@ float3 filteredStars(float3 p)
         // growing 2.5 times per magnitude, so most sit at the faint end); flux and
         // peak match the star pass's scale, which puts a magnitude 6.5 star near .007.
         float peak = 2.2;
-        if (root.frame.stars.x > .5)
+        if (sky.catalogue)
         {
             float magnitude = log(385.0 + hash(cell + 3.0) * 3430.0) / log(2.5);
-            peak = 3.0 * pow(10.0, -.4 * magnitude) * root.frame.stars.y;
+            peak = 3.0 * pow(10.0, -.4 * magnitude) * sky.starBrightness;
         }
         result += tint * kernel * step(.992, id) * peak;
     }
@@ -83,17 +86,20 @@ float3 filteredStars(float3 p)
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
+    SkyParams sky = skyParams(root.frame);
+    LightParams light = lightParams(root.frame);
+    ViewParams view = viewParams(root.frame);
     float3 rd = rayDirection(root.frame, position.xy);
     float3 color = float3(.0005, .0007, .0012);
-    if (root.frame.stars.w > 0.0)
+    if (sky.milkyWay > 0.0)
     {
-        if (root.frame.galaxy.w > 1.5)
-            color += galaxyOriginal(rd) * root.frame.stars.w;
-        else if (root.frame.galaxy.w > .5)
-            color += galaxyLayers(rd) * root.frame.stars.w;
+        if (sky.galaxyMode > 1)
+            color += galaxyOriginal(rd) * sky.milkyWay;
+        else if (sky.galaxyMode > 0)
+            color += galaxyLayers(rd) * sky.milkyWay;
         else {
             float4 band = milkyWay(position.xy);
-            float3 radiance = band.rgb * root.frame.stars.w;
+            float3 radiance = band.rgb * sky.milkyWay;
             if (max(radiance.r, max(radiance.g, radiance.b)) > 2e-4) // the dark sky skips the noise
                 radiance *= milkyDust(rd, band.w, length(fwidth(rd)));
             color += radiance;
@@ -109,10 +115,10 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     // The solar disc: its edge softened to the pixel footprint so it does not
     // alias from afar, and limb-darkened (I = 1 - u (1 - mu)); the brightness
     // is normalised so the darkening does not change the disc's total light.
-    float3 sunDir = normalize(root.frame.sun.xyz - root.frame.camera_time.xyz);
+    float3 sunDir = normalize(light.position - view.position);
     float angle = acos(clamp(dot(rd, sunDir), -1.0, 1.0));
-    float radius = root.frame.sun_disc.x, darkening = root.frame.sun_disc.y;
-    float edge = max(2.0 * root.frame.right_tan.w / root.frame.options.y, .0004);
+    float radius = light.discRadius, darkening = light.limbDarkening;
+    float edge = max(2.0 * view.tanHalfFov / view.size.y, .0004);
     float disc = 1.0 - smoothstep(radius - edge, radius + edge, angle);
     float mu = sqrt(max(1.0 - (angle * angle) / (radius * radius), 0.0));
     float limb = (1.0 - darkening * (1.0 - mu)) / (1.0 - darkening / 3.0);

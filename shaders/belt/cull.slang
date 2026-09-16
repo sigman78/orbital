@@ -10,6 +10,7 @@
 //   ORBITAL_CULL_PASS_SCATTER  each visible rock claims a slot and writes its instance
 
 #include "../scene/bindings.slang"
+#include "../scene/frame_records.slang"
 [[vk::push_constant]] ConstantBuffer<CullRoot> root;
 
 #include "belt.slang"
@@ -52,12 +53,12 @@ bool occludedByBodies(float3 target, float targetRadius, float3 offset)
     for (uint i = 0; i < 8; ++i)
     {
         if (i >= bodyCount) break;
-        float4 body = root.frame->bodies[i];
-        body.xyz += offset;
-        float bodyDistance = length(body.xyz);
-        if (bodyDistance <= body.w || targetDistance - targetRadius <= bodyDistance + body.w) continue;
-        float separation = acos(clamp(dot(direction, body.xyz / bodyDistance), -1.0, 1.0));
-        float bodyAngle = asin(saturate(body.w / bodyDistance));
+        BodyGpu body = bodyAt(root.frame, int(i));
+        float3 centre = body.centre + offset;
+        float bodyDistance = length(centre);
+        if (bodyDistance <= body.radius || targetDistance - targetRadius <= bodyDistance + body.radius) continue;
+        float separation = acos(clamp(dot(direction, centre / bodyDistance), -1.0, 1.0));
+        float bodyAngle = asin(saturate(body.radius / bodyDistance));
         if (separation + targetAngle < bodyAngle) return true;
     }
     return false;
@@ -96,8 +97,8 @@ Placement placeRock(uint id, bool lightSplats)
     if (occludedByBodies(position, radius, p->freeze.xyz)) return result;
 
     result.visible = true;
-    float4 ring = root.frame->belt_ring;
-    float radial = (length(v.xz) - ring.x) / (ring.y - ring.x);
+    BeltParams belt = beltParams(root.frame);
+    float radial = (length(v.xz) - belt.inner) / (belt.outer - belt.inner);
     uint composition = rockClass(id, radial);
     float3 colour = rockColour(composition, id);
     if (pixelRadius < p->billboard.y)
@@ -111,12 +112,13 @@ Placement placeRock(uint id, bool lightSplats)
         // splat is a pixel-filter footprint whose coverage matches the rock's
         // true covered area, so small rocks stay small and dim.
         Frame* frame = root.frame;
+        LightParams sunLight = lightParams(frame);
         bool disc = pixelRadius >= SPLAT_DISC_PIXELS;
         float splatPixels = disc ? pixelRadius * sqrt(SPLAT_AREA) : SPLAT_POINT_PIXELS;
         float coverage = disc ? 1.0 : SPLAT_AREA * pixelRadius * pixelRadius / (SPLAT_POINT_PIXELS * SPLAT_POINT_PIXELS);
         coverage *= saturate((pixelRadius - p->billboard.z) / p->billboard.z);
         if (onDisc) coverage *= 1.0 - p->billboard.w; // the far-belt disc carries the rest
-        float3 light = normalize(frame->sun.xyz - position);
+        float3 light = normalize(sunLight.position - position);
         float phase = acos(clamp(dot(light, normalize(-position)), -1.0, 1.0));
         // The same scanned set the mesh material would lead with, at its coarsest mip.
         float seed = rockMaterialSeed(id);
@@ -128,7 +130,7 @@ Placement placeRock(uint id, bool lightSplats)
         // impostors in the fragment (cosine per pixel), points take the disc average.
         float rim = SPLAT_RIM * (1.0 - cos(phase)) * .5;
         float shadowing = solarVisibility(frame, position, -1) * beltExtinction(frame, position) * beltRockTransmittance(frame, position);
-        float irradiance = frame->sun.w / 3.141592653589793 * shadowing;
+        float irradiance = sunLight.radiance / 3.141592653589793 * shadowing;
         result.group = BILLBOARD_GROUP;
         result.instance.center_radius = float4(position, radius * splatPixels / pixelRadius);
         float3 radiance = albedo * irradiance * (disc ? 1.0 : lambertSpherePhase(phase) + rim + SPLAT_AMBIENT / max(irradiance, 1e-6));

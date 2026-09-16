@@ -1,4 +1,5 @@
 #include "../scene/frame_bindings.slang"
+#include "../scene/frame_records.slang"
 #include "../surface/lighting.slang"
 #include "../surface/brdf.slang"
 #include "../lib/math.slang"
@@ -91,5 +92,5 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     float3x3 rotate = rotation(s.inst.rotation_kind.xyz);
     Material m = s.kind == KIND_MARS ? marsMaterial(input, rotate, s.N, s.L, s.visibility, root.detail)
                                      : moonMaterial(input, rotate, s.N, s.L, s.visibility, root.detail);
-    return float4(shadeSurface(m, s.L, s.V, sunlight(root.frame), root.frame->earth.y, root.frame->quality.w), 1);
+    return float4(shadeSurface(m, s.L, s.V, sunlight(root.frame), earthParams(root.frame).glint, lightParams(root.frame).ambientFill), 1);
 }

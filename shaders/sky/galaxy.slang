@@ -1,4 +1,5 @@
 #include "../scene/frame_bindings.slang"
+#include "../scene/frame_records.slang"
 #include "../scene/view.slang"
 #include "../lib/math.slang"
 #include "../lib/color.slang"
@@ -23,8 +24,10 @@ static const float MILKY_WAY_SCALE = .1; // HDR radiance of the fit's unit (the 
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
+    ViewParams view = viewParams(root.frame);
+    SkyParams sky = skyParams(root.frame);
     // This target is the frame over a divisor: the frame pixel under this one's centre.
-    float2 pixel = position.xy * root.frame.options.xy / floor(root.frame.options.xy / root.frame.galaxy_more.z);
+    float2 pixel = position.xy * view.size / floor(view.size / sky.divisor);
     float3 rd = rayDirection(root.frame, pixel);
     float3 g = galacticDirection(rd);
     float3 light = float3(0.0, 0.0, 0.0), dark = float3(0.0, 0.0, 0.0);
@@ -56,6 +59,6 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float depth = 2.0 * saturate(luma709(dark) / (luma709(light) + 1e-3)); // a lane's share as an optical depth, kept mild
     // Band contrast: an exponent on the fit's radiance about its unit (the bulge), so the halo
     // can stay faint while the core comes up, the photographic look of the references.
-    float3 radiance = pow(max(light - dark, 0.0), root.frame.galaxy_more.w);
+    float3 radiance = pow(max(light - dark, 0.0), sky.bandContrast);
     return float4(radiance * MILKY_WAY_SCALE, depth);
 }

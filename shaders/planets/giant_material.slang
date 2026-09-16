@@ -1,6 +1,7 @@
 #pragma once
 #include "../surface/types.slang"
-#include "../scene/shadows.slang"
+#include "../scene/bindings.slang"
+#include "../scene/frame_records.slang"
 #include "../lib/math.slang"
 #include "../lib/noise.slang"
 #include "../lib/sampling.slang"
@@ -21,13 +22,12 @@ static const float2 GAS_POLAR_TEXELS = float2(1024.0, 1024.0);
 
 // The polar cap's albedo at a local normal, advected on the cap's own flow the
 // same way as the map: Juno's cyclone clusters, since the map is smeared there.
-float3 giantPolar(float3 localN, float2 uv, float2 dx, float2 dy, float fine, float t, float4 giant)
+float3 giantPolar(float3 localN, float2 uv, float2 dx, float2 dy, float fine, float t, float flowScale, float cycle)
 {
     // uv is the cap coordinate already scaled by the cap size.
     float south = localN.y < 0.0 ? .5 : 0.0;
     float2 atlas = float2(uv.x, uv.y * .5 + south);
-    float2 flow = (textures[TEX_GAS_POLAR_FLOW].SampleLevel(samplers[SAMPLER_CLAMP], atlas, 0.0).rg * 2.0 - 1.0) * GAS_POLAR_FLOW_UNIT * giant.x;
-    float cycle = giant.y;
+    float2 flow = (textures[TEX_GAS_POLAR_FLOW].SampleLevel(samplers[SAMPLER_CLAMP], atlas, 0.0).rg * 2.0 - 1.0) * GAS_POLAR_FLOW_UNIT * flowScale;
     float phase = fbm2(uv * float2(40, 40) + south * 7.0, 2);
     float p0 = frac(t / cycle + phase), p1 = frac(p0 + .5);
     float w0 = 1.0 - abs(2.0 * p0 - 1.0);
@@ -113,17 +113,15 @@ float3 layeredDeck(float2 uv, float2 lift, float2 cast, float2 layers, float t, 
     return lerp(lower * shade, upper, upperHere);
 }
 
-Material giantMaterial(Frame* frame, SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float3 V, float visibility,
-                       float detail)
+Material giantMaterial(GiantParams giant, float t, SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float3 V,
+                       float visibility, float detail)
 {
-    float4 giant = frame->giant;
-    if (giant.w < .5) giant.x = 0.0; // the panel's flow switch off: the deck and the caps hold still
-    float t = frame->camera_time.w;
+    float flowScale = giant.flow ? giant.flowTimeScale : 0.0; // the panel's flow switch off: the deck and the caps hold still
     float3 localN = normalize(input.localNormal);
     float2 uv = sphereUV(localN);
     float4 flowMap = sampleSphere(textures[TEX_GAS_FLOW], samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv);
-    float2 flow = (flowMap.rg * 2.0 - 1.0) * GAS_FLOW_UNIT * giant.x;
-    float cycle = giant.y;
+    float2 flow = (flowMap.rg * 2.0 - 1.0) * GAS_FLOW_UNIT * flowScale;
+    float cycle = giant.cycle;
     float phase = fbm2(uv * float2(60, 30), 2);
     float p0 = frac(t / cycle + phase), p1 = frac(p0 + .5);
     float w0 = 1.0 - abs(2.0 * p0 - 1.0);
@@ -131,20 +129,20 @@ Material giantMaterial(Frame* frame, SurfaceVaryings input, float3x3 rotate, flo
     float2 d0x, d0y, d1x, d1y; // footprints for the samples inside per-fragment branches below
     sphereFootprint(uv0, d0x, d0y);
     sphereFootprint(uv1, d1x, d1y);
-    float fine = magnification(uv, GAS_TEXELS) * giant.z * (.5 + flowMap.b);
+    float fine = magnification(uv, GAS_TEXELS) * giant.turbulence * (.5 + flowMap.b);
     // The wind's direction in texture space, for the per-pixel streaks (the map's, not the switch's).
     float2 windUV = flowMap.rg * 2.0 - 1.0;
     float2 along = dot(windUV, windUV) > 1e-6 ? normalize(windUV) : float2(1.0, 0.0);
     float3 T, B;
     tangentFrame(localN, rotate, N, T, B);
-    float2 layers = frame->giant_layers.xy;
+    float2 layers = float2(giant.deckLift, giant.deckShadow);
     layers.x *= detail; // the parallax lift and the cast go with the tier
     float3 viewTS = float3(dot(V, T), dot(V, B), max(dot(V, N), .15));
     float3 lightTS = float3(dot(L, T), dot(L, B), max(dot(L, N), .2));
     float2 lift = viewTS.xy / viewTS.z * layers.x;  // toward the viewer, in texture units
     float2 cast = lightTS.xy / lightTS.z * layers.x; // toward the sun
     // Close-range streaks: 1 once a filament texel covers 8 pixels; nothing with the panel's switch off.
-    float streaks = frame->giant_layers.z;
+    float streaks = giant.streaks;
     float extreme = streaks > 0.0 ? magnification(uv, GAS_DETAIL_TEXELS * 4.0) : 0.0;
     float3 c0 = layeredDeck(uv0, lift, cast, layers, t, fine, extreme);
     float3 c1 = layeredDeck(uv1, lift, cast, layers, t, fine, extreme);
@@ -154,23 +152,22 @@ Material giantMaterial(Frame* frame, SurfaceVaryings input, float3x3 rotate, flo
     float closer = magnification(uvBlend, GAS_DETAIL_TEXELS * 12.0);
     if (extreme > 0.0) m.albedo *= giantCloseDetail(uvBlend, along, fine * streaks, extreme, closer);
     // Over the outer part of the cap's radius the map gives way to the baked polar caps.
-    float capSin = GAS_CAP_SIN * max(frame->giant_night.z, 1e-3);
+    float capSin = GAS_CAP_SIN * max(giant.capSize, 1e-3);
     float capEdge = length(localN.xz) / capSin; // 1 at the cap's edge
-    float polar = frame->giant_night.z > 0.0
-                      ? (1.0 - smoothstep(1.0 - frame->giant_night.w, 1.0, capEdge)) * frame->giant_more.w : 0.0;
+    float polar = giant.capSize > 0.0 ? (1.0 - smoothstep(1.0 - giant.capBlend, 1.0, capEdge)) * giant.capOpacity : 0.0;
     float2 capUV = .5 + .5 * localN.xz / capSin; // and its footprint, taken outside the branch
     float2 capDx = ddx(capUV), capDy = ddy(capUV);
-    float capFine = magnificationGrad(capDx, capDy, GAS_POLAR_TEXELS) * giant.z;
+    float capFine = magnificationGrad(capDx, capDy, GAS_POLAR_TEXELS) * giant.turbulence;
     capDx *= float2(1.0, .5); capDy *= float2(1.0, .5);
-    if (polar > 0.0) m.albedo = lerp(m.albedo, giantPolar(localN, capUV, capDx, capDy, capFine, t, giant), polar);
+    if (polar > 0.0) m.albedo = lerp(m.albedo, giantPolar(localN, capUV, capDx, capDy, capFine, t, flowScale, cycle), polar);
     m.rough = .95;
     m.water = 0.0;
-    m.visibility = visibility * beltShadow(frame, input.worldPosition);
+    m.visibility = visibility;
     // The panel exaggerates the physical slopes so the relief reads along the
     // terminator; under a high sun the same tilt would emboss the whole disc,
     // so it fades to a fraction there, where the true slopes are invisible anyway.
     float grazing = 1.0 - smoothstep(.05, .5, dot(N, L));
-    float strength = frame->giant_more.z * lerp(.15, 1.0, grazing) * (1.0 - polar) * detail;
+    float strength = giant.relief * lerp(.15, 1.0, grazing) * (1.0 - polar) * detail;
     m.N = N;
     if (strength > 0.0)
     {

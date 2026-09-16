@@ -1,4 +1,5 @@
 #include "../scene/frame_bindings.slang"
+#include "../scene/frame_records.slang"
 
 // The atmosphere pass drawn over the body's projected shell only: one triangle
 // covering the screen rectangle of the shell's bounding box, so the pixels the
@@ -16,6 +17,7 @@ struct FullscreenVaryings { float4 position : SV_Position; };
 FullscreenVaryings vertexMain(uint vertexIndex : SV_VertexID)
 {
     Frame* frame = root.frame;
+    ViewParams view = viewParams(frame);
     Instance body = root.instances[root.base];
     float3 centre = body.center_radius.xyz;
     float half = body.center_radius.w * SHELL_MARGIN;
@@ -24,13 +26,13 @@ FullscreenVaryings vertexMain(uint vertexIndex : SV_VertexID)
     for (int corner = 0; corner < 8; ++corner) {
         float3 offset = float3((corner & 1) != 0 ? half : -half, (corner & 2) != 0 ? half : -half,
                                (corner & 4) != 0 ? half : -half);
-        float4 clip = mul(frame->view_projection, float4(centre + offset, 1.0));
+        float4 clip = mul(view.viewProjection, float4(centre + offset, 1.0));
         if (clip.w <= 1e-4) { clipped = true; break; }
         float2 ndc = clip.xy / clip.w;
         lower = min(lower, ndc);
         upper = max(upper, ndc);
     }
-    float2 margin = 2.0 / frame->options.xy; // one pixel
+    float2 margin = 2.0 / view.size; // one pixel
     if (clipped) {
         lower = float2(-1.0, -1.0);
         upper = float2(1.0, 1.0);

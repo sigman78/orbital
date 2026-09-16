@@ -1,4 +1,5 @@
 #include "../scene/frame_bindings.slang"
+#include "../scene/frame_records.slang"
 #include "../scene/view.slang"
 #include "../scene/visibility.slang"
 #include "../lib/math.slang"
@@ -20,7 +21,10 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     int kind = int(body.rotation_kind.w + .5);
     bool gas = kind == 1, desert = kind == 4;
     float shellRadius = radius * (gas ? 1.010 : desert ? 1.014 : 1.018);
-    float3 ro = root.frame.camera_time.xyz;
+    ViewParams view = viewParams(root.frame);
+    LightParams light = lightParams(root.frame);
+    EarthParams earth = earthParams(root.frame);
+    float3 ro = view.position;
     float3 rd = normalize(rayDirection(root.frame, position.xy));
     float2 atmosphereHit = sphereHit(ro, rd, centre, shellRadius);
     float begin = max(atmosphereHit.x, 0.0);
@@ -30,10 +34,10 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float2 groundHit = sphereHit(ro, rd, centre, radius);
     float nearGround = groundHit.y > 0.0 ? (groundHit.x > 0.0 ? groundHit.x : groundHit.y) : 1e9;
     end = min(end, nearGround);
-    int bodyCount = int(root.frame.scene.x);
-    for (int i = 0; i < MAX_OCCLUDING_BODIES; ++i) if (i < bodyCount && i != bodyIndex) {
-        float4 other = root.frame.bodies[i];
-        float2 hit = sphereHit(ro, rd, other.xyz, other.w);
+    int bodies = bodyCount(root.frame);
+    for (int i = 0; i < MAX_OCCLUDING_BODIES; ++i) if (i < bodies && i != bodyIndex) {
+        BodyGpu other = bodyAt(root.frame, i);
+        float2 hit = sphereHit(ro, rd, other.centre, other.radius);
         if (hit.x > 0.0) end = min(end, hit.x);
     }
     // Anything already drawn in front of the shell (asteroids, the moon) ends the march.
@@ -49,8 +53,8 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     end = min(end, scene);
     if (end <= begin) return float4(0.0, 0.0, 0.0, 0.0);
 
-    float3 sunDirection = normalize(root.frame.sun.xyz - centre);
-    float solarRadiance = max(root.frame.sun.w, 0.0);
+    float3 sunDirection = normalize(light.position - centre);
+    float solarRadiance = max(light.radiance, 0.0);
     float mu = dot(rd, sunDirection);
     float phaseR = 3.0 * (1.0 + mu * mu) / (16.0 * PI);
     // Earth: blue Rayleigh sky. Gas giant: warm haze. Desert: a thin, dusty
@@ -67,7 +71,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     // broad next to the low path a ray takes under the clouds, so one read at
     // the ray's lowest point stands for the whole of it.
     float lowShadow = 1.0;
-    if (kind == 0 && root.frame.earth.z > 0.0) {
+    if (kind == 0 && earth.cloudShadow > 0.0) {
         float3x3 rotate = rotation(body.rotation_kind.xyz);
         float3 localLight = mul(transpose(rotate), sunDirection);
         float lowest = groundHit.y > 0.0 && groundHit.x > 0.0 ? groundHit.x : clamp(dot(centre - ro, rd), begin, end);
@@ -75,11 +79,11 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         float altitude = max(length(low - centre) / radius - 1.0, 0.0);
         float3 localDirection = mul(transpose(rotate), normalize(low - centre));
         float2 shellUV = sphereUV(cloudShellDirection(localDirection, min(altitude, CLOUD_HEIGHT), localLight));
-        float density = cloudShadowDensityLevel(cloudUV(shellUV, root.frame.camera_time.w), 2.0 + root.frame.earth.w);
-        lowShadow = 1.0 - density * root.frame.earth.z;
+        float density = cloudShadowDensityLevel(cloudUV(shellUV, view.time), 2.0 + earth.cloudShadowSoftness);
+        lowShadow = 1.0 - density * earth.cloudShadow;
     }
-    int viewSteps = root.frame.options.z > .5 ? 20 : 12;
-    int lightSteps = root.frame.options.z > .5 ? 6 : 4;
+    int viewSteps = view.highQuality ? 20 : 12;
+    int lightSteps = view.highQuality ? 6 : 4;
     float segment = (end - begin) / float(viewSteps);
     float ds = segment / radius;
     float3 viewOpticalDepth = float3(0.0, 0.0, 0.0);

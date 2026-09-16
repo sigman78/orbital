@@ -1,4 +1,5 @@
 #include "../scene/frame_bindings.slang"
+#include "../scene/frame_records.slang"
 #include "../lib/math.slang"
 #include "../lib/projection.slang"
 
@@ -29,12 +30,14 @@ StarVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_Ins
     o.tint = float3(0.0, 0.0, 0.0);
     o.sigma = STAR_SIGMA;
     Vertex star = root.vertices[instanceId]; // position: direction and flux; normal: colour and magnitude
-    float brightness = root.frame->stars.y;
+    SkyParams sky = skyParams(root.frame);
+    ViewParams view = viewParams(root.frame);
+    float brightness = sky.starBrightness;
     if (brightness <= 0.0) return o;
     // At infinity: the direction alone, far along the ray; positions are camera-relative anyway.
-    float4 clip = mul(root.frame->view_projection, float4(star.position.xyz * (FAR_Z * .5), 1.0));
+    float4 clip = mul(view.viewProjection, float4(star.position.xyz * (FAR_Z * .5), 1.0));
     if (clip.w <= NEAR_Z) return o;
-    float2 resolution = root.frame->options.xy;
+    float2 resolution = view.size;
     float2 centre = (clip.xy / clip.w * .5 + .5) * resolution;
     float flux = star.position.w * STAR_ENERGY * brightness;
     // The brightest stars grow a little, so their size is a cue before the bloom is.
@@ -46,7 +49,7 @@ StarVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_Ins
     o.position = float4(ndc, clip.z / clip.w, 1.0);
     o.local = local;
     // The baked colour is the blackbody's; the eye sees stars nearly white, so the panel sets how much chroma shows.
-    float3 colour = lerp(float3(1.0, 1.0, 1.0), star.normal.xyz, root.frame->stars.z);
+    float3 colour = lerp(float3(1.0, 1.0, 1.0), star.normal.xyz, sky.starSaturation);
     o.tint = colour * flux / (2.0 * PI * sigma * sigma);
     o.sigma = sigma;
     return o;
