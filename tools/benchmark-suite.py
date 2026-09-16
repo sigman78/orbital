@@ -11,6 +11,7 @@ import platform
 import re
 import statistics
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 SCENES = {name: ['--bookmark', str(i)] for i, name in
@@ -168,6 +169,10 @@ def main():
         running = command_output(['tasklist', '/FI', 'IMAGENAME eq orbital.exe', '/FO', 'CSV', '/NH'])
         if '"orbital.exe"' in running.lower():
             raise RuntimeError('Close running Orbital instances before benchmarking')
+    # A full host-visible aperture puts the mapped heaps in system memory: the numbers would be about the
+    # machine, not the change (tools/check-bar1.py explains).
+    if subprocess.run([sys.executable, str(ROOT / 'tools/check-bar1.py')]).returncode:
+        raise RuntimeError('The host-visible aperture is too full to benchmark; free it first')
     baselines = [json.loads(p.read_text(encoding='utf-8')) for p in args.baseline]
     exe = args.executable.resolve()
     output = args.output.resolve()
