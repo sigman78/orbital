@@ -133,10 +133,12 @@ struct MeterRoot {
 #define ORBITAL_BELT_BANDS 8                             // belt::radial_bands
 #define ORBITAL_CULL_THREADS 128
 
-// Static per-rock record in the belt's own frame (before spin and tilt).
+// Static per-rock record in the belt's own frame (before spin and tilt). The
+// CPU places the rock each frame in the state array: belt-relative position
+// after the band spin and the tilt, with the radius in w.
 struct RockData {
     SHADER_FLOAT4 position_radius; // belt-local centre, world radius
-    SHADER_FLOAT4 rotation_seed;   // Euler angles at t = 0, w unused
+    SHADER_FLOAT4 rotation_seed;   // Euler angles at t = 0, w = rock id (the tail's compacted copies index the state by it)
     SHADER_FLOAT4 spin_group;      // tumble rate per axis, w = shape * ORBITAL_BELT_BANDS + band
 };
 
@@ -151,8 +153,6 @@ struct CullParams {
     SHADER_FLOAT4 view;                 // pixels per unit depth, plane x scale, plane y scale, rock spin angle
     SHADER_FLOAT4 giant;                // camera-relative belt centre, w unused
     SHADER_FLOAT4 freeze;               // live camera to the frozen cull camera, zero when culling follows the view; w unused
-    SHADER_FLOAT4 belt_tilt;            // y scale, y from z, z scale, unused
-    SHADER_FLOAT4 band_spin[ORBITAL_BELT_BANDS]; // cos and sin of each radial band's spin angle
     SHADER_FLOAT4 levels;               // projected-radius thresholds of levels 1 to 4, in pixels
     SHADER_FLOAT4 billboard;            // level 5 threshold, billboard radius, minimum radius, far-tier blend weight (splats fade out by it)
     SHADER_UINT rock_limit, body_count, light_in_count_pass, unused; // light_in_count_pass: splats lit in both passes (development comparison)
@@ -187,11 +187,12 @@ struct CullScratch {
 // records and pass holding their count.
 struct CullRoot {
 #ifdef __cplusplus
-    SHADER_ADDRESS frame, rocks, scratch;
+    SHADER_ADDRESS frame, rocks, scratch, state;
 #else
     SHADER_ADDRESS(Frame) frame;
     SHADER_ADDRESS(RockData) rocks;
     SHADER_ADDRESS(CullScratch) scratch;
+    SHADER_ADDRESS(float4) state; // this frame's belt-relative position and radius per rock id
 #endif
     SHADER_UINT pass, unused;
 };

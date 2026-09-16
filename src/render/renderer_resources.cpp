@@ -165,15 +165,22 @@ void Renderer::Impl::create_device(void* window) {
     submissions.initialize(device);
     buffers.static_data = UniqueGpuHeap::create(device, heap_layout.static_budget, gpu::MemoryType::gpu_only);
     buffers.data = UniqueGpuHeap::create(device, heap_layout.mapped_size());
-    buffers.cull_device = UniqueGpuHeap::create(
-        device, heap_layout.cull_size(std::max(high_quality.belt_count, belt_count_override), body_count),
-        gpu::MemoryType::gpu_only);
+    belt_capacity = std::max(high_quality.belt_count, belt_count_override);
+    buffers.cull_device = UniqueGpuHeap::create(device, heap_layout.cull_size(belt_capacity, body_count),
+                                                gpu::MemoryType::gpu_only);
     buffers.cull_readback = UniqueGpuHeap::create(device, sizeof(CullScratch), gpu::MemoryType::readback);
-    panic_if(!buffers.static_data.range().gpu || !buffers.cull_device.range().gpu || !buffers.cull_readback.range().cpu,
+    buffers.belt_state = UniqueGpuHeap::create(device, 2ull * belt_capacity * sizeof(Float4),
+                                               gpu::MemoryType::gpu_only);
+    buffers.belt_state_staging = UniqueGpuHeap::create(device, std::uint64_t(belt_capacity) * sizeof(Float4));
+    panic_if(!buffers.static_data.range().gpu || !buffers.cull_device.range().gpu ||
+                 !buffers.cull_readback.range().cpu || !buffers.belt_state.range().gpu ||
+                 !buffers.belt_state_staging.range().cpu,
              "device heap allocation failed");
-    log::info("Buffer heaps: {} KiB device-only static, {} KiB mapped, {} KiB device-only culling",
-              buffers.static_data.range().size / 1024, buffers.data.range().size / 1024,
-              buffers.cull_device.range().size / 1024);
+    log::info(
+        "Buffer heaps: {} KiB device-only static, {} KiB mapped, {} KiB device-only culling, {} + {} KiB rock state",
+        buffers.static_data.range().size / 1024, buffers.data.range().size / 1024,
+        buffers.cull_device.range().size / 1024, buffers.belt_state.range().size / 1024,
+        buffers.belt_state_staging.range().size / 1024);
     buffers.texture_descriptors = UniqueGpuHeap::create(device, caps.texture_descriptor_size * unsigned(Slot::count),
                                                         gpu::MemoryType::texture_descriptor_heap);
     buffers.sampler_descriptors = UniqueGpuHeap::create(
@@ -448,9 +455,11 @@ void Renderer::Impl::collect_memory_stats() {
     memory.static_data.used = static_cursor;
     memory.mapped = {};
     heap(memory.mapped, buffers.data);
+    heap(memory.mapped, buffers.belt_state_staging);
     memory.mapped.used = memory.mapped.bytes;
     memory.device_buffers = {};
     heap(memory.device_buffers, buffers.cull_device);
+    heap(memory.device_buffers, buffers.belt_state);
     heap(memory.device_buffers, buffers.meter_device);
     memory.device_buffers.used = memory.device_buffers.bytes;
     memory.readback = {};

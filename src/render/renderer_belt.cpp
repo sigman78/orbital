@@ -31,11 +31,17 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
         const float radius = rock.scale.x * belt::rock_radius_scale;
         records.push_back(
             {.position_radius = {rock.position.x, rock.position.y, rock.position.z, radius},
-             .rotation_seed = {rock.rotation.x, rock.rotation.y, rock.rotation.z, 0},
+             .rotation_seed = {rock.rotation.x, rock.rotation.y, rock.rotation.z, float(id)},
              .spin_group = {rock.spin.x, rock.spin.y, rock.spin.z, float(rock.variant * belt::radial_bands + band)}});
     }
     rock_data = upload_static(bytes_of(records));
     rock_count = unsigned(records.size());
+    rock_base.resize(records.size());
+    rock_band.resize(records.size());
+    for (unsigned id = 0; id < records.size(); ++id) {
+        rock_base[id] = records[id].position_radius;
+        rock_band[id] = std::uint8_t(unsigned(records[id].spin_group.w + .5f) % belt::radial_bands);
+    }
     std::vector<RockData> tail;
     for (unsigned id = 0; id < records.size(); ++id)
         if (records[id].position_radius.w >= belt::map_caster_min_radius) {
@@ -83,13 +89,18 @@ void Renderer::Impl::record_belt_maps(gpu::CommandBuffer* cmd, const CullRoot& c
         const CullRoot splat_root{.frame = root.frame,
                                   .rocks = rock_tail_data,
                                   .scratch = cull_root.scratch,
+                                  .state = cull_root.state,
                                   .pass = unsigned(tail_end - rock_tail_ids.begin()),
                                   .unused = 0};
         record_belt_light_pass(cmd, splat_root, root, splat_root.pass);
     }
     {
-        const CullRoot bake_root{
-            .frame = root.frame, .rocks = rock_data, .scratch = cull_root.scratch, .pass = rock_limit, .unused = 0};
+        const CullRoot bake_root{.frame = root.frame,
+                                 .rocks = rock_data,
+                                 .scratch = cull_root.scratch,
+                                 .state = cull_root.state,
+                                 .pass = rock_limit,
+                                 .unused = 0};
         record_belt_disc_bakes(cmd, bake_root, root, rock_limit, far_weight);
     }
 }

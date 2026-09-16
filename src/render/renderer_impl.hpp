@@ -249,6 +249,8 @@ struct Renderer::Impl {
         UniqueGpuHeap meter_device, meter_zero,
             meter_readback;                       // the exposure histogram, its zero source and its readback
         UniqueGpuHeap cull_device, cull_readback; // GPU output and completed scratch for CPU statistics
+        UniqueGpuHeap belt_state;         // device-only: two slices of per-rock state, this frame's and the last
+        UniqueGpuHeap belt_state_staging; // host-visible: the CPU writes this frame's slice here for the copy
     } buffers;
     std::uint64_t static_cursor = 0;
     struct StaticUpload { // the staging path of upload_static, open until finish_static_uploads
@@ -341,6 +343,9 @@ struct Renderer::Impl {
     std::array<GpuMesh, max_body_count> moonlet_meshes{}; // per body index; only moonlets are filled
     std::uint64_t rock_data = 0;                          // static heap address of the RockData records
     unsigned rock_count = 0;
+    unsigned belt_capacity = 0;          // rocks the state heaps hold: the high tier or the override
+    std::vector<Float4> rock_base;       // belt-frame centre and radius per rock, the CPU's copy for the state
+    std::vector<std::uint8_t> rock_band; // radial band per rock, which sets its spin rate
     std::uint64_t rock_tail_data = 0;    // the size-tail rocks again, compacted for the transmittance splat
     std::vector<unsigned> rock_tail_ids; // their ids, ascending
     unsigned belt_count_override = 0;    // RendererConfig::belt_count
@@ -454,6 +459,7 @@ struct Renderer::Impl {
     // CPU frame packing (renderer_frame_data.cpp).
     FrameData build_frame(const FrameInput& input);
     void write_body_instances(const FrameInput& input, const FrameData& frame);
+    void write_belt_state(const FrameInput& input, unsigned count);
     void cull_bodies(const FrameInput& input, const FrameData& frame);
     void write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
                             std::uint64_t instance_address);

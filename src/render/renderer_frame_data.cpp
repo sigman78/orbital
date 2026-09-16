@@ -251,13 +251,28 @@ void Renderer::Impl::cull_bodies(const FrameInput& input, const FrameData& frame
 // frustum test it replaced: plane normals are not unit length, so sphere
 // support is scaled, and two pixels of padding cover temporal jitter and
 // expanded tiny billboards.
+// The per-rock state the cull, the light-map splat and the disc bake read: each
+// rock's belt-relative position this frame (band spin, then the tilt) and its
+// radius, written to the staging heap for the copy into the device slice. The
+// closed form of the static record for now; an integrator writes the same
+// buffer later.
+void Renderer::Impl::write_belt_state(const FrameInput& input, unsigned count) {
+    const BeltTransform transform = belt_transform(system.belts.front(), float(input.time * belt_culling::spin_rate));
+    auto* out = reinterpret_cast<Float4*>(buffers.belt_state_staging.range().cpu);
+    for (unsigned id = 0; id < count; id++) {
+        const Float4& v = rock_base[id];
+        const float c = transform.cos_spin[rock_band[id]], s = transform.sin_spin[rock_band[id]];
+        const float bx = v.x * c - v.z * s, bz = v.x * s + v.z * c;
+        out[id] = {bx, v.y * belt_tilt.y_scale - bz * belt_tilt.y_from_z, bz * belt_tilt.z_scale, v.w};
+    }
+}
+
 void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
                                         std::uint64_t instance_address) {
     // build_frame has already captured or released the frozen cull camera; the
     // frame's far-tier weight is the frozen one when it holds.
     const CameraView& camera = frozen_cull ? frozen_cull->camera : input.camera;
     const float tan_y = frozen_cull ? frozen_cull->tan_y : frame.right_tan.w, tan_x = tan_y * frame.up_aspect.w;
-    const BeltTransform transform = belt_transform(system.belts.front(), float(input.time * belt_culling::spin_rate));
     CullParams& p = scratch.params;
     p = {};
     p.right = f4(to_float(camera.right), tan_x);
@@ -268,9 +283,6 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
     // Rocks stay live camera relative for the draw; the offset moves the tests to the cull camera.
     p.giant = f4(input.bodies[showcase.belt_parent()].position - input.camera.position);
     p.freeze = f4(input.camera.position - camera.position);
-    p.belt_tilt = {belt_tilt.y_scale, belt_tilt.y_from_z, belt_tilt.z_scale, 0};
-    for (unsigned band = 0; band < belt::radial_bands; band++)
-        p.band_spin[band] = {transform.cos_spin[band], transform.sin_spin[band], 0, 0};
     p.levels = {geometry::rock_level_thresholds[0], geometry::rock_level_thresholds[1],
                 geometry::rock_level_thresholds[2], geometry::rock_level_thresholds[3]};
     p.billboard = {geometry::rock_level_thresholds[4], input.belt.billboard_radius(),

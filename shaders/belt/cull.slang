@@ -71,15 +71,12 @@ Placement placeRock(uint id, bool lightSplats)
     result.group = 0;
     RockData rock = root.rocks[id];
     CullParams* p = &root.scratch->params;
-    uint packed = uint(rock.spin_group.w + .5);
-    uint band = packed & (ORBITAL_BELT_BANDS - 1), variant = packed / ORBITAL_BELT_BANDS;
-    // Belt frame: spin the band, then tilt and compress the plane.
-    float2 spin = p->band_spin[band].xy;
-    float3 v = rock.position_radius.xyz;
-    float bx = v.x * spin.x - v.z * spin.y, bz = v.x * spin.y + v.z * spin.x;
-    float3 local = float3(bx, v.y * p->belt_tilt.x - bz * p->belt_tilt.y, bz * p->belt_tilt.z);
-    float3 position = p->giant.xyz + local;
-    float radius = rock.position_radius.w;
+    uint variant = uint(rock.spin_group.w + .5) / ORBITAL_BELT_BANDS;
+    // The CPU places the rock each frame; the record keeps what does not move.
+    float4 state = root.state[id];
+    float3 position = p->giant.xyz + state.xyz;
+    float radius = state.w;
+    float3 v = rock.position_radius.xyz; // the belt frame before the spin, for the radial class
     // Visibility, level and coverage are judged from the cull camera, which the
     // panel can freeze while the live camera moves on; the instance keeps the
     // live camera relative position, so what was culled draws where it is.
