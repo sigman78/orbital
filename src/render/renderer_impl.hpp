@@ -496,7 +496,7 @@ struct Renderer::Impl {
     void record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input, const FrameData& frame,
                            std::uint64_t args_address);
     void record_atmosphere_passes(gpu::CommandBuffer* cmd, Root& root);
-    void record_motion_streaks(gpu::CommandBuffer* cmd, Root& root);
+    void record_motion_streaks(gpu::CommandBuffer* cmd, Root& root, bool temporal_aa);
     void draw_mesh(gpu::CommandBuffer* cmd, Root& root, const GpuMesh& mesh, unsigned base, unsigned instance_count);
 
     // Post-processing and exposure (renderer_post.cpp).
