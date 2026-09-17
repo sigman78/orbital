@@ -44,6 +44,7 @@ private:
 struct FrameTargets {
     GpuImage hdr, depth, sun_visibility, bloom_a, bloom_b, flare, final_image, ldr;
     GpuImage history[2], splat_mask, smaa_edges, smaa_weights, belt_dust, galaxy;
+    GpuImage motion; // the opaque surfaces' step to their previous raster position, for the temporal pass
 };
 
 // Independent of the window size; released before the device at shutdown.

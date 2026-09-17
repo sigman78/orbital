@@ -184,10 +184,14 @@ void Renderer::Impl::write_body_instances(const FrameInput& input, const FrameDa
         const BodyClass body_class = system.bodies[i].body_class;
         // Moonlets are dark, reddish rock; the tint also seeds their texture offset.
         const Float4 tint = body_class == BodyClass::Moonlet ? Float4{.34f, .30f, .27f, 1} : Float4{1, 1, 1, 1};
+        // The step back to the previous frame: the orbit's in world space, the spin's about the axis.
+        const BodyState& previous = previous_bodies_valid ? previous_bodies[i] : input.bodies[i];
         instances.push_back({frame.bodies[i],
                              {0, float(input.bodies[i].rotation_angle), float(system.bodies[i].axial_tilt),
                               float(surface_kind(body_class))},
-                             tint});
+                             tint,
+                             f4(previous.position - input.bodies[i].position),
+                             {0, float(previous.rotation_angle - input.bodies[i].rotation_angle), 0, 0}});
     }
 }
 
@@ -257,6 +261,9 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
     // Rocks stay live camera relative for the draw; the offset moves the tests to the cull camera.
     p.giant = f4(input.bodies[showcase.belt_parent()].position - input.camera.position);
     p.freeze = f4(input.camera.position - camera.position);
+    const unsigned parent = showcase.belt_parent();
+    p.giant_motion = previous_bodies_valid ? f4(previous_bodies[parent].position - input.bodies[parent].position)
+                                           : Float4{0, 0, 0, 0};
     p.levels = {geometry::rock_level_thresholds[0], geometry::rock_level_thresholds[1],
                 geometry::rock_level_thresholds[2], geometry::rock_level_thresholds[3]};
     p.billboard = {geometry::rock_level_thresholds[4], input.belt.billboard_radius(),

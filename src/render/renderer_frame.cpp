@@ -94,10 +94,13 @@ bool Renderer::draw(const FrameInput& supplied) {
               .instances = cull_address + heap_layout.instance_offset,
               .base = 0,
               .mode = 0};
+    const std::uint64_t previous_slice = ((s.frame_index + 1) & 1) * std::uint64_t(s.belt_capacity) * belt_state_stride;
     const CullRoot cull_root{.frame = frame_address,
                              .rocks = s.rock_data,
                              .scratch = cull_address + heap_layout.cull_offset,
                              .state = state_address,
+                             .previous_state = reinterpret_cast<std::uint64_t>(s.buffers.belt_state.range().gpu) +
+                                               previous_slice,
                              .pass = 0,
                              .unused = 0};
     const std::uint64_t args_address = cull_address + heap_layout.cull_offset + offsetof(CullScratch, args);
@@ -148,6 +151,10 @@ bool Renderer::draw(const FrameInput& supplied) {
                 s.record_depth_prepass(cmd, root);
             }
             s.record_scene_pass(cmd, root, input, frame, args_address);
+            {
+                GpuTimingScope child(s.timings, GpuPass::SurfaceMotion);
+                s.record_motion_pass(cmd, root, args_address);
+            }
         }
         {
             GpuTimingScope timing(s.timings, GpuPass::Atmosphere);
@@ -187,6 +194,8 @@ bool Renderer::draw(const FrameInput& supplied) {
     s.previous_vertical_fov = input.camera.vertical_fov;
     s.previous_camera_cut = input.camera.cut_serial;
     s.history_valid = true;
+    std::copy(input.bodies.begin(), input.bodies.end(), s.previous_bodies.begin());
+    s.previous_bodies_valid = true;
     s.collect_memory_stats(); // a few dozen reads; cheaper than tracking when allocations change
     s.stats.frame.draw_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count();
     return true;

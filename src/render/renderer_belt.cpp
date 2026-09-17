@@ -179,8 +179,9 @@ void Renderer::Impl::record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullR
 }
 
 // The opaque half of the rock batch, drawn with the other opaque geometry.
-void Renderer::Impl::draw_rock_meshes(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address) {
-    gpu::bind_pso(cmd, pso.scene.surface_rock);
+void Renderer::Impl::draw_rock_meshes(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address,
+                                      gpu::PSO* pipeline) {
+    gpu::bind_pso(cmd, pipeline);
     // Rocks: one multi-draw over the pooled mesh; the culling pass wrote every
     // group's count, base and slice into the argument array.
     root.base = 0;

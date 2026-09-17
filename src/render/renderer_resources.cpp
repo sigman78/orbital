@@ -435,11 +435,11 @@ void Renderer::Impl::collect_memory_stats() {
         }
     };
     auto& memory = stats.memory;
-    memory.frame_targets = images({&frame_targets.hdr, &frame_targets.depth, &frame_targets.sun_visibility,
-                                   &frame_targets.bloom_a, &frame_targets.bloom_b, &frame_targets.flare,
-                                   &frame_targets.final_image, &frame_targets.ldr, &frame_targets.history[0],
-                                   &frame_targets.history[1], &frame_targets.splat_mask, &frame_targets.smaa_edges,
-                                   &frame_targets.smaa_weights, &frame_targets.belt_dust, &frame_targets.galaxy});
+    memory.frame_targets = images(
+        {&frame_targets.hdr, &frame_targets.depth, &frame_targets.sun_visibility, &frame_targets.bloom_a,
+         &frame_targets.bloom_b, &frame_targets.flare, &frame_targets.final_image, &frame_targets.ldr,
+         &frame_targets.history[0], &frame_targets.history[1], &frame_targets.splat_mask, &frame_targets.smaa_edges,
+         &frame_targets.smaa_weights, &frame_targets.belt_dust, &frame_targets.galaxy, &frame_targets.motion});
     memory.fixed_targets = images({&fixed_targets.shadow_map, &fixed_targets.belt_light, &fixed_targets.belt_light_blur,
                                    &fixed_targets.belt_disc_light, &fixed_targets.belt_disc_rocks});
     memory.materials = {};
@@ -511,6 +511,7 @@ void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor, unsigned flar
         image = create_image({.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
     frame_targets.splat_mask = create_image(
         {.extent = extent, .format = gpu::Format::rgba16_float, .usage = color_usage});
+    frame_targets.motion = create_image({.extent = extent, .format = gpu::Format::rg16_float, .usage = color_usage});
     frame_targets.smaa_edges = create_image({.extent = extent, .format = gpu::Format::rg8_unorm, .usage = color_usage});
     frame_targets.smaa_weights = create_image(
         {.extent = extent, .format = gpu::Format::rgba8_unorm, .usage = color_usage});
@@ -532,6 +533,7 @@ void Renderer::Impl::resize(Extent2D new_extent, unsigned divisor, unsigned flar
     bind(Slot::ldr, frame_targets.ldr);
     bind(Slot::depth, frame_targets.depth);
     bind(Slot::splat_mask, frame_targets.splat_mask);
+    bind(Slot::motion, frame_targets.motion);
     bind(Slot::smaa_edges, frame_targets.smaa_edges);
     bind(Slot::smaa_weights, frame_targets.smaa_weights);
     bind(Slot::belt_dust, frame_targets.belt_dust);

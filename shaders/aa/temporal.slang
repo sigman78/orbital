@@ -70,9 +70,18 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float currentZ = splat ? metadata.r / metadata.a : (sky ? FAR_Z : linearViewDepth(deviceDepth));
     if (!temporal.historyValid || !temporal.enabled) return float4(current, currentZ);
 
+    // Everything drawn carries its own motion (scene/motion.slang), the camera's
+    // step included, so a rock or a turning planet finds its history where it
+    // was and not where a still world would have put it; the sky's step is in
+    // the same field. Read at the pixel, not between pixels: a rock's step and
+    // the sky's behind it differ by the parallax, and mixing them at every edge
+    // measured worse than the pixel's own. Splats keep the camera-only step,
+    // their depth is their own metadata; the depth estimate for the history
+    // test keeps it too, a surface's own step along the view being small.
     float3 rd = rayDirection(root.frame, rasterPosition);
     float4 previousClip;
     float predictedPreviousZ = FAR_Z;
+    float2 previousUV;
     if (sky) {
         previousClip = mul(previousProjection(root.frame), float4(rd, 0.0));
     } else {
@@ -82,9 +91,12 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         predictedPreviousZ = dot(previousPosition, temporal.previousForward);
         previousClip = mul(previousProjection(root.frame), float4(previousPosition, 1.0));
     }
-    bool behind = previousClip.w <= 1e-5;
-    float2 previousUV = previousClip.xy / max(previousClip.w, 1e-5) * .5 + .5
-                      - view.previousJitter / float2(size);
+    bool behind = splat && previousClip.w <= 1e-5;
+    if (splat) {
+        previousUV = previousClip.xy / max(previousClip.w, 1e-5) * .5 + .5 - view.previousJitter / float2(size);
+    } else {
+        previousUV = rasterUV + textures[TEX_MOTION].Load(int3(pixel, 0)).rg;
+    }
     bool outside = any(previousUV < float2(0.0, 0.0)) || any(previousUV > float2(1.0, 1.0));
     if (behind || outside || (!sky && predictedPreviousZ <= 0.0)) return float4(current, currentZ);
 

@@ -54,6 +54,7 @@ enum class Slot : unsigned {
     history_a = TEX_HISTORY_A,
     history_b = TEX_HISTORY_B,
     depth = TEX_DEPTH,
+    motion = TEX_MOTION, // the opaque surfaces' step to their previous raster position (RG, UV units)
     mars_albedo = TEX_MARS_ALBEDO,
     mars_normal = TEX_MARS_NORMAL,
     moon_normal = TEX_MOON_NORMAL,
@@ -107,7 +108,8 @@ enum class SurfaceMode : std::uint32_t {
     cloud = ORBITAL_SURFACE_CLOUD,
     shadow = ORBITAL_SURFACE_SHADOW,
     billboard = ORBITAL_SURFACE_BILLBOARD,
-    splat_mask = ORBITAL_SURFACE_SPLAT_MASK
+    splat_mask = ORBITAL_SURFACE_SPLAT_MASK,
+    motion_sky = ORBITAL_SURFACE_MOTION_SKY
 };
 // Only bloom selects a stage through Root.mode; other post pipelines have dedicated entry points.
 enum class BloomMode : std::uint32_t {
@@ -152,7 +154,7 @@ struct HeapLayout {
 
     constexpr std::uint64_t ui_offset() const { return instance_offset + max_body_count * sizeof(Instance); }
     constexpr std::uint64_t mapped_size() const { return ui_offset() + ui_bytes; }
-    constexpr std::uint64_t instance_capacity() const { return instance_budget / sizeof(Instance); }
+    constexpr std::uint64_t instance_capacity() const { return instance_budget / sizeof(AsteroidInstance); }
     constexpr std::uint64_t cull_size(unsigned rocks, unsigned bodies) const {
         return instance_offset + std::uint64_t(bodies) * sizeof(Instance) +
                std::uint64_t(rocks) * sizeof(AsteroidInstance);
@@ -279,6 +281,8 @@ struct Renderer::Impl {
             gpu::PSO* atmosphere = nullptr;
             gpu::PSO* shadow = nullptr;
             gpu::PSO* depth_prepass = nullptr; // the bodies' depth, no colour
+            gpu::PSO* motion = nullptr;        // the opaque meshes' motion vectors at equal depth
+            gpu::PSO* motion_sky = nullptr;    // the same at the far plane, the sky's
             gpu::PSO* motes = nullptr;
             gpu::PSO* stars = nullptr;
         } scene;
@@ -406,6 +410,8 @@ struct Renderer::Impl {
     double previous_vertical_fov = 0;
     std::size_t previous_camera_cut = 0;
     bool history_valid = false;
+    std::array<BodyState, max_body_count> previous_bodies{}; // last frame's ordered states, for the bodies' motion
+    bool previous_bodies_valid = false;
     bool ui_overflow_logged = false;
     bool ui_font_uploaded = false;
     bool belt_disc_baked = false;          // the far-belt maps hold data (baked once the far tier is first needed)
@@ -458,7 +464,8 @@ struct Renderer::Impl {
     void upload_rock_pool(std::span<const geometry::Mesh> meshes);
     const GpuMesh& body_mesh(unsigned body, unsigned lod) const;
     void record_depth_prepass(gpu::CommandBuffer* cmd, Root root);
-    void draw_rock_meshes(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address);
+    void draw_rock_meshes(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address, gpu::PSO* pipeline);
+    void record_motion_pass(gpu::CommandBuffer* cmd, Root root, std::uint64_t args_address);
     void draw_rock_splats(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address);
 
     // CPU frame packing (renderer_frame_data.cpp).
