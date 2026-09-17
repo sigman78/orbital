@@ -101,7 +101,7 @@ depth pre-pass, the scene pass and the motion pass; the shadow map keeps the sph
 the terrain's positions in radii with the sphere's normals, so the maps shade them exactly as the far
 tier and the switch is invisible; procedural detail past the maps is the step after. For the review the
 airless shader can draw a patch's quad grid over the surface from the face's cell coordinates (the
-wireframe switch, `--wireframe`), and Z slows the flight to a tenth for the approach.
+wireframe switch, `--wireframe`), and Z slows the flight to a fiftieth for the approach.
 
 ## Frame
 

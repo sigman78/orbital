@@ -562,7 +562,7 @@ void camera_controls(AppState& app) {
         free_camera(app);
     ImGui::Checkbox("Pause (Space)", &app.paused);
     ImGui::SameLine();
-    ImGui::Checkbox("Slow travel (Z)", &app.slow_travel); // a tenth of the speed, for a small body
+    ImGui::Checkbox("Slow travel (Z)", &app.slow_travel); // a fiftieth of the speed, for a small body
 }
 void overlay_controls(AppState& app) {
     ImGui::Checkbox("HUD (F1)", &app.overlay);
