@@ -60,7 +60,10 @@ past 16 steps re-seeds exactly from the seeds, and a slice of the population is 
 repeated float rotations do not drift in radius. A standing time (fixed captures, benchmarks) writes
 nothing after the first frame.
 
-The sweep writes into a host-visible staging heap and the frame copies it into one of two device slices
+The sweep writes into one of two slots of a host-visible staging heap, chosen by frame parity, before
+the frame waits for the previous frame's GPU work, so the write (1.45 ms at 280k rocks, 2.75 at 520k,
+most of it the CPU-to-aperture path) overlaps that work instead of adding to the frame; the previous
+frame may still be copying the other slot. The frame then copies the slot into one of two device slices
 (the other keeps the previous frame's positions, for motion vectors), then a compute shader culls the
 whole population in three passes (count, prefix, scatter): frustum,
 planet occlusion, projected size, then a level and shape group, or a splat for rocks under the cut-off. The
@@ -204,7 +207,7 @@ heap of about 4 MiB holds frame constants, staged culling parameters/body instan
 space. GPU-written culling scratch, indirect
 commands and generated instances use a separate device-only heap sized for the configured maximum
 rock count (about 16 MiB by default); the two rock-state slices are another 16 MiB of device memory with
-an 8 MiB host-visible staging heap. A small readback heap returns completed culling statistics; the
+a 16 MiB host-visible staging heap in two slots. A small readback heap returns completed culling statistics; the
 per-frame uploads are the parameters, the body instances and the rock state of the active tier. Rock-count overrides are checked against
 the supported instance capacity before allocation. Generated asteroids use 32-byte records,
 while the body prefix retains 48-byte instances. Mesh material data is reconstructed from

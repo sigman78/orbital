@@ -33,6 +33,8 @@ bool Renderer::draw(const FrameInput& supplied) {
     ORBITAL_ASSERT(s.showcase.order_states(supplied.bodies, states));
     FrameInput input = supplied;
     input.bodies = states;
+    // The heavy CPU write of the frame goes first, while the previous frame's GPU work is still running.
+    s.write_belt_state(input);
     s.submissions.wait_last();
     s.read_gpu_timings();
     s.apply_metering(input.tone);
@@ -84,10 +86,9 @@ bool Renderer::draw(const FrameInput& supplied) {
     std::memcpy(dynamic + heap_layout.instance_offset, s.instances.data(), s.instances.size() * sizeof(Instance));
     // This frame's rock state goes to one of two device slices, so the other still holds the last frame's.
     const unsigned rock_limit = scratch->params.rock_limit;
-    s.write_belt_state(input, rock_limit);
     const std::uint64_t state_bytes = std::uint64_t(rock_limit) * belt_state_stride;
-    const auto state_address = reinterpret_cast<std::uint64_t>(s.buffers.belt_state.range().gpu) +
-                               (s.frame_index & 1) * std::uint64_t(s.belt_capacity) * belt_state_stride;
+    const std::uint64_t state_slice = (s.frame_index & 1) * std::uint64_t(s.belt_capacity) * belt_state_stride;
+    const auto state_address = reinterpret_cast<std::uint64_t>(s.buffers.belt_state.range().gpu) + state_slice;
     Root root{.frame = frame_address,
               .vertices = 0,
               .instances = cull_address + heap_layout.instance_offset,
@@ -122,7 +123,7 @@ bool Renderer::draw(const FrameInput& supplied) {
                                  {s.buffers.cull_device.range().gpu + heap_layout.instance_offset,
                                   s.instances.size() * sizeof(Instance)});
                 if (state_bytes)
-                    gpu::copy_memory(cmd, {s.buffers.belt_state_staging.range().gpu, state_bytes},
+                    gpu::copy_memory(cmd, {s.buffers.belt_state_staging.range().gpu + state_slice, state_bytes},
                                      {reinterpret_cast<void*>(state_address), state_bytes});
                 synchronize(cmd, access::transfer_write, cull_input_access);
                 s.record_cull_passes(cmd, cull_root);

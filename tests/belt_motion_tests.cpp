@@ -72,10 +72,17 @@ void test_seed_and_steps() {
     assert(motion.advance(3.25, 40000, out.data()));
     assert(motion.stepped_time() == 3.25);
     check_against("seed", p, out, 0, 40000, 3.25, 1e-3f);
-    // A fixed time stands still and does not touch the output.
+    // A fixed time stands still and does not touch the output; the version says so,
+    // and write() fills another buffer with the same states.
+    const auto version = motion.version();
     out[0].x = 12345.f;
     assert(!motion.advance(3.25, 40000, out.data()));
-    assert(out[0].x == 12345.f);
+    assert(out[0].x == 12345.f && motion.version() == version);
+    std::vector<RockState> copy(out.size());
+    motion.write(40000, copy.data());
+    check_against("write", p, copy, 0, 40000, 3.25, 1e-3f);
+    for (unsigned i = 1; i < 40000; i++)
+        assert(copy[i].x == out[i].x && copy[i].z == out[i].z && copy[i].phase == out[i].phase);
     // Frames advance in whole steps; the remainder waits for the next frame.
     double time = 3.25;
     for (unsigned frame = 0; frame < 300; frame++) {

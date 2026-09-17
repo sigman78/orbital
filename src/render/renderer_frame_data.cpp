@@ -223,11 +223,23 @@ void Renderer::Impl::cull_bodies(const FrameInput& input, const FrameData& frame
 // frustum test it replaced: plane normals are not unit length, so sphere
 // support is scaled, and two pixels of padding cover temporal jitter and
 // expanded tiny billboards.
-// The rocks' states for this frame, stepped by the sweep into the staging heap
-// the frame copies into the device slice; a standing time leaves the last write
-// in place.
-void Renderer::Impl::write_belt_state(const FrameInput& input, unsigned count) {
-    belt_motion.advance(input.time, count, reinterpret_cast<RockState*>(buffers.belt_state_staging.range().cpu));
+// The rocks' states for this frame, stepped by the sweep into this frame's
+// staging slot, which the frame copies into the device slice. Runs before the
+// wait for the previous frame, so the write overlaps that frame's GPU work; the
+// previous frame reads the other slot. A standing state is written only into a
+// slot that does not hold it yet.
+void Renderer::Impl::write_belt_state(const FrameInput& input) {
+    const unsigned slot = frame_index & 1, count = active_rock_count(input);
+    auto* out = reinterpret_cast<RockState*>(buffers.belt_state_staging.range().cpu +
+                                             slot * std::uint64_t(belt_capacity) * belt_state_stride);
+    if (!belt_motion.advance(input.time, count, out) && belt_staging_version[slot] != belt_motion.version())
+        belt_motion.write(count, out);
+    belt_staging_version[slot] = belt_motion.version();
+}
+
+unsigned Renderer::Impl::active_rock_count(const FrameInput& input) const {
+    const unsigned tier_count = (input.high_quality ? high_quality : baseline_quality).belt_count;
+    return std::min(rock_count, belt_count_override ? belt_count_override : tier_count);
 }
 
 void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
@@ -249,8 +261,7 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
                 geometry::rock_level_thresholds[2], geometry::rock_level_thresholds[3]};
     p.billboard = {geometry::rock_level_thresholds[4], input.belt.billboard_radius(),
                    belt_culling::billboard::min_pixels, frame.belt_disc.y};
-    const unsigned tier_count = (input.high_quality ? high_quality : baseline_quality).belt_count;
-    p.rock_limit = std::min(rock_count, belt_count_override ? belt_count_override : tier_count);
+    p.rock_limit = active_rock_count(input);
     p.body_count = body_count;
     p.light_in_count_pass = input.belt.splat_light_twice ? 1u : 0u;
     for (unsigned group = 0; group < rock_group_count; group++) {

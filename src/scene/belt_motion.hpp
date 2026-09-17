@@ -48,10 +48,15 @@ public:
     const std::vector<RockSeed>& rocks() const { return rocks_; }
     const std::vector<RockState>& states() const { return states_; }
     double stepped_time() const { return stepped_time_; }
+    // Changes whenever a state changes; a caller keeping several output buffers
+    // compares it to know whether one still holds the current states.
+    std::uint64_t version() const { return version_; }
     // Brings the first count rocks to the simulation time in whole steps and
     // writes their states to out. Returns false when nothing moved and out was
     // not touched (a fixed time), so the previous write still stands.
     bool advance(double time, unsigned count, RockState* out);
+    // Writes the first count rocks' current states to out without stepping.
+    void write(unsigned count, RockState* out) const;
 
 private:
     void seed(std::size_t begin, std::size_t end, double time, RockState* out);
@@ -61,6 +66,7 @@ private:
     float rates_[bands] = {};
     double stepped_time_ = 0;
     std::uint64_t step_index_ = 0;
+    std::uint64_t version_ = 0;
     unsigned seeded_count_ = 0; // rocks holding a valid state; the rest are stale
     bool seeded_ = false;
 };

@@ -60,6 +60,11 @@ void BeltMotion::step(std::size_t begin, std::size_t end, double seconds, RockSt
     }
 }
 
+void BeltMotion::write(unsigned count, RockState* out) const {
+    count = std::min(count, this->count());
+    std::copy_n(states_.data(), count, out);
+}
+
 bool BeltMotion::advance(double time, unsigned count, RockState* out) {
     count = std::min(count, this->count());
     const double gap = time - stepped_time_;
@@ -69,6 +74,7 @@ bool BeltMotion::advance(double time, unsigned count, RockState* out) {
         step_index_ = 0;
         seeded_count_ = count;
         seeded_ = true;
+        ++version_;
         return true;
     }
     const auto steps = unsigned(gap / step_seconds);
@@ -77,6 +83,7 @@ bool BeltMotion::advance(double time, unsigned count, RockState* out) {
             return false;
         seed(seeded_count_, count, stepped_time_, out); // the tier grew: the new rocks exactly, the rest stand
         seeded_count_ = count;
+        ++version_;
         return true;
     }
     if (count > seeded_count_)
@@ -86,6 +93,7 @@ bool BeltMotion::advance(double time, unsigned count, RockState* out) {
     stepped_time_ += seconds;
     step_index_ += steps;
     seeded_count_ = count;
+    ++version_;
     // The slice whose turn it is goes back to the exact state.
     const std::size_t slice = (count + reseed_period - 1) / reseed_period;
     const std::size_t begin = std::min<std::size_t>((step_index_ % reseed_period) * slice, count);

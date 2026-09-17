@@ -171,7 +171,8 @@ void Renderer::Impl::create_device(void* window) {
     buffers.cull_readback = UniqueGpuHeap::create(device, sizeof(CullScratch), gpu::MemoryType::readback);
     buffers.belt_state = UniqueGpuHeap::create(device, 2ull * belt_capacity * belt_state_stride,
                                                gpu::MemoryType::gpu_only);
-    buffers.belt_state_staging = UniqueGpuHeap::create(device, std::uint64_t(belt_capacity) * belt_state_stride);
+    buffers.belt_state_staging = UniqueGpuHeap::create(device, 2ull * belt_capacity *
+                                                                   belt_state_stride); // two slots, by frame parity
     panic_if(!buffers.static_data.range().gpu || !buffers.cull_device.range().gpu ||
                  !buffers.cull_readback.range().cpu || !buffers.belt_state.range().gpu ||
                  !buffers.belt_state_staging.range().cpu,
