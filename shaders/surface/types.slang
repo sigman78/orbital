@@ -16,6 +16,9 @@ struct SurfaceVaryings {
     [[vk::location(2)]] float3 localNormal : LOCAL_NORMAL;
     [[vk::location(3)]] nointerpolation uint instanceIndex : INSTANCE_INDEX;
     [[vk::location(4)]] nointerpolation uint patchLevel : PATCH_LEVEL;
+    [[vk::location(5)]] float2 tileUV : TILE_UV;
+    [[vk::location(6)]] nointerpolation uint tileSlot : TILE_SLOT;
+    [[vk::location(7)]] nointerpolation uint tileFace : TILE_FACE;
 };
 
 struct Material {

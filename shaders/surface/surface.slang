@@ -38,10 +38,16 @@ SurfaceVaryings vertexMain(uint vertexIndex : SV_VertexID, uint firstVertex : SV
         output.worldNormal = pr.worldNormal;
         output.localNormal = pr.localNormal;
         output.patchLevel = pr.level;
+        output.tileUV = pr.tileUV;
+        output.tileSlot = pr.slot;
+        output.tileFace = pr.face;
         output.position = mul(root.mode == MODE_SHADOW ? shadowProjection(root.frame) : viewProjection(root.frame), float4(output.worldPosition, 1.0));
         return output;
     }
     output.patchLevel = 0;
+    output.tileUV = float2(0, 0);
+    output.tileSlot = 0;
+    output.tileFace = 0;
     Vertex vertex = root.vertices[vertexIndex];
     float3x3 rotate = rotation(inst.rotation_kind.xyz);
     float scale = inst.center_radius.w * (root.mode == MODE_CLOUD ? 1.0 + CLOUD_HEIGHT : 1.0);

@@ -1,7 +1,9 @@
 #include "../scene/frame_bindings.slang"
 #include "../scene/frame_records.slang"
+#include "../scene/bindings.slang"
 #include "../surface/lighting.slang"
 #include "../surface/brdf.slang"
+#include "../surface/patch.slang"
 #include "../lib/math.slang"
 #include "../lib/color.slang"
 #include "../lib/noise.slang"
@@ -94,6 +96,25 @@ Material marsMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L
     return m;
 }
 
+Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility)
+{
+    float2 uv = (input.tileUV * PATCH_QUADS + 0.5) / TILE_SIDE;
+    uint slot = input.tileSlot;
+    uint face = input.tileFace;
+    float3 albedo = textureArrays[TEX_ARRAY_TERRAIN_ALBEDO].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0).rgb;
+    float4 nm = textureArrays[TEX_ARRAY_TERRAIN_NORMAL].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0);
+    float3 mapN = nm.xyz * 2.0 - 1.0;
+    float3 T = normalize(mul(rotate, FACE_S[face]));
+    float3 B = normalize(mul(rotate, FACE_T[face]));
+    Material m;
+    m.N = normalize(T * mapN.x + B * mapN.y + N * max(mapN.z, .2));
+    m.albedo = albedo;
+    m.visibility = visibility;
+    m.rough = .95;
+    m.water = 0.0;
+    return m;
+}
+
 // The near tier's review: the patch's quad grid over the surface, in the cube
 // face's cell coordinates of scene/terrain_patch.hpp (the face by the major
 // axis, s and t through the tangent warp), the patch borders in a second
@@ -108,11 +129,12 @@ float3 wireframe(float3 colour, float3 n, uint level, float3 irradiance)
     float3 a = abs(n);
     int face = a.x >= a.y && a.x >= a.z ? (n.x > 0 ? 0 : 1) : a.y >= a.z ? (n.y > 0 ? 2 : 3) : (n.z > 0 ? 4 : 5);
     float axis = dot(n, CUBE_AXIS[face]);
-    float2 st = float2(atan2(dot(n, CUBE_S[face]), axis), atan2(dot(n, CUBE_T[face]), axis)) * (4.0 / PI);
-    float2 quads = st * (8.0 * exp2(float(level)));  // the quads across the face at this level, halved for the [-1, 1] span
-    float2 cell = frac(quads), patch = frac(quads / 16.0);
+    float2 uv = float2(dot(n, CUBE_S[face]), dot(n, CUBE_T[face])) / axis;
+    float2 st = atan(uv * TAN_K) / EVERITT_K;
+    float2 quads = st * (PATCH_QUADS / 2.0 * exp2(float(level)));
+    float2 cell = frac(quads), patch = frac(st * (0.5 * exp2(float(level))));
     float2 lineQuad = 1.0 - smoothstep(0.0, fwidth(quads) * 1.5, min(cell, 1.0 - cell));
-    float2 linePatch = 1.0 - smoothstep(0.0, fwidth(quads / 16.0) * 1.5, min(patch, 1.0 - patch));
+    float2 linePatch = 1.0 - smoothstep(0.0, fwidth(patch) * 1.5, min(patch, 1.0 - patch));
     float bright = max(luma709(irradiance) * .04, 1e-4);
     colour = lerp(colour, float3(.15, 1.0, .35) * bright, max(lineQuad.x, lineQuad.y) * .8);
     return lerp(colour, float3(1.0, .75, .2) * bright, max(linePatch.x, linePatch.y));
@@ -123,9 +145,10 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
 {
     Surface s = surfaceAt(root.frame, root.instances, input, true);
     float3x3 rotate = rotation(s.inst.rotation_kind.xyz);
-    Material m = s.kind == KIND_MARS        ? marsMaterial(input, rotate, s.N, s.L, s.visibility, root.detail)
-               : s.kind == KIND_MINOR_PLANET   ? minorPlanetMaterial(input, rotate, s.N, s.L, s.visibility, root.detail)
-                                            : moonMaterial(input, rotate, s.N, s.L, s.visibility, root.detail);
+    Material m = (root.flags & ORBITAL_ROOT_PATCHES) ? patchMaterial(input, rotate, s.N, s.L, s.visibility)
+               : s.kind == KIND_MARS                ? marsMaterial(input, rotate, s.N, s.L, s.visibility, root.detail)
+               : s.kind == KIND_MINOR_PLANET         ? minorPlanetMaterial(input, rotate, s.N, s.L, s.visibility, root.detail)
+                                                    : moonMaterial(input, rotate, s.N, s.L, s.visibility, root.detail);
     float3 irradiance = sunlight(root.frame);
     float3 colour = shadeSurface(m, s.L, s.V, irradiance, earthParams(root.frame).glint, lightParams(root.frame).ambientFill);
     if (root.flags & ORBITAL_ROOT_WIREFRAME) {

@@ -32,6 +32,9 @@ struct PatchResult {
     float3 worldNormal;
     float3 localNormal;
     uint level;
+    float2 tileUV;
+    uint slot;
+    uint face;
 };
 
 PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
@@ -71,5 +74,8 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     r.worldNormal = normalize(mul(rotate, d));
     r.localNormal = d;
     r.level = level;
+    r.tileUV = gm / PATCH_QUADS;
+    r.slot = slot;
+    r.face = face;
     return r;
 }
