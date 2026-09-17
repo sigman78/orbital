@@ -19,8 +19,10 @@
 // so the haze does not bleed across rock silhouettes, mixed with the far-belt
 // disc (beltfar.slang) by the LOD weight in a single blend, so the belt's
 // opacity crosses over linearly rather than dipping mid-fade as two stacked
-// layers would. The ray start is jittered per pixel and frame (the frame count,
-// so a paused simulation keeps decorrelating it), and the
+// layers would. The ray start is dithered per pixel with interleaved gradient
+// noise, rotated per frame while the temporal pass is on to settle it (by the
+// frame count, so a paused simulation keeps decorrelating it) and still when
+// it is off, and the
 // temporal pass settles the noise. Frame.quality.z switches the dust off;
 // the far disc still draws its rock layer then.
 
@@ -55,7 +57,7 @@ float4 march(float2 fullResPixel, int2 depthPixel)
     float farScale = dustFarScale(aboveSlab, beyondEdge, halfHeight, dustSettings.farScale);
     float3 colour = dustColour(frame);
 
-    float jitter = hash(float3(fullResPixel, view.frame * 13.0 + view.jitter.x * 37.0));
+    float jitter = marchJitter(fullResPixel, view.frame, temporalParams(frame).enabled);
     float ds = (t1 - t0) / float(DUST_STEPS);
     float transmittance = 1.0;
     float3 radiance = float3(0.0, 0.0, 0.0);
