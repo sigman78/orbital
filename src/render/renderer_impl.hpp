@@ -175,7 +175,8 @@ static_assert(heap_layout.instance_offset < heap_layout.ui_offset());
 
 // Sizes of the fixed GPU targets, created by the resources side and addressed by the frame side.
 namespace targets {
-inline constexpr Range<float> depth{0.02f, 2000.0f}; // near and far plane, camera-relative units
+inline constexpr Range<float> depth{
+    0.002f, 2000.0f}; // near and far plane, camera-relative units; reversed-Z (NEAR_Z in the shaders)
 inline constexpr unsigned shadow_map_size = 2048;
 inline constexpr unsigned belt_light_map_size = 2048;    // the whole belt in light space, rgba16f coverage slices
 inline constexpr unsigned belt_disc_map_size = 1024;     // the whole belt over its plane, for the far tier: sunlight

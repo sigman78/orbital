@@ -183,7 +183,7 @@ PreparedCamera prepare_camera(const CameraView& camera, const CameraHistory& pre
     result.forward = to_float(camera.forward);
     result.tan_half_fov = float(std::tan(camera.vertical_fov * .5));
     result.aspect = extent.aspect();
-    result.projection = perspective_matrix(result.tan_half_fov, result.aspect, near_plane, far_plane) *
+    result.projection = perspective_matrix_reversed(result.tan_half_fov, result.aspect, near_plane, far_plane) *
                         view_matrix(result.right, result.up, result.forward);
     result.jitter_x = temporal_aa ? jitter[jitter_phase % 8][0] : 0;
     result.jitter_y = temporal_aa ? jitter[jitter_phase % 8][1] : 0;

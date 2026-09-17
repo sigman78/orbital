@@ -95,6 +95,13 @@ void test_matrices() {
     assert(product.at(0, 0) == 2 && product.at(0, 3) == 5);
     const Mat4 projection = perspective_matrix(1.0f, 2.0f, 0.1f, 100.0f);
     assert(near(projection.at(0, 0), 0.5f) && near(projection.at(1, 1), -1.0f) && projection.at(3, 2) == -1);
+    // Reversed depth: the near plane lands at 1, the far at 0, between them falling with distance.
+    const Mat4 reversed = perspective_matrix_reversed(1.0f, 2.0f, 0.1f, 100.0f);
+    const auto depth_at = [&](float z) {
+        return (reversed.at(2, 2) * -z + reversed.at(2, 3)) / (reversed.at(3, 2) * -z);
+    };
+    assert(near(depth_at(0.1f), 1.0f) && near(depth_at(100.0f), 0.0f) && depth_at(1) > depth_at(10));
+    assert(near(depth_at(1.0f), 0.1f * 99.0f / (1.0f * 99.9f)));
 }
 
 void test_files() {

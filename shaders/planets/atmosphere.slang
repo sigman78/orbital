@@ -6,8 +6,6 @@
 #include "../lib/scattering.slang"
 #include "clouds.slang"
 
-static const float DEPTH_FLOAT_STEP = 6e-8;       // one float step just below 1, where far depths land
-static const float DEPTH_RESOLUTION_STEPS = 4.0;  // steps within which a buffer depth is taken as the analytic ground
 // The minor planet's haze is Pluto's (Gladstone et al. 2016, Science 351): a blue, forward-scattering
 // tholin haze with a scale height of about 50 km on a 1188 km radius, reaching 200 km up, of a normal
 // optical depth near a hundredth. Physically it barely shows; the boost makes it read, and the scale
@@ -46,17 +44,9 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         float2 hit = sphereHit(ro, rd, other.centre, other.radius);
         if (hit.x > 0.0) end = min(end, hit.x);
     }
-    // Anything already drawn in front of the shell (asteroids, the moon) ends the march.
-    // The depth buffer's own resolution (the float step of the standard projection
-    // near 1, over its slope of near / z^2) grows with the square of the distance
-    // and passes the shell's thickness a few hundred units out, so a ground pixel's
-    // depth lands either side of the analytic hit and the march would end early by
-    // up to that step, a pattern that moves with the view; within that resolution
-    // the analytic ground stands in for the buffer.
-    float scene = sceneDistance(root.frame, textures[TEX_DEPTH], position.xy, rd);
-    float resolution = scene * scene * DEPTH_RESOLUTION_STEPS * DEPTH_FLOAT_STEP / NEAR_Z;
-    if (abs(scene - nearGround) < resolution) scene = nearGround;
-    end = min(end, scene);
+    // Anything already drawn in front of the shell (asteroids, the moon) ends the march;
+    // the reversed-Z buffer resolves the ground finer than the shell at every distance.
+    end = min(end, sceneDistance(root.frame, textures[TEX_DEPTH], position.xy, rd));
     if (end <= begin) return float4(0.0, 0.0, 0.0, 0.0);
 
     float3 sunDirection = normalize(light.position - centre);

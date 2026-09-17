@@ -121,4 +121,14 @@ constexpr Mat4 perspective_matrix(float tan_half_fov, float aspect, float near_z
     return projection;
 }
 
+// The same with depth reversed: near maps to 1 and far to 0, so a float depth
+// buffer keeps near-uniform relative precision over the whole range and the
+// near plane can sit close without starving the distance.
+constexpr Mat4 perspective_matrix_reversed(float tan_half_fov, float aspect, float near_z, float far_z) {
+    Mat4 projection = perspective_matrix(tan_half_fov, aspect, near_z, far_z);
+    projection.at(2, 2) = near_z / (far_z - near_z);
+    projection.at(2, 3) = far_z * near_z / (far_z - near_z);
+    return projection;
+}
+
 } // namespace space
