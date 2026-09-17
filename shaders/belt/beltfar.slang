@@ -147,7 +147,7 @@ float4 farBelt(float2 position)
     float pixelAngle = 2.0 * view.tanHalfFov / view.size.y;
     int taps = clamp(int(round(t0 * pixelAngle / texelSize)), 3, MAX_FOOTPRINT); // at least 3x3: the map is a rock-count estimate and wants smoothing
 
-    float jitter = hash(float3(position, frac(view.time * 11.0) * 100.0 + view.jitter.y * 29.0));
+    float jitter = marchJitter(position, view.frame, temporalParams(frame).enabled);
     float ds = (t1 - t0) / float(DISC_STEPS);
     float transmittance = 1.0;
     float3 radiance = float3(0.0, 0.0, 0.0);

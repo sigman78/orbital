@@ -134,7 +134,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     // Dither and grain in display-code space; linear-space noise is far too
     // bright in black space. Grain is strongest in the midtones.
     float luminance = luma709(color);
-    float grain = (hash(float3(position.xy, frac(view.time * 7.0) * 100.0)) - .5) * post.grain
+    float grain = (hash(float3(position.xy, view.frame * 7.0)) - .5) * post.grain
                   * (4.0 * luminance * (1.0 - luminance));
     float dither = (hash(float3(position.xy, 0.0)) - .5) / 255.0 + grain;
     if (view.hud) {

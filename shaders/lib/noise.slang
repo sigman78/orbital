@@ -69,3 +69,19 @@ float fbm2(float2 p, int octaves)
     }
     return n;
 }
+
+// Interleaved gradient noise: a fine, regular screen pattern with no visible
+// lumps, the dither of the marches. Rotated by the golden ratio each frame it
+// covers [0, 1) evenly over a history's length, so the temporal pass settles it
+// faster than a hash; without the temporal pass it stands still, fine grain
+// instead of a pattern that shimmers.
+float interleavedGradientNoise(float2 pixel)
+{
+    return frac(52.9829189 * frac(dot(pixel, float2(0.06711056, 0.00583715))));
+}
+
+float marchJitter(float2 pixel, float frame, bool temporal)
+{
+    float pattern = interleavedGradientNoise(pixel);
+    return temporal ? frac(pattern + frame * 0.61803398875) : pattern;
+}
