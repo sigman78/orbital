@@ -46,14 +46,9 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
     const float bound = float(cap + view.radius * 2 * MinorPlanetTerrain::height_max);
     if (!geometry::sphere_in_frustum(view.frustum, to_float(centre), bound))
         return {};
-    // The projected size per radius of extent, from the patch's distance; the
-    // cell's edge in those units orders the generation.
     const double distance = std::max(length(centre), cap);
     const float scale = float(view.radius * view.height_pixels / (distance * view.tan_y));
-    // Facing the camera an error shows as parallax, edge-on it is the silhouette
-    // itself: the tolerance is the strict one at the limb and twice it head-on.
-    const float facing = float(std::clamp(-dot(normal, centre) / distance, 0.0, 1.0));
-    return {.visible = true, .scale = scale, .pixels = float(b.angular_size) * scale, .tolerance = 1 + facing};
+    return {.visible = true, .pixels = float(b.angular_size) * scale};
 }
 
 std::uint32_t TerrainTier::allocate_children(const Node& parent) {
@@ -87,9 +82,12 @@ unsigned TerrainTier::slot_of(PatchKey key) const {
     return found == slots_by_key_.end() ? no_slot : found->second;
 }
 
-float TerrainTier::error_of(PatchKey key) const {
-    const unsigned slot = slot_of(key);
-    return slot == no_slot ? 0 : slots_[slot].error;
+unsigned TerrainTier::resident() const {
+    unsigned count = 0;
+    for (const auto& [_, slot] : slots_by_key_)
+        if (slots_[slot].resident)
+            count++;
+    return count;
 }
 
 void TerrainTier::touch(PatchKey key) {
@@ -109,26 +107,27 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view) {
     }
     const PatchKey key = nodes_[index].key;
     touch(key);
-    // A resident patch splits while its error shows on screen; the valve holds
-    // the tree under the pool's size.
-    const bool split = key.level < patch_level_max && (nodes_[index].children || nodes() < slot_count - 64) &&
-                       error_of(key) * seen.scale >
-                           error_pixels * seen.tolerance * (nodes_[index].children ? hysteresis : 1);
+    const double dist = length(view.camera_local - nodes_[index].bounds.centre);
+    const bool split = key.level < patch_level_max && key.level + 1 < std::size(level_error) &&
+                       (nodes_[index].children || nodes() < slot_count - 64) &&
+                       dist < double(range_[key.level + 1]) * (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0);
     if (split && !nodes_[index].children)
         nodes_[index].children = allocate_children(nodes_[index]);
     if (!split && nodes_[index].children)
         collapse(nodes_[index]);
     if (const std::uint32_t children = nodes_[index].children) {
-        // Descend only when every visible child is resident; keep those
-        // children alive meanwhile, and ask for the missing ones.
         bool ready = true;
         for (unsigned i = 0; i < 4; i++) {
             const Node& child = nodes_[children + i];
             const Visibility child_seen = visibility(child, view);
             if (!child_seen.visible)
                 continue;
-            if (slot_of(child.key) == no_slot) {
+            const unsigned child_slot = slot_of(child.key);
+            if (child_slot == no_slot) {
                 request(child.key, child_seen.pixels);
+                ready = false;
+            } else if (!slots_[child_slot].resident) {
+                touch(child.key);
                 ready = false;
             } else {
                 touch(child.key);
@@ -140,10 +139,11 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view) {
             return;
         }
     }
-    if (const unsigned slot = slot_of(key); slot != no_slot)
-        draws_.push_back({.slot = slot, .level = key.level});
-    else
-        request(key, seen.pixels); // a root, before the tier is active
+    const unsigned slot = slot_of(key);
+    if (slot != no_slot && slots_[slot].resident)
+        draws_.push_back({.key = key, .slot = slot});
+    else if (slot == no_slot)
+        request(key, seen.pixels);
 }
 
 // Coarse levels first, then the largest on screen; a slot comes from the free
@@ -172,7 +172,7 @@ void TerrainTier::choose_generation() {
                 break;
             slots_by_key_.erase(slots_[slot].key.packed());
         }
-        slots_[slot] = {.key = r.key, .used = frame_, .resident = true};
+        slots_[slot] = {.key = r.key, .used = frame_, .resident = false};
         slots_by_key_[r.key.packed()] = slot;
         generate_.push_back({.key = r.key, .slot = slot});
     }
@@ -190,9 +190,9 @@ void TerrainTier::update(const TierView& view, unsigned frame) {
     frame_ = frame;
     draws_.clear();
     requests_.clear();
-    for (const Generation& g : generate_) // last frame's, generated since
-        slots_[g.slot].error = g.error;
     generate_.clear();
+    for (unsigned level = 0; level < std::size(level_error); level++)
+        range_[level] = level_error[level] * view.height_pixels / (view.tan_y * error_pixels);
     ensure_roots();
     const double distance = std::max(length(view.body_centre), view.radius);
     const float projected = float(view.radius * view.height_pixels / (distance * view.tan_y));

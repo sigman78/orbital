@@ -27,6 +27,7 @@ using ShaderMatrix4 = float[16];
 // Root.flags for a body draw.
 #define ORBITAL_ROOT_FOLD_CLOUDS 1 // the cloud shell is not drawn: the ground shader blends the clouds in
 #define ORBITAL_ROOT_WIREFRAME 2   // a terrain patch's quad grid drawn over it; its level in bits 8 to 15
+#define ORBITAL_ROOT_PATCHES 4     // this draw uses the CDLOD patch path: root.patches points to PatchInstance records
 // The Earth's cloud shell above the surface, in radii (the mesh scale and the shadow geometry).
 #define ORBITAL_CLOUD_HEIGHT 0.009
 // Instance.rotation_kind.w (SurfaceKind on the C++ side); each kind has its own fragment shader.
@@ -57,6 +58,11 @@ struct AsteroidInstance {
     SHADER_UINT previous[4];
 };
 struct Vertex { SHADER_FLOAT4 position; SHADER_FLOAT4 normal; };
+struct PatchInstance {
+    SHADER_FLOAT4 cell;  // s0, t0, size, level
+    SHADER_FLOAT4 morph; // start distance (radii), end distance, unused, unused
+    SHADER_UINT tile[4]; // face, slot, flags, unused
+};
 struct Frame {
     SHADER_MATRIX4 view_projection;
     SHADER_FLOAT4 camera_time, right_tan, up_aspect, forward_exposure, sun;
@@ -100,11 +106,12 @@ struct Frame {
 };
 struct Root {
 #ifdef __cplusplus
-    SHADER_ADDRESS frame, vertices, instances;
+    SHADER_ADDRESS frame, vertices, instances, patches;
 #else
     SHADER_ADDRESS(Frame) frame;
     SHADER_ADDRESS(Vertex) vertices;
     SHADER_ADDRESS(Instance) instances;
+    SHADER_ADDRESS(PatchInstance) patches;
 #endif
     SHADER_UINT base, mode;
     // Per body draw: the detail weight (0 at the smallest mesh level, 1 from the third)

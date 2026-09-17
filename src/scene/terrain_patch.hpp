@@ -28,11 +28,19 @@ struct PatchKey {
 constexpr unsigned patch_quads = 16, patch_side = patch_quads + 1;
 constexpr unsigned patch_vertex_count = patch_side * patch_side + 4 * patch_side; // the grid, then the skirt
 constexpr unsigned patch_index_count = (patch_quads * patch_quads + 4 * patch_quads) * 6;
-constexpr unsigned patch_level_max = 10; // a cell of 90 degrees over 1024, quads of 0.1 mrad
+constexpr unsigned patch_level_max = 10;  // a cell of 90 degrees over 1024, quads of 0.1 mrad
+constexpr unsigned tile_side = 65;        // texels per tile edge, covering 64 quads
+constexpr unsigned tile_colour_ratio = 1; // colour texels per height texel (1 for now; 2 later for extra detail)
 
-// Direction of a face point, s and t in [-1, 1], the square warped by the
-// tangent so cells are near-uniform on the sphere.
+// Direction of a face point, s and t in [-1, 1], warped by Everitt's mapping
+// (tan(k*s)/tan(k), k=0.8687) so texel areas stay within about 11 percent.
 Vec3d cube_direction(unsigned face, double s, double t);
+
+struct CubeCoord {
+    unsigned face;
+    double s, t; // in [-1, 1]
+};
+CubeCoord cube_coordinates(Vec3d direction);
 
 struct PatchBounds {
     Vec3d centre;              // unit direction
@@ -49,5 +57,19 @@ PatchBounds patch_bounds(PatchKey key);
 float generate_patch(const MinorPlanetTerrain& terrain, PatchKey key, std::span<geometry::Vertex> out);
 // The index triples every patch shares, patch_index_count of them.
 std::vector<std::uint32_t> patch_indices();
+
+// The patch's geometric error in radii, from the terrain at quad centres against
+// the bilinear surface of the tile's corner heights, the sphere's curvature included.
+float patch_error(const MinorPlanetTerrain& terrain, PatchKey key);
+
+// Tile generation: heights in radii (tile_side² floats), then colour tiles
+// (tile_side² × 4 bytes each for albedo RGBA8 and normal+height RGBA8).
+void generate_height_tile(const MinorPlanetTerrain& terrain, PatchKey key, std::span<float> out);
+void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<const float> heights,
+                           std::span<std::uint8_t> albedo, std::span<std::uint8_t> normal);
+
+// The shared grid mesh for all patches: 65×65 vertices whose position holds
+// (x, y, skirt), x and y in 0..64, skirt 0 on the grid and 1 on the drop ring.
+geometry::Mesh patch_grid_mesh();
 
 } // namespace space

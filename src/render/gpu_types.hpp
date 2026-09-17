@@ -16,7 +16,7 @@ using DrawArgs = ::DrawArgs;
 using CullParams = ::CullParams;
 using CullScratch = ::CullScratch;
 using CullRoot = ::CullRoot;
-static_assert(sizeof(Root) == 40 && sizeof(Vertex) == 32 && sizeof(Instance) == 80);
+static_assert(sizeof(Root) == 48 && sizeof(Vertex) == 32 && sizeof(Instance) == 80 && sizeof(PatchInstance) == 48);
 static_assert(sizeof(AsteroidInstance) == 48 && offsetof(AsteroidInstance, payload) == 16 &&
               offsetof(AsteroidInstance, previous) == 32);
 static_assert(sizeof(CullRoot) == 48 && sizeof(RockData) == 48 && sizeof(DrawArgs) == 32);

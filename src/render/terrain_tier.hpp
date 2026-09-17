@@ -21,12 +21,11 @@ struct TierView {
 };
 
 // The near tier's CPU side: which patches of the cube sphere to draw this frame
-// and which to generate for the next, over a fixed pool of vertex slots kept as
-// a cache by patch (least recently used out). The quadtree splits a patch while
-// its geometric error (measured at its generation) projects larger than a
-// tolerance on screen, with hysteresis, and collapses it out of view; a patch whose visible children are not all
-// resident draws itself, so the surface is always complete. Nothing here touches the GPU: the caller generates the
-// requested patches into the slots and draws the listed ones.
+// and which to generate for the next, over a fixed pool of tile slots kept as a
+// cache by patch (least recently used out). The quadtree splits by per-level
+// distance ranges derived from the error table, with hysteresis; a patch whose
+// visible children are not all resident draws itself. Slots start non-resident
+// and the caller marks them after the tile upload.
 class TerrainTier {
 public:
     static constexpr unsigned slot_count = 1024; // 11 MiB of vertices; a close view holds 400 of them
@@ -35,15 +34,21 @@ public:
     static constexpr float activate_pixels = 1200; // the body's, where the finest sphere level runs out
     static constexpr float error_pixels = 3;       // a patch's geometric error on screen: it splits above 1.5 px
     static constexpr float hysteresis = .8f;       // the fraction of either the way back
+    // Worst measured geometric error per level, radii, from 64 random patches per level
+    // on the seed-1007 terrain with the Everitt warp (2026-09-18). Levels 9..12
+    // extrapolated by the measured ratio of 2.5 per level.
+    static constexpr float level_error[] = {
+        .01458f,   .00478f,   .00215f, .000761f, .000300f, .000136f, .0000862f,
+        .0000356f, .0000145f, 5.8e-6f, 2.3e-6f,  9.3e-7f,  3.7e-7f,
+    };
 
     struct Generation {
         PatchKey key;
         unsigned slot;
-        float error = 0; // filled by the caller from generate_patch, read at the next update
     };
     struct Draw {
+        PatchKey key;
         unsigned slot;
-        unsigned level;
     };
 
     void update(const TierView& view, unsigned frame);
@@ -51,8 +56,10 @@ public:
     // True once the tier covers the body: the sphere levels draw until then.
     bool active() const { return active_; }
     std::span<const Draw> draws() const { return draws_; } // this frame's patches
-    std::span<Generation> generate() { return generate_; }
-    unsigned resident() const { return unsigned(slots_by_key_.size()); }
+    std::span<const Generation> generate() const { return generate_; }
+    void mark_resident(unsigned slot) { slots_[slot].resident = true; }
+    float range(unsigned level) const { return level < std::size(range_) ? range_[level] : 0; }
+    unsigned resident() const;
     unsigned nodes() const { return unsigned(nodes_.size() - free_blocks_.size() * 4); }
 
 private:
@@ -63,8 +70,7 @@ private:
     };
     struct Slot {
         PatchKey key;
-        unsigned used = 0; // the frame it was last needed
-        float error = 0;   // the patch's geometric error, radii, from its generation
+        unsigned used = 0;
         bool resident = false;
     };
     struct Request {
@@ -73,9 +79,7 @@ private:
     };
     struct Visibility {
         bool visible = false;
-        float scale = 0;     // screen size per radius of extent, for the error test
-        float pixels = 0;    // the cell's edge on screen, the generation priority
-        float tolerance = 1; // the error tolerance's factor: 1 edge-on, 2 facing
+        float pixels = 0; // the cell's edge on screen, the generation priority
     };
 
     void ensure_roots();
@@ -83,8 +87,7 @@ private:
     void visit(std::uint32_t index, const TierView& view);
     void collapse(Node& node);
     std::uint32_t allocate_children(const Node& node);
-    unsigned slot_of(PatchKey key) const; // slot_count when not resident
-    float error_of(PatchKey key) const;   // 0 when not resident
+    unsigned slot_of(PatchKey key) const; // slot_count when not in the cache
     void touch(PatchKey key);
     void request(PatchKey key, float pixels);
     void choose_generation();
@@ -97,6 +100,7 @@ private:
     std::vector<Draw> draws_;
     std::vector<Request> requests_;
     std::vector<Generation> generate_;
+    float range_[13] = {};
     unsigned frame_ = 0;
     bool active_ = false, wanted_ = false;
 };

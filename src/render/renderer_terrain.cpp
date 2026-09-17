@@ -93,8 +93,9 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     const std::uint64_t slot_offset = (frame_index & 1) * std::uint64_t(TerrainTier::generate_per_frame) * patch_bytes;
     std::uint8_t* staging = buffers.patch_staging.range().cpu + slot_offset;
     unsigned n = 0;
-    for (TerrainTier::Generation& generation : terrain_tier.generate()) {
-        generation.error = generate_patch(*minor_planet_terrain, generation.key, patch_scratch);
+    for (const TerrainTier::Generation& generation : terrain_tier.generate()) {
+        generate_patch(*minor_planet_terrain, generation.key, patch_scratch);
+        terrain_tier.mark_resident(generation.slot);
         auto* out = reinterpret_cast<Vertex*>(staging + n * patch_bytes);
         for (unsigned i = 0; i < patch_vertex_count; i++) {
             const geometry::Vertex& v = patch_scratch[i];
@@ -139,7 +140,7 @@ void Renderer::Impl::draw_body(gpu::CommandBuffer* cmd, Root& root, unsigned bod
         return;
     }
     for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
-        root.flags = wireframe ? ORBITAL_ROOT_WIREFRAME | draw.level << 8 : 0;
+        root.flags = wireframe ? ORBITAL_ROOT_WIREFRAME | draw.key.level << 8 : 0;
         stats.frame.draw_calls++;
         gpu::draw_indexed(cmd, root, indices, gpu::IndexType::uint32, patch_index_count, 1, 0,
                           std::int32_t(draw.slot * patch_vertex_count));

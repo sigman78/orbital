@@ -125,10 +125,111 @@ void test_patches() {
     assert(left.child(3) == child && left.packed() != right.packed());
 }
 
+void test_cube_coordinates() {
+    for (unsigned face = 0; face < 6; face++)
+        for (double s = -.9; s <= .9; s += .3)
+            for (double t = -.9; t <= .9; t += .3) {
+                const Vec3d d = cube_direction(face, s, t);
+                const CubeCoord c = cube_coordinates(d);
+                assert(c.face == face);
+                assert(std::abs(c.s - s) < 1e-9 && std::abs(c.t - t) < 1e-9);
+            }
+    // A direction on the face boundary goes to the right face.
+    const CubeCoord c = cube_coordinates(normalized(Vec3d{1, .5, .3}));
+    assert(c.face == 0); // +x dominant
+}
+
+void test_tiles() {
+    const MinorPlanetTerrain terrain(1007);
+    // Height tile determinism.
+    std::vector<float> a(tile_side * tile_side), b(tile_side * tile_side);
+    const PatchKey key{2, 3, 4, 5};
+    generate_height_tile(terrain, key, a);
+    generate_height_tile(terrain, key, b);
+    for (unsigned i = 0; i < a.size(); i++)
+        assert(a[i] == b[i]);
+    // Heights within range.
+    for (float h : a)
+        assert(h >= MinorPlanetTerrain::height_min && h <= MinorPlanetTerrain::height_max);
+    // Parent-child even-texel agreement: child's even texels sample the same
+    // directions as the parent's texels in the overlapping region.
+    std::vector<float> parent(tile_side * tile_side), child(tile_side * tile_side);
+    const PatchKey parent_key{0, 2, 1, 1};
+    generate_height_tile(terrain, parent_key, parent);
+    generate_height_tile(terrain, parent_key.child(0), child);
+    unsigned mismatches = 0;
+    for (unsigned y = 0; y < tile_side; y += 2)
+        for (unsigned x = 0; x < tile_side; x += 2) {
+            const float ph = parent[y / 2 * tile_side + x / 2];
+            const float ch = child[y * tile_side + x];
+            if (std::abs(ph - ch) > 1.0f / 65535)
+                mismatches++;
+        }
+    std::printf("tiles: parent-child even-texel mismatches %u of %u\n", mismatches,
+                (tile_side / 2 + 1) * (tile_side / 2 + 1));
+    assert(mismatches == 0);
+    // Neighbours share their edge exactly.
+    const PatchKey left_key{2, 3, 4, 5}, right_key{2, 3, 5, 5};
+    std::vector<float> lh(tile_side * tile_side), rh(tile_side * tile_side);
+    generate_height_tile(terrain, left_key, lh);
+    generate_height_tile(terrain, right_key, rh);
+    for (unsigned y = 0; y < tile_side; y++)
+        assert(lh[y * tile_side + (tile_side - 1)] == rh[y * tile_side]);
+    // Colour tiles match expected layout.
+    std::vector<std::uint8_t> albedo(tile_side * tile_side * 4), norm(tile_side * tile_side * 4);
+    generate_colour_tiles(terrain, key, a, albedo, norm);
+    for (unsigned i = 0; i < tile_side * tile_side; i++) {
+        assert(albedo[i * 4 + 3] == 255);
+        assert(norm[i * 4 + 2] > 0); // z component of normal is positive (outward)
+    }
+    // Patch error positive and reasonable.
+    const float error = patch_error(terrain, key);
+    assert(error > 0 && error < .01f);
+    std::printf("tiles: patch error at level 3: %g radii\n", double(error));
+}
+
+void calibrate_level_errors() {
+    const MinorPlanetTerrain terrain(1007);
+    std::uint64_t rng = 42;
+    std::printf("calibration: max patch_error per level, 64 random patches, seed 1007, Everitt warp:\n");
+    for (unsigned level = 0; level <= 8; level++) {
+        const unsigned cells = 1u << level;
+        float worst = 0;
+        for (unsigned trial = 0; trial < 64; trial++) {
+            const unsigned face = unsigned(uniform(rng) * 6) % 6;
+            const unsigned x = unsigned(uniform(rng) * cells) % cells;
+            const unsigned y = unsigned(uniform(rng) * cells) % cells;
+            const float e = patch_error(
+                terrain, PatchKey{std::uint8_t(face), std::uint8_t(level), std::uint16_t(x), std::uint16_t(y)});
+            if (e > worst)
+                worst = e;
+        }
+        std::printf("  level %u: %.6g\n", level, double(worst));
+    }
+}
+
+void test_grid_mesh() {
+    const auto mesh = patch_grid_mesh();
+    constexpr unsigned expected_vertices = tile_side * tile_side + 4 * tile_side;
+    constexpr unsigned expected_indices = ((tile_side - 1) * (tile_side - 1) + 4 * (tile_side - 1)) * 6;
+    assert(mesh.vertices.size() == expected_vertices);
+    assert(mesh.indices.size() == expected_indices);
+    for (const auto& v : mesh.vertices)
+        assert(v.position.x >= 0 && v.position.x <= tile_side - 1 && v.position.y >= 0 &&
+               v.position.y <= tile_side - 1 && (v.position.z == 0 || v.position.z == 1));
+    for (const auto index : mesh.indices)
+        assert(index < expected_vertices);
+    std::printf("grid mesh: %zu vertices, %zu indices\n", mesh.vertices.size(), mesh.indices.size());
+}
+
 int main() {
     test_noise();
     test_terrain();
     test_bake();
     test_patches();
+    test_cube_coordinates();
+    test_tiles();
+    test_grid_mesh();
+    calibrate_level_errors();
     return 0;
 }
