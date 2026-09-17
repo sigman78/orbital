@@ -381,7 +381,7 @@ int run(const Options& options) {
     renderer.set_ui_font({{atlas.width, atlas.height},
                           assets::PixelLayout::Rgba8,
                           {atlas.rgba, std::size_t(atlas.width) * atlas.height * 4}});
-    log::info("Ready at {} ms. RMB + WASD: fly | 1-6: views | T: tour | F12: control panel | F10: capture | --help "
+    log::info("Ready at {} ms. RMB + WASD: fly | 1-8: views | T: tour | F12: control panel | F10: capture | --help "
               "for all controls",
               since_start());
     std::string report;

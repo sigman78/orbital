@@ -60,6 +60,11 @@ float4 march(float2 fullResPixel, int2 depthPixel)
     // The march's own pixel, not the full-resolution one: the pattern is made for a unit
     // stride, and sampled every other pixel it folds into waves across the halo.
     float jitter = marchJitter(float2(depthPixel / 2), view.frame, temporalParams(frame).enabled);
+    // Once per pixel: the light direction and the phase (the sun is far), and which bodies'
+    // shadows the segment can enter at all.
+    float3 light = normalize(sunLight.position - rd * (.5 * (t0 + t1)));
+    float phase = dustPhase(dot(light, rd));
+    uint shadows = shadowCandidates(frame, rd, t0, t1);
     float ds = (t1 - t0) / float(DUST_STEPS);
     float transmittance = 1.0;
     float3 radiance = float3(0.0, 0.0, 0.0);
@@ -71,10 +76,9 @@ float4 march(float2 fullResPixel, int2 depthPixel)
         float density = beltDensity(q, belt) * belt.density * farScale;
         if (density < 1e-5) continue;
         float sigma = density * BELT_EXTINCTION * DUST_DENSITY * dustSettings.density; // extinction per unit length
-        float3 light = normalize(sunLight.position - p);
-        float sunlight = sunLight.radiance * sunTransmittance(q, light, belt) * solarVisibility(frame, p, -1)
+        float sunlight = sunLight.radiance * sunTransmittance(q, light, belt) * solarVisibilityMasked(frame, p, shadows)
                        * beltRockTransmittance(frame, p);
-        float3 inscatter = colour * DUST_ALBEDO * dustSettings.brightness * sigma * dustPhase(dot(light, rd)) * sunlight;
+        float3 inscatter = colour * DUST_ALBEDO * dustSettings.brightness * sigma * phase * sunlight;
         // Analytic integral of the in-scatter over the step under constant density.
         float stepTransmittance = exp(-sigma * ds);
         radiance += transmittance * inscatter * (1.0 - stepTransmittance) / sigma;
