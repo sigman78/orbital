@@ -70,6 +70,9 @@ GROUPS = {
                   f'name=mars-25 bookmark=3 back=25 {STILL}',
                   f'name=mars-zoom bookmark=3 back=55 fov-div=5 {STILL}',
                   f'name=minor-planet bookmark=8 {STILL}',
+                  'name=minor-planet-close bookmark=9 taa=0 frames=40 time=0', # the near tier converges over frames
+                  f'name=minor-planet-sphere bookmark=9 near-tier=0 {STILL}',
+                  'name=minor-planet-wire bookmark=9 wireframe=1 taa=0 frames=40 time=0',
                   f'name=mars-far bookmark=3 back=205 fov-div=8 {STILL}'],
     },
     'belt': {

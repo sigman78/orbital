@@ -35,6 +35,7 @@ bool Renderer::draw(const FrameInput& supplied) {
     input.bodies = states;
     // The heavy CPU write of the frame goes first, while the previous frame's GPU work is still running.
     s.write_belt_state(input);
+    s.prepare_terrain_tier(input);
     s.submissions.wait_last();
     s.read_gpu_timings();
     s.apply_metering(input.tone);
@@ -131,6 +132,7 @@ bool Renderer::draw(const FrameInput& supplied) {
                 if (state_bytes)
                     gpu::copy_memory(cmd, {s.buffers.belt_state_staging.range().gpu + state_slice, state_bytes},
                                      {reinterpret_cast<void*>(state_address), state_bytes});
+                s.record_terrain_uploads(cmd);
                 synchronize(cmd, access::transfer_write, cull_input_access);
                 s.record_cull_passes(cmd, cull_root);
                 synchronize(cmd, access::compute_write, access::transfer_read);

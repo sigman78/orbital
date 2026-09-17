@@ -80,6 +80,10 @@ bool apply_arguments(Options& options, std::span<const std::string_view> args) {
             ok = parse_number(value(), options.lod_scale) && options.lod_scale > 0;
         else if (arg == "--disc")
             ok = parse_choice(value(), options.disc, 2);
+        else if (arg == "--near-tier")
+            ok = parse_choice(value(), options.near_tier, 2);
+        else if (arg == "--wireframe")
+            ok = parse_choice(value(), options.wireframe, 2);
         else if (arg == "--dust")
             ok = parse_choice(value(), options.dust, 2);
         else if (arg == "--vsync")

@@ -15,18 +15,18 @@ endif()
 #   orbital_core   logging, panic, file I/O, math
 #   orbital_scene  deterministic system generation, geometry
 #   orbital_app_cpu app navigation and command-line parsing, independent of the renderer
-#   orbital_render_cpu showcase contract, state binding and frame calculations
+#   orbital_render_cpu showcase contract, state binding, frame calculations, the near tier's quadtree
 #   orbital_assets PNG I/O (vendored Wuffs decoder, stb writer), pixel kernels, materials
 add_library(orbital_core STATIC src/core/log.cpp src/core/panic.cpp src/core/file.cpp src/core/noise.cpp)
 target_include_directories(orbital_core PUBLIC src)
 target_compile_features(orbital_core PUBLIC cxx_std_20)
 target_compile_options(orbital_core PRIVATE ${ORBITAL_WARNINGS})
 
-add_library(orbital_scene STATIC src/scene/system.cpp src/scene/geometry.cpp src/scene/belt_motion.cpp src/scene/terrain.cpp)
+add_library(orbital_scene STATIC src/scene/system.cpp src/scene/geometry.cpp src/scene/belt_motion.cpp src/scene/terrain.cpp src/scene/terrain_patch.cpp)
 target_link_libraries(orbital_scene PUBLIC orbital_core)
 target_compile_options(orbital_scene PRIVATE ${ORBITAL_WARNINGS})
 
-add_library(orbital_render_cpu STATIC src/render/showcase.cpp src/render/frame_calculations.cpp)
+add_library(orbital_render_cpu STATIC src/render/showcase.cpp src/render/frame_calculations.cpp src/render/terrain_tier.cpp)
 target_include_directories(orbital_render_cpu PUBLIC shaders) # the shared GPU ABI headers
 target_link_libraries(orbital_render_cpu PUBLIC orbital_scene)
 target_compile_options(orbital_render_cpu PRIVATE ${ORBITAL_WARNINGS})
@@ -87,10 +87,10 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME gpu_scopes COMMAND gpu_scopes_tests)
   endif()
-  foreach(test IN ITEMS core belt_motion terrain system geometry camera image kernels materials smaa texture app showcase frame_calculations options)
+  foreach(test IN ITEMS core belt_motion terrain terrain_tier system geometry camera image kernels materials smaa texture app showcase frame_calculations options)
     add_executable(${test}_tests tests/${test}_tests.cpp)
     target_link_libraries(${test}_tests PRIVATE orbital_scene orbital_assets)
-    if(test STREQUAL "showcase" OR test STREQUAL "frame_calculations")
+    if(test STREQUAL "showcase" OR test STREQUAL "frame_calculations" OR test STREQUAL "terrain_tier")
       target_link_libraries(${test}_tests PRIVATE orbital_render_cpu)
     endif()
     if(test STREQUAL "camera" OR test STREQUAL "app" OR test STREQUAL "options")
@@ -161,7 +161,7 @@ if(ORBITAL_BUILD_DEMO)
 
   add_executable(orbital src/app/main.cpp src/app/hud.cpp src/app/ui.cpp src/app/ui_panel.cpp src/render/renderer_resources.cpp src/render/gpu_image.cpp src/render/renderer_frame.cpp
     src/render/renderer_frame_data.cpp src/render/renderer_pipelines.cpp src/render/renderer_assets.cpp
-    src/render/renderer_belt.cpp src/render/renderer_scene.cpp src/render/renderer_post.cpp src/render/renderer_overlay.cpp)
+    src/render/renderer_belt.cpp src/render/renderer_scene.cpp src/render/renderer_terrain.cpp src/render/renderer_post.cpp src/render/renderer_overlay.cpp)
   target_link_libraries(orbital PRIVATE orbital_scene orbital_app_cpu orbital_render_cpu orbital_assets orbital_platform NoGraphicsAPI)
   target_include_directories(orbital PRIVATE shaders) # scene_shared.h, the C++/shader layout
   target_compile_definitions(orbital PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)

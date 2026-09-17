@@ -54,6 +54,9 @@ constexpr ViewDefinition bookmark_views[bookmark_count] = {
     {.body = 1, .radius_scale = {}, .offset = {35.8, 19.8, -41.5}},
     {.body = 1, .radius_scale = {}, .offset = {-19.9, 36.0, -86.0}},
     {.body = 6, .radius_scale = {0.9, 0.35, 2.4}, .offset = {}}, // the minor planet, framed like Mars
+    {.body = 6,
+     .radius_scale = {0.35, 0.3, 1.2},
+     .offset = {}}, // and from just above its surface, the near tier's view
 };
 
 // Catmull-Rom waypoints of the tour, visited in order over one period.

@@ -19,6 +19,7 @@ inline constexpr float step = 1.1f; // per +/- key press
 namespace control {
 inline constexpr double max_frame_seconds = 0.1; // a stall must not advance the simulation by more than this
 inline constexpr float fast_speed_scale = 4.0f;  // Shift
+inline constexpr float slow_speed_scale = 0.02f; // Z toggles it: creeping up to a small body
 inline constexpr double orbit_zoom_radii = 2.3;  // O key orbits at this many body radii
 } // namespace control
 
@@ -31,7 +32,8 @@ struct AppState {
     bool running = true, paused = false, high = false, overlay = true;
     bool show_ui = false; // F12
     bool vsync = true;
-    float pan = 0; // lateral drift added to the move axis (--pan)
+    bool slow_travel = false; // a fiftieth of the flight speed (Z)
+    float pan = 0;            // lateral drift added to the move axis (--pan)
     render::ToneSettings tone;
     render::DisplaySettings display; // polled from the window once a second
     render::AntiAliasingSettings aa;
@@ -42,6 +44,7 @@ struct AppState {
     render::PostSettings post;
     render::SkySettings sky;
     render::GasSettings gas;
+    render::TerrainSettings terrain;
     unsigned selected_body = 0;
     std::filesystem::path capture_request;
 };

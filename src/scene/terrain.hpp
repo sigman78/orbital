@@ -26,15 +26,25 @@ public:
     };
     static constexpr float height_min = -.05f, height_max = .05f; // the range a bake's alpha spans, radii
 
+    // The craters within reach of a cap of the sphere, so a patch's vertices test
+    // a handful instead of the whole population.
+    struct Region {
+        std::vector<Crater> craters;
+    };
+
     explicit MinorPlanetTerrain(std::uint64_t seed);
 
     // Height above the reference sphere, radii, within [height_min, height_max].
-    float height(Vec3d direction) const;
+    float height(Vec3d direction) const { return height(direction, craters_); }
+    float height(Vec3d direction, const Region& region) const { return height(direction, region.craters); }
+    Region region(Vec3d centre, double angular_radius) const;
     // Linear-light albedo at a point, given its height and slope (0 flat, 1 vertical).
     Vec3f albedo(Vec3d direction, float height, float slope) const;
     std::span<const Crater> craters() const { return craters_; }
 
 private:
+    float height(Vec3d direction, std::span<const Crater> craters) const;
+
     std::uint64_t seed_;
     std::vector<Crater> craters_;
 };

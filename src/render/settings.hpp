@@ -145,6 +145,11 @@ struct SkySettings {
     float dust_gain = .7f;       // ... amplitude step per octave; three octaves
 };
 
+struct TerrainSettings {
+    bool near_tier = true;  // the minor planet's cube-sphere patches close in; off keeps its sphere levels
+    bool wireframe = false; // the patches' quad grid drawn over the surface, the quadtree's review
+};
+
 struct GasSettings {
     bool flow = true;           // off holds the cloud deck still
     float time_scale = 1500.f;  // wind speed, times real
