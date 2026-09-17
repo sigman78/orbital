@@ -8,6 +8,11 @@
 
 static const float DEPTH_FLOAT_STEP = 6e-8;       // one float step just below 1, where far depths land
 static const float DEPTH_RESOLUTION_STEPS = 4.0;  // steps within which a buffer depth is taken as the analytic ground
+// The minor planet's haze is Pluto's (Gladstone et al. 2016, Science 351): a blue, forward-scattering
+// tholin haze with a scale height of about 50 km on a 1188 km radius, reaching 200 km up, of a normal
+// optical depth near a hundredth. Physically it barely shows; the boost makes it read.
+static const float MINOR_PLANET_HAZE_BOOST = 3.0;
+static const float MINOR_PLANET_SHELL = 1.12; // radii; the haze is a percent of its surface density there
 
 float airDensity(float altitude, float scaleHeight) { return exp(-max(altitude, 0.0) / scaleHeight); }
 
@@ -19,8 +24,8 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float3 centre = body.center_radius.xyz;
     float radius = max(body.center_radius.w, 1e-4);
     int kind = int(body.rotation_kind.w + .5);
-    bool gas = kind == 1, desert = kind == 4;
-    float shellRadius = radius * (gas ? 1.010 : desert ? 1.014 : 1.018);
+    bool gas = kind == 1, desert = kind == 4, minor = kind == 5;
+    float shellRadius = radius * (gas ? 1.010 : desert ? 1.014 : minor ? MINOR_PLANET_SHELL : 1.018);
     ViewParams view = viewParams(root.frame);
     LightParams light = lightParams(root.frame);
     EarthParams earth = earthParams(root.frame);
@@ -66,6 +71,16 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
     float3 scatterM = gas ? float3(1.0, .72, .43) : desert ? float3(1.0, .66, .40) : float3(1.0, .93, .82);
     float scaleR = gas ? .0015 : desert ? .004 : .0025;
     float scaleM = desert ? .003 : .001;
+    if (minor) {
+        // One haze, bluish, split between the symmetric and the forward-peaked phase.
+        float3 haze = float3(.12, .17, .26) * MINOR_PLANET_HAZE_BOOST;
+        betaR = haze * .55;
+        betaM = haze * .45;
+        scatterR = float3(.75, .88, 1.0);
+        scatterM = float3(.70, .85, 1.0);
+        scaleR = scaleM = .042;
+        phaseM = cornetteShanks(mu, .8);
+    }
     // Earth: the air below the cloud layer is shadowed by it, so cloud shadows
     // read over the sea as darker haze the way they do from orbit. Shadows are
     // broad next to the low path a ray takes under the clouds, so one read at

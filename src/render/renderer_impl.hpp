@@ -385,7 +385,7 @@ struct Renderer::Impl {
     SystemDescription system;
     std::filesystem::path directory;
     // The bodies occupy instance slots 0..body_count-1 in system order. The
-    // three anchors carry atmospheres and shadow maps.
+    // three anchors carry atmospheres and shadow maps; the minor planet a haze.
     Showcase showcase;
     unsigned body_count = 0;
     bool polar_caps = true;      // the gas giant's polar cap atlas loaded; the blend is skipped without it

@@ -84,7 +84,8 @@ to a raised rim, ejecta, a central peak on the large ones; the fresh ones dark i
 a few with a bright facula), within a stated height range, after Ceres and Pluto. At start-up
 `bake_terrain_maps` samples it across the cores (`core/parallel.hpp`) into an equirectangular
 normal+height map and an albedo map in the layout the Moon and Mars use, so the body draws through the
-airless shader (`KIND_MINOR_PLANET`) with the same terrain shadowing and draw tiers. The near tier, a
+airless shader (`KIND_MINOR_PLANET`) with the same terrain shadowing and draw tiers, and the atmosphere
+pass gives it a faint blue haze after Pluto's, tripled from the physical optical depth to read. The near tier, a
 cube-sphere quadtree of patches displaced by the same terrain, is planned; it reads the same class, so the
 far and near representations cannot disagree.
 

@@ -200,18 +200,18 @@ void Renderer::Impl::write_body_instances(const FrameInput& input, const FrameDa
 
 // Which bodies can be on screen and at what mesh level. The test runs at the
 // cull camera, so a frozen cull holds the bodies as it holds the rocks, and it
-// covers the atmosphere shell (up to 1.8% over the radius) so a shell whose
-// body is just off screen still draws.
+// covers the atmosphere shell (up to 1.8% over the radius, the minor planet's
+// high haze 12%) so a shell whose body is just off screen still draws.
 void Renderer::Impl::cull_bodies(const FrameInput& input, const FrameData& frame) {
     const CameraView& camera = frozen_cull ? frozen_cull->camera : input.camera;
     const float tan_y = frozen_cull ? frozen_cull->tan_y : frame.right_tan.w, tan_x = tan_y * frame.up_aspect.w;
     const geometry::Frustum frustum = view_frustum(camera, tan_x, tan_y);
-    constexpr float shell = 1.02f;
     body_visible.reset();
     stats.frame.bodies_drawn = 0;
     for (unsigned i = 0; i < body_count; i++) {
         const Vec3d relative = input.bodies[i].position - camera.position;
         const float radius = float(input.bodies[i].radius);
+        const float shell = system.bodies[i].body_class == BodyClass::MinorPlanet ? 1.13f : 1.02f;
         body_visible[i] = geometry::sphere_in_frustum(frustum, to_float(relative), radius * shell);
         const float distance = float(length(relative));
         const float projected = radius * float(extent.height) / (distance * tan_y);

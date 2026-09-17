@@ -1,5 +1,7 @@
 #include "render/renderer_impl.hpp"
 
+#include "core/small_vec.hpp"
+
 #include <cmath>
 
 namespace space::render {
@@ -154,7 +156,12 @@ void Renderer::Impl::record_atmosphere_passes(gpu::CommandBuffer* cmd, Root& roo
     // Atmosphere is composited per body; the depth clamp orders them against
     // geometry, and Earth's goes last so it stays on top where shells overlap.
     root.mode = 0;
-    for (unsigned body : {showcase.giant(), showcase.desert(), showcase.earth()}) {
+    SmallVec<unsigned, 4> bodies;
+    if (showcase.has_minor_planet())
+        bodies.push_back(showcase.minor_planet());
+    for (unsigned body : {showcase.giant(), showcase.desert(), showcase.earth()})
+        bodies.push_back(body);
+    for (unsigned body : bodies) {
         if (!body_visible[body])
             continue; // the shell is inside the culled sphere
         root.base = body;
