@@ -144,6 +144,7 @@ struct MeterRoot {
 #define ORBITAL_ROCK_LEVELS 6                            // geometry::rock_level_count
 #define ORBITAL_ROCK_GROUPS (16 * ORBITAL_ROCK_LEVELS)   // geometry::rock_shape_count * levels; group index = shape * levels + level
 #define ORBITAL_BELT_BANDS 8                             // belt::radial_bands
+#define ORBITAL_ROCK_MAP_FOOTPRINT 2.0                   // half-width in texels of a rock's splat into the far-belt map: the smoothing the far march reads (beltfar.slang)
 #define ORBITAL_CULL_THREADS 128
 // The belt plane to the giant's frame: a rotation about X (cos .933, sin .36) with the plane compressed;
 // (x, y, z) -> (x, y * Y_SCALE - z * Y_FROM_Z, z * Z_SCALE). The plane normal is fixed by it.
