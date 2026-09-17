@@ -57,7 +57,9 @@ float4 march(float2 fullResPixel, int2 depthPixel)
     float farScale = dustFarScale(aboveSlab, beyondEdge, halfHeight, dustSettings.farScale);
     float3 colour = dustColour(frame);
 
-    float jitter = marchJitter(fullResPixel, view.frame, temporalParams(frame).enabled);
+    // The march's own pixel, not the full-resolution one: the pattern is made for a unit
+    // stride, and sampled every other pixel it folds into waves across the halo.
+    float jitter = marchJitter(float2(depthPixel / 2), view.frame, temporalParams(frame).enabled);
     float ds = (t1 - t0) / float(DUST_STEPS);
     float transmittance = 1.0;
     float3 radiance = float3(0.0, 0.0, 0.0);
