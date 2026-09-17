@@ -210,6 +210,7 @@ struct ShotReadings {
     unsigned frames = 0;
     std::array<float, render::gpu_pass_count> pass_ms{};
     float draw_ms = 0;
+    unsigned patches_drawn = 0, patches_resident = 0; // the near tier's last frame
     render::ExposureStats exposure;
 };
 
@@ -300,7 +301,10 @@ ShotReadings frame_loop(const Session& session, FrameHistory& history, Benchmark
             update_title(window, smoother, app, history.percentile(.95f));
         }
     }
-    ShotReadings readings{.frames = frames, .exposure = renderer.stats().exposure};
+    ShotReadings readings{.frames = frames,
+                          .patches_drawn = renderer.stats().frame.patches_drawn,
+                          .patches_resident = renderer.stats().frame.patches_resident,
+                          .exposure = renderer.stats().exposure};
     // Medians over the frames after a warmup of the first half, at most 60 frames.
     const std::size_t warmup = std::min<std::size_t>(timings.size() / 2, 60);
     const auto median = [&](auto value_of) {
@@ -336,7 +340,9 @@ std::string report_entry(const Shot& shot, const ShotReadings& readings) {
         "  {{\n    \"name\": {}, \"capture\": {}, \"frames\": {}, \"width\": {}, \"height\": {},\n",
         json_string(shot.name), json_string(shot.options.capture.string()), readings.frames, shot.options.size.width,
         shot.options.size.height);
-    entry += std::format("    \"draw_ms\": {:.4f},\n    \"gpu\": {{", readings.draw_ms);
+    entry += std::format(
+        "    \"draw_ms\": {:.4f},\n    \"patches\": {{\"drawn\": {}, \"resident\": {}}},\n    \"gpu\": {{",
+        readings.draw_ms, readings.patches_drawn, readings.patches_resident);
     for (std::size_t pass = 0; pass < render::gpu_pass_count; pass++)
         entry += std::format("{}\"{}\": {:.4f}", pass ? ", " : "", render::gpu_pass_info[pass].column,
                              readings.pass_ms[pass]);

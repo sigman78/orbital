@@ -18,6 +18,7 @@ inline constexpr AccessScope depth_read{gpu::Stage::depth_stencil_tests, gpu::Ac
 inline constexpr AccessScope transfer_write{gpu::Stage::transfer, gpu::Access::transfer_write};
 inline constexpr AccessScope transfer_read{gpu::Stage::transfer, gpu::Access::transfer_read};
 inline constexpr AccessScope host_read{gpu::Stage::host, gpu::Access::host_read};
+inline constexpr AccessScope indirect_read{gpu::Stage::indirect, gpu::Access::indirect_read};
 } // namespace access
 
 // Global execution/memory dependency, not a texture state transition.

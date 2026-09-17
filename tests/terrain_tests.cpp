@@ -92,8 +92,9 @@ void test_patches() {
             assert(std::abs(length(cube_direction(face, s, .25)) - 1) < 1e-12);
     std::vector<geometry::Vertex> a(patch_vertex_count), b(patch_vertex_count);
     const PatchKey left{2, 3, 4, 5}, right{2, 3, 5, 5};
-    generate_patch(terrain, left, a);
+    const float error = generate_patch(terrain, left, a);
     generate_patch(terrain, right, b);
+    assert(error > 0 && error < .01f); // a level-3 cell: its curvature and terrain, well under the height range
     for (unsigned y = 0; y < patch_side; y++)
         assert(a[y * patch_side + patch_quads] == b[y * patch_side]);
     const PatchBounds bounds = patch_bounds(left);
@@ -113,6 +114,13 @@ void test_patches() {
         generate_patch(terrain, PatchKey{std::uint8_t(i % 6), 5, std::uint16_t(i), std::uint16_t(3 * i)}, b);
     std::printf("terrain: eight patches of %u vertices in %.2f ms on one thread\n", patch_vertex_count,
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+    std::printf("terrain: patch error by level, radii:");
+    for (unsigned level = 0; level <= 8; level++)
+        std::printf(" %.2g", double(generate_patch(terrain,
+                                                   PatchKey{1, std::uint8_t(level), std::uint16_t((1u << level) / 2),
+                                                            std::uint16_t((1u << level) / 3)},
+                                                   b)));
+    std::printf("\n");
     const PatchKey child{2, 4, 9, 11};
     assert(left.child(3) == child && left.packed() != right.packed());
 }

@@ -106,6 +106,14 @@ enum class SamplerSlot : unsigned {
     count = ORBITAL_SAMPLER_COUNT
 };
 
+// Array-texture descriptor slots (shaders/scene/bindings.slang binding 2).
+enum class ArraySlot : unsigned {
+    terrain_height = TEX_ARRAY_TERRAIN_HEIGHT,
+    terrain_albedo = TEX_ARRAY_TERRAIN_ALBEDO,
+    terrain_normal = TEX_ARRAY_TERRAIN_NORMAL,
+    count = ORBITAL_TEXTURE_ARRAY_COUNT,
+};
+
 // Root.mode as interpreted by surface.slang.
 enum class SurfaceMode : std::uint32_t {
     opaque = ORBITAL_SURFACE_OPAQUE,
@@ -264,6 +272,8 @@ struct Renderer::Impl {
         UniqueGpuHeap belt_state_staging; // host-visible: the CPU writes this frame's slice here for the copy
         UniqueGpuHeap patch_pool;         // device-only: the near tier's patch vertices, a slot per patch
         UniqueGpuHeap patch_staging;      // host-visible: this frame's new patches, two slots by frame parity
+        UniqueGpuHeap patch_args;         // device-only: the drawn patches' indirect commands, one multi-draw a pass
+        UniqueGpuHeap patch_args_staging; // host-visible: the CPU writes them here, two slots by frame parity
     } buffers;
     std::uint64_t static_cursor = 0;
     struct StaticUpload { // the staging path of upload_static, open until finish_static_uploads
@@ -368,9 +378,10 @@ struct Renderer::Impl {
     std::uint64_t patch_indices_address = 0; // static heap: the index triples every patch shares
     std::vector<geometry::Vertex> patch_scratch;
     struct PatchCopy {
-        std::uint64_t source, destination;
+        std::uint64_t source, destination, bytes;
     };
     std::vector<PatchCopy> patch_copies;
+    std::uint64_t patch_args_bytes = 0; // this frame's commands to copy, and the multi-draw's extent
     // The staging heap has two slots, written by frame parity before the wait for the
     // previous frame, which may still be copying the other; the version each holds
     // says whether a standing state must be written again into a stale slot.
@@ -414,6 +425,7 @@ struct Renderer::Impl {
     assets::TextureSupport texture_support;
     bool galaxy_layers_tried = false, galaxy_layers_available = false;
     bool galaxy_original_tried = false, galaxy_original_available = false;
+    GpuImage array_placeholder; // 1x1x1 array image bound to every array slot at start-up
 
     // Frame state.
     Extent2D extent{};
@@ -462,6 +474,7 @@ struct Renderer::Impl {
     void finish_static_uploads();
     GpuImage create_image(const ImageDesc& desc);
     void bind(Slot slot, const GpuImage& image);
+    void bind(ArraySlot slot, const GpuImage& image);
     void upload_images(std::span<const Upload> uploads);
     void upload_images(std::initializer_list<Upload> uploads) {
         upload_images(std::span<const Upload>(uploads.begin(), uploads.size()));

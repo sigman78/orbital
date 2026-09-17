@@ -48,7 +48,7 @@ PatchBounds patch_bounds(PatchKey key) {
     return bounds;
 }
 
-void generate_patch(const MinorPlanetTerrain& terrain, PatchKey key, std::span<geometry::Vertex> out) {
+float generate_patch(const MinorPlanetTerrain& terrain, PatchKey key, std::span<geometry::Vertex> out) {
     ORBITAL_ASSERT(out.size() == patch_vertex_count);
     const Cell cell = cell_of(key);
     const PatchBounds bounds = patch_bounds(key);
@@ -56,11 +56,15 @@ void generate_patch(const MinorPlanetTerrain& terrain, PatchKey key, std::span<g
     // The skirt drops by the gap a coarser neighbour can leave: its chord's
     // sagitta and the terrain's change over one of its quads.
     const float skirt = float(std::clamp(bounds.angular_size * .5, .001, .1));
-    const auto vertex = [&](unsigned x, unsigned y, float drop) {
+    const auto surface = [&](double x, double y) {
         const Vec3d d = cube_direction(key.face, cell.s0 + x * cell.size / patch_quads,
                                        cell.t0 + y * cell.size / patch_quads);
-        const float h = terrain.height(d, region);
-        return geometry::Vertex{.position = to_float(d * double(1 + h - drop)), .normal = to_float(d)};
+        return d * double(1 + terrain.height(d, region));
+    };
+    const auto vertex = [&](unsigned x, unsigned y, float drop) {
+        const Vec3d p = surface(x, y);
+        return geometry::Vertex{.position = to_float(p * (1 - double(drop) / length(p))),
+                                .normal = to_float(normalized(p))};
     };
     unsigned n = 0;
     for (unsigned y = 0; y < patch_side; y++)
@@ -77,6 +81,17 @@ void generate_patch(const MinorPlanetTerrain& terrain, PatchKey key, std::span<g
     for (unsigned i = 0; i < patch_side; i++)
         out[n++] = vertex(0, patch_quads - i, skirt);
     ORBITAL_ASSERT(n == patch_vertex_count);
+    // The error: the terrain at each quad's centre against the mean of its corners.
+    double error = 0;
+    for (unsigned y = 0; y < patch_quads; y++)
+        for (unsigned x = 0; x < patch_quads; x++) {
+            const auto corner = [&](unsigned dx, unsigned dy) {
+                return to_double(out[(y + dy) * patch_side + x + dx].position);
+            };
+            const Vec3d mean = (corner(0, 0) + corner(1, 0) + corner(0, 1) + corner(1, 1)) * .25;
+            error = std::max(error, length(surface(x + .5, y + .5) - mean));
+        }
+    return float(error);
 }
 
 std::vector<std::uint32_t> patch_indices() {

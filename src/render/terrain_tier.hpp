@@ -23,22 +23,23 @@ struct TierView {
 // The near tier's CPU side: which patches of the cube sphere to draw this frame
 // and which to generate for the next, over a fixed pool of vertex slots kept as
 // a cache by patch (least recently used out). The quadtree splits a patch while
-// its projected size is over a threshold, with hysteresis, and collapses it out
-// of view; a patch whose visible children are not all resident draws itself,
-// so the surface is always complete. Nothing here touches the GPU: the caller
-// generates the requested patches into the slots and draws the listed ones.
+// its geometric error (measured at its generation) projects larger than a
+// tolerance on screen, with hysteresis, and collapses it out of view; a patch whose visible children are not all
+// resident draws itself, so the surface is always complete. Nothing here touches the GPU: the caller generates the
+// requested patches into the slots and draws the listed ones.
 class TerrainTier {
 public:
-    static constexpr unsigned slot_count = 512;
+    static constexpr unsigned slot_count = 1024; // 11 MiB of vertices; a close view holds 400 of them
     static constexpr unsigned generate_per_frame = 8;
     // Sizes are in cull_bodies' units: a projected radius over the half height, twice the pixels.
     static constexpr float activate_pixels = 1200; // the body's, where the finest sphere level runs out
-    static constexpr float split_pixels = 400;     // a patch's edge: it splits above 200 px, 12 px a quad
+    static constexpr float error_pixels = 3;       // a patch's geometric error on screen: it splits above 1.5 px
     static constexpr float hysteresis = .8f;       // the fraction of either the way back
 
     struct Generation {
         PatchKey key;
         unsigned slot;
+        float error = 0; // filled by the caller from generate_patch, read at the next update
     };
     struct Draw {
         unsigned slot;
@@ -50,7 +51,7 @@ public:
     // True once the tier covers the body: the sphere levels draw until then.
     bool active() const { return active_; }
     std::span<const Draw> draws() const { return draws_; } // this frame's patches
-    std::span<const Generation> generate() const { return generate_; }
+    std::span<Generation> generate() { return generate_; }
     unsigned resident() const { return unsigned(slots_by_key_.size()); }
     unsigned nodes() const { return unsigned(nodes_.size() - free_blocks_.size() * 4); }
 
@@ -63,6 +64,7 @@ private:
     struct Slot {
         PatchKey key;
         unsigned used = 0; // the frame it was last needed
+        float error = 0;   // the patch's geometric error, radii, from its generation
         bool resident = false;
     };
     struct Request {
@@ -71,7 +73,9 @@ private:
     };
     struct Visibility {
         bool visible = false;
-        float pixels = 0;
+        float scale = 0;     // screen size per radius of extent, for the error test
+        float pixels = 0;    // the cell's edge on screen, the generation priority
+        float tolerance = 1; // the error tolerance's factor: 1 edge-on, 2 facing
     };
 
     void ensure_roots();
@@ -80,6 +84,7 @@ private:
     void collapse(Node& node);
     std::uint32_t allocate_children(const Node& node);
     unsigned slot_of(PatchKey key) const; // slot_count when not resident
+    float error_of(PatchKey key) const;   // 0 when not resident
     void touch(PatchKey key);
     void request(PatchKey key, float pixels);
     void choose_generation();
