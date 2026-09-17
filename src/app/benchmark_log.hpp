@@ -28,10 +28,10 @@ public:
             log::error("cannot write benchmark {}", path.string());
             return;
         }
-        buffer_ = "frame,frame_ms,cpu_submit_and_wait_ms,cpu_prepare_ms";
+        buffer_ = "frame,frame_ms,cpu_submit_and_wait_ms,cpu_prepare_ms,cpu_belt_ms";
         for (const auto& pass : render::gpu_pass_info)
             std::format_to(std::back_inserter(buffer_), ",{}", pass.column);
-        buffer_ += '\n';
+        buffer_ += ",rocks,rock_candidates\n";
     }
     ~BenchmarkLog() { flush(); }
     BenchmarkLog(const BenchmarkLog&) = delete;
@@ -41,10 +41,11 @@ public:
     void record(float frame_ms, const render::FrameStats& frame) {
         if (!file_)
             return;
-        std::format_to(std::back_inserter(buffer_), "{},{},{},{}", rows_++, frame_ms, frame.draw_ms, frame.prepare_ms);
+        std::format_to(std::back_inserter(buffer_), "{},{},{},{},{}", rows_++, frame_ms, frame.draw_ms,
+                       frame.prepare_ms, frame.belt_ms);
         for (const float ms : frame.gpu.ms)
             std::format_to(std::back_inserter(buffer_), ",{}", ms);
-        buffer_ += '\n';
+        std::format_to(std::back_inserter(buffer_), ",{},{}\n", frame.visible_asteroids, frame.rock_candidates);
         draw_ms_.push_back(frame.draw_ms);
         if (rows_ % rows_per_flush == 0)
             flush();

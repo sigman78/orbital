@@ -237,11 +237,48 @@ void Renderer::Impl::cull_bodies(const FrameInput& input, const FrameData& frame
 // slot that does not hold it yet.
 void Renderer::Impl::write_belt_state(const FrameInput& input) {
     const unsigned slot = frame_index & 1, count = active_rock_count(input);
-    auto* out = reinterpret_cast<RockState*>(buffers.belt_state_staging.range().cpu +
-                                             slot * std::uint64_t(belt_capacity) * belt_state_stride);
+    auto* out = reinterpret_cast<RockState*>(buffers.belt_state_staging.range().cpu + slot * belt_slot_bytes());
     if (!belt_motion.advance(input.time, count, out) && belt_staging_version[slot] != belt_motion.version())
         belt_motion.write(count, out);
     belt_staging_version[slot] = belt_motion.version();
+}
+
+// The cull camera before build_frame has run: the frozen one while the panel
+// holds it (build_frame captures it this frame if it is not held yet, at this
+// same live camera), the live one otherwise. Tangents and the size cut-off are
+// widened so the CPU never drops what the GPU would keep.
+BeltCullView Renderer::Impl::belt_cull_view(const FrameInput& input) const {
+    const bool frozen = input.belt.freeze_culling && frozen_cull;
+    const CameraView& camera = frozen ? frozen_cull->camera : input.camera;
+    const float tan_y = frozen ? frozen_cull->tan_y : float(std::tan(input.camera.vertical_fov * .5));
+    const float tan_x = tan_y * extent.aspect();
+    constexpr float tangent_margin = 1.002f, pixel_margin = .98f;
+    BeltCullView view;
+    view.origin = to_float(input.bodies[showcase.belt_parent()].position - camera.position);
+    view.right = to_float(camera.right);
+    view.up = to_float(camera.up);
+    view.forward = to_float(camera.forward);
+    view.tan_x = tan_x * tangent_margin;
+    view.tan_y = tan_y * tangent_margin;
+    view.scale_x = std::sqrt(1 + tan_x * tan_x);
+    view.scale_y = std::sqrt(1 + tan_y * tan_y);
+    view.pixels_per_unit = float(extent.height) / (2 * tan_y);
+    view.min_pixels = belt_culling::billboard::min_pixels * pixel_margin;
+    view.pad_per_depth = tan_y * 4 / float(extent.height);
+    view.tilt_y_scale = ORBITAL_BELT_TILT_Y_SCALE;
+    view.tilt_y_from_z = ORBITAL_BELT_TILT_Y_FROM_Z;
+    view.tilt_z_scale = ORBITAL_BELT_TILT_Z_SCALE;
+    return view;
+}
+
+// The candidate ids into this frame's slot, after the states. Sweeps into
+// ordinary memory first: the slot is write-combined aperture memory.
+void Renderer::Impl::cull_belt(const FrameInput& input) {
+    belt_candidate_count = belt_motion.cull(active_rock_count(input), belt_cull_view(input), belt_candidates.data());
+    const unsigned slot = frame_index & 1;
+    std::memcpy(buffers.belt_state_staging.range().cpu + slot * belt_slot_bytes() + belt_candidate_offset(),
+                belt_candidates.data(), belt_candidate_count * belt_candidate_stride);
+    stats.frame.rock_candidates = belt_candidate_count;
 }
 
 unsigned Renderer::Impl::active_rock_count(const FrameInput& input) const {
@@ -250,7 +287,7 @@ unsigned Renderer::Impl::active_rock_count(const FrameInput& input) const {
 }
 
 void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
-                                        std::uint64_t instance_address) {
+                                        std::uint64_t instance_address, std::uint64_t candidate_address) {
     // build_frame has already captured or released the frozen cull camera; the
     // frame's far-tier weight is the frozen one when it holds.
     const CameraView& camera = frozen_cull ? frozen_cull->camera : input.camera;
@@ -274,12 +311,14 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
     p.rock_limit = active_rock_count(input);
     p.body_count = body_count;
     p.light_in_count_pass = input.belt.splat_light_twice ? 1u : 0u;
+    p.candidate_count = belt_candidate_count;
     for (unsigned group = 0; group < rock_group_count; group++) {
         p.index_counts[group] = rocks[group].index_count;
         p.first_indices[group] = rocks[group].first_index;
         p.vertex_offsets[group] = rocks[group].vertex_offset;
     }
     scratch.instances = instance_address;
+    scratch.candidates = candidate_address;
     std::memset(scratch.counts, 0, sizeof scratch.counts);
     std::memset(scratch.cursors, 0, sizeof scratch.cursors);
 }

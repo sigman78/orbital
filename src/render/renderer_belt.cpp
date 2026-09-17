@@ -93,7 +93,8 @@ void Renderer::Impl::read_cull_counts(const CullScratch& scratch) {
 void Renderer::Impl::record_cull_passes(gpu::CommandBuffer* cmd, const CullRoot& root) {
     constexpr unsigned passes[] = {ORBITAL_CULL_PASS_COUNT, ORBITAL_CULL_PASS_PREFIX, ORBITAL_CULL_PASS_SCATTER};
     gpu::bind_pso(cmd, pso.belt.cull);
-    const unsigned groups = (rock_count + ORBITAL_CULL_THREADS - 1) / ORBITAL_CULL_THREADS;
+    // One thread per candidate; the prefix pass runs even with none, to write empty draws.
+    const unsigned groups = std::max(1u, (belt_candidate_count + ORBITAL_CULL_THREADS - 1) / ORBITAL_CULL_THREADS);
     for (unsigned pass : passes) {
         CullRoot pass_root = root;
         pass_root.pass = pass;

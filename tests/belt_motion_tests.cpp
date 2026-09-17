@@ -134,9 +134,68 @@ void test_drift_bounded() {
 
 } // namespace
 
+// The frustum pass is conservative against the exact (double, unwidened) GPU
+// test at several cameras, and not loose: it keeps few rocks the exact test drops.
+void test_cull_conservative() {
+    const auto p = make_population(40000);
+    BeltMotion motion(p.rocks, p.rates);
+    std::vector<RockState> states(p.rocks.size());
+    assert(motion.advance(7.5, 40000, states.data()));
+    BeltCullView view;
+    view.tan_y = 0.5773f;
+    view.tan_x = view.tan_y * 2.4f;
+    view.scale_x = std::sqrt(1 + view.tan_x * view.tan_x);
+    view.scale_y = std::sqrt(1 + view.tan_y * view.tan_y);
+    view.pixels_per_unit = 700 / view.tan_y;
+    view.min_pixels = 0.06f;
+    view.pad_per_depth = view.tan_y * 4 / 1400;
+    view.tilt_y_scale = .7f;
+    view.tilt_y_from_z = .36f;
+    view.tilt_z_scale = .933f;
+    const Vec3f cameras[] = {{0, 0, 0}, {-70, -1, 3}, {-95, 8, -40}, {30, 0.2f, 90}};
+    const Vec3f forwards[] = {{0, 0, 1}, {1, 0, 0}, {0.6f, -0.1f, 0.79f}, {-0.7f, 0, -0.71f}};
+    std::vector<std::uint32_t> kept(40000);
+    for (unsigned c = 0; c < 4; c++) {
+        const Vec3f f = normalized(forwards[c]);
+        const Vec3f r = normalized(cross(f, Vec3f{0, 1, 0})), u = cross(r, f);
+        view.origin = Vec3f{-cameras[c].x, -cameras[c].y, -cameras[c].z};
+        view.right = r;
+        view.up = u;
+        view.forward = f;
+        const unsigned count = motion.cull(40000, view, kept.data());
+        std::vector<bool> is_kept(40000);
+        for (unsigned i = 0; i < count; i++) {
+            assert(i == 0 || kept[i] > kept[i - 1]);
+            is_kept[kept[i]] = true;
+        }
+        unsigned exact = 0;
+        for (unsigned i = 0; i < 40000; i++) {
+            const RockState& s = states[i];
+            const double radius = p.rocks[i].radius;
+            const double px = view.origin.x + s.x, py = view.origin.y + s.y * .7 - s.z * .36,
+                         pz = view.origin.z + s.z * .933;
+            const double z = f.x * px + f.y * py + f.z * pz, zc = std::max(z, 0.0);
+            const double tan_x = view.tan_x / 1.0, tan_y = view.tan_y; // the test's own tangents, unwidened
+            const double pixels = radius * view.pixels_per_unit / std::max(z, .1);
+            const double padding = radius + zc * view.pad_per_depth;
+            const bool in = z >= -radius && pixels >= view.min_pixels &&
+                            std::fabs(r.x * px + r.y * py + r.z * pz) <= zc * tan_x + padding * view.scale_x &&
+                            std::fabs(u.x * px + u.y * py + u.z * pz) <= zc * tan_y + padding * view.scale_y;
+            if (in) {
+                exact++;
+                assert(is_kept[i]);
+            }
+        }
+        std::printf("cull camera %u: %u exact, %u kept of 40000\n", c, exact, count);
+        assert(exact > 0 && count < 40000);
+        assert(count <= exact + exact / 10 + 50); // conservative, not loose
+    }
+}
+
 int main() {
     test_seed_and_steps();
     test_tier_growth();
     test_drift_bounded();
+    test_cull_conservative();
     return 0;
 }

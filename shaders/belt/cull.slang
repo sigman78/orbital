@@ -1,9 +1,10 @@
 #include "../scene_shared.h"
 
-// GPU belt culling: one thread per rock decides visibility, level and
-// placement, three passes turn that into per-group instance lists and
-// indirect draw arguments. Everything is addressed through buffer pointers;
-// the conventional descriptor set carries no storage buffers.
+// GPU belt culling: one thread per candidate (the rocks the CPU's frustum
+// pass kept, belt_motion.cpp) decides visibility, level and placement, three
+// passes turn that into per-group instance lists and indirect draw arguments.
+// Everything is addressed through buffer pointers; the conventional descriptor
+// set carries no storage buffers.
 //
 //   ORBITAL_CULL_PASS_COUNT    each visible rock bumps its group's counter
 //   ORBITAL_CULL_PASS_PREFIX   one thread turns counts into bases and draw arguments
@@ -207,7 +208,8 @@ void computeMain(uint3 thread : SV_DispatchThreadID)
         scratch->draw_count = drawCount;
         return;
     }
-    if (id >= scratch->params.rock_limit) return;
+    if (id >= scratch->params.candidate_count) return;
+    id = scratch->candidates[id];
     Placement placement = placeRock(id, root.pass != ORBITAL_CULL_PASS_COUNT || scratch->params.light_in_count_pass != 0);
     if (!placement.visible) return;
     if (root.pass == ORBITAL_CULL_PASS_COUNT)

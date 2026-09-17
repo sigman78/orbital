@@ -26,6 +26,9 @@ BandAngles band_angles(const float* rates, double seconds) {
 BeltMotion::BeltMotion(std::vector<RockSeed> rocks, std::span<const float, bands> rates)
     : rocks_(std::move(rocks)), states_(rocks_.size()) {
     std::copy(rates.begin(), rates.end(), rates_);
+    radii_.reserve(rocks_.size());
+    for (const RockSeed& rock : rocks_)
+        radii_.push_back(rock.radius);
 }
 
 // The exact state at the time: the seed's centre turned by the band's angle, the
@@ -63,6 +66,32 @@ void BeltMotion::step(std::size_t begin, std::size_t end, double seconds, RockSt
 void BeltMotion::write(unsigned count, RockState* out) const {
     count = std::min(count, this->count());
     std::copy_n(states_.data(), count, out);
+}
+
+// Every test is evaluated and the id appended under a predicate: the branches
+// mispredict on belt data and cost more than the arithmetic they skip.
+unsigned BeltMotion::cull(unsigned count, const BeltCullView& v, std::uint32_t* out) const {
+    count = std::min(count, this->count());
+    constexpr float radius_margin = 1.02f, radius_slack = 1e-3f; // covers the two sides' float paths
+    unsigned kept = 0;
+    for (unsigned i = 0; i < count; i++) {
+        const RockState& s = states_[i];
+        const float r = radii_[i] * radius_margin + radius_slack;
+        const float px = v.origin.x + s.x;
+        const float py = v.origin.y + s.y * v.tilt_y_scale - s.z * v.tilt_y_from_z;
+        const float pz = v.origin.z + s.z * v.tilt_z_scale;
+        const float z = v.forward.x * px + v.forward.y * py + v.forward.z * pz;
+        const float zc = std::max(z, 0.f);
+        const float pixels = r * v.pixels_per_unit / std::max(z, .1f);
+        const float padding = r + zc * v.pad_per_depth;
+        const float x = std::fabs(v.right.x * px + v.right.y * py + v.right.z * pz);
+        const float y = std::fabs(v.up.x * px + v.up.y * py + v.up.z * pz);
+        const bool in = (z >= -r) & (pixels >= v.min_pixels) & (x <= zc * v.tan_x + padding * v.scale_x) &
+                        (y <= zc * v.tan_y + padding * v.scale_y);
+        out[kept] = i;
+        kept += in;
+    }
+    return kept;
 }
 
 bool BeltMotion::advance(double time, unsigned count, RockState* out) {

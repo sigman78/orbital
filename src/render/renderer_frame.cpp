@@ -33,8 +33,13 @@ bool Renderer::draw(const FrameInput& supplied) {
     ORBITAL_ASSERT(s.showcase.order_states(supplied.bodies, states));
     FrameInput input = supplied;
     input.bodies = states;
-    // The heavy CPU write of the frame goes first, while the previous frame's GPU work is still running.
+    // The heavy CPU work of the frame goes first, while the previous frame's GPU work is still
+    // running: the rock sweep and the frustum pass over it.
+    const auto belt_start = std::chrono::steady_clock::now();
     s.write_belt_state(input);
+    s.cull_belt(input);
+    s.stats.frame.belt_ms =
+        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - belt_start).count();
     s.submissions.wait_last();
     s.read_gpu_timings();
     s.apply_metering(input.tone);
@@ -44,7 +49,10 @@ bool Renderer::draw(const FrameInput& supplied) {
         return false;
     s.set_hdr_output(input.tone.hdr_output);
     s.update_hdr_metadata(input.tone, input.display);
+    const Extent2D extent_before = s.extent;
     s.resize({drawable.x, drawable.y}, unsigned(input.sky.galaxy_resolution), unsigned(input.sun.flare_resolution));
+    if (s.extent.width != extent_before.width || s.extent.height != extent_before.height)
+        s.cull_belt(input); // the frustum pass judged sizes at the old extent
     const auto swap = gpu::acquire(s.device);
     if (!swap.render_view)
         return false;
@@ -83,21 +91,24 @@ bool Renderer::draw(const FrameInput& supplied) {
         s.read_cull_counts(*reinterpret_cast<const CullScratch*>(s.buffers.cull_readback.range().cpu));
     std::memcpy(dynamic, &frame, sizeof frame);
     const auto cull_address = reinterpret_cast<std::uint64_t>(s.buffers.cull_device.range().gpu);
+    // This frame's rock states and candidate ids go to one of two device slices, so the
+    // other still holds the last frame's states.
+    const std::uint64_t state_slice = (s.frame_index & 1) * s.belt_slot_bytes();
+    const auto state_address = reinterpret_cast<std::uint64_t>(s.buffers.belt_state.range().gpu) + state_slice;
     s.cull_bodies(input, frame);
     s.write_cull_scratch(input, frame, *scratch,
-                         cull_address + heap_layout.instance_offset + s.body_count * sizeof(Instance));
+                         cull_address + heap_layout.instance_offset + s.body_count * sizeof(Instance),
+                         state_address + s.belt_candidate_offset());
     std::memcpy(dynamic + heap_layout.instance_offset, s.instances.data(), s.instances.size() * sizeof(Instance));
-    // This frame's rock state goes to one of two device slices, so the other still holds the last frame's.
     const unsigned rock_limit = scratch->params.rock_limit;
     const std::uint64_t state_bytes = std::uint64_t(rock_limit) * belt_state_stride;
-    const std::uint64_t state_slice = (s.frame_index & 1) * std::uint64_t(s.belt_capacity) * belt_state_stride;
-    const auto state_address = reinterpret_cast<std::uint64_t>(s.buffers.belt_state.range().gpu) + state_slice;
+    const std::uint64_t candidate_bytes = std::uint64_t(s.belt_candidate_count) * belt_candidate_stride;
     Root root{.frame = frame_address,
               .vertices = 0,
               .instances = cull_address + heap_layout.instance_offset,
               .base = 0,
               .mode = 0};
-    const std::uint64_t previous_slice = ((s.frame_index + 1) & 1) * std::uint64_t(s.belt_capacity) * belt_state_stride;
+    const std::uint64_t previous_slice = ((s.frame_index + 1) & 1) * s.belt_slot_bytes();
     const CullRoot cull_root{.frame = frame_address,
                              .rocks = s.rock_data,
                              .scratch = cull_address + heap_layout.cull_offset,
@@ -131,6 +142,12 @@ bool Renderer::draw(const FrameInput& supplied) {
                 if (state_bytes)
                     gpu::copy_memory(cmd, {s.buffers.belt_state_staging.range().gpu + state_slice, state_bytes},
                                      {reinterpret_cast<void*>(state_address), state_bytes});
+                if (candidate_bytes)
+                    gpu::copy_memory(
+                        cmd,
+                        {s.buffers.belt_state_staging.range().gpu + state_slice + s.belt_candidate_offset(),
+                         candidate_bytes},
+                        {reinterpret_cast<void*>(state_address + s.belt_candidate_offset()), candidate_bytes});
                 synchronize(cmd, access::transfer_write, cull_input_access);
                 s.record_cull_passes(cmd, cull_root);
                 synchronize(cmd, access::compute_write, access::transfer_read);

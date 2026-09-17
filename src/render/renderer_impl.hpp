@@ -162,7 +162,9 @@ struct HeapLayout {
 };
 inline constexpr HeapLayout heap_layout{};
 inline constexpr std::uint64_t belt_state_stride = sizeof(RockState); // (x, y, z, phase) per rock in the state slices
-static_assert(heap_layout.instance_capacity() < (1ull << 30));        // packed asteroid id
+inline constexpr std::uint64_t belt_candidate_stride = sizeof(
+    std::uint32_t);                                            // a candidate id, after the states in a slot
+static_assert(heap_layout.instance_capacity() < (1ull << 30)); // packed asteroid id
 static_assert(heap_layout.cull_offset >= sizeof(FrameData));
 static_assert(heap_layout.instance_offset >= heap_layout.cull_offset + sizeof(CullScratch));
 static_assert(heap_layout.instance_offset < heap_layout.ui_offset());
@@ -351,6 +353,13 @@ struct Renderer::Impl {
     unsigned rock_count = 0;
     unsigned belt_capacity = 0; // rocks the state heaps hold: the high tier or the override
     BeltMotion belt_motion;     // the rocks' seeds and states, stepped on the CPU
+    // A staging slot and a device slice hold the states, then the candidate ids.
+    std::uint64_t belt_candidate_offset() const { return std::uint64_t(belt_capacity) * belt_state_stride; }
+    std::uint64_t belt_slot_bytes() const {
+        return std::uint64_t(belt_capacity) * (belt_state_stride + belt_candidate_stride);
+    }
+    std::vector<std::uint32_t> belt_candidates; // the frustum pass's output before it goes to the slot
+    unsigned belt_candidate_count = 0;          // this frame's, the GPU cull's thread count
     // The staging heap has two slots, written by frame parity before the wait for the
     // previous frame, which may still be copying the other; the version each holds
     // says whether a standing state must be written again into a stale slot.
@@ -471,11 +480,13 @@ struct Renderer::Impl {
     // CPU frame packing (renderer_frame_data.cpp).
     FrameData build_frame(const FrameInput& input);
     void write_body_instances(const FrameInput& input, const FrameData& frame);
-    unsigned active_rock_count(const FrameInput& input) const; // the tier's prefix of the population
-    void write_belt_state(const FrameInput& input);            // before the wait: this frame's staging slot
+    unsigned active_rock_count(const FrameInput& input) const;  // the tier's prefix of the population
+    void write_belt_state(const FrameInput& input);             // before the wait: this frame's staging slot
+    BeltCullView belt_cull_view(const FrameInput& input) const; // the GPU cull's camera, widened
+    void cull_belt(const FrameInput& input);                    // before the wait too: the candidate ids
     void cull_bodies(const FrameInput& input, const FrameData& frame);
     void write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
-                            std::uint64_t instance_address);
+                            std::uint64_t instance_address, std::uint64_t candidate_address);
 
     // Belt population, GPU culling, indirect batch and maps (renderer_belt.cpp).
     void build_belt(const BeltDescription& description);

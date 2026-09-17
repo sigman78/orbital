@@ -241,12 +241,13 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
     ImGui::Text("GPU %.2f ms", stats.gpu[render::GpuPass::Frame]);
     gpu_time_bar(stats);
     ImGui::Text("Cull + shadows %.2f ms", stats.gpu[render::GpuPass::CullAndShadows]);
-    ImGui::Text("CPU prepare %.2f ms", stats.prepare_ms);
+    ImGui::Text("CPU prepare %.2f ms, belt %.2f ms overlapped", stats.prepare_ms, stats.belt_ms);
     ImGui::Checkbox("VSync", &vsync);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Disable VSync for performance comparisons: a waiting GPU may clock down.");
     ImGui::Text("%u draws, %u bodies, %u rock groups", stats.draw_calls, stats.bodies_drawn, stats.rock_groups_drawn);
-    ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
+    ImGui::Text("%u rocks of %u candidates, %.2f M triangles", stats.visible_asteroids, stats.rock_candidates,
+                stats.triangles / 1e6);
 }
 void quality_controls(bool& high) {
     ImGui::Checkbox("High tier (F2)", &high);

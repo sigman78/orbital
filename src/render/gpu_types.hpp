@@ -24,8 +24,9 @@ static_assert(sizeof(MeterRoot) == 24 && sizeof(MeterHistogram) == (ORBITAL_METE
 // Scalar layout the shader sees: float4 members first, then 8-byte pointers and 4-byte words.
 static_assert(offsetof(CullParams, index_counts) == 160 && sizeof(CullParams) == 160 + 12 * ORBITAL_ROCK_GROUPS);
 static_assert(offsetof(CullScratch, instances) == sizeof(CullParams) &&
-              offsetof(CullScratch, counts) == sizeof(CullParams) + 8);
-static_assert(offsetof(CullScratch, draw_count) == sizeof(CullParams) + 8 + 8 * (ORBITAL_ROCK_GROUPS + 1));
+              offsetof(CullScratch, candidates) == sizeof(CullParams) + 8 &&
+              offsetof(CullScratch, counts) == sizeof(CullParams) + 16);
+static_assert(offsetof(CullScratch, draw_count) == sizeof(CullParams) + 16 + 8 * (ORBITAL_ROCK_GROUPS + 1));
 static_assert(offsetof(CullScratch, args) == offsetof(CullScratch, draw_count) + 16);
 static_assert(offsetof(FrameData, camera_time) == 64 && sizeof(FrameData) == 1088);
 static_assert(std::is_trivially_copyable_v<FrameData>);

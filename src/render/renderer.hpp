@@ -55,9 +55,11 @@ struct MemoryStats {
 struct FrameStats {
     float draw_ms = 0;    // CPU time of draw(), including the wait for the previous frame
     float prepare_ms = 0; // CPU work between acquiring the swapchain image and submitting
+    float belt_ms = 0;    // the rock sweep and frustum pass, done before the wait so it overlaps the GPU
     PassTimings gpu;      // the GPU passes of the last completed frame, by GpuPass
     unsigned visible_asteroids = 0, triangles = 0,
              rock_triangles = 0;    // rock figures are from the previous frame's culling
+    unsigned rock_candidates = 0;   // rocks the CPU frustum pass handed this frame's GPU cull
     unsigned draw_calls = 0;        // API draw calls submitted this frame (an indirect multi-draw counts once)
     unsigned bodies_drawn = 0;      // bodies inside the view frustum this frame
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame

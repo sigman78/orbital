@@ -176,7 +176,7 @@ struct CullParams {
     SHADER_FLOAT4 giant_motion;         // the belt parent's world-space step back to the previous frame; w unused
     SHADER_FLOAT4 levels;               // projected-radius thresholds of levels 1 to 4, in pixels
     SHADER_FLOAT4 billboard;            // level 5 threshold, billboard radius, minimum radius, far-tier blend weight (splats fade out by it)
-    SHADER_UINT rock_limit, body_count, light_in_count_pass, unused; // light_in_count_pass: splats lit in both passes (development comparison)
+    SHADER_UINT rock_limit, body_count, light_in_count_pass, candidate_count; // light_in_count_pass: splats lit in both passes (development comparison); candidate_count: the rocks the CPU's frustum pass kept, one cull thread each
     // Each rock group's slice of the pooled rock mesh.
     SHADER_UINT index_counts[ORBITAL_ROCK_GROUPS];
     SHADER_UINT first_indices[ORBITAL_ROCK_GROUPS];
@@ -184,15 +184,17 @@ struct CullParams {
 };
 
 // Per-frame scratch the culling passes read and write; the CPU fills params,
-// the asteroid-only instance pointer and zeroes the counters before each frame.
-// Indirect first-instance indices still include the full-size body prefix.
+// the asteroid-only instance pointer, the candidate pointer and zeroes the
+// counters before each frame. Indirect first-instance indices still include the
+// full-size body prefix.
 struct CullScratch {
     CullParams params;
 #ifdef __cplusplus
-    SHADER_ADDRESS instances;
+    SHADER_ADDRESS instances, candidates;
     SHADER_UINT counts[ORBITAL_ROCK_GROUPS + 1], cursors[ORBITAL_ROCK_GROUPS + 1];
 #else
     SHADER_ADDRESS(AsteroidInstance) instances;
+    SHADER_ADDRESS(uint) candidates; // rock ids the CPU's frustum pass kept, this frame's slice
     Atomic<uint> counts[ORBITAL_ROCK_GROUPS + 1];
     Atomic<uint> cursors[ORBITAL_ROCK_GROUPS + 1];
 #endif

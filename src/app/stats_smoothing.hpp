@@ -29,6 +29,7 @@ struct SmoothedStats {
         ease(frame_ms, sample_frame_ms);
         ease(frame.draw_ms, sample.draw_ms);
         ease(frame.prepare_ms, sample.prepare_ms);
+        ease(frame.belt_ms, sample.belt_ms);
         for (std::size_t i = 0; i < render::gpu_pass_count; i++)
             ease(frame.gpu.ms[i], sample.gpu.ms[i]);
         ease(rocks_, float(sample.visible_asteroids));
@@ -38,6 +39,7 @@ struct SmoothedStats {
         frame.draw_calls = sample.draw_calls;
         frame.rock_groups_drawn = sample.rock_groups_drawn;
         frame.belt_lod = sample.belt_lod;
+        frame.rock_candidates = sample.rock_candidates;
         frame.visible_asteroids = unsigned(rocks_ + .5f);
         frame.triangles = unsigned(triangles_ + .5f);
         primed = true;
