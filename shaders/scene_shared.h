@@ -82,6 +82,7 @@ struct Frame {
     SHADER_FLOAT4 galaxy_layers;         // low-frequency, cloud and filament gains, unused
     SHADER_FLOAT4 galaxy_more;           // dust fBm lacunarity, gain, the galaxy pass's resolution divisor, band contrast exponent
     SHADER_FLOAT4 display;               // HDR output (0 off, 1 scRGB, 2 HDR10), paper white in nits, headroom (peak over paper white), the auto exposure's multiplier
+    SHADER_FLOAT4 sequence;              // frames since the last camera cut, the seed of the per-frame jitters (marches, grain); unused x3
 };
 struct Root {
 #ifdef __cplusplus

@@ -15,6 +15,7 @@ struct ViewParams
     float exposure;
     float time; // seconds
     bool highQuality, hud;
+    float frame; // frames since the last camera cut: the seed of the per-frame jitters, so they keep changing while the time stands
 };
 
 ViewParams viewParams(Frame* frame)
@@ -33,6 +34,7 @@ ViewParams viewParams(Frame* frame)
     v.time = frame->camera_time.w;
     v.highQuality = frame->options.z > .5;
     v.hud = frame->options.w > .5;
+    v.frame = frame->sequence.x;
     return v;
 }
 

@@ -127,6 +127,9 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
                      input.belt_dust.enabled ? 1.f : 0.f, input.sun.ambient_fill};
     frame.dust = {input.belt_dust.density, input.belt_dust.brightness, input.belt_dust.far, input.belt_dust.saturation};
     frame.dust_tint = {input.belt_dust.tint[0], input.belt_dust.tint[1], input.belt_dust.tint[2], 0};
+    // The jitter seed counts frames, not seconds: a paused simulation still decorrelates the
+    // marches for the temporal pass, and a shot's frame gets the same seed wherever it sits.
+    frame.sequence = {float(frames_since_cut % 4096), 0, 0, 0};
     frame.earth = {input.earth.ocean_roughness, input.earth.glint_intensity, input.earth.cloud_shadow,
                    input.earth.cloud_shadow_softness};
     frame.earth_more = {input.earth.sea_patchiness, input.earth.cloud_opacity, 0, 0};
