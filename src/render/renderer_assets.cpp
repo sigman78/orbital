@@ -119,11 +119,10 @@ const GpuMesh& Renderer::Impl::body_mesh(unsigned body, unsigned lod) const {
 // The minor planet's maps, baked at start-up from its terrain in the airless
 // shader's layout, so the body draws through the Moon's path with its own content.
 void Renderer::Impl::load_minor_planet_maps() {
-    if (!showcase.has_minor_planet())
+    if (!minor_planet_terrain)
         return;
     const auto start = std::chrono::steady_clock::now();
-    const MinorPlanetTerrain terrain(system.bodies[showcase.minor_planet()].material_seed);
-    TerrainMaps maps = bake_terrain_maps(terrain, 2048, 1024);
+    TerrainMaps maps = bake_terrain_maps(*minor_planet_terrain, 2048, 1024);
     const auto image = [&](Bytes& pixels) {
         return assets::Rgba8Image{.extent = {maps.width, maps.height}, .pixels = std::move(pixels)};
     };

@@ -12,8 +12,8 @@ namespace space::app {
 namespace {
 
 constexpr float panel_width = 360;
-constexpr const char* bookmark_names[] = {"Earth", "Jupiter",     "Moon",         "Mars",        "Dawn",
-                                          "Belt",  "Dust shadow", "Dust grazing", "Minor planet"};
+constexpr const char* bookmark_names[] = {"Earth", "Jupiter",     "Moon",         "Mars",         "Dawn",
+                                          "Belt",  "Dust shadow", "Dust grazing", "Minor planet", "Minor planet close"};
 static_assert(std::size(bookmark_names) == bookmark_count);
 
 // A collapsing section with its own ID scope: headers push none, so labels
@@ -246,12 +246,17 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Disable VSync for performance comparisons: a waiting GPU may clock down.");
     ImGui::Text("%u draws, %u bodies, %u rock groups", stats.draw_calls, stats.bodies_drawn, stats.rock_groups_drawn);
+    if (stats.patches_resident)
+        ImGui::Text("%u terrain patches drawn, %u cached", stats.patches_drawn, stats.patches_resident);
     ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
 }
-void quality_controls(bool& high) {
+void quality_controls(bool& high, render::TerrainSettings& terrain) {
     ImGui::Checkbox("High tier (F2)", &high);
     ImGui::SameLine();
     ImGui::TextDisabled(high ? "520k rocks" : "280k rocks");
+    ImGui::Checkbox("Near tier", &terrain.near_tier); // the minor planet's patches close in; off keeps its sphere
+    ImGui::SameLine();
+    ImGui::Checkbox("Wireframe", &terrain.wireframe); // the patches' quad grid over the surface
 }
 void anti_aliasing_controls(render::AntiAliasingSettings& settings) {
     ImGui::Checkbox("Temporal (F5)", &settings.temporal_aa);
@@ -556,6 +561,8 @@ void camera_controls(AppState& app) {
     if (ImGui::Button("Free (F)", {104, 0}))
         free_camera(app);
     ImGui::Checkbox("Pause (Space)", &app.paused);
+    ImGui::SameLine();
+    ImGui::Checkbox("Slow travel (Z)", &app.slow_travel); // a fiftieth of the speed, for a small body
 }
 void overlay_controls(AppState& app) {
     ImGui::Checkbox("HUD (F1)", &app.overlay);
@@ -587,7 +594,7 @@ void draw_panel(AppState& app, const render::Stats& stats, const SmoothedStats& 
         ImGui::PopID();
     }
     if (section("Quality")) {
-        quality_controls(app.high);
+        quality_controls(app.high, app.terrain);
         ImGui::PopID();
     }
     if (section("Anti-aliasing")) {

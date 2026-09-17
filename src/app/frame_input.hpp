@@ -29,7 +29,8 @@ inline render::FrameInput make_frame_input(const AppState& app, double time, con
             .sun = app.sun,
             .post = app.post,
             .sky = app.sky,
-            .gas = app.gas};
+            .gas = app.gas,
+            .terrain = app.terrain};
 }
 
 } // namespace space::app

@@ -1,7 +1,9 @@
 #include "scene/terrain.hpp"
 #include "core/noise.hpp"
+#include "scene/terrain_patch.hpp"
 
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 
@@ -81,9 +83,44 @@ void test_bake() {
         }
 }
 
+// A patch's grid lies on the terrain exactly (its crater region is complete),
+// neighbours share their edge, the skirt hangs below, and the indices fit.
+void test_patches() {
+    const MinorPlanetTerrain terrain(1007);
+    for (unsigned face = 0; face < 6; face++)
+        for (double s = -1; s <= 1; s += .5)
+            assert(std::abs(length(cube_direction(face, s, .25)) - 1) < 1e-12);
+    std::vector<geometry::Vertex> a(patch_vertex_count), b(patch_vertex_count);
+    const PatchKey left{2, 3, 4, 5}, right{2, 3, 5, 5};
+    generate_patch(terrain, left, a);
+    generate_patch(terrain, right, b);
+    for (unsigned y = 0; y < patch_side; y++)
+        assert(a[y * patch_side + patch_quads] == b[y * patch_side]);
+    const PatchBounds bounds = patch_bounds(left);
+    for (unsigned i = 0; i < patch_side * patch_side; i++) {
+        const Vec3d d = to_double(a[i].normal);
+        assert(std::abs(length(to_double(a[i].position)) - (1 + terrain.height(d))) < 1e-6);
+        assert(std::acos(std::min(dot(d, bounds.centre), 1.0)) <= bounds.angular_radius);
+    }
+    for (unsigned i = patch_side * patch_side; i < patch_vertex_count; i++)
+        assert(length(a[i].position) < 1 + MinorPlanetTerrain::height_max);
+    const auto indices = patch_indices();
+    assert(indices.size() == patch_index_count);
+    for (const auto index : indices)
+        assert(index < patch_vertex_count);
+    const auto start = std::chrono::steady_clock::now();
+    for (unsigned i = 0; i < 8; i++)
+        generate_patch(terrain, PatchKey{std::uint8_t(i % 6), 5, std::uint16_t(i), std::uint16_t(3 * i)}, b);
+    std::printf("terrain: eight patches of %u vertices in %.2f ms on one thread\n", patch_vertex_count,
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+    const PatchKey child{2, 4, 9, 11};
+    assert(left.child(3) == child && left.packed() != right.packed());
+}
+
 int main() {
     test_noise();
     test_terrain();
     test_bake();
+    test_patches();
     return 0;
 }

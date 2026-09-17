@@ -57,9 +57,10 @@ struct FrameStats {
     float prepare_ms = 0; // CPU work between acquiring the swapchain image and submitting
     PassTimings gpu;      // the GPU passes of the last completed frame, by GpuPass
     unsigned visible_asteroids = 0, triangles = 0,
-             rock_triangles = 0;    // rock figures are from the previous frame's culling
-    unsigned draw_calls = 0;        // API draw calls submitted this frame (an indirect multi-draw counts once)
-    unsigned bodies_drawn = 0;      // bodies inside the view frustum this frame
+             rock_triangles = 0; // rock figures are from the previous frame's culling
+    unsigned draw_calls = 0;     // API draw calls submitted this frame (an indirect multi-draw counts once)
+    unsigned bodies_drawn = 0;   // bodies inside the view frustum this frame
+    unsigned patches_drawn = 0, patches_resident = 0; // the minor planet's near tier: drawn this frame, cached
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
     float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc
 };
@@ -98,6 +99,7 @@ struct FrameInput {
     PostSettings post;
     SkySettings sky;
     GasSettings gas;
+    TerrainSettings terrain;
 };
 
 // Startup choices that are not part of the scene description.
