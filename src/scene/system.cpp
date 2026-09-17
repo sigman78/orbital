@@ -144,12 +144,12 @@ SystemDescription generate_system(std::uint64_t seed) {
                         .orbit_axis = {0, 1, 0.03},
                         .orbit_angular_rate = 0.004488,
                         .material_seed = material(tags::body_ids[5])},
-        // The planetoid: a thirtieth of the Earth's radius (a large asteroid's worth of
-        // world, a few hundred kilometres), on its own slow orbit away from the belt, spinning
+        // The minor planet: a fifteenth of the Earth's radius (a dwarf planet's worth of
+        // world, near a thousand kilometres), on its own slow orbit away from the belt, spinning
         // fast enough to watch. Its surface is generated from the material seed.
         BodyDescription{.id = tags::body_ids[6],
-                        .body_class = BodyClass::Planetoid,
-                        .radius = 2.5 / 30.0,
+                        .body_class = BodyClass::MinorPlanet,
+                        .radius = 2.5 / 15.0,
                         .axial_tilt = 0.35,
                         .rotation_period = 700.0,
                         .rotation_phase = 0.4,

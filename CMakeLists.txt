@@ -17,7 +17,7 @@ endif()
 #   orbital_app_cpu app navigation and command-line parsing, independent of the renderer
 #   orbital_render_cpu showcase contract, state binding and frame calculations
 #   orbital_assets PNG I/O (vendored Wuffs decoder, stb writer), pixel kernels, materials
-add_library(orbital_core STATIC src/core/log.cpp src/core/panic.cpp src/core/file.cpp)
+add_library(orbital_core STATIC src/core/log.cpp src/core/panic.cpp src/core/file.cpp src/core/noise.cpp)
 target_include_directories(orbital_core PUBLIC src)
 target_compile_features(orbital_core PUBLIC cxx_std_20)
 target_compile_options(orbital_core PRIVATE ${ORBITAL_WARNINGS})

@@ -7,22 +7,26 @@
 
 namespace space {
 
-// The planetoid's terrain, the one source of its shape and colour: the start-up
-// bake of its maps reads it, and the near tier's patches will. Everything is a
-// function of a direction from the centre, so any parameterisation (the
-// equirectangular maps today, cube-sphere patches later) samples the same body.
-// Heights are in radii, signed about the reference sphere.
-class PlanetoidTerrain {
+// The minor planet's terrain, the one source of its shape and colour: the
+// start-up bake of its maps reads it, and the near tier's patches will.
+// Everything is a function of a direction from the centre, so any
+// parameterisation (the equirectangular maps today, cube-sphere patches later)
+// samples the same body. Heights are in radii, signed about the reference
+// sphere. The look is after Ceres and Pluto: a dark grey ground with warm
+// maculae, worn craters at every size, and a few bright faculae.
+class MinorPlanetTerrain {
 public:
     struct Crater {
-        Vec3d centre;     // unit direction
-        float radius = 0; // angular, radians
-        float depth = 0;  // radii, at the floor
-        float bright = 0; // 0 old and dark to 1 fresh and bright, for the albedo
+        Vec3d centre;        // unit direction
+        float radius = 0;    // angular, radians
+        float depth = 0;     // radii, the floor below the reference sphere
+        float age = 0;       // 0 fresh (dark floor, bright ejecta) to 1 worn to the ground's tone
+        float facula = 0;    // a bright deposit at the floor's centre, 0 for most
+        float cos_reach = 1; // cosine of the angle past which the crater no longer contributes
     };
-    static constexpr float height_min = -.04f, height_max = .06f; // the range a bake's alpha spans, radii
+    static constexpr float height_min = -.05f, height_max = .05f; // the range a bake's alpha spans, radii
 
-    explicit PlanetoidTerrain(std::uint64_t seed);
+    explicit MinorPlanetTerrain(std::uint64_t seed);
 
     // Height above the reference sphere, radii, within [height_min, height_max].
     float height(Vec3d direction) const;
@@ -35,10 +39,13 @@ private:
     std::vector<Crater> craters_;
 };
 
-// Deterministic gradient noise over 3D, in [-1, 1]; the terrain's building block,
-// public for tests and for a GPU port to check against.
-float gradient_noise(Vec3d p, std::uint64_t seed);
-// Fractional Brownian motion of gradient_noise: octaves doubling in frequency, halving in amplitude.
-float fbm(Vec3d p, unsigned octaves, std::uint64_t seed);
+// The terrain sampled into equirectangular maps in the airless shader's layout,
+// RGBA8 rows from the north: the albedo in linear light, and the tangent normal
+// (x east, y south) with the height over [height_min, height_max] in alpha.
+struct TerrainMaps {
+    unsigned width = 0, height = 0;
+    std::vector<std::uint8_t> albedo, normal;
+};
+TerrainMaps bake_terrain_maps(const MinorPlanetTerrain& terrain, unsigned width, unsigned height);
 
 } // namespace space

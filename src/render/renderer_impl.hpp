@@ -90,8 +90,8 @@ enum class Slot : unsigned {
     sun_visibility = TEX_SUN_VISIBILITY,
     flare = TEX_FLARE,         // the soft lens flare stack at a fraction of the frame
     lens_dirt = TEX_LENS_DIRT, // dirty-glass mask stretched over the frame, baked by tools/bake-lens-dirt.py
-    planetoid_albedo = TEX_PLANETOID_ALBEDO, // the planetoid's maps, baked at start-up from its terrain
-    planetoid_normal = TEX_PLANETOID_NORMAL,
+    minor_planet_albedo = TEX_MINOR_PLANET_ALBEDO, // the minor planet's maps, baked at start-up from its terrain
+    minor_planet_normal = TEX_MINOR_PLANET_NORMAL,
     count = ORBITAL_TEXTURE_COUNT,
 };
 
@@ -127,7 +127,7 @@ enum class SurfaceKind : unsigned {
     moon = ORBITAL_KIND_MOON,
     rock = ORBITAL_KIND_ROCK,
     mars = ORBITAL_KIND_MARS,
-    planetoid = ORBITAL_KIND_PLANETOID
+    minor_planet = ORBITAL_KIND_MINOR_PLANET
 };
 
 constexpr SurfaceKind surface_kind(BodyClass body_class) {
@@ -137,7 +137,7 @@ constexpr SurfaceKind surface_kind(BodyClass body_class) {
     case BodyClass::RockyMoon: return SurfaceKind::moon;
     case BodyClass::Desert: return SurfaceKind::mars;
     case BodyClass::Moonlet: return SurfaceKind::rock;
-    case BodyClass::Planetoid: return SurfaceKind::planetoid;
+    case BodyClass::MinorPlanet: return SurfaceKind::minor_planet;
     }
     return SurfaceKind::rock;
 }
@@ -343,7 +343,7 @@ struct Renderer::Impl {
         case SurfaceKind::giant: return pso.scene.surface_giant;
         case SurfaceKind::moon:
         case SurfaceKind::mars:
-        case SurfaceKind::planetoid: return pso.scene.surface_airless;
+        case SurfaceKind::minor_planet: return pso.scene.surface_airless;
         case SurfaceKind::rock: return pso.scene.surface_rock;
         }
         return pso.scene.surface_rock;
@@ -460,7 +460,7 @@ struct Renderer::Impl {
     // Static mesh and material assets (renderer_assets.cpp).
     void create_meshes();
     void load_materials();
-    void load_planetoid_maps(); // bakes the planetoid's albedo and normal+height maps from its terrain
+    void load_minor_planet_maps(); // bakes the minor planet's albedo and normal+height maps from its terrain
     void load_stars();
     void load_splats();
     void load_galaxy_layers();

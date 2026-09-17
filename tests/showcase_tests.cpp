@@ -13,7 +13,7 @@ int main() {
     assert(binding && error.empty());
     assert(system.bodies[binding->earth()].body_class == BodyClass::Terrestrial);
     assert(system.bodies[binding->desert()].body_class == BodyClass::Desert);
-    assert(binding->has_planetoid() && system.bodies[binding->planetoid()].body_class == BodyClass::Planetoid);
+    assert(binding->has_minor_planet() && system.bodies[binding->minor_planet()].body_class == BodyClass::MinorPlanet);
     assert(system.bodies[binding->belt_parent()].id == system.belts.front().parent_id);
     const auto original = evaluate_system(system, 1234);
     auto shuffled = original;

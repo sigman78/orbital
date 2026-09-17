@@ -13,7 +13,7 @@
 namespace space::app {
 inline constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
-    "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..7\n"
+    "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..8\n"
     "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --pan-stop-frame N "
     "--rocks N --sun-at X Y (turn the camera so the sun projects there, 1 the frame edge; for lens review)\n"
     "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --disc 0|1 --lod-scale X --vsync 0|1 --splat 0..3 --tone "

@@ -38,10 +38,10 @@ std::optional<Showcase> Showcase::resolve(const SystemDescription& system, std::
             break;
         case BodyClass::RockyMoon: ++counts[3]; break;
         case BodyClass::Moonlet: break;
-        case BodyClass::Planetoid:
-            if (result.planetoid_ < max_body_count)
-                return invalid("showcase allows one planetoid");
-            result.planetoid_ = i;
+        case BodyClass::MinorPlanet:
+            if (result.minor_planet_ < max_body_count)
+                return invalid("showcase allows one minor planet");
+            result.minor_planet_ = i;
             break;
         default: return invalid("showcase has an unsupported body class");
         }

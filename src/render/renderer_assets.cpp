@@ -1,6 +1,5 @@
 #include "assets/image_io.hpp"
 #include "render/renderer_impl.hpp"
-#include "scene/terrain.hpp"
 
 #include "assets/kernels.hpp"
 #include "assets/material_catalog.hpp"
@@ -8,7 +7,9 @@
 #include "assets/texture.hpp"
 #include "core/file.hpp"
 #include "core/log.hpp"
+#include "core/parallel.hpp"
 #include "core/small_vec.hpp"
+#include "scene/terrain.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -96,23 +97,13 @@ void Renderer::Impl::create_meshes() {
         spheres[lod] = upload_mesh(geometry::generate_sphere(32u << lod, 16u << lod));
     constexpr std::uint32_t rock_seed_base = 71, rock_seed_stride = 37;
     // The library's shapes are independent, so they are generated across the
-    // material pool's workers; each writes its own groups of the library.
+    // cores; each writes its own groups of the library.
     std::vector<geometry::Mesh> library(rock_group_count);
-    {
-        const unsigned cores = std::thread::hardware_concurrency();
-        const unsigned workers = std::clamp(cores > 1 ? cores - 1 : 1u, 1u, decode_workers_max);
-        std::atomic<unsigned> next_shape = 0;
-        SmallVec<std::future<void>, decode_workers_max> pool;
-        for (unsigned worker = 0; worker < workers; worker++)
-            pool.push_back(std::async(std::launch::async, [&] {
-                for (unsigned shape = next_shape++; shape < geometry::rock_shape_count; shape = next_shape++)
-                    for (unsigned level = 0; level < geometry::rock_level_count; level++)
-                        library[rock_group(shape, level)] = geometry::generate_rock(
-                            rock_seed_base + shape * rock_seed_stride, level);
-            }));
-        for (auto& task : pool)
-            task.get();
-    }
+    parallel_for(geometry::rock_shape_count, [&](unsigned shape) {
+        for (unsigned level = 0; level < geometry::rock_level_count; level++)
+            library[rock_group(shape, level)] = geometry::generate_rock(rock_seed_base + shape * rock_seed_stride,
+                                                                        level);
+    });
     upload_rock_pool(library);
     // Moonlets are irregular bodies: each gets its own seeded rock at full detail.
     for (unsigned i = 0; i < body_count; i++)
@@ -125,80 +116,30 @@ const GpuMesh& Renderer::Impl::body_mesh(unsigned body, unsigned lod) const {
     return system.bodies[body].body_class == BodyClass::Moonlet ? moonlet_meshes[body] : spheres[lod];
 }
 
-// Decodes and mip-filters every material on a bounded worker pool, then
-// uploads them all in one batch on this thread. Unused descriptor slots point
-// at the first map so every binding is valid.
-// The planetoid's maps, baked at start-up from its terrain: an equirectangular
-// albedo in linear light and a normal+height map in the airless shader's layout
-// (the tangent normal in RGB with x east and y south, the height over the
-// terrain's range in alpha), so the body draws through the Moon's path with its
-// own content. The heights are sampled first so the normals come from finite
-// differences of the same values the alpha carries.
-void Renderer::Impl::load_planetoid_maps() {
-    if (!showcase.has_planetoid())
+// The minor planet's maps, baked at start-up from its terrain in the airless
+// shader's layout, so the body draws through the Moon's path with its own content.
+void Renderer::Impl::load_minor_planet_maps() {
+    if (!showcase.has_minor_planet())
         return;
     const auto start = std::chrono::steady_clock::now();
-    const PlanetoidTerrain terrain(system.bodies[showcase.planetoid()].material_seed);
-    constexpr unsigned width = 2048, height = 1024;
-    const auto direction = [](double u, double v) {
-        const double angle = (u - .5) * 2 * pi<double>, latitude = (.5 - v) * pi<double>;
-        const double c = std::cos(latitude);
-        return Vec3d{c * std::cos(angle), std::sin(latitude), c * std::sin(angle)};
+    const MinorPlanetTerrain terrain(system.bodies[showcase.minor_planet()].material_seed);
+    TerrainMaps maps = bake_terrain_maps(terrain, 2048, 1024);
+    const auto image = [&](Bytes& pixels) {
+        return assets::Rgba8Image{.extent = {maps.width, maps.height}, .pixels = std::move(pixels)};
     };
-    std::vector<float> heights(std::size_t(width) * height);
-    const auto rows = [&](auto&& body) {
-        const unsigned workers = std::clamp(std::thread::hardware_concurrency(), 1u, 16u);
-        SmallVec<std::future<void>, 16> pool;
-        for (unsigned w = 0; w < workers; w++)
-            pool.push_back(std::async(std::launch::async, [&, w] {
-                for (unsigned y = w; y < height; y += workers)
-                    body(y);
-            }));
-        for (auto& worker : pool)
-            worker.get();
-    };
-    rows([&](unsigned y) {
-        for (unsigned x = 0; x < width; x++)
-            heights[std::size_t(y) * width + x] = terrain.height(direction((x + .5) / width, (y + .5) / height));
-    });
-    assets::Rgba8Image albedo{.extent = {width, height}, .pixels = {}}, normal{.extent = {width, height}, .pixels = {}};
-    albedo.pixels.resize(std::size_t(width) * height * 4);
-    normal.pixels.resize(std::size_t(width) * height * 4);
-    const float range = PlanetoidTerrain::height_max - PlanetoidTerrain::height_min;
-    const auto at = [&](unsigned x, unsigned y) { return heights[std::size_t(y) * width + (x % width)]; };
-    const auto byte = [](float v) { return std::uint8_t(std::clamp(v * 255.f + .5f, 0.f, 255.f)); };
-    rows([&](unsigned y) {
-        const double v = (y + .5) / height, latitude = (.5 - v) * pi<double>;
-        const float cos_latitude = std::max(float(std::cos(latitude)), .05f);
-        const float east_arc = 2 * float(pi<double>) / width * cos_latitude; // radii per texel along u
-        const float south_arc = float(pi<double>) / height;                  // radii per texel along v
-        for (unsigned x = 0; x < width; x++) {
-            const float h = at(x, y);
-            const float east = (at(x + 1, y) - at(x + width - 1, y)) / (2 * east_arc);
-            const float south = (at(x, std::min(y + 1, height - 1)) - at(x, y == 0 ? 0 : y - 1)) / (2 * south_arc);
-            const Vec3f n = normalized(Vec3f{-east, -south, 1});
-            const std::size_t p = (std::size_t(y) * width + x) * 4;
-            normal.pixels[p] = byte(n.x * .5f + .5f);
-            normal.pixels[p + 1] = byte(n.y * .5f + .5f);
-            normal.pixels[p + 2] = byte(n.z * .5f + .5f);
-            normal.pixels[p + 3] = byte((h - PlanetoidTerrain::height_min) / range);
-            const Vec3f colour = terrain.albedo(direction((x + .5) / width, v), h, 1 - n.z);
-            albedo.pixels[p] = byte(colour.x);
-            albedo.pixels[p + 1] = byte(colour.y);
-            albedo.pixels[p + 2] = byte(colour.z);
-            albedo.pixels[p + 3] = 255;
-        }
-    });
     upload_images({{.data = assets::texture_from_images(
-                        assets::prepare_material(std::move(albedo), {.encoding = assets::MaterialEncoding::Linear})),
-                    .slot = Slot::planetoid_albedo},
+                        assets::prepare_material(image(maps.albedo), {.encoding = assets::MaterialEncoding::Linear})),
+                    .slot = Slot::minor_planet_albedo},
                    {.data = assets::texture_from_images(assets::prepare_material(
-                        std::move(normal), {.encoding = assets::MaterialEncoding::Linear, .normal_map = true})),
-                    .slot = Slot::planetoid_normal}});
-    log::info("Planetoid maps baked ({}x{}) in {} ms", width, height,
+                        image(maps.normal), {.encoding = assets::MaterialEncoding::Linear, .normal_map = true})),
+                    .slot = Slot::minor_planet_normal}});
+    log::info("Minor planet maps baked ({}x{}) in {} ms", maps.width, maps.height,
               std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
 }
 
+// Decodes and mip-filters every material on a bounded worker pool, then
+// uploads them all in one batch on this thread. Unused descriptor slots point
+// at the first map so every binding is valid.
 void Renderer::Impl::load_materials() {
     const auto start = std::chrono::steady_clock::now();
     // Leave one core for this thread and cap the pool: decoding and filtering

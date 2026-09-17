@@ -45,7 +45,7 @@ app        options, camera, HUD, control panel, frame loop     (no OS headers)
 render     Vulkan renderer through NoGraphicsAPI                (no OS headers; opaque native handle)
 platform   window, events, process, text and ImGui overlays    platform/<os>/ implements them
 scene      system generation, geometry                         assets  image I/O, kernels, materials
-core       log, panic, file, math, types, small_vec            depends on nothing
+core       log, panic, file, math, types, small_vec, noise, parallel   depends on nothing
 ```
 
 ### Header dependencies and bounds

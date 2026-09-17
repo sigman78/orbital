@@ -57,8 +57,8 @@
 #define TEX_FLARE 51
 #define TEX_LENS_DIRT 52
 #define TEX_MOTION 53
-#define TEX_PLANETOID_ALBEDO 54 // baked at start-up from scene/terrain.hpp, linear light
-#define TEX_PLANETOID_NORMAL 55 // tangent normal and height, the airless shader's layout
+#define TEX_MINOR_PLANET_ALBEDO 54 // baked at start-up from scene/terrain.hpp, linear light
+#define TEX_MINOR_PLANET_NORMAL 55 // tangent normal and height, the airless shader's layout
 #define SAMPLER_CLAMP 0
 #define SAMPLER_WRAP_U_ANISOTROPIC 1
 #define SAMPLER_SHADOW_COMPARE 2
