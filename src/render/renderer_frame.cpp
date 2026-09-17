@@ -63,8 +63,11 @@ bool Renderer::draw(const FrameInput& supplied) {
                   s.extent.width, s.extent.height);
     const auto prepare_start = std::chrono::steady_clock::now();
 
+    // Descriptors are written before recording starts: a write later would invalidate the command
+    // buffer they are bound in. With TAA off the resolved slot is the scene itself, the temporal
+    // pass being skipped; a toggle back on starts the history afresh (prepare_camera).
     const unsigned history_write = s.frame_index % 2;
-    s.bind(Slot::history_a, s.frame_targets.history[history_write]);
+    s.bind(Slot::history_a, input.aa.temporal_aa ? s.frame_targets.history[history_write] : s.frame_targets.hdr);
     s.bind(Slot::history_b, s.frame_targets.history[1 - history_write]);
     const FrameData frame = s.build_frame(input);
     s.write_body_instances(input, frame);
