@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parent.parent
 SCENES = {name: ['--bookmark', str(i)] for i, name in
           enumerate(['earth', 'giant', 'moon', 'mars', 'dawn', 'belt'])}
 SCENES['belt-sun'] = ['--belt-sun-view']
+DEFAULT_SCENES = list(SCENES) # the protocol every baseline shares; the views below are for local investigations
+SCENES['dust-shadow'] = ['--bookmark', '6']
+SCENES['dust-grazing'] = ['--bookmark', '7']
 SETTINGS = ['--seed', '20260911', '--time', '0', '--taa', '1', '--spatial', '2',
             '--dust', '1', '--disc', '1', '--lod-scale', '1', '--splat', '2',
             '--tone', '2', '--galaxy', '0', '--exposure', '1', '--vsync', '0', '--no-hud']
@@ -149,7 +152,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--executable', type=Path, default=ROOT / 'build/release/orbital.exe')
     parser.add_argument('--baseline', type=Path, action='append', default=[])
-    parser.add_argument('--scenes', nargs='+', choices=list(SCENES), default=list(SCENES))
+    parser.add_argument('--scenes', nargs='+', choices=list(SCENES), default=DEFAULT_SCENES)
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--frames', type=int, default=360)
     parser.add_argument('--warmup', type=int, default=120)

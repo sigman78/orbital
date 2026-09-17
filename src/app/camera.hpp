@@ -23,7 +23,7 @@ struct Input {
 };
 
 // Number of preset views reachable with the number keys.
-constexpr std::size_t bookmark_count = 6;
+constexpr std::size_t bookmark_count = 8;
 
 struct Camera {
     Vec3d position{0.0, 0.8, 4.8};

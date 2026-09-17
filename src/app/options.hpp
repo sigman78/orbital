@@ -13,7 +13,7 @@
 namespace space::app {
 inline constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
-    "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..5\n"
+    "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..7\n"
     "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --pan-stop-frame N "
     "--rocks N --sun-at X Y (turn the camera so the sun projects there, 1 the frame edge; for lens review)\n"
     "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --disc 0|1 --lod-scale X --vsync 0|1 --splat 0..3 --tone "
@@ -28,7 +28,7 @@ inline constexpr std::string_view usage =
     "--shots file (one shot per line: key=value tokens named as the options above, e.g. bookmark=3 frames=80 "
     "capture=mars.png; the command line sets the defaults) --report file.json (per-shot readings) --headless "
     "(hidden window)\n"
-    "Controls: RMB mouse look; MMB hold telescope (5x); WASD move; Q/E vertical; Shift fast; 1-6 bookmarks; O orbit; F "
+    "Controls: RMB mouse look; MMB hold telescope (5x); WASD move; Q/E vertical; Shift fast; 1-8 bookmarks; O orbit; F "
     "free;\n"
     "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
     "F5 temporal AA; F6 rock splat cut-off; F7 splat lighting in both cull passes; F8 tone curve;\n"

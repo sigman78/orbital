@@ -47,6 +47,12 @@ constexpr ViewDefinition bookmark_views[bookmark_count] = {
     {.body = 3, .radius_scale = {0.9, 0.35, 2.4}, .offset = {}},
     {.body = 0, .radius_scale = {}, .offset = {4.8, -0.2, 0.8}},
     {.body = 1, .radius_scale = {}, .offset = {45.0, -8.0, 22.0}},
+    // The dust views: inside the belt on the giant's night side, low over the plane, so the
+    // dust lies between the camera and the planet with the sun beyond it (forward scatter)
+    // and the planet's shadow across it; and from outside the belt at a grazing height,
+    // the rays crossing the whole slab, the sun to the side.
+    {.body = 1, .radius_scale = {}, .offset = {35.8, 19.8, -41.5}},
+    {.body = 1, .radius_scale = {}, .offset = {-19.9, 36.0, -86.0}},
 };
 
 // Catmull-Rom waypoints of the tour, visited in order over one period.
