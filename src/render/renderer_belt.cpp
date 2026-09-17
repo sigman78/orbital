@@ -2,16 +2,26 @@
 
 #include <algorithm>
 #include <cmath>
+#include <span>
 
 namespace space::render {
 
 namespace {
 constexpr AccessScope culled_draw_access{gpu::Stage::indirect | gpu::Stage::vertex | gpu::Stage::fragment,
                                          gpu::Access::indirect_read | gpu::Access::shader_read};
+// The belt spins with time, each radial band at its own rate so the rings slowly
+// shear past each other: the rate falls with radius as r^-0.35, a hint of Kepler
+// shear rather than the real 1.5. Each rock tumbles about its own axis at its own
+// rate, the generator's relative rate times this one. Barely visible, radians per
+// simulation second.
+constexpr double belt_spin_rate = 0.0012, rock_spin_rate = 0.02;
+constexpr float shear_exponent = 0.35f;
 } // namespace
 
-// Uploads the static per-rock records the GPU culling pass places each frame.
-// The seeded belt order defines quality tiers, so records keep their ids.
+// The CPU keeps every rock's seed (centre, tumble axis and rate, radius, band,
+// shape) and steps the motion; the GPU's static records are written from the
+// seeds once. The seeded belt order defines quality tiers, so records keep their
+// ids.
 void Renderer::Impl::build_belt(const BeltDescription& description) {
     const float inner = float(description.inner_radius), outer = float(description.outer_radius);
     const auto belt = geometry::generate_belt({.seed = description.seed,
@@ -19,7 +29,9 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
                                                .inner_radius = inner,
                                                .outer_radius = outer,
                                                .thickness = float(description.thickness)});
+    std::vector<RockSeed> seeds;
     std::vector<RockData> records;
+    seeds.reserve(belt.size());
     records.reserve(belt.size());
     for (unsigned id = 0; id < belt.size(); ++id) {
         const auto& rock = belt[id];
@@ -28,19 +40,30 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
             belt::radial_bands - 1,
             unsigned(std::clamp((radial - inner) / std::max(outer - inner, 1e-4f), 0.f, .999999f) *
                      belt::radial_bands));
-        const float radius = rock.scale.x * belt::rock_radius_scale;
-        records.push_back(
-            {.position_radius = {rock.position.x, rock.position.y, rock.position.z, radius},
-             .rotation_seed = {rock.rotation.x, rock.rotation.y, rock.rotation.z, float(id)},
-             .spin_group = {rock.spin.x, rock.spin.y, rock.spin.z, float(rock.variant * belt::radial_bands + band)}});
+        // The generator's tumble is a rate per Euler axis; the CPU steps its magnitude
+        // as the phase and the record keeps the direction the phase applies along.
+        const float spin = std::sqrt(dot(rock.spin, rock.spin));
+        const Vec3f axis = spin > 0 ? rock.spin * (1 / spin) : Vec3f{0, 1, 0};
+        seeds.push_back({.centre = rock.position,
+                         .spin_axis = axis,
+                         .spin_rate = spin * float(rock_spin_rate),
+                         .radius = rock.scale.x * belt::rock_radius_scale,
+                         .band = std::uint8_t(band),
+                         .variant = std::uint8_t(rock.variant)});
+        records.push_back({.position_radius = {rock.position.x, rock.position.y, rock.position.z, seeds.back().radius},
+                           .rotation_seed = {rock.rotation.x, rock.rotation.y, rock.rotation.z, float(id)},
+                           .spin_group = {axis.x, axis.y, axis.z, float(rock.variant * belt::radial_bands + band)}});
     }
     rock_data = upload_static(bytes_of(records));
     rock_count = unsigned(records.size());
-    rock_base.resize(records.size());
-    rock_band.resize(records.size());
-    for (unsigned id = 0; id < records.size(); ++id) {
-        rock_base[id] = records[id].position_radius;
-        rock_band[id] = std::uint8_t(unsigned(records[id].spin_group.w + .5f) % belt::radial_bands);
+    {
+        const float middle = (inner + outer) * .5f;
+        float rates[belt::radial_bands];
+        for (unsigned band = 0; band < belt::radial_bands; band++) {
+            const float radius = inner + (float(band) + .5f) / float(belt::radial_bands) * (outer - inner);
+            rates[band] = float(belt_spin_rate) * std::pow(middle / radius, shear_exponent);
+        }
+        belt_motion = BeltMotion(std::move(seeds), std::span<const float, belt::radial_bands>(rates));
     }
     std::vector<RockData> tail;
     for (unsigned id = 0; id < records.size(); ++id)

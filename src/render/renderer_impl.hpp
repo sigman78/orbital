@@ -15,6 +15,7 @@
 #include "render/gpu_timing.hpp"
 #include "render/gpu_types.hpp"
 #include "render/showcase.hpp"
+#include "scene/belt_motion.hpp"
 #include "scene/geometry.hpp"
 #include "scene/system.hpp"
 
@@ -158,7 +159,8 @@ struct HeapLayout {
     }
 };
 inline constexpr HeapLayout heap_layout{};
-static_assert(heap_layout.instance_capacity() < (1ull << 30)); // packed asteroid id
+inline constexpr std::uint64_t belt_state_stride = sizeof(RockState); // (x, y, z, phase) per rock in the state slices
+static_assert(heap_layout.instance_capacity() < (1ull << 30));        // packed asteroid id
 static_assert(heap_layout.cull_offset >= sizeof(FrameData));
 static_assert(heap_layout.instance_offset >= heap_layout.cull_offset + sizeof(CullScratch));
 static_assert(heap_layout.instance_offset < heap_layout.ui_offset());
@@ -344,8 +346,7 @@ struct Renderer::Impl {
     std::uint64_t rock_data = 0;                          // static heap address of the RockData records
     unsigned rock_count = 0;
     unsigned belt_capacity = 0;          // rocks the state heaps hold: the high tier or the override
-    std::vector<Float4> rock_base;       // belt-frame centre and radius per rock, the CPU's copy for the state
-    std::vector<std::uint8_t> rock_band; // radial band per rock, which sets its spin rate
+    BeltMotion belt_motion;              // the rocks' seeds and states, stepped on the CPU
     std::uint64_t rock_tail_data = 0;    // the size-tail rocks again, compacted for the transmittance splat
     std::vector<unsigned> rock_tail_ids; // their ids, ascending
     unsigned belt_count_override = 0;    // RendererConfig::belt_count

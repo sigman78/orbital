@@ -39,6 +39,7 @@ struct Placement {
 // The class rides in the integer part of Instance.tint.w, the material seed
 // in its fraction; billboards carry their coverage there instead.
 #include "rockclass.slang"
+#include "belt_frame.slang"
 
 // True when the rock's sphere lies entirely behind one of the bodies, seen from
 // the cull camera; both are live camera relative, so the frozen offset shifts both.
@@ -72,10 +73,10 @@ Placement placeRock(uint id, bool lightSplats)
     RockData rock = root.rocks[id];
     CullParams* p = &root.scratch->params;
     uint variant = uint(rock.spin_group.w + .5) / ORBITAL_BELT_BANDS;
-    // The CPU places the rock each frame; the record keeps what does not move.
+    // The CPU sweep places the rock in the belt plane each frame; the record keeps what does not move.
     float4 state = root.state[id];
-    float3 position = p->giant.xyz + state.xyz;
-    float radius = state.w;
+    float3 position = p->giant.xyz + rockPosition(state);
+    float radius = rock.position_radius.w;
     float3 v = rock.position_radius.xyz; // the belt frame before the spin, for the radial class
     // Visibility, level and coverage are judged from the cull camera, which the
     // panel can freeze while the live camera moves on; the instance keeps the
@@ -146,7 +147,7 @@ Placement placeRock(uint id, bool lightSplats)
     if (pixelRadius >= p->levels.w) level = 4;
     if (pixelRadius >= p->billboard.x) level = 5;
     result.group = variant * ORBITAL_ROCK_LEVELS + level;
-    float3 rotation = rock.rotation_seed.xyz + rock.spin_group.xyz * p->view.w;
+    float3 rotation = rockRotation(state, rock);
     result.instance.center_radius = float4(position, radius);
     result.instance.payload[0] = asuint(rotation.x);
     result.instance.payload[1] = asuint(rotation.y);

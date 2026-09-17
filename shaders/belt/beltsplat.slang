@@ -1,5 +1,6 @@
 #include "../scene_shared.h"
 #include "../scene/frame_records.slang"
+#include "belt_frame.slang"
 
 // Belt transmittance map, splat pass: every rock adds its cross-section to
 // the light-space texel column it falls in, into one of four depth slices
@@ -32,9 +33,8 @@ SplatVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_In
         return output;
     }
     RockData rock = root.rocks[instanceId];
-    float4 state = root.state[uint(rock.rotation_seed.w + .5)]; // the tail's records carry their ids
-    float3 position = p->giant.xyz + state.xyz;
-    float radius = state.w;
+    float3 position = p->giant.xyz + rockPosition(root.state[uint(rock.rotation_seed.w + .5)]); // the tail's records carry their ids
+    float radius = rock.position_radius.w;
 
     // Slice along the sun ray, relative to where this column crosses the belt plane.
     BeltParams belt = beltParams(root.frame);

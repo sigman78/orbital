@@ -48,15 +48,21 @@ Frame preparation separates CPU geometry from shader packing. `frame_calculation
 
 The belt is a population rather than a mesh list: `geometry` places 280k (baseline) or 520k (high) rocks in
 an annulus with rings, a gap, tapered edges and flared height, a power-law size distribution and three
-composition classes. Each rock is a 48-byte static record on the GPU (belt-frame centre and radius, tumble
-seed and rate, shape and band) and a 16-byte state the CPU writes every frame: its belt-relative position
-after the band spin and the tilt, with the radius. The CPU keeps the centres and bands for that; the
-state is the closed-form motion for now, and the integrator of the belt-motion plan writes the same
-buffer.
+composition classes. The CPU owns the rocks as two arrays in `scene/belt_motion.cpp`: the seeds that never
+change (centre in the belt frame, unit tumble axis and rate, radius, band, shape) and the states it steps,
+float4 (x, y, z, phase), the position after the band spin and the tumble phase. The GPU keeps a 48-byte
+static record per rock written from the seeds once, and reads the state the CPU writes every frame; the
+reader applies the fixed tilt and the phase along the record's axis (`belt/belt_frame.slang`). Every rock
+turns about the belt's axis at its band's rate and tumbles about its own at its own, so a step is one
+rotation per band and one phase increment per rock, applied to every rock in one plain loop. Time
+advances in fixed steps of 1/120 s; a frame takes as many whole steps as it covers, a time jump or a gap
+past 16 steps re-seeds exactly from the seeds, and a slice of the population is re-seeded every step so
+repeated float rotations do not drift in radius. A standing time (fixed captures, benchmarks) writes
+nothing after the first frame.
 
-Every frame the CPU writes the state into a host-visible staging heap and the frame copies it into one
-of two device slices (the other keeps the previous frame's positions, for motion vectors), then a
-compute shader culls the whole population in three passes (count, prefix, scatter): frustum,
+The sweep writes into a host-visible staging heap and the frame copies it into one of two device slices
+(the other keeps the previous frame's positions, for motion vectors), then a compute shader culls the
+whole population in three passes (count, prefix, scatter): frustum,
 planet occlusion, projected size, then a level and shape group, or a splat for rocks under the cut-off. The
 scatter pass lights each splat once (Lambert sphere at its phase angle, belt shadowing) and writes indirect
 draw arguments per group, so the meshes are one multi-draw and the splats one draw. Belt shadowing comes

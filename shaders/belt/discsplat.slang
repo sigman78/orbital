@@ -1,6 +1,7 @@
 #include "../scene_shared.h"
 #include "../scene/frame_records.slang"
 #include "rockclass.slang"
+#include "belt_frame.slang"
 
 // Far-belt map, rock layer: every rock adds its projected cross-section,
 // times its albedo, to the belt-plane texel it falls in (additive blend).
@@ -32,9 +33,8 @@ SplatVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_In
         return output;
     }
     RockData rock = root.rocks[instanceId];
-    float4 state = root.state[instanceId];
-    float3 position = p->giant.xyz + state.xyz;
-    float radius = state.w;
+    float3 position = p->giant.xyz + rockPosition(root.state[instanceId]);
+    float radius = rock.position_radius.w;
     float3 v = rock.position_radius.xyz; // the belt frame before the spin, for the radial class
 
     BeltParams belt = beltParams(root.frame);

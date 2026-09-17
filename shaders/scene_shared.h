@@ -132,14 +132,20 @@ struct MeterRoot {
 #define ORBITAL_ROCK_GROUPS (16 * ORBITAL_ROCK_LEVELS)   // geometry::rock_shape_count * levels; group index = shape * levels + level
 #define ORBITAL_BELT_BANDS 8                             // belt::radial_bands
 #define ORBITAL_CULL_THREADS 128
+// The belt plane to the giant's frame: a rotation about X (cos .933, sin .36) with the plane compressed;
+// (x, y, z) -> (x, y * Y_SCALE - z * Y_FROM_Z, z * Z_SCALE). The plane normal is fixed by it.
+#define ORBITAL_BELT_TILT_Y_SCALE .7
+#define ORBITAL_BELT_TILT_Y_FROM_Z .36
+#define ORBITAL_BELT_TILT_Z_SCALE .933
 
 // Static per-rock record in the belt's own frame (before spin and tilt). The
-// CPU places the rock each frame in the state array: belt-relative position
-// after the band spin and the tilt, with the radius in w.
+// CPU places the rock each frame in the state array, float4 (x, y, z, phase):
+// the position after the band spin and the tumble phase; the reader applies
+// the tilt (belt/belt_frame.slang) and the phase along the tumble axis.
 struct RockData {
     SHADER_FLOAT4 position_radius; // belt-local centre, world radius
     SHADER_FLOAT4 rotation_seed;   // Euler angles at t = 0, w = rock id (the tail's compacted copies index the state by it)
-    SHADER_FLOAT4 spin_group;      // tumble rate per axis, w = shape * ORBITAL_BELT_BANDS + band
+    SHADER_FLOAT4 spin_group;      // unit tumble axis in the Euler frame, w = shape * ORBITAL_BELT_BANDS + band
 };
 
 // VkDrawIndexedIndirectCommand padded to 32 bytes. The billboard entry holds a
@@ -150,7 +156,7 @@ struct DrawArgs {
 
 struct CullParams {
     SHADER_FLOAT4 right, up, forward;   // camera basis; w = tan_x, tan_y, pixel padding per unit depth
-    SHADER_FLOAT4 view;                 // pixels per unit depth, plane x scale, plane y scale, rock spin angle
+    SHADER_FLOAT4 view;                 // pixels per unit depth, plane x scale, plane y scale, unused
     SHADER_FLOAT4 giant;                // camera-relative belt centre, w unused
     SHADER_FLOAT4 freeze;               // live camera to the frozen cull camera, zero when culling follows the view; w unused
     SHADER_FLOAT4 levels;               // projected-radius thresholds of levels 1 to 4, in pixels
@@ -192,7 +198,7 @@ struct CullRoot {
     SHADER_ADDRESS(Frame) frame;
     SHADER_ADDRESS(RockData) rocks;
     SHADER_ADDRESS(CullScratch) scratch;
-    SHADER_ADDRESS(float4) state; // this frame's belt-relative position and radius per rock id
+    SHADER_ADDRESS(float4) state; // this frame's (x, y, z, phase) per rock id, two slices: this frame's and the last
 #endif
     SHADER_UINT pass, unused;
 };
