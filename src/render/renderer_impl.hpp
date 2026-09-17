@@ -501,9 +501,9 @@ struct Renderer::Impl {
 
     // Post-processing and exposure (renderer_post.cpp).
     void apply_metering(const ToneSettings& tone);
-    void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view, SpatialAA spatial_aa,
-                            bool bloom, bool flare, bool motion_streaks, const ImDrawData* ui, std::uint8_t* ui_cpu,
-                            std::uint64_t ui_gpu);
+    void record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view, bool temporal_aa,
+                            SpatialAA spatial_aa, bool bloom, bool flare, bool motion_streaks, const ImDrawData* ui,
+                            std::uint8_t* ui_cpu, std::uint64_t ui_gpu);
     void fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, gpu::PSO* pipeline, Root root,
                          bool preserve = false);
 

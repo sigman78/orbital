@@ -151,7 +151,7 @@ bool Renderer::draw(const FrameInput& supplied) {
                 s.record_depth_prepass(cmd, root);
             }
             s.record_scene_pass(cmd, root, input, frame, args_address);
-            {
+            if (input.aa.temporal_aa) { // the motion vectors have one reader
                 GpuTimingScope child(s.timings, GpuPass::SurfaceMotion);
                 s.record_motion_pass(cmd, root, args_address);
             }
@@ -177,7 +177,7 @@ bool Renderer::draw(const FrameInput& supplied) {
         }
         {
             GpuTimingScope timing(s.timings, GpuPass::Post);
-            s.record_post_passes(cmd, root, swap.render_view, input.aa.spatial_aa,
+            s.record_post_passes(cmd, root, swap.render_view, input.aa.temporal_aa, input.aa.spatial_aa,
                                  input.post.bloom && input.post.bloom_intensity > 0, input.sun.lens_flare,
                                  frame.camera_cell.w > 0, input.ui, dynamic + heap_layout.ui_offset(),
                                  frame_address + heap_layout.ui_offset());
