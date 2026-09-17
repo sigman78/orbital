@@ -11,7 +11,7 @@ int main() {
     assert(a.bodies[0].id == b.bodies[0].id && a.bodies[0].material_seed == b.bodies[0].material_seed);
     assert(a.bodies[0].material_seed != c.bodies[0].material_seed);
     const auto t0 = evaluate_system(a, 0), t1 = evaluate_system(a, 1000), t0again = evaluate_system(a, 0);
-    assert(t0.size() == 6 && t0again.size() == t0.size());
+    assert(t0.size() == 7 && t0again.size() == t0.size());
     assert(std::abs(t0[0].position.x) < 1e-12 && std::abs(t0[1].position.x - 75) < 1e-12 &&
            std::abs(t0[2].position.x + 65) < 1e-12);
     assert(std::abs(t0[0].position.y) < 1e-12 && std::abs(t0[1].position.y - 20) < 1e-12 &&

@@ -7,7 +7,9 @@
 #include "assets/texture.hpp"
 #include "core/file.hpp"
 #include "core/log.hpp"
+#include "core/parallel.hpp"
 #include "core/small_vec.hpp"
+#include "scene/terrain.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -95,23 +97,13 @@ void Renderer::Impl::create_meshes() {
         spheres[lod] = upload_mesh(geometry::generate_sphere(32u << lod, 16u << lod));
     constexpr std::uint32_t rock_seed_base = 71, rock_seed_stride = 37;
     // The library's shapes are independent, so they are generated across the
-    // material pool's workers; each writes its own groups of the library.
+    // cores; each writes its own groups of the library.
     std::vector<geometry::Mesh> library(rock_group_count);
-    {
-        const unsigned cores = std::thread::hardware_concurrency();
-        const unsigned workers = std::clamp(cores > 1 ? cores - 1 : 1u, 1u, decode_workers_max);
-        std::atomic<unsigned> next_shape = 0;
-        SmallVec<std::future<void>, decode_workers_max> pool;
-        for (unsigned worker = 0; worker < workers; worker++)
-            pool.push_back(std::async(std::launch::async, [&] {
-                for (unsigned shape = next_shape++; shape < geometry::rock_shape_count; shape = next_shape++)
-                    for (unsigned level = 0; level < geometry::rock_level_count; level++)
-                        library[rock_group(shape, level)] = geometry::generate_rock(
-                            rock_seed_base + shape * rock_seed_stride, level);
-            }));
-        for (auto& task : pool)
-            task.get();
-    }
+    parallel_for(geometry::rock_shape_count, [&](unsigned shape) {
+        for (unsigned level = 0; level < geometry::rock_level_count; level++)
+            library[rock_group(shape, level)] = geometry::generate_rock(rock_seed_base + shape * rock_seed_stride,
+                                                                        level);
+    });
     upload_rock_pool(library);
     // Moonlets are irregular bodies: each gets its own seeded rock at full detail.
     for (unsigned i = 0; i < body_count; i++)
@@ -122,6 +114,27 @@ void Renderer::Impl::create_meshes() {
 
 const GpuMesh& Renderer::Impl::body_mesh(unsigned body, unsigned lod) const {
     return system.bodies[body].body_class == BodyClass::Moonlet ? moonlet_meshes[body] : spheres[lod];
+}
+
+// The minor planet's maps, baked at start-up from its terrain in the airless
+// shader's layout, so the body draws through the Moon's path with its own content.
+void Renderer::Impl::load_minor_planet_maps() {
+    if (!showcase.has_minor_planet())
+        return;
+    const auto start = std::chrono::steady_clock::now();
+    const MinorPlanetTerrain terrain(system.bodies[showcase.minor_planet()].material_seed);
+    TerrainMaps maps = bake_terrain_maps(terrain, 2048, 1024);
+    const auto image = [&](Bytes& pixels) {
+        return assets::Rgba8Image{.extent = {maps.width, maps.height}, .pixels = std::move(pixels)};
+    };
+    upload_images({{.data = assets::texture_from_images(
+                        assets::prepare_material(image(maps.albedo), {.encoding = assets::MaterialEncoding::Linear})),
+                    .slot = Slot::minor_planet_albedo},
+                   {.data = assets::texture_from_images(assets::prepare_material(
+                        image(maps.normal), {.encoding = assets::MaterialEncoding::Linear, .normal_map = true})),
+                    .slot = Slot::minor_planet_normal}});
+    log::info("Minor planet maps baked ({}x{}) in {} ms", maps.width, maps.height,
+              std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
 }
 
 // Decodes and mip-filters every material on a bounded worker pool, then

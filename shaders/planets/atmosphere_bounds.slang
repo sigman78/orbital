@@ -9,7 +9,8 @@
 // around the shell, a pixel of margin added; with the camera inside or beside
 // the shell (a corner behind the near plane) the triangle covers the frame.
 
-static const float SHELL_MARGIN = 1.02; // over the largest shell (1.018 radii), the cube's half-extent
+static const float SHELL_MARGIN = 1.02;              // over the largest shell (1.018 radii), the cube's half-extent
+static const float MINOR_PLANET_SHELL_MARGIN = 1.07; // over the minor planet's high haze (atmosphere.slang)
 
 struct FullscreenVaryings { float4 position : SV_Position; };
 
@@ -20,7 +21,8 @@ FullscreenVaryings vertexMain(uint vertexIndex : SV_VertexID)
     ViewParams view = viewParams(frame);
     Instance body = root.instances[root.base];
     float3 centre = body.center_radius.xyz;
-    float half = body.center_radius.w * SHELL_MARGIN;
+    bool minor = int(body.rotation_kind.w + .5) == 5;
+    float half = body.center_radius.w * (minor ? MINOR_PLANET_SHELL_MARGIN : SHELL_MARGIN);
     float2 lower = float2(1.0, 1.0), upper = float2(-1.0, -1.0);
     bool clipped = false;
     for (int corner = 0; corner < 8; ++corner) {

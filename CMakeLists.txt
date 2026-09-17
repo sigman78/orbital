@@ -17,12 +17,12 @@ endif()
 #   orbital_app_cpu app navigation and command-line parsing, independent of the renderer
 #   orbital_render_cpu showcase contract, state binding and frame calculations
 #   orbital_assets PNG I/O (vendored Wuffs decoder, stb writer), pixel kernels, materials
-add_library(orbital_core STATIC src/core/log.cpp src/core/panic.cpp src/core/file.cpp)
+add_library(orbital_core STATIC src/core/log.cpp src/core/panic.cpp src/core/file.cpp src/core/noise.cpp)
 target_include_directories(orbital_core PUBLIC src)
 target_compile_features(orbital_core PUBLIC cxx_std_20)
 target_compile_options(orbital_core PRIVATE ${ORBITAL_WARNINGS})
 
-add_library(orbital_scene STATIC src/scene/system.cpp src/scene/geometry.cpp src/scene/belt_motion.cpp)
+add_library(orbital_scene STATIC src/scene/system.cpp src/scene/geometry.cpp src/scene/belt_motion.cpp src/scene/terrain.cpp)
 target_link_libraries(orbital_scene PUBLIC orbital_core)
 target_compile_options(orbital_scene PRIVATE ${ORBITAL_WARNINGS})
 
@@ -87,7 +87,7 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME gpu_scopes COMMAND gpu_scopes_tests)
   endif()
-  foreach(test IN ITEMS core belt_motion system geometry camera image kernels materials smaa texture app showcase frame_calculations options)
+  foreach(test IN ITEMS core belt_motion terrain system geometry camera image kernels materials smaa texture app showcase frame_calculations options)
     add_executable(${test}_tests tests/${test}_tests.cpp)
     target_link_libraries(${test}_tests PRIVATE orbital_scene orbital_assets)
     if(test STREQUAL "showcase" OR test STREQUAL "frame_calculations")

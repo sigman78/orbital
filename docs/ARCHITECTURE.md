@@ -21,7 +21,8 @@ Wayland/X11 windows and input, and Fontconfig/FreeType for HUD text. The rendere
 ## Scene
 
 `scene::generate_system` builds a deterministic description from a seed: a star, an Earth-like world, a gas
-giant with an asteroid belt, a rocky moon, a desert world with two tidally locked moonlets. Bodies carry
+giant with an asteroid belt, a rocky moon, a desert world with two tidally locked moonlets, and a small
+airless minor planet whose surface is generated rather than mapped. Bodies carry
 stable ids and independent derived seeds; orbits and rotations are evaluated directly at a time, so a fixed
 time reproduces a snapshot. Distances are deliberately compressed so several bodies share a frame.
 
@@ -72,6 +73,21 @@ draw arguments per group, so the meshes are one multi-draw and the splats one dr
 from three sources: an analytic extinction through the belt's own density along the sun ray, a
 transmittance map splatted by the largest rocks from the sun's direction, and the planets' shadows.
 Between the rocks a half-resolution march through the same density field scatters sunlight as dust.
+
+## Minor planet
+
+The minor planet is a fifteenth of the Earth's radius, on its own orbit, and the one body whose surface is
+made rather than mapped. `scene/terrain.hpp` is the single source of it: `MinorPlanetTerrain(seed)` gives a
+height above the reference sphere and a linear-light albedo for any direction from the centre, from
+gradient-noise fBm (`core/noise.hpp`), a ridged term and a seeded crater population (a flat floor, a wall
+to a raised rim, ejecta, a central peak on the large ones; the fresh ones dark inside and bright around,
+a few with a bright facula), within a stated height range, after Ceres and Pluto. At start-up
+`bake_terrain_maps` samples it across the cores (`core/parallel.hpp`) into an equirectangular
+normal+height map and an albedo map in the layout the Moon and Mars use, so the body draws through the
+airless shader (`KIND_MINOR_PLANET`) with the same terrain shadowing and draw tiers, and the atmosphere
+pass gives it a faint blue haze after Pluto's, tripled from the physical optical depth to read. The near tier, a
+cube-sphere quadtree of patches displaced by the same terrain, is planned; it reads the same class, so the
+far and near representations cannot disagree.
 
 ## Frame
 

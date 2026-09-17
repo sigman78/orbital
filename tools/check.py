@@ -69,6 +69,7 @@ GROUPS = {
                   f'name=moon-far bookmark=2 back=205 fov-div=8 {STILL}',
                   f'name=mars-25 bookmark=3 back=25 {STILL}',
                   f'name=mars-zoom bookmark=3 back=55 fov-div=5 {STILL}',
+                  f'name=minor-planet bookmark=8 {STILL}',
                   f'name=mars-far bookmark=3 back=205 fov-div=8 {STILL}'],
     },
     'belt': {

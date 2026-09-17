@@ -90,6 +90,8 @@ enum class Slot : unsigned {
     sun_visibility = TEX_SUN_VISIBILITY,
     flare = TEX_FLARE,         // the soft lens flare stack at a fraction of the frame
     lens_dirt = TEX_LENS_DIRT, // dirty-glass mask stretched over the frame, baked by tools/bake-lens-dirt.py
+    minor_planet_albedo = TEX_MINOR_PLANET_ALBEDO, // the minor planet's maps, baked at start-up from its terrain
+    minor_planet_normal = TEX_MINOR_PLANET_NORMAL,
     count = ORBITAL_TEXTURE_COUNT,
 };
 
@@ -124,7 +126,8 @@ enum class SurfaceKind : unsigned {
     giant = ORBITAL_KIND_GIANT,
     moon = ORBITAL_KIND_MOON,
     rock = ORBITAL_KIND_ROCK,
-    mars = ORBITAL_KIND_MARS
+    mars = ORBITAL_KIND_MARS,
+    minor_planet = ORBITAL_KIND_MINOR_PLANET
 };
 
 constexpr SurfaceKind surface_kind(BodyClass body_class) {
@@ -134,6 +137,7 @@ constexpr SurfaceKind surface_kind(BodyClass body_class) {
     case BodyClass::RockyMoon: return SurfaceKind::moon;
     case BodyClass::Desert: return SurfaceKind::mars;
     case BodyClass::Moonlet: return SurfaceKind::rock;
+    case BodyClass::MinorPlanet: return SurfaceKind::minor_planet;
     }
     return SurfaceKind::rock;
 }
@@ -338,7 +342,8 @@ struct Renderer::Impl {
         case SurfaceKind::earth: return pso.scene.surface_earth;
         case SurfaceKind::giant: return pso.scene.surface_giant;
         case SurfaceKind::moon:
-        case SurfaceKind::mars: return pso.scene.surface_airless;
+        case SurfaceKind::mars:
+        case SurfaceKind::minor_planet: return pso.scene.surface_airless;
         case SurfaceKind::rock: return pso.scene.surface_rock;
         }
         return pso.scene.surface_rock;
@@ -380,7 +385,7 @@ struct Renderer::Impl {
     SystemDescription system;
     std::filesystem::path directory;
     // The bodies occupy instance slots 0..body_count-1 in system order. The
-    // three anchors carry atmospheres and shadow maps.
+    // three anchors carry atmospheres and shadow maps; the minor planet a haze.
     Showcase showcase;
     unsigned body_count = 0;
     bool polar_caps = true;      // the gas giant's polar cap atlas loaded; the blend is skipped without it
@@ -455,6 +460,7 @@ struct Renderer::Impl {
     // Static mesh and material assets (renderer_assets.cpp).
     void create_meshes();
     void load_materials();
+    void load_minor_planet_maps(); // bakes the minor planet's albedo and normal+height maps from its terrain
     void load_stars();
     void load_splats();
     void load_galaxy_layers();

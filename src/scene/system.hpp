@@ -20,8 +20,9 @@ constexpr std::size_t max_body_count = 8;
 
 // Terrestrial: Earth-like with clouds and a thick atmosphere. Desert: Mars-like
 // with a thin dusty one. RockyMoon: a large airless sphere. Moonlet: a small
-// irregular captured body rendered as a rock.
-enum class BodyClass { Terrestrial, GasGiant, RockyMoon, Desert, Moonlet };
+// irregular captured body rendered as a rock. MinorPlanet: a small airless world
+// whose surface is generated (scene/terrain.hpp), not mapped.
+enum class BodyClass { Terrestrial, GasGiant, RockyMoon, Desert, Moonlet, MinorPlanet };
 
 struct BodyDescription {
     std::uint64_t id = 0;

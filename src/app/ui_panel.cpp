@@ -12,8 +12,8 @@ namespace space::app {
 namespace {
 
 constexpr float panel_width = 360;
-constexpr const char* bookmark_names[] = {"Earth", "Jupiter", "Moon",        "Mars",
-                                          "Dawn",  "Belt",    "Dust shadow", "Dust grazing"};
+constexpr const char* bookmark_names[] = {"Earth", "Jupiter",     "Moon",         "Mars",        "Dawn",
+                                          "Belt",  "Dust shadow", "Dust grazing", "Minor planet"};
 static_assert(std::size(bookmark_names) == bookmark_count);
 
 // A collapsing section with its own ID scope: headers push none, so labels

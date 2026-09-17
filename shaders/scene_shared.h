@@ -34,6 +34,7 @@ using ShaderMatrix4 = float[16];
 #define ORBITAL_KIND_MOON 2
 #define ORBITAL_KIND_ROCK 3
 #define ORBITAL_KIND_MARS 4
+#define ORBITAL_KIND_MINOR_PLANET 5
 
 // A drawn thing: where it is, how it is turned, and the step back to where it was
 // a frame ago (previous_center: the world-space step of the centre, w unused;
