@@ -273,6 +273,10 @@ void belt_controls(render::BeltSettings& belt, render::BeltDustSettings& dust, f
     ImGui::EndDisabled();
     static constexpr const char* cutoffs[] = {"Off", "1.2 px", "2.5 px", "4 px"};
     combo("Splat cut-off (F6)", belt.splat_mode, cutoffs);
+    ImGui::SliderFloat("Point cut-off", &belt.point_cutoff, .06f, 2.f, "%.2f px", ImGuiSliderFlags_Logarithmic);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Rocks projecting smaller than this are not drawn; the splats fade out towards it.");
+    ImGui::Checkbox("Analytic speckle under it", &belt.speckle); // the dust march's point field stands in for them
     ImGui::Checkbox("Light splats in both cull passes (F7)", &belt.splat_light_twice);
     ImGui::Checkbox("Freeze culling", &belt.freeze_culling); // the rock set, levels and splats of this view stay put
     if (ImGui::IsItemHovered())

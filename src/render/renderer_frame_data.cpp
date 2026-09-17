@@ -36,12 +36,6 @@ inline constexpr float shell_min_pixels = 80.f;
 inline constexpr float grow_hysteresis = 1.15f, shrink_hysteresis = .85f;
 } // namespace body_tiers
 
-namespace belt_culling {
-namespace billboard {
-inline constexpr float min_pixels = 0.06f; // smaller rocks are dropped
-} // namespace billboard
-} // namespace belt_culling
-
 Float4 f4(Vec3f v, float w = 0) {
     return {v.x, v.y, v.z, w};
 }
@@ -127,6 +121,8 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
                      input.belt_dust.enabled ? 1.f : 0.f, input.sun.ambient_fill};
     frame.dust = {input.belt_dust.density, input.belt_dust.brightness, input.belt_dust.far, input.belt_dust.saturation};
     frame.dust_tint = {input.belt_dust.tint[0], input.belt_dust.tint[1], input.belt_dust.tint[2], 0};
+    frame.speckle = {input.belt.speckle ? input.belt.point_cutoff : 0.f,
+                     float(active_rock_count(input)) / belt_population_area, 0, 0};
     // The jitter seed counts frames, not seconds: a paused simulation still decorrelates the
     // marches for the temporal pass, and a shot's frame gets the same seed wherever it sits.
     frame.sequence = {float(frames_since_cut % 4096), 0, 0, 0};
@@ -269,8 +265,8 @@ void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData
                                            : Float4{0, 0, 0, 0};
     p.levels = {geometry::rock_level_thresholds[0], geometry::rock_level_thresholds[1],
                 geometry::rock_level_thresholds[2], geometry::rock_level_thresholds[3]};
-    p.billboard = {geometry::rock_level_thresholds[4], input.belt.billboard_radius(),
-                   belt_culling::billboard::min_pixels, frame.belt_disc.y};
+    p.billboard = {geometry::rock_level_thresholds[4], input.belt.billboard_radius(), input.belt.point_cutoff,
+                   frame.belt_disc.y};
     p.rock_limit = active_rock_count(input);
     p.body_count = body_count;
     p.light_in_count_pass = input.belt.splat_light_twice ? 1u : 0u;

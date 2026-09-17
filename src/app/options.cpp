@@ -80,6 +80,10 @@ bool apply_arguments(Options& options, std::span<const std::string_view> args) {
             ok = parse_number(value(), options.lod_scale) && options.lod_scale > 0;
         else if (arg == "--disc")
             ok = parse_choice(value(), options.disc, 2);
+        else if (arg == "--point-cutoff")
+            ok = parse_number(value(), options.point_cutoff) && options.point_cutoff > 0;
+        else if (arg == "--speckle")
+            ok = parse_choice(value(), options.speckle, 2);
         else if (arg == "--dust")
             ok = parse_choice(value(), options.dust, 2);
         else if (arg == "--vsync")

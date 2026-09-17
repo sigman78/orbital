@@ -72,6 +72,10 @@ draw arguments per group, so the meshes are one multi-draw and the splats one dr
 from three sources: an analytic extinction through the belt's own density along the sun ray, a
 transmittance map splatted by the largest rocks from the sun's direction, and the planets' shadows.
 Between the rocks a half-resolution march through the same density field scatters sunlight as dust.
+Rocks projecting under the point cut-off (a belt setting, 0.06 pixels by default) are not drawn; with the
+analytic speckle on, the march stands in for them with a point field on three planes through the slab,
+cells co-rotating with their band, rocks drawn from the population's size law, lit and attenuated as the
+splats are, so the cut-off can move without the belt's brightness moving (belt/dust.slang).
 
 ## Frame
 

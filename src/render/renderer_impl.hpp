@@ -146,7 +146,7 @@ constexpr SurfaceKind surface_kind(BodyClass body_class) {
 // Culling counters and generated instances live in another device-only heap.
 struct HeapLayout {
     std::uint64_t static_budget = 80ull << 20; // meshes, rock records and sky tables, written once
-    std::uint64_t cull_offset = 1280;          // FrameData (1088 bytes, padded), then culling parameters/counters
+    std::uint64_t cull_offset = 1280;          // FrameData (1104 bytes, padded), then culling parameters/counters
     std::uint64_t instance_offset = 1280 + 8192;
     std::uint64_t staging_budget = 64ull << 20; // bounded upload staging, released after start-up
     std::uint64_t ui_bytes = 4ull << 20;
@@ -350,7 +350,9 @@ struct Renderer::Impl {
     std::uint64_t rock_data = 0;                          // static heap address of the RockData records
     unsigned rock_count = 0;
     unsigned belt_capacity = 0; // rocks the state heaps hold: the high tier or the override
-    BeltMotion belt_motion;     // the rocks' seeds and states, stepped on the CPU
+    float belt_population_area =
+        1;                  // the ring profile integrated over the sampling annulus: rocks over it is the density
+    BeltMotion belt_motion; // the rocks' seeds and states, stepped on the CPU
     // The staging heap has two slots, written by frame parity before the wait for the
     // previous frame, which may still be copying the other; the version each holds
     // says whether a standing state must be written again into a stale slot.

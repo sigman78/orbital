@@ -56,6 +56,22 @@ void Renderer::Impl::build_belt(const BeltDescription& description) {
     }
     rock_data = upload_static(bytes_of(records));
     rock_count = unsigned(records.size());
+    // The population is uniform in area over the sampling annulus, thinned by the ring
+    // profile (geometry::generate_belt, whose inner margin this mirrors); the count over
+    // the profile's integral is the rocks per unit area the analytic speckle scatters.
+    {
+        const float width = outer - inner;
+        const float sample_inner = std::max(0.f, inner - width * .05f);
+        const float sample_outer = inner + width * geometry::belt_outer_tail;
+        constexpr int steps = 4096;
+        const double dr = double(sample_outer - sample_inner) / steps;
+        double area = 0;
+        for (int i = 0; i < steps; i++) {
+            const double r = sample_inner + (i + .5) * dr;
+            area += geometry::belt_ring_density(float((r - inner) / width)) * 2 * pi<double> * r * dr;
+        }
+        belt_population_area = float(area);
+    }
     {
         const float middle = (inner + outer) * .5f;
         float rates[belt::radial_bands];
