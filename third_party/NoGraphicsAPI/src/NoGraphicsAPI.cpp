@@ -47,7 +47,7 @@ constexpr uint32 max_swapchain_images = 8;
 constexpr uint32 gpu_allocation_alignment = 16;
 constexpr uint32 max_surface_formats = 256;
 constexpr uint32 format_count = static_cast<uint32>(Format::undefined);
-constexpr uint32 conventional_texture_descriptor_count = 53;
+constexpr uint32 conventional_texture_descriptor_count = 54; // the sampled-image array of the conventional set: ORBITAL_TEXTURE_COUNT, which tools/check-shaders.py holds equal
 
 [[nodiscard]] Error error_from_vk(VkResult result) noexcept
 {

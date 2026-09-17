@@ -115,14 +115,14 @@ if(ORBITAL_BUILD_DEMO)
   add_subdirectory(third_party/NoGraphicsAPI EXCLUDE_FROM_ALL)
   find_program(SPIRV_VAL_EXECUTABLE NAMES spirv-val HINTS "${CMAKE_SOURCE_DIR}/.tools/Vulkan-ValidationLayers/bin" "$ENV{VULKAN_SDK}/Bin")
   include(cmake/Slang.cmake)
-  foreach(source IN ITEMS scene/fullscreen surface/surface belt/beltsplat overlay/ui belt/discsplat scene/motes sky/stars planets/atmosphere_bounds)
+  foreach(source IN ITEMS scene/fullscreen surface/surface scene/motion belt/beltsplat overlay/ui belt/discsplat scene/motes sky/stars planets/atmosphere_bounds)
     get_filename_component(shader "${source}" NAME)
     orbital_compile_slang("shaders/${shader}.vertex.spv" "shaders/${source}.slang" vertexMain vertex)
     list(APPEND ORBITAL_SHADER_OUTPUTS "${CMAKE_BINARY_DIR}/shaders/${shader}.vertex.spv")
   endforeach()
   foreach(source IN ITEMS
       planets/surface_earth planets/surface_giant planets/surface_airless planets/atmosphere
-      surface/surface_rock sky/background sky/galaxy sky/stars
+      surface/surface_rock scene/motion sky/background sky/galaxy sky/stars
       belt/beltsplat belt/beltblur belt/dust belt/disc belt/discsplat
       aa/temporal aa/smaa aa/fxaa_pass
       post/bloom post/composite post/flare post/present post/sun_visibility overlay/ui scene/motes)

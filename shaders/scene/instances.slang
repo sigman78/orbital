@@ -13,6 +13,8 @@ Instance loadInstance(Frame* frame, Instance* instances, uint index, bool billbo
     AsteroidInstance packed = asteroids[index - bodies];
     Instance result;
     result.center_radius = packed.center_radius;
+    result.previous_center = float4(0.0, 0.0, 0.0, 0.0);
+    result.previous_rotation = float4(0.0, 0.0, 0.0, 0.0);
     if (billboard)
     {
         uint br = packed.payload[1];
@@ -30,6 +32,10 @@ Instance loadInstance(Frame* frame, Instance* instances, uint index, bool billbo
         result.rotation_kind = float4(asfloat(packed.payload[0]), asfloat(packed.payload[1]),
                                       asfloat(packed.payload[2]), ORBITAL_KIND_ROCK);
         result.tint = float4(rockColour(composition, id), float(composition) + rockMaterialSeed(id));
+        float2 dxy = unpackHalf2x16ToFloat(packed.previous[0]), dzr = unpackHalf2x16ToFloat(packed.previous[1]),
+               drot = unpackHalf2x16ToFloat(packed.previous[2]);
+        result.previous_center = float4(dxy.x, dxy.y, dzr.x, 0.0);
+        result.previous_rotation = float4(dzr.y, drot.x, drot.y, 0.0);
     }
     return result;
 }

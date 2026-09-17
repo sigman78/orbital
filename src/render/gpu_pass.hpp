@@ -25,6 +25,7 @@ enum class GpuPass : unsigned {
     SurfaceRocks,   // the pooled rock mesh multi-draw
     SurfaceSplats,  // the rock billboards and splats, blended over the sky
     SurfaceClouds,  // the cloud shell
+    SurfaceMotion,  // the rocks and bodies again, at equal depth, for their motion vectors
     Atmospheres,    // the per-body shell marches
     BeltDust,       // the dust march, its upsample and the disc blend
     SplatMask,      // splat coverage and depth for TAA and sun visibility
@@ -68,6 +69,7 @@ inline constexpr std::array<GpuPassInfo, gpu_pass_count> gpu_pass_info{{
     {"gpu_surface_rocks_ms", "Rocks", GpuPass::Surface},
     {"gpu_surface_splats_ms", "Splats", GpuPass::Surface},
     {"gpu_surface_clouds_ms", "Clouds", GpuPass::Surface},
+    {"gpu_surface_motion_ms", "Motion", GpuPass::Surface},
     {"gpu_atmospheres_ms", "Atmospheres", GpuPass::Atmosphere},
     {"gpu_belt_dust_ms", "Belt dust", GpuPass::Atmosphere},
     {"gpu_splat_mask_ms", "Splat mask", GpuPass::Atmosphere},

@@ -16,7 +16,7 @@ Configure NoGraphicsAPI with `NOGRAPHICSAPI_FORCE_CONVENTIONAL_BACKEND=ON`. `Dev
 
 - Root bytes are ordinary Vulkan push constants, visible to all stages. The maximum is `DeviceCaps::max_push_data_size`.
 - GPU buffer pointers remain Vulkan buffer device addresses, exposed to shaders as typed Slang pointers.
-- Set 0, binding 0 is a fixed array of `ORBITAL_TEXTURE_COUNT` (53) separate sampled images.
+- Set 0, binding 0 is a fixed array of `ORBITAL_TEXTURE_COUNT` (54) separate sampled images. The fork's conventional set layout declares the same count (`conventional_texture_descriptor_count` in `NoGraphicsAPI.cpp`) and `tools/check-shaders.py` holds the two equal: a descriptor written past the layout's array is a validation error and a crash, so a new slot changes both, and the compat patch with them.
 - Set 0, binding 1 is a fixed array of 4 separate samplers.
 - Entry points are `vertexMain` and `fragmentMain` on both backends, as upstream; Slang is compiled with `-fvk-use-entrypoint-name`.
 - Mesh shaders and storage image descriptors are unsupported. `DeviceCaps::mesh_shaders` is false.
