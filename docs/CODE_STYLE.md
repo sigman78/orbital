@@ -383,6 +383,6 @@ App navigation and CLI parsing are built as `orbital_app_cpu`, used by the execu
 
 Renderer-specific scene restrictions live in `orbital_render_cpu`, which depends on the generic scene library. Keep them out of `validate_system`; the generic scene evaluator must remain usable without the showcase's required roles and belt configuration.
 
-Camera/history, lighting and belt LOD calculations also live in `orbital_render_cpu`. They accept explicit values and return typed results; shader component conventions stay in `renderer_frame_data.cpp`. Do not pass renderer `Impl` or GPU resources into these calculations.
+Camera/history, lighting, belt LOD and the near tier's quadtree calculations also live in `orbital_render_cpu`. They accept explicit values and return typed results; shader component conventions stay in `renderer_frame_data.cpp`. Do not pass renderer `Impl` or GPU resources into these calculations.
 
 UI lifetime/backend integration stays in `ui.cpp`; `ui_panel.cpp` assembles effect-specific controls with narrow settings references. Camera/capture actions are shared through `actions.hpp`. CLI validation stays in the CPU-testable `options.cpp`; reject non-finite numbers before they reach app state.

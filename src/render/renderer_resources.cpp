@@ -276,6 +276,7 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     phase("device");
     create_samplers();
     create_meshes();
+    create_terrain_tier();
     phase("meshes");
     build_belt(system.belts.front());
     phase("belt");
@@ -458,10 +459,12 @@ void Renderer::Impl::collect_memory_stats() {
     memory.mapped = {};
     heap(memory.mapped, buffers.data);
     heap(memory.mapped, buffers.belt_state_staging);
+    heap(memory.mapped, buffers.patch_staging);
     memory.mapped.used = memory.mapped.bytes;
     memory.device_buffers = {};
     heap(memory.device_buffers, buffers.cull_device);
     heap(memory.device_buffers, buffers.belt_state);
+    heap(memory.device_buffers, buffers.patch_pool);
     heap(memory.device_buffers, buffers.meter_device);
     memory.device_buffers.used = memory.device_buffers.bytes;
     memory.readback = {};

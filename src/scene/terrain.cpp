@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <span>
 
 namespace space {
 
@@ -54,7 +55,18 @@ MinorPlanetTerrain::MinorPlanetTerrain(std::uint64_t seed) : seed_(seed) {
     }
 }
 
-float MinorPlanetTerrain::height(Vec3d direction) const {
+MinorPlanetTerrain::Region MinorPlanetTerrain::region(Vec3d centre, double angular_radius) const {
+    Region region;
+    const Vec3d c = normalized(centre);
+    for (const Crater& crater : craters_) {
+        const double reach = std::acos(std::clamp(double(crater.cos_reach), -1.0, 1.0)) + angular_radius;
+        if (reach >= pi<double> || dot(c, crater.centre) >= std::cos(reach))
+            region.craters.push_back(crater);
+    }
+    return region;
+}
+
+float MinorPlanetTerrain::height(Vec3d direction, std::span<const Crater> craters) const {
     const Vec3d d = normalized(direction);
     // Rolling ground and a sharper ridged term for the highlands.
     float h = .018f * fbm(d * 2.6, 5, seed_);
@@ -62,7 +74,7 @@ float MinorPlanetTerrain::height(Vec3d direction) const {
     h += .012f * ridged * ridged;
     // Craters: a flat floor, a wall rising to the rim, ejecta fading past it,
     // and a central peak on the large ones.
-    for (const Crater& crater : craters_) {
+    for (const Crater& crater : craters) {
         const auto x = crater_x(crater, d);
         if (!x)
             continue;

@@ -15,9 +15,11 @@
 #include "render/gpu_timing.hpp"
 #include "render/gpu_types.hpp"
 #include "render/showcase.hpp"
+#include "render/terrain_tier.hpp"
 #include "scene/belt_motion.hpp"
 #include "scene/geometry.hpp"
 #include "scene/system.hpp"
+#include "scene/terrain.hpp"
 
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
 #include <array>
@@ -259,6 +261,8 @@ struct Renderer::Impl {
         UniqueGpuHeap cull_device, cull_readback; // GPU output and completed scratch for CPU statistics
         UniqueGpuHeap belt_state;         // device-only: two slices of per-rock state, this frame's and the last
         UniqueGpuHeap belt_state_staging; // host-visible: the CPU writes this frame's slice here for the copy
+        UniqueGpuHeap patch_pool;         // device-only: the near tier's patch vertices, a slot per patch
+        UniqueGpuHeap patch_staging;      // host-visible: this frame's new patches, two slots by frame parity
     } buffers;
     std::uint64_t static_cursor = 0;
     struct StaticUpload { // the staging path of upload_static, open until finish_static_uploads
@@ -356,6 +360,16 @@ struct Renderer::Impl {
     unsigned rock_count = 0;
     unsigned belt_capacity = 0; // rocks the state heaps hold: the high tier or the override
     BeltMotion belt_motion;     // the rocks' seeds and states, stepped on the CPU
+    // The minor planet's near tier (renderer_terrain.cpp): its terrain, the patch
+    // quadtree and cache, and this frame's staging-to-pool copies.
+    std::optional<MinorPlanetTerrain> minor_planet_terrain;
+    TerrainTier terrain_tier;
+    std::uint64_t patch_indices_address = 0; // static heap: the index triples every patch shares
+    std::vector<geometry::Vertex> patch_scratch;
+    struct PatchCopy {
+        std::uint64_t source, destination;
+    };
+    std::vector<PatchCopy> patch_copies;
     // The staging heap has two slots, written by frame parity before the wait for the
     // previous frame, which may still be copying the other; the version each holds
     // says whether a standing state must be written again into a stale slot.
@@ -459,6 +473,7 @@ struct Renderer::Impl {
 
     // Static mesh and material assets (renderer_assets.cpp).
     void create_meshes();
+    void create_terrain_tier(); // the near tier's pool, staging and shared indices (renderer_terrain.cpp)
     void load_materials();
     void load_minor_planet_maps(); // bakes the minor planet's albedo and normal+height maps from its terrain
     void load_stars();
@@ -479,6 +494,10 @@ struct Renderer::Impl {
     void write_body_instances(const FrameInput& input, const FrameData& frame);
     unsigned active_rock_count(const FrameInput& input) const; // the tier's prefix of the population
     void write_belt_state(const FrameInput& input);            // before the wait: this frame's staging slot
+    void prepare_terrain_tier(const FrameInput& input);        // before the wait: the patches to draw and the new ones
+    void record_terrain_uploads(gpu::CommandBuffer* cmd);      // the new patches into the pool
+    bool terrain_tier_draws(unsigned body) const;              // the body draws as patches this frame
+    void draw_body(gpu::CommandBuffer* cmd, Root& root, unsigned body); // its sphere level, or its patches
     void cull_bodies(const FrameInput& input, const FrameData& frame);
     void write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
                             std::uint64_t instance_address);

@@ -42,6 +42,7 @@ struct AppState {
     render::PostSettings post;
     render::SkySettings sky;
     render::GasSettings gas;
+    render::TerrainSettings terrain;
     unsigned selected_body = 0;
     std::filesystem::path capture_request;
 };

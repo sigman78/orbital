@@ -27,8 +27,8 @@ int main() {
     assert(!parse({"orbital", "--frames", "-1"}));
     assert(!parse({"orbital", "--frames", "999999999999999999999999"}));
     assert(!parse({"orbital", "--capture", ""}));
-    assert(parse({"orbital", "--bookmark", "8"}));
-    assert(!parse({"orbital", "--bookmark", "9"}));
+    assert(parse({"orbital", "--bookmark", "9"}));
+    assert(!parse({"orbital", "--bookmark", "10"}));
     assert(!parse({"orbital", "--back", "-1"}));
     assert(!parse({"orbital", "--fov-div", ".5"}));
     // Shot lines: keys as the options without dashes over the base, flags bare, commas for several values.
@@ -44,11 +44,11 @@ int main() {
     const auto unnamed = parse_shot(*base, "bookmark=1", 7);
     assert(unnamed && unnamed->name == "shot 7" && unnamed->options.capture.empty()); // outputs are per shot
     assert(!parse_shot(*base, "# a comment", 1) && !parse_shot(*base, "   ", 2));
-    assert(!parse_shot(*base, "bookmark=10", 3) && !parse_shot(*base, "unknown=1", 3) &&
+    assert(!parse_shot(*base, "bookmark=11", 3) && !parse_shot(*base, "unknown=1", 3) &&
            !parse_shot(*base, "name=", 3));
     assert(!parse({"orbital", "--duration", "-1"}));
     assert(!parse({"orbital", "--exposure", "0"}));
-    for (const char* flag : {"--taa", "--dust", "--disc", "--vsync"})
+    for (const char* flag : {"--taa", "--dust", "--disc", "--near-tier", "--vsync"})
         assert(!parse({"orbital", flag, "2"}));
     for (const char* flag : {"--spatial", "--tone", "--galaxy"})
         assert(!parse({"orbital", flag, "3"}));

@@ -85,9 +85,21 @@ a few with a bright facula), within a stated height range, after Ceres and Pluto
 `bake_terrain_maps` samples it across the cores (`core/parallel.hpp`) into an equirectangular
 normal+height map and an albedo map in the layout the Moon and Mars use, so the body draws through the
 airless shader (`KIND_MINOR_PLANET`) with the same terrain shadowing and draw tiers, and the atmosphere
-pass gives it a faint blue haze after Pluto's, tripled from the physical optical depth to read. The near tier, a
-cube-sphere quadtree of patches displaced by the same terrain, is planned; it reads the same class, so the
-far and near representations cannot disagree.
+pass gives it a faint blue haze after Pluto's, tripled from the physical optical depth to read.
+
+Close in, above a projected radius where the finest sphere level runs out, the body draws as its near
+tier instead: a cube sphere of six faces, each a quadtree of 16 by 16 quad patches with skirts
+(`scene/terrain_patch.hpp`), split while a patch's projected edge is over a threshold with hysteresis
+and foreshortened toward the limb, collapsed out of view. `render/terrain_tier.hpp` keeps the tree and a
+cache of 512 vertex slots by patch (least recently used out, the six faces pinned), lists the patches to
+draw and asks for up to eight new ones a frame; a patch whose visible children are not all resident draws
+itself, so the surface is complete every frame and refines over the following ones. The renderer
+(`renderer_terrain.cpp`) generates the requested patches on the CPU before the previous frame's wait
+into a staging slot chosen by frame parity, copies them into a device pool at the start of the command
+buffer, and draws the listed slots through the surface vertex shader with one shared index buffer, in the
+depth pre-pass, the scene pass and the motion pass; the shadow map keeps the sphere. Patch vertices are
+the terrain's positions in radii with the sphere's normals, so the maps shade them exactly as the far
+tier and the switch is invisible; procedural detail past the maps is the step after.
 
 ## Frame
 
@@ -192,6 +204,7 @@ Pass ordering and synchronization remain explicit.
 | `gpu_image.hpp` / `gpu_image.cpp` | Move-only image ownership and frame/fixed target groups |
 | `renderer_belt.cpp` | Rock population, GPU culling, indirect rock batch, light/disc maps, splat mask and dust |
 | `renderer_scene.cpp` | Shadow, galaxy, bodies/clouds, atmospheres and motion streaks |
+| `renderer_terrain.cpp` | The minor planet's near tier: patch generation, staging, pool copies and draws |
 | `renderer_post.cpp` | Temporal resolve, bloom, tone mapping, spatial AA, metering and presentation |
 | `renderer_overlay.cpp` | ImGui font upload and draw-list packing |
 

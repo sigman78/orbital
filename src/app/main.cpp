@@ -130,6 +130,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.show_ui = options.ui;
     app.belt_dust.enabled = options.dust != 0;
     app.belt.disc = options.disc != 0;
+    app.terrain.near_tier = options.near_tier != 0;
     app.belt.lod_scale = options.lod_scale;
     app.vsync = options.vsync < 0 ? options.benchmark.empty() : options.vsync != 0;
     app.tone.exposure = options.exposure;
@@ -381,7 +382,7 @@ int run(const Options& options) {
     renderer.set_ui_font({{atlas.width, atlas.height},
                           assets::PixelLayout::Rgba8,
                           {atlas.rgba, std::size_t(atlas.width) * atlas.height * 4}});
-    log::info("Ready at {} ms. RMB + WASD: fly | 1-8: views | T: tour | F12: control panel | F10: capture | --help "
+    log::info("Ready at {} ms. RMB + WASD: fly | 1-9: views | T: tour | F12: control panel | F10: capture | --help "
               "for all controls",
               since_start());
     std::string report;
