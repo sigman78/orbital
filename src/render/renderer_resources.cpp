@@ -281,6 +281,7 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     phase("belt");
     log::info("Loading planetary maps and scanned rock PBR materials...");
     load_materials();
+    load_planetoid_maps();
     finish_static_uploads();
     phase("materials and sky");
     upload_rgba(Slot::hud, hud);

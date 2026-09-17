@@ -1,7 +1,7 @@
 #pragma once
 
 // Descriptor ABI shared by C++ Slot/SamplerSlot and every shader.
-#define ORBITAL_TEXTURE_COUNT 54
+#define ORBITAL_TEXTURE_COUNT 56
 #define ORBITAL_SAMPLER_COUNT 4
 #define TEX_HDR 0
 #define TEX_BLOOM_A 1
@@ -57,6 +57,8 @@
 #define TEX_FLARE 51
 #define TEX_LENS_DIRT 52
 #define TEX_MOTION 53
+#define TEX_PLANETOID_ALBEDO 54 // baked at start-up from scene/terrain.hpp, linear light
+#define TEX_PLANETOID_NORMAL 55 // tangent normal and height, the airless shader's layout
 #define SAMPLER_CLAMP 0
 #define SAMPLER_WRAP_U_ANISOTROPIC 1
 #define SAMPLER_SHADOW_COMPARE 2

@@ -16,6 +16,9 @@ public:
     constexpr unsigned giant() const { return giant_; }
     constexpr unsigned desert() const { return desert_; }
     constexpr unsigned belt_parent() const { return belt_parent_; }
+    // The planetoid is optional: none, or one.
+    constexpr bool has_planetoid() const { return planetoid_ < count_; }
+    constexpr unsigned planetoid() const { return planetoid_; }
 
     // Accept any order, exactly one finite state per bound ID. Output must have
     // body_count entries and must not overlap input. Failure leaves output unspecified.
@@ -23,7 +26,7 @@ public:
 
 private:
     std::array<std::uint64_t, max_body_count> ids_{};
-    unsigned count_ = 0, earth_ = 0, giant_ = 0, desert_ = 0, belt_parent_ = 0;
+    unsigned count_ = 0, earth_ = 0, giant_ = 0, desert_ = 0, belt_parent_ = 0, planetoid_ = max_body_count;
 };
 
 } // namespace space::render

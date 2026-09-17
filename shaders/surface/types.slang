@@ -7,7 +7,7 @@ static const uint MODE_OPAQUE = ORBITAL_SURFACE_OPAQUE, MODE_CLOUD = ORBITAL_SUR
                   MODE_SPLAT_MASK = ORBITAL_SURFACE_SPLAT_MASK;
 // Instance kinds (rotation_kind.w); SurfaceKind on the C++ side.
 static const int KIND_EARTH = ORBITAL_KIND_EARTH, KIND_GIANT = ORBITAL_KIND_GIANT, KIND_MOON = ORBITAL_KIND_MOON,
-                 KIND_ROCK = ORBITAL_KIND_ROCK, KIND_MARS = ORBITAL_KIND_MARS;
+                 KIND_ROCK = ORBITAL_KIND_ROCK, KIND_MARS = ORBITAL_KIND_MARS, KIND_PLANETOID = ORBITAL_KIND_PLANETOID;
 
 struct SurfaceVaryings {
     float4 position : SV_Position;
