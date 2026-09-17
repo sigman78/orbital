@@ -75,7 +75,8 @@ Placement placeRock(uint id, bool lightSplats)
     uint variant = uint(rock.spin_group.w + .5) / ORBITAL_BELT_BANDS;
     // The CPU sweep places the rock in the belt plane each frame; the record keeps what does not move.
     float4 state = root.state[id];
-    float3 position = p->giant.xyz + rockPosition(state);
+    float3 local = rockPosition(state);           // relative to the belt's parent: what the instance keeps
+    float3 position = p->giant.xyz + local;       // relative to the cull camera, for the tests and the lighting
     result.instance.previous[0] = 0; result.instance.previous[1] = 0;
     result.instance.previous[2] = 0; result.instance.previous[3] = 0;
     float radius = rock.position_radius.w;
@@ -86,12 +87,14 @@ Placement placeRock(uint id, bool lightSplats)
     float3 eye = position + p->freeze.xyz;
 
     float z = dot(eye, p->forward.xyz);
-    if (z < -radius) return result;
+    if (z < -radius - p->freeze.w) return result;
     float pixelRadius = radius * p->view.x / max(z, .1);
     if (pixelRadius < p->billboard.z) return result;
-    // Frustum planes with non-unit normals; padding covers jitter and expanded billboards.
+    // Frustum planes with non-unit normals; padding covers jitter, expanded billboards
+    // and, for a cull run a frame ahead, the camera's step (freeze.w; the plane tangents
+    // carry the turn).
     float zc = max(z, 0.0);
-    float padding = radius + zc * p->forward.w;
+    float padding = radius + zc * p->forward.w + p->freeze.w;
     if (abs(dot(eye, p->right.xyz)) > zc * p->right.w + padding * p->view.y) return result;
     if (abs(dot(eye, p->up.xyz)) > zc * p->up.w + padding * p->view.z) return result;
     if (occludedByBodies(position, radius, p->freeze.xyz)) return result;
@@ -132,7 +135,7 @@ Placement placeRock(uint id, bool lightSplats)
         float shadowing = solarVisibility(frame, position, -1) * beltExtinction(frame, position) * beltRockTransmittance(frame, position);
         float irradiance = sunLight.radiance / 3.141592653589793 * shadowing;
         result.group = BILLBOARD_GROUP;
-        result.instance.center_radius = float4(position, radius * splatPixels / pixelRadius);
+        result.instance.center_radius = float4(local, radius * splatPixels / pixelRadius);
         float3 radiance = albedo * irradiance * (disc ? 1.0 : lambertSpherePhase(phase) + rim + SPLAT_AMBIENT / max(irradiance, 1e-6));
         // RGB is bounded by the fixed sun irradiance and normalized belt materials.
         // Keep ambient (large in deep shadow) and coverage in float32.
@@ -150,7 +153,7 @@ Placement placeRock(uint id, bool lightSplats)
     if (pixelRadius >= p->billboard.x) level = 5;
     result.group = variant * ORBITAL_ROCK_LEVELS + level;
     float3 rotation = rockRotation(state, rock);
-    result.instance.center_radius = float4(position, radius);
+    result.instance.center_radius = float4(local, radius);
     result.instance.payload[0] = asuint(rotation.x);
     result.instance.payload[1] = asuint(rotation.y);
     result.instance.payload[2] = asuint(rotation.z);

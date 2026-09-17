@@ -250,20 +250,20 @@ unsigned Renderer::Impl::active_rock_count(const FrameInput& input) const {
 }
 
 void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
-                                        std::uint64_t instance_address) {
+                                        std::uint64_t instance_address, float tan_pad, float slack) {
     // build_frame has already captured or released the frozen cull camera; the
     // frame's far-tier weight is the frozen one when it holds.
     const CameraView& camera = frozen_cull ? frozen_cull->camera : input.camera;
     const float tan_y = frozen_cull ? frozen_cull->tan_y : frame.right_tan.w, tan_x = tan_y * frame.up_aspect.w;
     CullParams& p = scratch.params;
     p = {};
-    p.right = f4(to_float(camera.right), tan_x);
-    p.up = f4(to_float(camera.up), tan_y);
+    p.right = f4(to_float(camera.right), tan_x * (1 + tan_pad));
+    p.up = f4(to_float(camera.up), tan_y * (1 + tan_pad));
     p.forward = f4(to_float(camera.forward), tan_y * 4 / float(extent.height));
     p.view = {float(extent.height) / (2 * tan_y), std::sqrt(1 + tan_x * tan_x), std::sqrt(1 + tan_y * tan_y), 0};
     // Rocks stay live camera relative for the draw; the offset moves the tests to the cull camera.
     p.giant = f4(input.bodies[showcase.belt_parent()].position - input.camera.position);
-    p.freeze = f4(input.camera.position - camera.position);
+    p.freeze = f4(input.camera.position - camera.position, slack);
     const unsigned parent = showcase.belt_parent();
     p.giant_motion = previous_bodies_valid ? f4(previous_bodies[parent].position - input.bodies[parent].position)
                                            : Float4{0, 0, 0, 0};

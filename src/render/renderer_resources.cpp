@@ -166,8 +166,8 @@ void Renderer::Impl::create_device(void* window) {
     buffers.static_data = UniqueGpuHeap::create(device, heap_layout.static_budget, gpu::MemoryType::gpu_only);
     buffers.data = UniqueGpuHeap::create(device, heap_layout.mapped_size());
     belt_capacity = std::max(high_quality.belt_count, belt_count_override);
-    buffers.cull_device = UniqueGpuHeap::create(device, heap_layout.cull_size(belt_capacity, body_count),
-                                                gpu::MemoryType::gpu_only);
+    cull_slot_bytes = (heap_layout.cull_size(belt_capacity, body_count) + 255) & ~255ull;
+    buffers.cull_device = UniqueGpuHeap::create(device, 2 * cull_slot_bytes, gpu::MemoryType::gpu_only); // two slots
     buffers.cull_readback = UniqueGpuHeap::create(device, sizeof(CullScratch), gpu::MemoryType::readback);
     buffers.belt_state = UniqueGpuHeap::create(device, 2ull * belt_capacity * belt_state_stride,
                                                gpu::MemoryType::gpu_only);

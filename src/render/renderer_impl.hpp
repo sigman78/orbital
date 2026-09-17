@@ -147,7 +147,8 @@ constexpr SurfaceKind surface_kind(BodyClass body_class) {
 struct HeapLayout {
     std::uint64_t static_budget = 80ull << 20; // meshes, rock records and sky tables, written once
     std::uint64_t cull_offset = 1280;          // FrameData (1088 bytes, padded), then culling parameters/counters
-    std::uint64_t instance_offset = 1280 + 8192;
+    std::uint64_t cull_stride = 8192;          // two of them: this frame's and the one written a frame ahead
+    std::uint64_t instance_offset = 1280 + 2 * 8192;
     std::uint64_t staging_budget = 64ull << 20; // bounded upload staging, released after start-up
     std::uint64_t ui_bytes = 4ull << 20;
     std::uint64_t instance_budget = (44ull << 20) - instance_offset; // retain the former instance limit
@@ -164,7 +165,8 @@ inline constexpr HeapLayout heap_layout{};
 inline constexpr std::uint64_t belt_state_stride = sizeof(RockState); // (x, y, z, phase) per rock in the state slices
 static_assert(heap_layout.instance_capacity() < (1ull << 30));        // packed asteroid id
 static_assert(heap_layout.cull_offset >= sizeof(FrameData));
-static_assert(heap_layout.instance_offset >= heap_layout.cull_offset + sizeof(CullScratch));
+static_assert(heap_layout.cull_stride >= sizeof(CullScratch));
+static_assert(heap_layout.instance_offset >= heap_layout.cull_offset + 2 * heap_layout.cull_stride);
 static_assert(heap_layout.instance_offset < heap_layout.ui_offset());
 
 // Sizes of the fixed GPU targets, created by the resources side and addressed by the frame side.
@@ -251,9 +253,10 @@ struct Renderer::Impl {
         UniqueGpuHeap static_data; // device-only: meshes, rock records and sky tables, filled once
         UniqueGpuHeap data, texture_descriptors, sampler_descriptors; // host-visible: the per-frame region and the UI
         UniqueGpuHeap meter_device, meter_zero,
-            meter_readback;                       // the exposure histogram, its zero source and its readback
-        UniqueGpuHeap cull_device, cull_readback; // GPU output and completed scratch for CPU statistics
-        UniqueGpuHeap belt_state;         // device-only: two slices of per-rock state, this frame's and the last
+            meter_readback; // the exposure histogram, its zero source and its readback
+        UniqueGpuHeap cull_device,
+            cull_readback;        // GPU output (two slots, by frame parity) and completed scratch for CPU statistics
+        UniqueGpuHeap belt_state; // device-only: two slices of per-rock state, this frame's and the last
         UniqueGpuHeap belt_state_staging; // host-visible: the CPU writes this frame's slice here for the copy
     } buffers;
     std::uint64_t static_cursor = 0;
@@ -349,8 +352,21 @@ struct Renderer::Impl {
     std::array<GpuMesh, max_body_count> moonlet_meshes{}; // per body index; only moonlets are filled
     std::uint64_t rock_data = 0;                          // static heap address of the RockData records
     unsigned rock_count = 0;
-    unsigned belt_capacity = 0; // rocks the state heaps hold: the high tier or the override
-    BeltMotion belt_motion;     // the rocks' seeds and states, stepped on the CPU
+    unsigned belt_capacity = 0;        // rocks the state heaps hold: the high tier or the override
+    std::uint64_t cull_slot_bytes = 0; // one slot of the culling heap: scratch and instances for one frame
+    // The cull runs a frame ahead: at the end of frame N it places the rocks for frame N+1
+    // from frame N's camera with the frustum padded for a turn and the near tests for a
+    // step. Frame N+1 checks that its camera stayed within that allowance (and that no cut
+    // happened) and otherwise culls exactly at its own start.
+    struct CullAhead {
+        bool valid = false;
+        std::size_t cut_serial = 0;
+        Vec3d forward{}, position{};
+        double slack = 0;
+    } cull_ahead;
+    static constexpr float cull_ahead_tan_pad = .15f;       // the frustum's tangents, widened for a turn
+    static constexpr double cull_ahead_turn_cosine = .9986; // about 3 degrees: beyond it the frame culls exactly
+    BeltMotion belt_motion;                                 // the rocks' seeds and states, stepped on the CPU
     // The staging heap has two slots, written by frame parity before the wait for the
     // previous frame, which may still be copying the other; the version each holds
     // says whether a standing state must be written again into a stale slot.
@@ -474,8 +490,9 @@ struct Renderer::Impl {
     unsigned active_rock_count(const FrameInput& input) const; // the tier's prefix of the population
     void write_belt_state(const FrameInput& input);            // before the wait: this frame's staging slot
     void cull_bodies(const FrameInput& input, const FrameData& frame);
+    // tan_pad widens the frustum and slack (units) the near and plane tests: the allowance of a cull run a frame ahead.
     void write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
-                            std::uint64_t instance_address);
+                            std::uint64_t instance_address, float tan_pad, float slack);
 
     // Belt population, GPU culling, indirect batch and maps (renderer_belt.cpp).
     void build_belt(const BeltDescription& description);

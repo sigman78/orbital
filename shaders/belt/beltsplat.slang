@@ -33,13 +33,14 @@ SplatVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_In
         return output;
     }
     RockData rock = root.rocks[instanceId];
-    float3 position = p->giant.xyz + rockPosition(root.state[uint(rock.rotation_seed.w + .5)]); // the tail's records carry their ids
+    float3 giant = beltParams(root.frame).centre; // this frame's, not the cull's, which may be a frame old
+    float3 position = giant + rockPosition(root.state[uint(rock.rotation_seed.w + .5)]); // the tail's records carry their ids
     float radius = rock.position_radius.w;
 
     // Slice along the sun ray, relative to where this column crosses the belt plane.
     BeltParams belt = beltParams(root.frame);
     float3 light = normalize(lightParams(root.frame).position - position);
-    float along = dot(position - p->giant.xyz, belt.normal) / (dot(light, belt.normal) + 1e-6);
+    float along = dot(position - giant, belt.normal) / (dot(light, belt.normal) + 1e-6);
     output.weightSlice.y = clamp((along / belt.lightSlice * .5 + .5) * SLICES, 0.0, SLICES - .001);
 
     // Splat at least one texel wide; the weight keeps the covered area right.

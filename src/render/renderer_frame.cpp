@@ -78,14 +78,24 @@ bool Renderer::draw(const FrameInput& supplied) {
     // The completed GPU scratch is read before preparing the next submission.
     const auto frame_address = reinterpret_cast<std::uint64_t>(s.buffers.data.range().gpu);
     auto* dynamic = s.buffers.data.range().cpu;
-    auto* scratch = reinterpret_cast<CullScratch*>(dynamic + heap_layout.cull_offset);
+    // The cull for this frame ran at the end of the last one, into this frame's slot, from
+    // that frame's camera with an allowance; if the camera left the allowance, or cut, or
+    // there was no last frame, this frame culls exactly at its own start.
+    const unsigned cull_slot = s.frame_index & 1;
+    const auto cull_address = reinterpret_cast<std::uint64_t>(s.buffers.cull_device.range().gpu) +
+                              cull_slot * s.cull_slot_bytes;
+    auto* scratch = reinterpret_cast<CullScratch*>(dynamic + heap_layout.cull_offset +
+                                                   cull_slot * heap_layout.cull_stride);
+    const bool cull_exact = !s.cull_ahead.valid || input.camera.cut_serial != s.cull_ahead.cut_serial ||
+                            dot(input.camera.forward, s.cull_ahead.forward) < s.cull_ahead_turn_cosine ||
+                            length(input.camera.position - s.cull_ahead.position) > s.cull_ahead.slack;
     if (s.frame_index)
         s.read_cull_counts(*reinterpret_cast<const CullScratch*>(s.buffers.cull_readback.range().cpu));
     std::memcpy(dynamic, &frame, sizeof frame);
-    const auto cull_address = reinterpret_cast<std::uint64_t>(s.buffers.cull_device.range().gpu);
     s.cull_bodies(input, frame);
-    s.write_cull_scratch(input, frame, *scratch,
-                         cull_address + heap_layout.instance_offset + s.body_count * sizeof(Instance));
+    if (cull_exact)
+        s.write_cull_scratch(input, frame, *scratch,
+                             cull_address + heap_layout.instance_offset + s.body_count * sizeof(Instance), 0, 0);
     std::memcpy(dynamic + heap_layout.instance_offset, s.instances.data(), s.instances.size() * sizeof(Instance));
     // This frame's rock state goes to one of two device slices, so the other still holds the last frame's.
     const unsigned rock_limit = scratch->params.rock_limit;
@@ -120,24 +130,27 @@ bool Renderer::draw(const FrameInput& supplied) {
                 synchronize(cmd, frame_render_access, frame_render_access);
                 // Transfer the small CPU inputs; generated instances and atomic counters
                 // stay device-only. The submission makes preceding host writes available.
-                gpu::copy_memory(
-                    cmd, {reinterpret_cast<void*>(frame_address + heap_layout.cull_offset), sizeof(CullScratch)},
-                    {s.buffers.cull_device.range().gpu + heap_layout.cull_offset, sizeof(CullScratch)});
                 gpu::copy_memory(cmd,
                                  {reinterpret_cast<void*>(frame_address + heap_layout.instance_offset),
                                   s.instances.size() * sizeof(Instance)},
-                                 {s.buffers.cull_device.range().gpu + heap_layout.instance_offset,
+                                 {reinterpret_cast<void*>(cull_address + heap_layout.instance_offset),
                                   s.instances.size() * sizeof(Instance)});
                 if (state_bytes)
                     gpu::copy_memory(cmd, {s.buffers.belt_state_staging.range().gpu + state_slice, state_bytes},
                                      {reinterpret_cast<void*>(state_address), state_bytes});
+                if (cull_exact) {
+                    gpu::copy_memory(
+                        cmd,
+                        {reinterpret_cast<void*>(frame_address + heap_layout.cull_offset +
+                                                 cull_slot * heap_layout.cull_stride),
+                         sizeof(CullScratch)},
+                        {reinterpret_cast<void*>(cull_address + heap_layout.cull_offset), sizeof(CullScratch)});
+                }
                 synchronize(cmd, access::transfer_write, cull_input_access);
-                s.record_cull_passes(cmd, cull_root);
-                synchronize(cmd, access::compute_write, access::transfer_read);
-                gpu::copy_memory(cmd,
-                                 {s.buffers.cull_device.range().gpu + heap_layout.cull_offset, sizeof(CullScratch)},
-                                 gpu::gpu_range(s.buffers.cull_readback.get()));
-                synchronize(cmd, access::transfer_write, access::host_read);
+                // The counts of an exact cull are not read back: the frame's count comes
+                // from the cull ahead, and the next one's is read back below.
+                if (cull_exact)
+                    s.record_cull_passes(cmd, cull_root);
             }
             {
                 GpuTimingScope timing(s.timings, GpuPass::BodyShadows);
@@ -184,6 +197,49 @@ bool Renderer::draw(const FrameInput& supplied) {
                                  input.post.bloom && input.post.bloom_intensity > 0, input.sun.lens_flare,
                                  frame.camera_cell.w > 0, input.ui, dynamic + heap_layout.ui_offset(),
                                  frame_address + heap_layout.ui_offset());
+        }
+        {
+            // The next frame's rocks, placed now from this camera with an allowance for its
+            // step and turn, into the other slot. The GPU does it while the CPU prepares the
+            // next frame; the instances are parent-relative, so that frame draws them with its
+            // own camera. Its state is this frame's, a step of motion behind, and so are its
+            // motion vectors: both uniform over a frame.
+            GpuTimingScope timing(s.timings, GpuPass::CullAhead);
+            const unsigned next_slot = cull_slot ^ 1;
+            const auto next_address = reinterpret_cast<std::uint64_t>(s.buffers.cull_device.range().gpu) +
+                                      next_slot * s.cull_slot_bytes;
+            auto* next_scratch = reinterpret_cast<CullScratch*>(dynamic + heap_layout.cull_offset +
+                                                                next_slot * heap_layout.cull_stride);
+            const double step = s.history_valid ? length(input.camera.position - s.previous_camera) : 0;
+            const double slack = std::clamp(2 * step + .25, .25, 50.0);
+            s.write_cull_scratch(input, frame, *next_scratch,
+                                 next_address + heap_layout.instance_offset + s.body_count * sizeof(Instance),
+                                 s.cull_ahead_tan_pad, float(slack));
+            const CullRoot next_root{.frame = frame_address,
+                                     .rocks = s.rock_data,
+                                     .scratch = next_address + heap_layout.cull_offset,
+                                     .state = state_address,
+                                     .previous_state = cull_root.previous_state,
+                                     .pass = 0,
+                                     .unused = 0};
+            synchronize(cmd, access::fragment_sample, access::transfer_write);
+            gpu::copy_memory(
+                cmd,
+                {reinterpret_cast<void*>(frame_address + heap_layout.cull_offset + next_slot * heap_layout.cull_stride),
+                 sizeof(CullScratch)},
+                {reinterpret_cast<void*>(next_address + heap_layout.cull_offset), sizeof(CullScratch)});
+            synchronize(cmd, access::transfer_write, cull_input_access);
+            s.record_cull_passes(cmd, next_root);
+            synchronize(cmd, access::compute_write, access::transfer_read);
+            gpu::copy_memory(cmd,
+                             {reinterpret_cast<void*>(next_address + heap_layout.cull_offset), sizeof(CullScratch)},
+                             gpu::gpu_range(s.buffers.cull_readback.get()));
+            synchronize(cmd, access::transfer_write, access::host_read);
+            s.cull_ahead = {.valid = true,
+                            .cut_serial = input.camera.cut_serial,
+                            .forward = input.camera.forward,
+                            .position = input.camera.position,
+                            .slack = slack};
         }
     }
     s.stats.frame.prepare_ms =

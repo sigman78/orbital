@@ -50,7 +50,7 @@ struct Instance {
 // previous: the centre's step and the Euler step as three halves each, w unused.
 // Billboard payload: half RGB/rim, float32 ambient and coverage; rim sign tags discs.
 struct AsteroidInstance {
-    SHADER_FLOAT4 center_radius;
+    SHADER_FLOAT4 center_radius; // the centre relative to the belt's parent (loadInstance adds the frame's camera-relative parent), so a cull run a frame ahead draws with the frame's own camera
     SHADER_UINT payload[4];
     SHADER_UINT previous[4];
 };
@@ -172,7 +172,7 @@ struct CullParams {
     SHADER_FLOAT4 right, up, forward;   // camera basis; w = tan_x, tan_y, pixel padding per unit depth
     SHADER_FLOAT4 view;                 // pixels per unit depth, plane x scale, plane y scale, unused
     SHADER_FLOAT4 giant;                // camera-relative belt centre, w unused
-    SHADER_FLOAT4 freeze;               // live camera to the frozen cull camera, zero when culling follows the view; w unused
+    SHADER_FLOAT4 freeze;               // live camera to the frozen cull camera, zero when culling follows the view; w: the slack (units) the frustum and near tests allow a cull run a frame ahead
     SHADER_FLOAT4 giant_motion;         // the belt parent's world-space step back to the previous frame; w unused
     SHADER_FLOAT4 levels;               // projected-radius thresholds of levels 1 to 4, in pixels
     SHADER_FLOAT4 billboard;            // level 5 threshold, billboard radius, minimum radius, far-tier blend weight (splats fade out by it)

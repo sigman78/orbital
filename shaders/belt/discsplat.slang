@@ -33,7 +33,7 @@ SplatVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_In
         return output;
     }
     RockData rock = root.rocks[instanceId];
-    float3 position = p->giant.xyz + rockPosition(root.state[instanceId]);
+    float3 position = beltParams(root.frame).centre + rockPosition(root.state[instanceId]); // this frame's centre, not the cull's
     float radius = rock.position_radius.w;
     float3 v = rock.position_radius.xyz; // the belt frame before the spin, for the radial class
 

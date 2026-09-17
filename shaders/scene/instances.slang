@@ -13,6 +13,7 @@ Instance loadInstance(Frame* frame, Instance* instances, uint index, bool billbo
     AsteroidInstance packed = asteroids[index - bodies];
     Instance result;
     result.center_radius = packed.center_radius;
+    result.center_radius.xyz += beltParams(frame).centre; // parent-relative in the record: this frame's camera offset here
     result.previous_center = float4(0.0, 0.0, 0.0, 0.0);
     result.previous_rotation = float4(0.0, 0.0, 0.0, 0.0);
     if (billboard)

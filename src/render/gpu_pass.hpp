@@ -38,6 +38,7 @@ enum class GpuPass : unsigned {
     SpatialAA, // FXAA, or the three SMAA passes
     Meter,     // the exposure histogram's slice for the frame and the cycle's copies
     Present,   // the swapchain copy with the HUD and the panel
+    CullAhead, // the next frame's rock placement, at the end of this one
     Count
 };
 
@@ -82,6 +83,7 @@ inline constexpr std::array<GpuPassInfo, gpu_pass_count> gpu_pass_info{{
     {"gpu_spatial_aa_ms", "Spatial AA", GpuPass::Post},
     {"gpu_meter_ms", "Meter", GpuPass::Post},
     {"gpu_present_ms", "Present and UI", GpuPass::Post},
+    {"gpu_cull_ahead_ms", "Cull ahead", GpuPass::Frame},
 }};
 
 constexpr const GpuPassInfo& pass_info(GpuPass pass) {
