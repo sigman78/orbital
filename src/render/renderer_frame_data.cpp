@@ -37,9 +37,6 @@ inline constexpr float grow_hysteresis = 1.15f, shrink_hysteresis = .85f;
 } // namespace body_tiers
 
 namespace belt_culling {
-inline constexpr double spin_rate = 0.0012, rock_spin_rate = 0.02; // radians per simulation second, barely visible
-inline constexpr float shear_exponent =
-    0.35f; // orbital rate falls with radius as r^-0.35: a hint of Kepler shear, not the real 1.5
 namespace billboard {
 inline constexpr float min_pixels = 0.06f; // smaller rocks are dropped
 } // namespace billboard
@@ -51,31 +48,6 @@ Float4 f4(Vec3f v, float w = 0) {
 
 Float4 f4(Vec3d v, float w = 0) {
     return f4(to_float(v), w);
-}
-
-// The belt is tilted and compressed relative to the giant, and spins with time,
-// each radial band at its own rate so the rings slowly shear past each other.
-// The tilt is a rotation about X (cos .933, sin .36), so the belt plane normal
-// is fixed; the surface shader uses it to cast the belt's shadow on the giant.
-struct BeltTilt {
-    float y_scale = .7f, y_from_z = .36f, z_scale = .933f; // (x, y, z) -> (x, y * y_scale - z * y_from_z, z * z_scale)
-};
-constexpr BeltTilt belt_tilt{};
-struct BeltTransform {
-    float cos_spin[belt::radial_bands], sin_spin[belt::radial_bands];
-};
-
-BeltTransform belt_transform(const BeltDescription& description, float angle) {
-    const float inner = float(description.inner_radius), outer = float(description.outer_radius);
-    const float middle = (inner + outer) * .5f;
-    BeltTransform transform{};
-    for (unsigned band = 0; band < belt::radial_bands; band++) {
-        const float radius = inner + (float(band) + .5f) / float(belt::radial_bands) * (outer - inner);
-        const float band_angle = angle * std::pow(middle / radius, belt_culling::shear_exponent);
-        transform.cos_spin[band] = std::cos(band_angle);
-        transform.sin_spin[band] = std::sin(band_angle);
-    }
-    return transform;
 }
 
 } // namespace
@@ -251,32 +223,45 @@ void Renderer::Impl::cull_bodies(const FrameInput& input, const FrameData& frame
 // frustum test it replaced: plane normals are not unit length, so sphere
 // support is scaled, and two pixels of padding cover temporal jitter and
 // expanded tiny billboards.
+// The rocks' states for this frame, stepped by the sweep into this frame's
+// staging slot, which the frame copies into the device slice. Runs before the
+// wait for the previous frame, so the write overlaps that frame's GPU work; the
+// previous frame reads the other slot. A standing state is written only into a
+// slot that does not hold it yet.
+void Renderer::Impl::write_belt_state(const FrameInput& input) {
+    const unsigned slot = frame_index & 1, count = active_rock_count(input);
+    auto* out = reinterpret_cast<RockState*>(buffers.belt_state_staging.range().cpu +
+                                             slot * std::uint64_t(belt_capacity) * belt_state_stride);
+    if (!belt_motion.advance(input.time, count, out) && belt_staging_version[slot] != belt_motion.version())
+        belt_motion.write(count, out);
+    belt_staging_version[slot] = belt_motion.version();
+}
+
+unsigned Renderer::Impl::active_rock_count(const FrameInput& input) const {
+    const unsigned tier_count = (input.high_quality ? high_quality : baseline_quality).belt_count;
+    return std::min(rock_count, belt_count_override ? belt_count_override : tier_count);
+}
+
 void Renderer::Impl::write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
                                         std::uint64_t instance_address) {
     // build_frame has already captured or released the frozen cull camera; the
     // frame's far-tier weight is the frozen one when it holds.
     const CameraView& camera = frozen_cull ? frozen_cull->camera : input.camera;
     const float tan_y = frozen_cull ? frozen_cull->tan_y : frame.right_tan.w, tan_x = tan_y * frame.up_aspect.w;
-    const BeltTransform transform = belt_transform(system.belts.front(), float(input.time * belt_culling::spin_rate));
     CullParams& p = scratch.params;
     p = {};
     p.right = f4(to_float(camera.right), tan_x);
     p.up = f4(to_float(camera.up), tan_y);
     p.forward = f4(to_float(camera.forward), tan_y * 4 / float(extent.height));
-    p.view = {float(extent.height) / (2 * tan_y), std::sqrt(1 + tan_x * tan_x), std::sqrt(1 + tan_y * tan_y),
-              float(input.time * belt_culling::rock_spin_rate)};
+    p.view = {float(extent.height) / (2 * tan_y), std::sqrt(1 + tan_x * tan_x), std::sqrt(1 + tan_y * tan_y), 0};
     // Rocks stay live camera relative for the draw; the offset moves the tests to the cull camera.
     p.giant = f4(input.bodies[showcase.belt_parent()].position - input.camera.position);
     p.freeze = f4(input.camera.position - camera.position);
-    p.belt_tilt = {belt_tilt.y_scale, belt_tilt.y_from_z, belt_tilt.z_scale, 0};
-    for (unsigned band = 0; band < belt::radial_bands; band++)
-        p.band_spin[band] = {transform.cos_spin[band], transform.sin_spin[band], 0, 0};
     p.levels = {geometry::rock_level_thresholds[0], geometry::rock_level_thresholds[1],
                 geometry::rock_level_thresholds[2], geometry::rock_level_thresholds[3]};
     p.billboard = {geometry::rock_level_thresholds[4], input.belt.billboard_radius(),
                    belt_culling::billboard::min_pixels, frame.belt_disc.y};
-    const unsigned tier_count = (input.high_quality ? high_quality : baseline_quality).belt_count;
-    p.rock_limit = std::min(rock_count, belt_count_override ? belt_count_override : tier_count);
+    p.rock_limit = active_rock_count(input);
     p.body_count = body_count;
     p.light_in_count_pass = input.belt.splat_light_twice ? 1u : 0u;
     for (unsigned group = 0; group < rock_group_count; group++) {

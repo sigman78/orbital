@@ -48,10 +48,24 @@ Frame preparation separates CPU geometry from shader packing. `frame_calculation
 
 The belt is a population rather than a mesh list: `geometry` places 280k (baseline) or 520k (high) rocks in
 an annulus with rings, a gap, tapered edges and flared height, a power-law size distribution and three
-composition classes. Each rock is a 64-byte record on the GPU; nothing per rock lives on the CPU after
-startup.
+composition classes. The CPU owns the rocks as two arrays in `scene/belt_motion.cpp`: the seeds that never
+change (centre in the belt frame, unit tumble axis and rate, radius, band, shape) and the states it steps,
+float4 (x, y, z, phase), the position after the band spin and the tumble phase. The GPU keeps a 48-byte
+static record per rock written from the seeds once, and reads the state the CPU writes every frame; the
+reader applies the fixed tilt and the phase along the record's axis (`belt/belt_frame.slang`). Every rock
+turns about the belt's axis at its band's rate and tumbles about its own at its own, so a step is one
+rotation per band and one phase increment per rock, applied to every rock in one plain loop. Time
+advances in fixed steps of 1/120 s; a frame takes as many whole steps as it covers, a time jump or a gap
+past 16 steps re-seeds exactly from the seeds, and a slice of the population is re-seeded every step so
+repeated float rotations do not drift in radius. A standing time (fixed captures, benchmarks) writes
+nothing after the first frame.
 
-Every frame a compute shader culls the whole population in three passes (count, prefix, scatter): frustum,
+The sweep writes into one of two slots of a host-visible staging heap, chosen by frame parity, before
+the frame waits for the previous frame's GPU work, so the write (1.45 ms at 280k rocks, 2.75 at 520k,
+most of it the CPU-to-aperture path) overlaps that work instead of adding to the frame; the previous
+frame may still be copying the other slot. The frame then copies the slot into one of two device slices
+(the other keeps the previous frame's positions, for motion vectors), then a compute shader culls the
+whole population in three passes (count, prefix, scatter): frustum,
 planet occlusion, projected size, then a level and shape group, or a splat for rocks under the cut-off. The
 scatter pass lights each splat once (Lambert sphere at its phase angle, belt shadowing) and writes indirect
 draw arguments per group, so the meshes are one multi-draw and the splats one draw. Belt shadowing comes
@@ -192,8 +206,9 @@ driver backs host-visible heaps with system memory and the belt cull runs 40x sl
 heap of about 4 MiB holds frame constants, staged culling parameters/body instances and the overlay
 space. GPU-written culling scratch, indirect
 commands and generated instances use a separate device-only heap sized for the configured maximum
-rock count (about 16 MiB by default). A small readback heap returns completed culling statistics;
-only parameters and body instances are uploaded each frame. Rock-count overrides are checked against
+rock count (about 16 MiB by default); the two rock-state slices are another 16 MiB of device memory with
+a 16 MiB host-visible staging heap in two slots. A small readback heap returns completed culling statistics; the
+per-frame uploads are the parameters, the body instances and the rock state of the active tier. Rock-count overrides are checked against
 the supported instance capacity before allocation. Generated asteroids use 32-byte records,
 while the body prefix retains 48-byte instances. Mesh material data is reconstructed from
 packed identity; billboards store half-precision RGB/rim and full-precision coverage/ambient.

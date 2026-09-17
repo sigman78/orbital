@@ -15,6 +15,7 @@
 #include "render/gpu_timing.hpp"
 #include "render/gpu_types.hpp"
 #include "render/showcase.hpp"
+#include "scene/belt_motion.hpp"
 #include "scene/geometry.hpp"
 #include "scene/system.hpp"
 
@@ -158,7 +159,8 @@ struct HeapLayout {
     }
 };
 inline constexpr HeapLayout heap_layout{};
-static_assert(heap_layout.instance_capacity() < (1ull << 30)); // packed asteroid id
+inline constexpr std::uint64_t belt_state_stride = sizeof(RockState); // (x, y, z, phase) per rock in the state slices
+static_assert(heap_layout.instance_capacity() < (1ull << 30));        // packed asteroid id
 static_assert(heap_layout.cull_offset >= sizeof(FrameData));
 static_assert(heap_layout.instance_offset >= heap_layout.cull_offset + sizeof(CullScratch));
 static_assert(heap_layout.instance_offset < heap_layout.ui_offset());
@@ -249,6 +251,8 @@ struct Renderer::Impl {
         UniqueGpuHeap meter_device, meter_zero,
             meter_readback;                       // the exposure histogram, its zero source and its readback
         UniqueGpuHeap cull_device, cull_readback; // GPU output and completed scratch for CPU statistics
+        UniqueGpuHeap belt_state;         // device-only: two slices of per-rock state, this frame's and the last
+        UniqueGpuHeap belt_state_staging; // host-visible: the CPU writes this frame's slice here for the copy
     } buffers;
     std::uint64_t static_cursor = 0;
     struct StaticUpload { // the staging path of upload_static, open until finish_static_uploads
@@ -341,6 +345,12 @@ struct Renderer::Impl {
     std::array<GpuMesh, max_body_count> moonlet_meshes{}; // per body index; only moonlets are filled
     std::uint64_t rock_data = 0;                          // static heap address of the RockData records
     unsigned rock_count = 0;
+    unsigned belt_capacity = 0; // rocks the state heaps hold: the high tier or the override
+    BeltMotion belt_motion;     // the rocks' seeds and states, stepped on the CPU
+    // The staging heap has two slots, written by frame parity before the wait for the
+    // previous frame, which may still be copying the other; the version each holds
+    // says whether a standing state must be written again into a stale slot.
+    std::uint64_t belt_staging_version[2] = {~0ull, ~0ull};
     std::uint64_t rock_tail_data = 0;    // the size-tail rocks again, compacted for the transmittance splat
     std::vector<unsigned> rock_tail_ids; // their ids, ascending
     unsigned belt_count_override = 0;    // RendererConfig::belt_count
@@ -454,6 +464,8 @@ struct Renderer::Impl {
     // CPU frame packing (renderer_frame_data.cpp).
     FrameData build_frame(const FrameInput& input);
     void write_body_instances(const FrameInput& input, const FrameData& frame);
+    unsigned active_rock_count(const FrameInput& input) const; // the tier's prefix of the population
+    void write_belt_state(const FrameInput& input);            // before the wait: this frame's staging slot
     void cull_bodies(const FrameInput& input, const FrameData& frame);
     void write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
                             std::uint64_t instance_address);
