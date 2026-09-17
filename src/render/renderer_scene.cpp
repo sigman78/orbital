@@ -50,8 +50,11 @@ void Renderer::Impl::record_galaxy_pass(gpu::CommandBuffer* cmd, Root root, cons
 void Renderer::Impl::record_depth_prepass(gpu::CommandBuffer* cmd, Root root) {
     root.mode = std::uint32_t(SurfaceMode::opaque);
     {
-        RenderPassScope pass(cmd, {.depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::clear}});
-        gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
+        RenderPassScope pass(cmd, {.depth = {.render_view = frame_targets.depth.view(),
+                                             .load = gpu::LoadOp::clear,
+                                             .clear = 0}}); // reversed-Z: far is 0
+        gpu::set_depth_stencil(
+            cmd, {.depth_test = true, .depth_write = true, .depth_compare = gpu::CompareOp::greater_equal});
         gpu::bind_pso(cmd, pso.scene.depth_prepass);
         const unsigned triangles_before = stats.frame.triangles;
         for (unsigned i = 0; i < body_count; i++)
@@ -74,7 +77,8 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
     {
         RenderPassScope pass(cmd, {.colors = {&color, 1},
                                    .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});
-        gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = true});
+        gpu::set_depth_stencil(
+            cmd, {.depth_test = true, .depth_write = true, .depth_compare = gpu::CompareOp::greater_equal});
         // The timing children sit inside the pass; draws overlap in the pipeline, so
         // each child is where its commands were issued rather than an exact cost.
         {
@@ -94,7 +98,8 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
             root.detail = 0;
             root.flags = 0;
         }
-        gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
+        gpu::set_depth_stencil(
+            cmd, {.depth_test = true, .depth_write = false, .depth_compare = gpu::CompareOp::greater_equal});
         {
             GpuTimingScope sky(timings, GpuPass::SurfaceSky);
             gpu::bind_pso(cmd, pso.scene.background); // at the far plane: only where nothing was drawn
@@ -135,7 +140,8 @@ void Renderer::Impl::record_motion_pass(gpu::CommandBuffer* cmd, Root root, std:
     gpu::ColorAttachment color{.render_view = frame_targets.motion.view(), .load = gpu::LoadOp::clear};
     RenderPassScope pass(
         cmd, {.colors = {&color, 1}, .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});
-    gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
+    gpu::set_depth_stencil(cmd,
+                           {.depth_test = true, .depth_write = false, .depth_compare = gpu::CompareOp::greater_equal});
     const unsigned triangles_before = stats.frame.triangles, draws_before = stats.frame.draw_calls;
     draw_rock_meshes(cmd, root, args_address, pso.scene.motion);
     gpu::bind_pso(cmd, pso.scene.motion);
@@ -184,7 +190,8 @@ void Renderer::Impl::record_motion_streaks(gpu::CommandBuffer* cmd, Root& root, 
     {
         RenderPassScope pass(cmd, {.colors = {&color, 1},
                                    .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});
-        gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
+        gpu::set_depth_stencil(
+            cmd, {.depth_test = true, .depth_write = false, .depth_compare = gpu::CompareOp::greater_equal});
         gpu::bind_pso(cmd, pso.scene.motes);
         root.mode = 0;
         gpu::draw(cmd, root, 6, targets::mote_count);

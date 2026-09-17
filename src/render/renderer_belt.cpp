@@ -198,7 +198,8 @@ void Renderer::Impl::draw_rock_meshes(gpu::CommandBuffer* cmd, Root& root, std::
 
 // The blended half: billboards and splats over whatever is behind them, so after the sky.
 void Renderer::Impl::draw_rock_splats(gpu::CommandBuffer* cmd, Root& root, std::uint64_t args_address) {
-    gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
+    gpu::set_depth_stencil(cmd,
+                           {.depth_test = true, .depth_write = false, .depth_compare = gpu::CompareOp::greater_equal});
     gpu::bind_pso(cmd, pso.belt.billboard);
     root.mode = std::uint32_t(SurfaceMode::billboard);
     gpu::draw_indirect(cmd, root,
@@ -219,7 +220,8 @@ void Renderer::Impl::record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, 
     {
         RenderPassScope pass(cmd, {.colors = {&mask, 1},
                                    .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});
-        gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
+        gpu::set_depth_stencil(
+            cmd, {.depth_test = true, .depth_write = false, .depth_compare = gpu::CompareOp::greater_equal});
         gpu::bind_pso(cmd, pso.belt.splat_mask);
         gpu::draw_indirect(
             cmd, root, {reinterpret_cast<void*>(args_address + rock_group_count * sizeof(DrawArgs)), sizeof(DrawArgs)},

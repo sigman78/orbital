@@ -47,6 +47,6 @@ FullscreenVaryings vertexMain(uint vertexIndex : SV_VertexID)
     float2 size = max(upper - lower, float2(0.0, 0.0));
     float2 p = lower + float2(vertexIndex == 1 ? 2.0 * size.x : 0.0, vertexIndex == 2 ? 2.0 * size.y : 0.0);
     FullscreenVaryings output;
-    output.position = float4(p, 1.0, 1.0); // at the far plane, as the full-screen triangle
+    output.position = float4(p, 0.0, 1.0); // at the far plane (reversed-Z), as the full-screen triangle
     return output;
 }

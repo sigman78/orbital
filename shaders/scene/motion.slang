@@ -27,7 +27,7 @@ MotionVaryings vertexMain(uint vertexIndex : SV_VertexID, uint firstVertex : SV_
     {
         MotionVaryings sky;
         float2 corner = float2((vertexIndex << 1) & 2, vertexIndex & 2);
-        sky.position = float4(corner * 2.0 - 1.0, 1.0, 1.0); // the far plane: only where nothing was drawn
+        sky.position = float4(corner * 2.0 - 1.0, 0.0, 1.0); // the far plane (reversed-Z): only where nothing was drawn
         sky.previousClip = float4(0.0, 0.0, 0.0, 0.0);
         return sky;
     }
