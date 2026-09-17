@@ -27,7 +27,8 @@ int main() {
     assert(!parse({"orbital", "--frames", "-1"}));
     assert(!parse({"orbital", "--frames", "999999999999999999999999"}));
     assert(!parse({"orbital", "--capture", ""}));
-    assert(!parse({"orbital", "--bookmark", "6"}));
+    assert(parse({"orbital", "--bookmark", "7"}));
+    assert(!parse({"orbital", "--bookmark", "8"}));
     assert(!parse({"orbital", "--back", "-1"}));
     assert(!parse({"orbital", "--fov-div", ".5"}));
     // Shot lines: keys as the options without dashes over the base, flags bare, commas for several values.
