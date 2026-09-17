@@ -77,7 +77,7 @@ void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu:
     }
     if (motion_streaks) {
         GpuTimingScope timing(timings, GpuPass::MotionStreaks);
-        record_motion_streaks(cmd, root);
+        record_motion_streaks(cmd, root, temporal_aa);
     }
     if (bloom) { // off, the composite does not read the halo, so its images may hold stale content
         GpuTimingScope timing(timings, GpuPass::Bloom);

@@ -162,13 +162,18 @@ void Renderer::Impl::record_atmosphere_passes(gpu::CommandBuffer* cmd, Root& roo
     }
 }
 
-void Renderer::Impl::record_motion_streaks(gpu::CommandBuffer* cmd, Root& root) {
-    // TAA has consumed scene HDR. Reuse it for this frame's transient streaks,
-    // retaining scene depth but keeping the effect out of temporal history.
+void Renderer::Impl::record_motion_streaks(gpu::CommandBuffer* cmd, Root& root, bool temporal_aa) {
+    // This frame's transient streaks go into a target the composite does not read as the
+    // scene, retaining scene depth but keeping the effect out of temporal history: with
+    // TAA on the scene HDR, which the temporal pass has consumed; off, the scene HDR is
+    // the resolved image itself, so the idle history target takes them (sampleHDR reads
+    // the one the frame bound as history B).
     synchronize(cmd, access::fragment_sample, access::color_write);
     synchronize(cmd, access::fragment_sample, access::depth_read);
     gpu::ColorAttachment color{
-        .render_view = frame_targets.hdr.view(), .load = gpu::LoadOp::clear, .clear = {0, 0, 0, 0}};
+        .render_view = (temporal_aa ? frame_targets.hdr : frame_targets.history[1 - frame_index % 2]).view(),
+        .load = gpu::LoadOp::clear,
+        .clear = {0, 0, 0, 0}};
     {
         RenderPassScope pass(cmd, {.colors = {&color, 1},
                                    .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});
