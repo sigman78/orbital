@@ -50,7 +50,10 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
     // cell's edge in those units orders the generation.
     const double distance = std::max(length(centre), cap);
     const float scale = float(view.radius * view.height_pixels / (distance * view.tan_y));
-    return {.visible = true, .scale = scale, .pixels = float(b.angular_size) * scale};
+    // Facing the camera an error shows as parallax, edge-on it is the silhouette
+    // itself: the tolerance is the strict one at the limb and twice it head-on.
+    const float facing = float(std::clamp(-dot(normal, centre) / distance, 0.0, 1.0));
+    return {.visible = true, .scale = scale, .pixels = float(b.angular_size) * scale, .tolerance = 1 + facing};
 }
 
 std::uint32_t TerrainTier::allocate_children(const Node& parent) {
@@ -109,7 +112,8 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view) {
     // A resident patch splits while its error shows on screen; the valve holds
     // the tree under the pool's size.
     const bool split = key.level < patch_level_max && (nodes_[index].children || nodes() < slot_count - 64) &&
-                       error_of(key) * seen.scale > error_pixels * (nodes_[index].children ? hysteresis : 1);
+                       error_of(key) * seen.scale >
+                           error_pixels * seen.tolerance * (nodes_[index].children ? hysteresis : 1);
     if (split && !nodes_[index].children)
         nodes_[index].children = allocate_children(nodes_[index]);
     if (!split && nodes_[index].children)

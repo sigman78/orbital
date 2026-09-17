@@ -89,9 +89,10 @@ pass gives it a faint blue haze after Pluto's, tripled from the physical optical
 
 Close in, above a projected radius where the finest sphere level runs out, the body draws as its near
 tier instead: a cube sphere of six faces, each a quadtree of 16 by 16 quad patches with skirts
-(`scene/terrain_patch.hpp`), split while a patch's projected edge is over a threshold with hysteresis
-and foreshortened toward the limb, collapsed out of view. `render/terrain_tier.hpp` keeps the tree and a
-cache of 512 vertex slots by patch (least recently used out, the six faces pinned), lists the patches to
+(`scene/terrain_patch.hpp`), split while a patch's geometric error (the terrain at its quad centres against
+the mean of their corners, measured at generation) projects over 1.5 px at the limb and 3 px head-on, with
+hysteresis, collapsed out of view. `render/terrain_tier.hpp` keeps the tree and a
+cache of 1024 vertex slots by patch (least recently used out, the six faces pinned), lists the patches to
 draw and asks for up to eight new ones a frame; a patch whose visible children are not all resident draws
 itself, so the surface is complete every frame and refines over the following ones. The renderer
 (`renderer_terrain.cpp`) generates the requested patches on the CPU before the previous frame's wait

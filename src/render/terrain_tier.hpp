@@ -29,7 +29,7 @@ struct TierView {
 // requested patches into the slots and draws the listed ones.
 class TerrainTier {
 public:
-    static constexpr unsigned slot_count = 512;
+    static constexpr unsigned slot_count = 1024; // 11 MiB of vertices; a close view holds 400 of them
     static constexpr unsigned generate_per_frame = 8;
     // Sizes are in cull_bodies' units: a projected radius over the half height, twice the pixels.
     static constexpr float activate_pixels = 1200; // the body's, where the finest sphere level runs out
@@ -73,8 +73,9 @@ private:
     };
     struct Visibility {
         bool visible = false;
-        float scale = 0;  // screen size per radius of extent, for the error test
-        float pixels = 0; // the cell's edge on screen, the generation priority
+        float scale = 0;     // screen size per radius of extent, for the error test
+        float pixels = 0;    // the cell's edge on screen, the generation priority
+        float tolerance = 1; // the error tolerance's factor: 1 edge-on, 2 facing
     };
 
     void ensure_roots();
