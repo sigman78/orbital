@@ -6,6 +6,7 @@
 #include "assets/image.hpp"
 #include "assets/texture.hpp"
 #include "belt/beltblur_shared.h"
+#include "core/parallel.hpp"
 #include "core/types.hpp"
 #include "post/bloom_shared.h"
 #include "render/gpu_commands.hpp"
@@ -388,6 +389,15 @@ struct Renderer::Impl {
     std::vector<PatchCopy> patch_copies;
     std::vector<TileCopy> tile_copies;
     std::uint64_t patch_records_bytes = 0;
+    struct TileResult {
+        PatchKey key;
+        unsigned slot;
+        unsigned ring;
+    };
+    static constexpr unsigned tile_ring_count = 32;
+    std::unique_ptr<WorkerPool<TileResult>> tile_pool;
+    unsigned ring_used_frame[tile_ring_count] = {};
+    unsigned ring_head = 0;
     // The staging heap has two slots, written by frame parity before the wait for the
     // previous frame, which may still be copying the other; the version each holds
     // says whether a standing state must be written again into a stale slot.

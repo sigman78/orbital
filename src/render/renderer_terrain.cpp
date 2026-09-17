@@ -41,13 +41,16 @@ void Renderer::Impl::create_terrain_tier() {
                                                   gpu::MemoryType::gpu_only);
     buffers.patch_records_staging = UniqueGpuHeap::create(device,
                                                           2ull * TerrainTier::slot_count * sizeof(PatchInstance));
-    buffers.tile_staging = UniqueGpuHeap::create(device, 2ull * TerrainTier::generate_per_frame * tile_total_bytes);
+    buffers.tile_staging = UniqueGpuHeap::create(device, std::uint64_t(tile_ring_count) * tile_total_bytes);
     panic_if(!buffers.patch_records.range().gpu || !buffers.patch_records_staging.range().cpu ||
                  !buffers.tile_staging.range().cpu,
              "terrain tier allocation failed");
-    log::info("Near tier: {} tile slots, {} KiB height + {} KiB albedo + {} KiB normal arrays", TerrainTier::slot_count,
-              TerrainTier::slot_count * height_tile_bytes >> 10, TerrainTier::slot_count * colour_tile_bytes >> 10,
-              TerrainTier::slot_count * colour_tile_bytes >> 10);
+    const unsigned cores = std::thread::hardware_concurrency();
+    const unsigned workers = std::max(1u, cores > 2 ? cores - 2 : 1u);
+    tile_pool = std::make_unique<WorkerPool<TileResult>>(workers);
+    log::info("Near tier: {} tile slots, {} workers, {} KiB height + {} KiB albedo + {} KiB normal arrays",
+              TerrainTier::slot_count, workers, TerrainTier::slot_count * height_tile_bytes >> 10,
+              TerrainTier::slot_count * colour_tile_bytes >> 10, TerrainTier::slot_count * colour_tile_bytes >> 10);
 }
 
 void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
@@ -59,6 +62,21 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         terrain_tier.disable();
         stats.frame.patches_drawn = 0;
         return;
+    }
+    // Poll finished tiles from the worker pool and record their copies.
+    if (tile_pool) {
+        const float height_range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
+        for (const TileResult& result : tile_pool->poll()) {
+            terrain_tier.mark_resident(result.slot);
+            const auto staging_gpu = reinterpret_cast<std::uint64_t>(buffers.tile_staging.range().gpu) +
+                                     result.ring * tile_total_bytes;
+            tile_copies.push_back({staging_gpu, height_tile_bytes, tile_height.texture(), result.slot});
+            tile_copies.push_back(
+                {staging_gpu + height_tile_bytes, colour_tile_bytes, tile_albedo.texture(), result.slot});
+            tile_copies.push_back({staging_gpu + height_tile_bytes + colour_tile_bytes, colour_tile_bytes,
+                                   tile_normal.texture(), result.slot});
+            ring_used_frame[result.ring] = frame_index;
+        }
     }
     const unsigned body = showcase.minor_planet();
     const CameraView& camera = frozen_cull ? frozen_cull->camera : input.camera;
@@ -86,33 +104,42 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                   terrain_tier.resident());
     stats.frame.patches_drawn = unsigned(terrain_tier.draws().size());
     stats.frame.patches_resident = terrain_tier.resident();
-    // Generate tiles for this frame's requests into the staging buffer.
-    const std::uint64_t tile_slot_offset = (frame_index & 1) * std::uint64_t(TerrainTier::generate_per_frame) *
-                                           tile_total_bytes;
-    std::uint8_t* tile_staging = buffers.tile_staging.range().cpu + tile_slot_offset;
-    const float height_range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
-    std::vector<float> heights(tile_side * tile_side);
-    std::vector<std::uint8_t> albedo_buf(tile_side * tile_side * 4), normal_buf(tile_side * tile_side * 4);
-    unsigned tile_n = 0;
-    for (const TerrainTier::Generation& generation : terrain_tier.generate()) {
-        generate_height_tile(*minor_planet_terrain, generation.key, heights);
-        generate_colour_tiles(*minor_planet_terrain, generation.key, heights, albedo_buf, normal_buf);
-        terrain_tier.mark_resident(generation.slot);
-        std::uint8_t* dst = tile_staging + tile_n * tile_total_bytes;
-        auto* h16 = reinterpret_cast<std::uint16_t*>(dst);
-        for (unsigned i = 0; i < tile_side * tile_side; i++)
-            h16[i] = std::uint16_t(
-                std::clamp((heights[i] - MinorPlanetTerrain::height_min) / height_range, 0.0f, 1.0f) * 65535.0f + .5f);
-        std::memcpy(dst + height_tile_bytes, albedo_buf.data(), colour_tile_bytes);
-        std::memcpy(dst + height_tile_bytes + colour_tile_bytes, normal_buf.data(), colour_tile_bytes);
-        const auto staging_gpu = reinterpret_cast<std::uint64_t>(buffers.tile_staging.range().gpu) + tile_slot_offset +
-                                 tile_n * tile_total_bytes;
-        tile_copies.push_back({staging_gpu, height_tile_bytes, tile_height.texture(), generation.slot});
-        tile_copies.push_back(
-            {staging_gpu + height_tile_bytes, colour_tile_bytes, tile_albedo.texture(), generation.slot});
-        tile_copies.push_back({staging_gpu + height_tile_bytes + colour_tile_bytes, colour_tile_bytes,
-                               tile_normal.texture(), generation.slot});
-        tile_n++;
+    // Submit new generation requests to the worker pool.
+    if (tile_pool) {
+        const float height_range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
+        for (const TerrainTier::Generation& generation : terrain_tier.generate()) {
+            unsigned ring = tile_ring_count;
+            for (unsigned i = 0; i < tile_ring_count; i++) {
+                const unsigned idx = (ring_head + i) % tile_ring_count;
+                if (frame_index >= ring_used_frame[idx] + 2 || ring_used_frame[idx] == 0) {
+                    ring = idx;
+                    ring_head = (idx + 1) % tile_ring_count;
+                    break;
+                }
+            }
+            if (ring == tile_ring_count)
+                break;
+            ring_used_frame[ring] = frame_index + 100;
+            std::uint8_t* dst = buffers.tile_staging.range().cpu + ring * tile_total_bytes;
+            const MinorPlanetTerrain* terrain = &*minor_planet_terrain;
+            const PatchKey key = generation.key;
+            const unsigned slot = generation.slot;
+            tile_pool->submit([terrain, key, slot, ring, dst, height_range]() -> TileResult {
+                std::vector<float> heights(tile_side * tile_side);
+                std::vector<std::uint8_t> albedo(tile_side * tile_side * 4), normal(tile_side * tile_side * 4);
+                generate_height_tile(*terrain, key, heights);
+                generate_colour_tiles(*terrain, key, heights, albedo, normal);
+                auto* h16 = reinterpret_cast<std::uint16_t*>(dst);
+                for (unsigned i = 0; i < tile_side * tile_side; i++)
+                    h16[i] = std::uint16_t(
+                        std::clamp((heights[i] - MinorPlanetTerrain::height_min) / height_range, 0.0f, 1.0f) *
+                            65535.0f +
+                        .5f);
+                std::memcpy(dst + height_tile_bytes, albedo.data(), colour_tile_bytes);
+                std::memcpy(dst + height_tile_bytes + colour_tile_bytes, normal.data(), colour_tile_bytes);
+                return {key, slot, ring};
+            });
+        }
     }
     // Write PatchInstance records for the drawn patches.
     const std::uint64_t records_slot = (frame_index & 1) * std::uint64_t(TerrainTier::slot_count) *

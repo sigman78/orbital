@@ -43,6 +43,7 @@ Renderer::Impl::~Impl() {
     material_images.clear();
     frame_targets = {};
     fixed_targets = {};
+    tile_pool.reset();
     tile_height.reset();
     tile_albedo.reset();
     tile_normal.reset();

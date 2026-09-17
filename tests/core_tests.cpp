@@ -1,5 +1,6 @@
 #include "core/file.hpp"
 #include "core/math.hpp"
+#include "core/parallel.hpp"
 #include "core/small_vec.hpp"
 #include "core/timing.hpp"
 #include "core/types.hpp"
@@ -126,12 +127,29 @@ void test_files() {
 
 } // namespace
 
+void test_worker_pool() {
+    space::WorkerPool<int> pool(2);
+    for (int i = 0; i < 100; i++)
+        pool.submit([i] { return i * i; });
+    std::vector<int> results;
+    while (results.size() < 100) {
+        auto batch = pool.poll();
+        results.insert(results.end(), batch.begin(), batch.end());
+        if (batch.empty())
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    std::sort(results.begin(), results.end());
+    for (int i = 0; i < 100; i++)
+        assert(results[i] == i * i);
+}
+
 int main() {
     test_vectors();
     test_small_types();
     test_small_vec();
     test_matrices();
     test_files();
+    test_worker_pool();
     std::printf("core tests passed\n");
     return 0;
 }
