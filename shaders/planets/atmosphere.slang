@@ -10,9 +10,10 @@ static const float DEPTH_FLOAT_STEP = 6e-8;       // one float step just below 1
 static const float DEPTH_RESOLUTION_STEPS = 4.0;  // steps within which a buffer depth is taken as the analytic ground
 // The minor planet's haze is Pluto's (Gladstone et al. 2016, Science 351): a blue, forward-scattering
 // tholin haze with a scale height of about 50 km on a 1188 km radius, reaching 200 km up, of a normal
-// optical depth near a hundredth. Physically it barely shows; the boost makes it read.
+// optical depth near a hundredth. Physically it barely shows; the boost makes it read, and the scale
+// height is half of Pluto's, the full one reviewed as too thick a halo.
 static const float MINOR_PLANET_HAZE_BOOST = 3.0;
-static const float MINOR_PLANET_SHELL = 1.12; // radii; the haze is a percent of its surface density there
+static const float MINOR_PLANET_SHELL = 1.06; // radii; the haze is a few percent of its surface density there
 
 float airDensity(float altitude, float scaleHeight) { return exp(-max(altitude, 0.0) / scaleHeight); }
 
@@ -78,7 +79,7 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         betaM = haze * .45;
         scatterR = float3(.75, .88, 1.0);
         scatterM = float3(.70, .85, 1.0);
-        scaleR = scaleM = .042;
+        scaleR = scaleM = .021;
         phaseM = cornetteShanks(mu, .8);
     }
     // Earth: the air below the cloud layer is shadowed by it, so cloud shadows

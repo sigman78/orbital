@@ -10,7 +10,7 @@
 // the shell (a corner behind the near plane) the triangle covers the frame.
 
 static const float SHELL_MARGIN = 1.02;              // over the largest shell (1.018 radii), the cube's half-extent
-static const float MINOR_PLANET_SHELL_MARGIN = 1.13; // over the minor planet's high haze (atmosphere.slang)
+static const float MINOR_PLANET_SHELL_MARGIN = 1.07; // over the minor planet's high haze (atmosphere.slang)
 
 struct FullscreenVaryings { float4 position : SV_Position; };
 
