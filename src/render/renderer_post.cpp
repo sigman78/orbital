@@ -64,11 +64,14 @@ void Renderer::Impl::fullscreen_pass(gpu::CommandBuffer* cmd, GpuImage& target, 
 }
 
 void Renderer::Impl::record_post_passes(gpu::CommandBuffer* cmd, Root root, gpu::RenderView* swapchain_view,
-                                        SpatialAA spatial_aa, bool bloom, bool flare, bool motion_streaks,
-                                        const ImDrawData* ui, std::uint8_t* ui_cpu, std::uint64_t ui_gpu) {
+                                        bool temporal_aa, SpatialAA spatial_aa, bool bloom, bool flare,
+                                        bool motion_streaks, const ImDrawData* ui, std::uint8_t* ui_cpu,
+                                        std::uint64_t ui_gpu) {
     const unsigned history_write = frame_index % 2;
     root.mode = 0;
-    {
+    // Off, the pass would only copy the scene; the frame bound the history slot to the scene
+    // target instead, and the composite and the meter read that.
+    if (temporal_aa) {
         GpuTimingScope timing(timings, GpuPass::Temporal);
         fullscreen_pass(cmd, frame_targets.history[history_write], pso.post.temporal, root);
     }

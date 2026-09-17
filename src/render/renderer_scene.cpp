@@ -77,7 +77,7 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
         // each child is where its commands were issued rather than an exact cost.
         {
             GpuTimingScope rock_batch(timings, GpuPass::SurfaceRocks);
-            draw_rock_meshes(cmd, root, args_address);
+            draw_rock_meshes(cmd, root, args_address, pso.scene.surface_rock);
         }
         {
             GpuTimingScope bodies(timings, GpuPass::SurfaceBodies);
@@ -121,6 +121,30 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
             root.detail = 0;
         }
     }
+}
+
+// The opaque meshes again at equal depth, each vertex placed where it is and
+// where it was a frame ago, into the motion target the temporal pass reads. The
+// same vertex placement as the scene pass, so the depth test passes exactly the
+// visible surface; a triangle at the far plane then fills the rest with the sky's.
+void Renderer::Impl::record_motion_pass(gpu::CommandBuffer* cmd, Root root, std::uint64_t args_address) {
+    synchronize(cmd, access::depth_write, access::depth_read);
+    root.mode = std::uint32_t(SurfaceMode::opaque);
+    gpu::ColorAttachment color{.render_view = frame_targets.motion.view(), .load = gpu::LoadOp::clear};
+    RenderPassScope pass(
+        cmd, {.colors = {&color, 1}, .depth = {.render_view = frame_targets.depth.view(), .load = gpu::LoadOp::load}});
+    gpu::set_depth_stencil(cmd, {.depth_test = true, .depth_write = false});
+    const unsigned triangles_before = stats.frame.triangles, draws_before = stats.frame.draw_calls;
+    draw_rock_meshes(cmd, root, args_address, pso.scene.motion);
+    gpu::bind_pso(cmd, pso.scene.motion);
+    for (unsigned i = 0; i < body_count; i++)
+        if (body_visible[i])
+            draw_mesh(cmd, root, body_mesh(i, body_level[i]), i, 1);
+    gpu::bind_pso(cmd, pso.scene.motion_sky);
+    root.mode = std::uint32_t(SurfaceMode::motion_sky);
+    gpu::draw(cmd, root, 3);
+    stats.frame.triangles = triangles_before; // counted once, in the scene pass
+    stats.frame.draw_calls = draws_before;
 }
 
 void Renderer::Impl::record_atmosphere_passes(gpu::CommandBuffer* cmd, Root& root) {

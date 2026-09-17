@@ -76,6 +76,8 @@ Placement placeRock(uint id, bool lightSplats)
     // The CPU sweep places the rock in the belt plane each frame; the record keeps what does not move.
     float4 state = root.state[id];
     float3 position = p->giant.xyz + rockPosition(state);
+    result.instance.previous[0] = 0; result.instance.previous[1] = 0;
+    result.instance.previous[2] = 0; result.instance.previous[3] = 0;
     float radius = rock.position_radius.w;
     float3 v = rock.position_radius.xyz; // the belt frame before the spin, for the radial class
     // Visibility, level and coverage are judged from the cull camera, which the
@@ -153,6 +155,14 @@ Placement placeRock(uint id, bool lightSplats)
     result.instance.payload[1] = asuint(rotation.y);
     result.instance.payload[2] = asuint(rotation.z);
     result.instance.payload[3] = id | (composition << 30);
+    // The step back to the previous frame for the motion pass: the belt parent's
+    // world step plus the rock's own, and the tumble's along its axis.
+    float4 previous = root.previous_state[id];
+    float3 step = p->giant_motion.xyz + rockPosition(previous) - rockPosition(state);
+    float3 tumble = rock.spin_group.xyz * (previous.w - state.w);
+    result.instance.previous[0] = packHalf2x16(step.xy);
+    result.instance.previous[1] = packHalf2x16(float2(step.z, tumble.x));
+    result.instance.previous[2] = packHalf2x16(tumble.yz);
     return result;
 }
 

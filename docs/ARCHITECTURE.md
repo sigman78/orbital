@@ -82,6 +82,13 @@ Between the rocks a half-resolution march through the same density field scatter
    composited with a depth-aware upsample.
 5. Splats write fractional coverage and coverage-weighted depth into metadata; scene depth remains opaque-only.
    TAA uses the reconstructed splat depth for reprojection and currently keeps splat history unclipped.
+6. Motion vectors: after the scene pass the rocks and the bodies are drawn again at equal depth (a bias of a
+   few units toward the camera, since the pass has its own vertex shader) into an RG16F target, each vertex
+   placed where it is and where it was a frame ago from the instance's previous centre and rotation (the
+   cull writes a rock's step from the previous state slice as halves, the CPU writes a body's from last
+   frame's state) and the previous camera; a triangle at the far plane fills the sky with the camera's
+   step. The temporal pass reads the vector at its pixel (not between pixels: a rock's step and the sky's
+   behind it differ by the parallax) and reprojects with it; splats keep the camera-only reprojection.
 6. Temporal anti-aliasing into a history target, its neighbourhood clip tightening with motion and
    splat history clipped loosely rather than not at all; transient motion streaks into reused HDR storage, added before
    area-prefiltered bloom with adjacent-texel separable blur at quarter resolution;

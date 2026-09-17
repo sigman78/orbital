@@ -19,6 +19,7 @@ using ShaderMatrix4 = float[16];
 
 // Root.mode of the surface pipelines (SurfaceMode on the C++ side).
 #define ORBITAL_SURFACE_OPAQUE 0
+#define ORBITAL_SURFACE_MOTION_SKY 5 // the motion pass's sky triangle at the far plane
 #define ORBITAL_SURFACE_CLOUD 1
 #define ORBITAL_SURFACE_SHADOW 2
 #define ORBITAL_SURFACE_BILLBOARD 3
@@ -34,13 +35,24 @@ using ShaderMatrix4 = float[16];
 #define ORBITAL_KIND_ROCK 3
 #define ORBITAL_KIND_MARS 4
 
-struct Instance { SHADER_FLOAT4 center_radius; SHADER_FLOAT4 rotation_kind; SHADER_FLOAT4 tint; };
+// A drawn thing: where it is, how it is turned, and the step back to where it was
+// a frame ago (previous_center: the world-space step of the centre, w unused;
+// previous_rotation: the Euler step), which the motion pass reprojects with.
+struct Instance {
+    SHADER_FLOAT4 center_radius;
+    SHADER_FLOAT4 rotation_kind;
+    SHADER_FLOAT4 tint;
+    SHADER_FLOAT4 previous_center;
+    SHADER_FLOAT4 previous_rotation;
+};
 // GPU-generated asteroid record. Bodies retain the full Instance representation.
-// Mesh payload: float32 Euler angles, then 30-bit rock id + 2-bit composition.
+// Mesh payload: float32 Euler angles, then 30-bit rock id + 2-bit composition;
+// previous: the centre's step and the Euler step as three halves each, w unused.
 // Billboard payload: half RGB/rim, float32 ambient and coverage; rim sign tags discs.
 struct AsteroidInstance {
     SHADER_FLOAT4 center_radius;
     SHADER_UINT payload[4];
+    SHADER_UINT previous[4];
 };
 struct Vertex { SHADER_FLOAT4 position; SHADER_FLOAT4 normal; };
 struct Frame {
@@ -160,6 +172,7 @@ struct CullParams {
     SHADER_FLOAT4 view;                 // pixels per unit depth, plane x scale, plane y scale, unused
     SHADER_FLOAT4 giant;                // camera-relative belt centre, w unused
     SHADER_FLOAT4 freeze;               // live camera to the frozen cull camera, zero when culling follows the view; w unused
+    SHADER_FLOAT4 giant_motion;         // the belt parent's world-space step back to the previous frame; w unused
     SHADER_FLOAT4 levels;               // projected-radius thresholds of levels 1 to 4, in pixels
     SHADER_FLOAT4 billboard;            // level 5 threshold, billboard radius, minimum radius, far-tier blend weight (splats fade out by it)
     SHADER_UINT rock_limit, body_count, light_in_count_pass, unused; // light_in_count_pass: splats lit in both passes (development comparison)
@@ -194,12 +207,13 @@ struct CullScratch {
 // records and pass holding their count.
 struct CullRoot {
 #ifdef __cplusplus
-    SHADER_ADDRESS frame, rocks, scratch, state;
+    SHADER_ADDRESS frame, rocks, scratch, state, previous_state;
 #else
     SHADER_ADDRESS(Frame) frame;
     SHADER_ADDRESS(RockData) rocks;
     SHADER_ADDRESS(CullScratch) scratch;
-    SHADER_ADDRESS(float4) state; // this frame's (x, y, z, phase) per rock id, two slices: this frame's and the last
+    SHADER_ADDRESS(float4) state;          // this frame's (x, y, z, phase) per rock id
+    SHADER_ADDRESS(float4) previous_state; // the previous frame's, the other slice
 #endif
     SHADER_UINT pass, unused;
 };

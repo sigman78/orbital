@@ -69,6 +69,10 @@ void Renderer::Impl::create_pipelines() {
     pso.scene.surface_giant = make("surface", "surface_giant", Format::rgba16_float, true, Blend::none, mesh_cull);
     pso.scene.surface_airless = make("surface", "surface_airless", Format::rgba16_float, true, Blend::none, mesh_cull);
     pso.scene.surface_rock = make("surface", "surface_rock", Format::rgba16_float, true, Blend::none, mesh_cull);
+    // Its vertex shader is not the scene's, so its depth can differ by an ulp; a bias of a few
+    // units toward the camera lets it pass at the visible surface, far short of any occluder.
+    pso.scene.motion = make("motion", "motion", Format::rg16_float, true, Blend::none, mesh_cull, -4);
+    pso.scene.motion_sky = make("motion", "motion", Format::rg16_float, true);
     // The cloud shell sits 0.9 percent of a radius above the ground, which the float
     // depth cannot separate past a few hundred units (the standard projection's step
     // there grows with the square of the distance), so the shell fought the ground
