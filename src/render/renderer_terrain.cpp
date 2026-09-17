@@ -26,7 +26,12 @@ void Renderer::Impl::create_terrain_tier() {
     buffers.patch_pool = UniqueGpuHeap::create(device, TerrainTier::slot_count * patch_bytes,
                                                gpu::MemoryType::gpu_only);
     buffers.patch_staging = UniqueGpuHeap::create(device, 2ull * TerrainTier::generate_per_frame * patch_bytes);
-    panic_if(!buffers.patch_pool.range().gpu || !buffers.patch_staging.range().cpu, "patch pool allocation failed");
+    buffers.patch_args = UniqueGpuHeap::create(device, TerrainTier::slot_count * sizeof(DrawArgs),
+                                               gpu::MemoryType::gpu_only);
+    buffers.patch_args_staging = UniqueGpuHeap::create(device, 2ull * TerrainTier::slot_count * sizeof(DrawArgs));
+    panic_if(!buffers.patch_pool.range().gpu || !buffers.patch_staging.range().cpu || !buffers.patch_args.range().gpu ||
+                 !buffers.patch_args_staging.range().cpu,
+             "patch pool allocation failed");
     patch_indices_address = upload_static(bytes_of(patch_indices()));
     patch_scratch.resize(patch_vertex_count);
     log::info("Near tier: {} patch slots of {} vertices, {} KiB device pool", TerrainTier::slot_count,
@@ -69,6 +74,21 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                   terrain_tier.resident());
     stats.frame.patches_drawn = unsigned(terrain_tier.draws().size());
     stats.frame.patches_resident = terrain_tier.resident();
+    // The drawn patches as one multi-draw's commands, a vertex offset each.
+    const std::uint64_t args_slot = (frame_index & 1) * std::uint64_t(TerrainTier::slot_count) * sizeof(DrawArgs);
+    auto* args = reinterpret_cast<DrawArgs*>(buffers.patch_args_staging.range().cpu + args_slot);
+    for (std::size_t i = 0; i < terrain_tier.draws().size(); i++)
+        args[i] = {.index_count = patch_index_count,
+                   .instance_count = 1,
+                   .first_index = 0,
+                   .vertex_offset = terrain_tier.draws()[i].slot * patch_vertex_count,
+                   .first_instance = 0};
+    patch_args_bytes = terrain_tier.draws().size() * sizeof(DrawArgs);
+    if (patch_args_bytes)
+        patch_copies.push_back(
+            {.source = reinterpret_cast<std::uint64_t>(buffers.patch_args_staging.range().gpu) + args_slot,
+             .destination = reinterpret_cast<std::uint64_t>(buffers.patch_args.range().gpu),
+             .bytes = patch_args_bytes});
     // The new patches go to this frame's staging slot; the previous frame may still copy the other.
     const std::uint64_t slot_offset = (frame_index & 1) * std::uint64_t(TerrainTier::generate_per_frame) * patch_bytes;
     std::uint8_t* staging = buffers.patch_staging.range().cpu + slot_offset;
@@ -83,15 +103,18 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         patch_copies.push_back({.source = reinterpret_cast<std::uint64_t>(buffers.patch_staging.range().gpu) +
                                           slot_offset + n * patch_bytes,
                                 .destination = reinterpret_cast<std::uint64_t>(buffers.patch_pool.range().gpu) +
-                                               generation.slot * patch_bytes});
+                                               generation.slot * patch_bytes,
+                                .bytes = patch_bytes});
         n++;
     }
 }
 
 void Renderer::Impl::record_terrain_uploads(gpu::CommandBuffer* cmd) {
     for (const PatchCopy& copy : patch_copies)
-        gpu::copy_memory(cmd, {reinterpret_cast<void*>(copy.source), patch_bytes},
-                         {reinterpret_cast<void*>(copy.destination), patch_bytes});
+        gpu::copy_memory(cmd, {reinterpret_cast<void*>(copy.source), copy.bytes},
+                         {reinterpret_cast<void*>(copy.destination), copy.bytes});
+    if (patch_args_bytes)
+        synchronize(cmd, access::transfer_write, access::indirect_read);
 }
 
 bool Renderer::Impl::terrain_tier_draws(unsigned body) const {
@@ -106,6 +129,15 @@ void Renderer::Impl::draw_body(gpu::CommandBuffer* cmd, Root& root, unsigned bod
     root.base = body;
     root.vertices = reinterpret_cast<std::uint64_t>(buffers.patch_pool.range().gpu);
     const gpu::GpuRange indices{reinterpret_cast<void*>(patch_indices_address), std::uint64_t(patch_index_count) * 4};
+    const unsigned count = unsigned(terrain_tier.draws().size());
+    if (!wireframe) { // one multi-draw over the drawn patches; the wireframe's level per patch needs a draw each
+        root.flags = 0;
+        stats.frame.draw_calls++;
+        gpu::draw_indexed_indirect(cmd, root, indices, gpu::IndexType::uint32,
+                                   {buffers.patch_args.range().gpu, patch_args_bytes}, count, sizeof(DrawArgs));
+        stats.frame.triangles += count * (patch_index_count / 3);
+        return;
+    }
     for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
         root.flags = wireframe ? ORBITAL_ROOT_WIREFRAME | draw.level << 8 : 0;
         stats.frame.draw_calls++;

@@ -97,8 +97,8 @@ draw and asks for up to eight new ones a frame; a patch whose visible children a
 itself, so the surface is complete every frame and refines over the following ones. The renderer
 (`renderer_terrain.cpp`) generates the requested patches on the CPU before the previous frame's wait
 into a staging slot chosen by frame parity, copies them into a device pool at the start of the command
-buffer, and draws the listed slots through the surface vertex shader with one shared index buffer, in the
-depth pre-pass, the scene pass and the motion pass; the shadow map keeps the sphere. Patch vertices are
+buffer, and draws the listed slots as one indexed multi-draw through the surface vertex shader with one shared
+index buffer, in the depth pre-pass, the scene pass and the motion pass; the shadow map keeps the sphere. Patch vertices are
 the terrain's positions in radii with the sphere's normals, so the maps shade them exactly as the far
 tier and the switch is invisible; procedural detail past the maps is the step after. For the review the
 airless shader can draw a patch's quad grid over the surface from the face's cell coordinates (the
