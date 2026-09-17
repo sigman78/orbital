@@ -106,6 +106,14 @@ enum class SamplerSlot : unsigned {
     count = ORBITAL_SAMPLER_COUNT
 };
 
+// Array-texture descriptor slots (shaders/scene/bindings.slang binding 2).
+enum class ArraySlot : unsigned {
+    terrain_height = TEX_ARRAY_TERRAIN_HEIGHT,
+    terrain_albedo = TEX_ARRAY_TERRAIN_ALBEDO,
+    terrain_normal = TEX_ARRAY_TERRAIN_NORMAL,
+    count = ORBITAL_TEXTURE_ARRAY_COUNT,
+};
+
 // Root.mode as interpreted by surface.slang.
 enum class SurfaceMode : std::uint32_t {
     opaque = ORBITAL_SURFACE_OPAQUE,
@@ -417,6 +425,7 @@ struct Renderer::Impl {
     assets::TextureSupport texture_support;
     bool galaxy_layers_tried = false, galaxy_layers_available = false;
     bool galaxy_original_tried = false, galaxy_original_available = false;
+    GpuImage array_placeholder; // 1x1x1 array image bound to every array slot at start-up
 
     // Frame state.
     Extent2D extent{};
@@ -465,6 +474,7 @@ struct Renderer::Impl {
     void finish_static_uploads();
     GpuImage create_image(const ImageDesc& desc);
     void bind(Slot slot, const GpuImage& image);
+    void bind(ArraySlot slot, const GpuImage& image);
     void upload_images(std::span<const Upload> uploads);
     void upload_images(std::initializer_list<Upload> uploads) {
         upload_images(std::span<const Upload>(uploads.begin(), uploads.size()));

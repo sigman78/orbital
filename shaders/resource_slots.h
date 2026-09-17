@@ -59,6 +59,10 @@
 #define TEX_MOTION 53
 #define TEX_MINOR_PLANET_ALBEDO 54 // baked at start-up from scene/terrain.hpp, linear light
 #define TEX_MINOR_PLANET_NORMAL 55 // tangent normal and height, the airless shader's layout
+#define ORBITAL_TEXTURE_ARRAY_COUNT 8
+#define TEX_ARRAY_TERRAIN_HEIGHT 0
+#define TEX_ARRAY_TERRAIN_ALBEDO 1
+#define TEX_ARRAY_TERRAIN_NORMAL 2
 #define SAMPLER_CLAMP 0
 #define SAMPLER_WRAP_U_ANISOTROPIC 1
 #define SAMPLER_SHADOW_COMPARE 2

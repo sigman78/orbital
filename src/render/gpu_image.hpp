@@ -28,6 +28,8 @@ public:
     ~GpuImage();
 
     static GpuImage create(gpu::Device* device, const ImageDesc& desc);
+    static GpuImage create_array(gpu::Device* device, Extent2D extent, unsigned layers, gpu::Format format,
+                                 unsigned mips = 1);
     constexpr gpu::Texture* texture() const { return texture_; }
     constexpr gpu::RenderView* view() const { return view_; }
     constexpr std::uint64_t bytes() const { return bytes_; } // the allocation, 0 when empty

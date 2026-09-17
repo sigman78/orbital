@@ -450,6 +450,7 @@ struct DeviceCaps
     bool mesh_shaders = false;
     bool storage_image_read_without_format = false;
     bool hdr_metadata = false; // VK_EXT_hdr_metadata: set_hdr_metadata reaches the display (conventional backend addition)
+    uint32 texture_array_descriptor_count = 0; // conventional backend: array-texture binding count (binding 2)
 };
 
 // The swapchain's colour space (conventional backend addition, for HDR output):
@@ -737,6 +738,8 @@ void destroy_texture(Texture* texture) noexcept;
 void destroy_render_view(RenderView* render_view) noexcept;
 void write_texture_descriptor(Device* device, void* cpu_destination, const Texture* texture, TextureDescriptorType type,
                               const TextureDescriptorDesc& desc = {}) noexcept;
+void write_texture_array_descriptor(Device* device, uint32 index, const Texture* texture,
+                                    const TextureDescriptorDesc& desc = {}) noexcept;
 void write_sampler_descriptor(Device* device, void* cpu_destination, const SamplerDesc& desc = {}) noexcept;
 
 [[nodiscard]] PSO* create_graphics_pso(Device* device, const GraphicsPSODesc& desc) noexcept;

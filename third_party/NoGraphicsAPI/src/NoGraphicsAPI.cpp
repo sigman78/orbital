@@ -48,6 +48,7 @@ constexpr uint32 gpu_allocation_alignment = 16;
 constexpr uint32 max_surface_formats = 256;
 constexpr uint32 format_count = static_cast<uint32>(Format::undefined);
 constexpr uint32 conventional_texture_descriptor_count = 56; // the sampled-image array of the conventional set: ORBITAL_TEXTURE_COUNT, which tools/check-shaders.py holds equal
+constexpr uint32 conventional_texture_array_descriptor_count = 8; // the array-texture binding of the conventional set: ORBITAL_TEXTURE_ARRAY_COUNT
 
 [[nodiscard]] Error error_from_vk(VkResult result) noexcept
 {
@@ -697,6 +698,8 @@ struct Device
     VkSampler conventional_samplers[4]{};
     VkImageView conventional_views[conventional_texture_descriptor_count]{};
     const Texture* conventional_view_textures[conventional_texture_descriptor_count]{};
+    VkImageView conventional_array_views[conventional_texture_array_descriptor_count]{};
+    const Texture* conventional_array_view_textures[conventional_texture_array_descriptor_count]{};
     GpuHeapOwner* gpu_heaps = nullptr;
 
     ~Device();
@@ -1040,6 +1043,7 @@ Device::~Device()
     {
         for (VkSampler sampler : conventional_samplers) if (sampler) vkDestroySampler(device, sampler, nullptr);
         for (VkImageView view : conventional_views) if (view) vkDestroyImageView(device, view, nullptr);
+        for (VkImageView view : conventional_array_views) if (view) vkDestroyImageView(device, view, nullptr);
         if (conventional_descriptor_pool) vkDestroyDescriptorPool(device, conventional_descriptor_pool, nullptr);
         if (conventional_pipeline_layout) vkDestroyPipelineLayout(device, conventional_pipeline_layout, nullptr);
         if (conventional_set_layout) vkDestroyDescriptorSetLayout(device, conventional_set_layout, nullptr);
@@ -2089,17 +2093,18 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     vkGetDeviceQueue(state->device, state->queue_family, 0, &state->queue);
     if (selected.conventional)
     {
-        const VkDescriptorSetLayoutBinding bindings[2]{
+        const VkDescriptorSetLayoutBinding bindings[3]{
             {.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = conventional_texture_descriptor_count, .stageFlags = VK_SHADER_STAGE_ALL},
             {.binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 4, .stageFlags = VK_SHADER_STAGE_ALL},
+            {.binding = 2, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = conventional_texture_array_descriptor_count, .stageFlags = VK_SHADER_STAGE_ALL},
         };
-        const VkDescriptorSetLayoutCreateInfo set_info{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 2, .pBindings = bindings};
+        const VkDescriptorSetLayoutCreateInfo set_info{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 3, .pBindings = bindings};
         require_vk(vkCreateDescriptorSetLayout(state->device, &set_info, nullptr, &state->conventional_set_layout));
         const VkPushConstantRange push_range{.stageFlags = VK_SHADER_STAGE_ALL, .size = selected.properties.limits.maxPushConstantsSize};
         const VkPipelineLayoutCreateInfo layout_info{.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
                                                      .pSetLayouts = &state->conventional_set_layout, .pushConstantRangeCount = 1, .pPushConstantRanges = &push_range};
         require_vk(vkCreatePipelineLayout(state->device, &layout_info, nullptr, &state->conventional_pipeline_layout));
-        const VkDescriptorPoolSize sizes[2]{{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, conventional_texture_descriptor_count}, {VK_DESCRIPTOR_TYPE_SAMPLER, 4}};
+        const VkDescriptorPoolSize sizes[2]{{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, conventional_texture_descriptor_count + conventional_texture_array_descriptor_count}, {VK_DESCRIPTOR_TYPE_SAMPLER, 4}};
         const VkDescriptorPoolCreateInfo pool_info{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1, .poolSizeCount = 2, .pPoolSizes = sizes};
         require_vk(vkCreateDescriptorPool(state->device, &pool_info, nullptr, &state->conventional_descriptor_pool));
         const VkDescriptorSetAllocateInfo allocation{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = state->conventional_descriptor_pool,
@@ -2164,6 +2169,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         .mesh_shaders = !selected.conventional,
         .storage_image_read_without_format = selected.storage_image_read_without_format,
         .hdr_metadata = selected.ext_hdr_metadata,
+        .texture_array_descriptor_count = selected.conventional ? conventional_texture_array_descriptor_count : 0,
     };
     if (presentation)
     {
@@ -2933,6 +2939,15 @@ void destroy_texture(Texture* texture) noexcept
                 texture->state->conventional_view_textures[index] = nullptr;
             }
         }
+        for (uint32 index = 0; index < conventional_texture_array_descriptor_count; ++index)
+        {
+            if (texture->state->conventional_array_view_textures[index] == texture)
+            {
+                vkDestroyImageView(texture->state->device, texture->state->conventional_array_views[index], nullptr);
+                texture->state->conventional_array_views[index] = VK_NULL_HANDLE;
+                texture->state->conventional_array_view_textures[index] = nullptr;
+            }
+        }
     }
     delete texture;
 }
@@ -3051,6 +3066,25 @@ void write_texture_descriptor(Device* device, void* cpu_destination, const Textu
         .size = static_cast<size_t>(device->heap_properties.imageDescriptorSize),
     };
     assert_vk(device->fn.write_resource_descriptors(device->device, 1, &descriptor_info, &destination));
+}
+
+void write_texture_array_descriptor(Device* device, uint32 index, const Texture* texture, const TextureDescriptorDesc& desc) noexcept
+{
+    assert(device && texture);
+    assert(device->conventional_backend && "write_texture_array_descriptor requires the conventional descriptor backend");
+    assert(index < conventional_texture_array_descriptor_count);
+    assert(texture->type == TextureType::two_d_array || texture->type == TextureType::cube_array);
+    if (device->conventional_array_views[index]) vkDestroyImageView(device->device, device->conventional_array_views[index], nullptr);
+    const VkImageViewCreateInfo view{.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = texture->image, .viewType = to_vk_view(texture->type),
+        .format = to_vk(desc.format == Format::undefined ? texture->format : desc.format), .subresourceRange = {.aspectMask = image_aspects(texture->format),
+        .baseMipLevel = desc.base_mip, .levelCount = desc.mip_count ? desc.mip_count : VK_REMAINING_MIP_LEVELS, .baseArrayLayer = desc.base_layer,
+        .layerCount = desc.layer_count ? desc.layer_count : VK_REMAINING_ARRAY_LAYERS}};
+    require_vk(vkCreateImageView(device->device, &view, nullptr, &device->conventional_array_views[index]));
+    device->conventional_array_view_textures[index] = texture;
+    const VkDescriptorImageInfo image{.imageView = device->conventional_array_views[index], .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
+    const VkWriteDescriptorSet write{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = device->conventional_descriptor_set, .dstBinding = 2,
+                                     .dstArrayElement = index, .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, .pImageInfo = &image};
+    vkUpdateDescriptorSets(device->device, 1, &write, 0, nullptr);
 }
 
 void write_sampler_descriptor(Device* device, void* cpu_destination, const SamplerDesc& desc) noexcept

@@ -36,11 +36,16 @@ def run(command):
 def check_descriptor_count():
     slots = (SHADERS / "resource_slots.h").read_text()
     backend = (ROOT / "third_party/NoGraphicsAPI/src/NoGraphicsAPI.cpp").read_text()
+    failures = []
     expected = int(re.search(r"ORBITAL_TEXTURE_COUNT (\d+)", slots)[1])
     actual = int(re.search(r"conventional_texture_descriptor_count = (\d+)", backend)[1])
     if actual != expected:
-        return [f"descriptor count: backend {actual} differs from shader slots {expected}"]
-    return []
+        failures.append(f"descriptor count: backend {actual} differs from shader slots {expected}")
+    expected_array = int(re.search(r"ORBITAL_TEXTURE_ARRAY_COUNT (\d+)", slots)[1])
+    actual_array = int(re.search(r"conventional_texture_array_descriptor_count = (\d+)", backend)[1])
+    if actual_array != expected_array:
+        failures.append(f"array descriptor count: backend {actual_array} differs from shader slots {expected_array}")
+    return failures
 
 
 def check_helper(compiler, helper):

@@ -46,4 +46,22 @@ GpuImage GpuImage::create(gpu::Device* device, const ImageDesc& desc) {
     return result;
 }
 
+GpuImage GpuImage::create_array(gpu::Device* device, Extent2D extent, unsigned layers, gpu::Format format,
+                                unsigned mips) {
+    const gpu::TextureDesc texture_desc{.type = gpu::TextureType::two_d_array,
+                                        .extent = {extent.width, extent.height, 1},
+                                        .mip_levels = mips,
+                                        .layer_count = layers,
+                                        .format = format,
+                                        .usage = gpu::TextureUsage::sampled | gpu::TextureUsage::transfer_destination};
+    const auto size = gpu::get_texture_size_align(device, texture_desc);
+    GpuImage result;
+    result.heap_ = gpu::create_texture_heap(device, size.size);
+    result.bytes_ = size.size;
+    result.texture_ = gpu::create_texture(device, texture_desc, result.heap_, 0);
+    panic_if(!result.texture_, "array texture allocation failed ({}x{}, {} layers, {} mips)", extent.width,
+             extent.height, layers, mips);
+    return result;
+}
+
 } // namespace space::render

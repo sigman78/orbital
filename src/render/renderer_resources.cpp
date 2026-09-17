@@ -43,6 +43,7 @@ Renderer::Impl::~Impl() {
     material_images.clear();
     frame_targets = {};
     fixed_targets = {};
+    array_placeholder.reset();
     static_upload.staging.reset(); // empty after start-up; here for an init that stopped early
     buffers = {};
     timings.reset();
@@ -90,6 +91,11 @@ void Renderer::Impl::bind(Slot slot, const GpuImage& image) {
     gpu::write_texture_descriptor(
         device, buffers.texture_descriptors.range().cpu + unsigned(slot) * caps.texture_descriptor_size,
         image.texture(), gpu::TextureDescriptorType::sampled);
+}
+
+void Renderer::Impl::bind(ArraySlot slot, const GpuImage& image) {
+    ORBITAL_ASSERT(slot < ArraySlot::count);
+    gpu::write_texture_array_descriptor(device, unsigned(slot), image.texture());
 }
 
 // Creates one sampled texture per upload and streams every mip through
@@ -301,6 +307,9 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
                    {.data = assets::texture_from_image(widen(assets::smaa_search(), assets::smaa_search_width,
                                                              assets::smaa_search_height, assets::smaa_search_channels)),
                     .slot = Slot::smaa_search}});
+    array_placeholder = GpuImage::create_array(device, {1, 1}, 1, gpu::Format::rgba8_unorm);
+    for (unsigned i = 0; i < unsigned(ArraySlot::count); i++)
+        bind(ArraySlot(i), array_placeholder);
     phase("tables");
     create_pipelines();
     phase("pipelines");
