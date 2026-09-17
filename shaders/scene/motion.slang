@@ -40,7 +40,7 @@ MotionVaryings vertexMain(uint vertexIndex : SV_VertexID, uint firstVertex : SV_
         float radius = inst.center_radius.w;
         float3x3 prevRotate = rotation(inst.rotation_kind.xyz + inst.previous_rotation.xyz);
         float3 previousCentre = inst.center_radius.xyz + inst.previous_center.xyz + temporalParams(root.frame).cameraDelta;
-        float3 previous = previousCentre + mul(prevRotate, pr.localNormal) * radius * (1 + patchHeight(root.patches[instanceId].tile[1], root.vertices[vertexIndex].position.xy));
+        float3 previous = previousCentre + mul(prevRotate, pr.localPosition) * radius;
         MotionVaryings output;
         output.position = mul(viewProjection(root.frame), float4(pr.worldPosition, 1.0));
         output.previousClip = mul(previousProjection(root.frame), float4(previous, 1.0));

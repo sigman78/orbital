@@ -147,13 +147,16 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view) {
 }
 
 // Coarse levels first, then the largest on screen; a slot comes from the free
-// list or from the resident patch longest unused, never one needed this frame.
-void TerrainTier::choose_generation() {
+// list or from the resident patch longest unused, never one needed this frame
+// or one still in flight (it isn't touched once its node collapses, but it may
+// still land and get marked resident, so it stays until then).
+void TerrainTier::choose_generation(unsigned budget) {
+    const unsigned cap = std::min(budget, generate_per_frame);
     std::sort(requests_.begin(), requests_.end(), [](const Request& a, const Request& b) {
         return a.key.level != b.key.level ? a.key.level < b.key.level : a.pixels > b.pixels;
     });
     for (const Request& r : requests_) {
-        if (generate_.size() >= generate_per_frame)
+        if (generate_.size() >= cap)
             break;
         if (slot_of(r.key) != no_slot)
             continue; // requested twice, or already resident
@@ -164,12 +167,12 @@ void TerrainTier::choose_generation() {
         } else {
             unsigned oldest = frame_;
             for (unsigned i = 0; i < slot_count; i++)
-                if (slots_[i].used < oldest) {
+                if (slots_[i].resident && slots_[i].used < oldest) {
                     oldest = slots_[i].used;
                     slot = i;
                 }
             if (slot == no_slot)
-                break;
+                break; // nothing evictable: every other slot is pending
             slots_by_key_.erase(slots_[slot].key.packed());
         }
         slots_[slot] = {.key = r.key, .used = frame_, .resident = false};
@@ -186,7 +189,14 @@ void TerrainTier::disable() {
     active_ = wanted_ = false;
 }
 
-void TerrainTier::update(const TierView& view, unsigned frame) {
+bool TerrainTier::mark_resident(unsigned slot, PatchKey key) {
+    if (slots_[slot].key != key)
+        return false; // recycled since the request went out
+    slots_[slot].resident = true;
+    return true;
+}
+
+void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) {
     frame_ = frame;
     draws_.clear();
     requests_.clear();
@@ -211,14 +221,16 @@ void TerrainTier::update(const TierView& view, unsigned frame) {
         visit(face, view);
     // The tier takes over once every face is resident; the sphere levels draw until then.
     active_ = true;
-    for (unsigned face = 0; face < 6; face++)
-        if (slot_of(nodes_[face].key) == no_slot) {
+    for (unsigned face = 0; face < 6; face++) {
+        const unsigned slot = slot_of(nodes_[face].key);
+        if (slot == no_slot)
             request(nodes_[face].key, 1e9f);
+        if (slot == no_slot || !slots_[slot].resident)
             active_ = false;
-        }
+    }
     if (!active_)
         draws_.clear();
-    choose_generation();
+    choose_generation(budget);
 }
 
 } // namespace space::render

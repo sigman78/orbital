@@ -21,11 +21,13 @@ struct TierView {
 };
 
 // The near tier's CPU side: which patches of the cube sphere to draw this frame
-// and which to generate for the next, over a fixed pool of tile slots kept as a
-// cache by patch (least recently used out). The quadtree splits by per-level
-// distance ranges derived from the error table, with hysteresis; a patch whose
-// visible children are not all resident draws itself. Slots start non-resident
-// and the caller marks them after the tile upload.
+// and which to generate for the next, up to a per-frame budget, over a fixed
+// pool of tile slots kept as a cache by patch (least recently used resident
+// slot out; a pending one stays put until it lands). The quadtree splits by
+// per-level distance ranges derived from the error table, with hysteresis; a
+// patch whose visible children are not all resident draws itself. Slots start
+// non-resident and the caller marks a slot resident by slot and key, once the
+// tile upload for that key completes; a slot recycled meanwhile is left alone.
 class TerrainTier {
 public:
     static constexpr unsigned slot_count = 1024; // 11 MiB of vertices; a close view holds 400 of them
@@ -51,13 +53,14 @@ public:
         unsigned slot;
     };
 
-    void update(const TierView& view, unsigned frame);
+    void update(const TierView& view, unsigned frame, unsigned budget = generate_per_frame);
     void disable(); // the switch off: the tree collapses, the cache stays
     // True once the tier covers the body: the sphere levels draw until then.
     bool active() const { return active_; }
     std::span<const Draw> draws() const { return draws_; } // this frame's patches
     std::span<const Generation> generate() const { return generate_; }
-    void mark_resident(unsigned slot) { slots_[slot].resident = true; }
+    // Marks a slot resident if it still holds key; false if it was recycled meanwhile.
+    bool mark_resident(unsigned slot, PatchKey key);
     float range(unsigned level) const { return level < std::size(range_) ? range_[level] : 0; }
     unsigned resident() const;
     unsigned nodes() const { return unsigned(nodes_.size() - free_blocks_.size() * 4); }
@@ -90,7 +93,7 @@ private:
     unsigned slot_of(PatchKey key) const; // slot_count when not in the cache
     void touch(PatchKey key);
     void request(PatchKey key, float pixels);
-    void choose_generation();
+    void choose_generation(unsigned budget);
 
     std::vector<Node> nodes_;
     std::vector<std::uint32_t> free_blocks_;

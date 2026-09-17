@@ -195,6 +195,72 @@ The host-visible heaps count against the BAR aperture (`tools/check-bar1.py`); a
 8. Docs: `docs/ARCHITECTURE.md`'s minor planet section rewritten for this design; a `docs/DECISIONS.md` entry
    with the measurements (per-level errors, patch counts, generation times, draw calls, memory).
 
+## Status after the first implementation (PR #64, 2026-09-18)
+
+Tasks 1 to 8 are implemented; the near tier draws from tile arrays with the worker pool. A review of that
+implementation found the following. The first group was fixed before the merge; the rest is open and is
+what acceptance 1, 2 and 4 to 6 still need.
+
+Fixed in the PR after review:
+
+- The patch draw set `instanceIndex` to `base + patchId`, so every patch but the first shaded with another
+  body's instance (its rotation, kind and self-shadow test).
+- Tile copies started at offsets that were not multiples of the texel size (an entry was 42,250 bytes):
+  `VUID-vkCmdCopyBufferToImage-dstImage-07975` on every upload. Planes and entries are now 4-byte aligned.
+- The tier went active when the roots had a slot, before their tiles arrived ("Near tier on at frame 24,
+  0 patches resident"): the sphere stopped and nothing drew. Activation now needs resident roots.
+- Requests the renderer could not submit (no free ring entry) kept their pending slot forever and their
+  subtree never refined. `update` takes a budget, the free ring count.
+- Eviction could take a pending slot; the old job then marked the new key resident with the old tile.
+  Pending slots are not evicted, and `mark_resident(slot, key)` checks the key.
+- The motion pass placed the previous position with the unmorphed height and no skirt drop, so morphing
+  patches carried false motion vectors into TAA.
+- `init` bound the 1x1 placeholder to every array slot after `create_terrain_tier` had bound the tile
+  arrays, so the shaders sampled the placeholder: every height read as `height_min` (a smooth sphere at
+  0.95 radii) and the albedo as black. The placeholder now goes in first. Found because the near tier
+  only activates above 960x540 at bookmark 10, so every low-resolution capture had shown the sphere.
+
+Open, in the order they matter:
+
+1. **Selection by centre distance** (`TerrainTier::visit`), not the nearest distance to the node's cap as
+   designed. An unsplit node's near edge can be inside `range[level + 1]`, so the neighbouring child's edge
+   is only partly morphed there and a T-junction opens (the skirt hides it). Acceptance 1.
+2. **The tier and the shader measure different distances**: the tier to the unit sphere, the shader to
+   the displaced vertex. Heights reach ±0.02 radii and `range[8]` is about 0.01 radii at 900 px, so low
+   over raised ground the tier under-selects and the morph disagrees with the selection. The tier needs the
+   camera's height over the terrain, not the sphere.
+3. **Tile normals are too shallow and the tangent frame is not on the sphere.** `generate_colour_tiles`
+   differentiates in face s and t units; one unit of s is 0.735 radians at the face centre (more toward
+   the edges), so slopes and the albedo's slope input are about 1.36 times too small there. `patchMaterial`
+   uses the raw face S and T axes as the tangent frame; off the face centre they are not tangent to the
+   sphere. Acceptance 2.
+4. **Shading seams at tile edges**: edge texels use one-sided differences, so neighbouring tiles disagree
+   about the shared edge's normal. Generate heights with a one-texel border (67x67).
+5. **`SKIRT_DROP` is a fixed 0.002 radii**, not a fraction of the cell size; at levels 0 and 1 the cracks
+   of item 1 exceed it.
+6. **The patch material drops the `root.detail` fade and the regolith grain.** The height-trace shadow is
+   also skipped, as the design allows for a first cut.
+7. **Acceptance 6 is not measured** (main-thread time under 0.5 ms with 32 jobs in flight), and acceptance
+   3 (one draw a pass) was not read off the panel.
+8. **Dead code from tasks 3 and 6**: `generate_patch`, `patch_indices`, `patch_vertex_count`, `patch_quads`
+   remain in `terrain_patch.hpp` for the old tests only. Stale comments: `slot_count`'s "11 MiB of
+   vertices", "tangent warp" above `wireframe`, "staging-to-pool copies" in `renderer_impl.hpp`.
+9. **The calibration runs inside `terrain_tests`** (13.9 s; ctest went from 10 s to 25 s). Put it behind a
+   flag. `patch_error` samples each corner once per quad and its comment claims the sphere's curvature is
+   included; it compares radii only.
+10. **Ring bookkeeping**: `ring_used_frame = frame + 100` marks an entry in flight and 0 marks it free.
+    With the near tier off the poll is skipped, results wait unpolled while their markers expire, and the
+    entries can be reused under them. An explicit state per entry is safer. `WorkerPool`'s destructor runs
+    every queued job before joining (up to 32 tiles at shutdown).
+11. **`draw_body` leaves `ORBITAL_ROOT_PATCHES` and `root.patches` on the caller's `Root`**; the depth
+    pre-pass and motion pass do not reset flags between bodies. Harmless only because the minor planet is
+    the last body.
+12. **Constants duplicated between C++ and the shaders with no check**: the Everitt constant, the face
+    tables (in both `patch.slang` and `surface_airless.slang`), `tile_side`, the height range.
+13. **The effective tolerance is one level looser than `error_pixels` reads**: a node splits at
+    `range[level + 1]`, as designed, so a level draws until its error is about 2.5 times the tolerance
+    (about 3.75 px, not 1.5). Keep in mind when judging quality.
+
 ## Tasks
 
 1. **Backend texture arrays.** Per `docs/BACKEND_TEXTURE_ARRAYS.md`. Blocks everything below.

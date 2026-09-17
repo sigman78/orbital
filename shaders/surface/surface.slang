@@ -34,6 +34,7 @@ SurfaceVaryings vertexMain(uint vertexIndex : SV_VertexID, uint firstVertex : SV
     if (root.flags & ORBITAL_ROOT_PATCHES)
     {
         PatchResult pr = evaluatePatch(vertexIndex, instanceId, root);
+        output.instanceIndex = root.base; // instanceId is the patch, not the body
         output.worldPosition = pr.worldPosition;
         output.worldNormal = pr.worldNormal;
         output.localNormal = pr.localNormal;

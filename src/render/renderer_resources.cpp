@@ -285,6 +285,11 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     create_device(window);
     phase("device");
     create_samplers();
+    // Every array slot holds a valid descriptor before the first draw; the
+    // terrain's arrays replace three of them below.
+    array_placeholder = GpuImage::create_array(device, {1, 1}, 1, gpu::Format::rgba8_unorm);
+    for (unsigned i = 0; i < unsigned(ArraySlot::count); i++)
+        bind(ArraySlot(i), array_placeholder);
     create_meshes();
     create_terrain_tier();
     phase("meshes");
@@ -311,9 +316,6 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
                    {.data = assets::texture_from_image(widen(assets::smaa_search(), assets::smaa_search_width,
                                                              assets::smaa_search_height, assets::smaa_search_channels)),
                     .slot = Slot::smaa_search}});
-    array_placeholder = GpuImage::create_array(device, {1, 1}, 1, gpu::Format::rgba8_unorm);
-    for (unsigned i = 0; i < unsigned(ArraySlot::count); i++)
-        bind(ArraySlot(i), array_placeholder);
     phase("tables");
     create_pipelines();
     phase("pipelines");

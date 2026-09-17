@@ -28,6 +28,7 @@ float patchHeight(uint slot, float2 g)
 }
 
 struct PatchResult {
+    float3 localPosition; // body frame, radii, the skirt drop applied
     float3 worldPosition;
     float3 worldNormal;
     float3 localNormal;
@@ -70,6 +71,7 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
         p = d * (1 + h - SKIRT_DROP);
 
     PatchResult r;
+    r.localPosition = p;
     r.worldPosition = inst.center_radius.xyz + mul(rotate, p) * radius;
     r.worldNormal = normalize(mul(rotate, d));
     r.localNormal = d;

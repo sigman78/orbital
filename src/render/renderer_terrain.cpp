@@ -11,9 +11,16 @@
 namespace space::render {
 
 namespace {
+constexpr std::uint64_t align4(std::uint64_t bytes) {
+    return (bytes + 3) & ~3ull;
+}
+// A buffer-to-image copy's offset must be a multiple of the texel size: the
+// rgba8 planes start at 4-byte offsets within an entry, and entries are 4-byte strides.
 constexpr std::uint64_t height_tile_bytes = tile_side * tile_side * 2;
 constexpr std::uint64_t colour_tile_bytes = tile_side * tile_side * 4;
-constexpr std::uint64_t tile_total_bytes = height_tile_bytes + 2 * colour_tile_bytes;
+constexpr std::uint64_t albedo_offset = align4(height_tile_bytes);
+constexpr std::uint64_t normal_offset = albedo_offset + colour_tile_bytes;
+constexpr std::uint64_t tile_total_bytes = align4(normal_offset + colour_tile_bytes);
 } // namespace
 
 void Renderer::Impl::create_terrain_tier() {
@@ -65,16 +72,13 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     }
     // Poll finished tiles from the worker pool and record their copies.
     if (tile_pool) {
-        const float height_range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
         for (const TileResult& result : tile_pool->poll()) {
-            terrain_tier.mark_resident(result.slot);
+            terrain_tier.mark_resident(result.slot, result.key);
             const auto staging_gpu = reinterpret_cast<std::uint64_t>(buffers.tile_staging.range().gpu) +
                                      result.ring * tile_total_bytes;
             tile_copies.push_back({staging_gpu, height_tile_bytes, tile_height.texture(), result.slot});
-            tile_copies.push_back(
-                {staging_gpu + height_tile_bytes, colour_tile_bytes, tile_albedo.texture(), result.slot});
-            tile_copies.push_back({staging_gpu + height_tile_bytes + colour_tile_bytes, colour_tile_bytes,
-                                   tile_normal.texture(), result.slot});
+            tile_copies.push_back({staging_gpu + albedo_offset, colour_tile_bytes, tile_albedo.texture(), result.slot});
+            tile_copies.push_back({staging_gpu + normal_offset, colour_tile_bytes, tile_normal.texture(), result.slot});
             ring_used_frame[result.ring] = frame_index;
         }
     }
@@ -97,8 +101,12 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     view.camera_local = Vec3d{dot(view.axes[0], camera_relative), dot(view.axes[1], camera_relative),
                               dot(view.axes[2], camera_relative)} *
                         (1 / state.radius);
+    // Only as many requests as there are ring entries to generate them into.
+    unsigned free_rings = 0;
+    for (unsigned i = 0; i < tile_ring_count; i++)
+        free_rings += frame_index >= ring_used_frame[i] + 2 || ring_used_frame[i] == 0;
     const bool was_active = terrain_tier.active();
-    terrain_tier.update(view, frame_index);
+    terrain_tier.update(view, frame_index, tile_pool ? free_rings : 0);
     if (terrain_tier.active() != was_active)
         log::info("Near tier {} at frame {}, {} patches resident", terrain_tier.active() ? "on" : "off", frame_index,
                   terrain_tier.resident());
@@ -135,8 +143,8 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                         std::clamp((heights[i] - MinorPlanetTerrain::height_min) / height_range, 0.0f, 1.0f) *
                             65535.0f +
                         .5f);
-                std::memcpy(dst + height_tile_bytes, albedo.data(), colour_tile_bytes);
-                std::memcpy(dst + height_tile_bytes + colour_tile_bytes, normal.data(), colour_tile_bytes);
+                std::memcpy(dst + albedo_offset, albedo.data(), colour_tile_bytes);
+                std::memcpy(dst + normal_offset, normal.data(), colour_tile_bytes);
                 return {key, slot, ring};
             });
         }
