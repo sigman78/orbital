@@ -6,40 +6,53 @@
 #include "scene/terrain_patch.hpp"
 
 #include <cmath>
-
-// The minor planet's near tier: the CPU picks the cube-sphere patches to draw
-// and generates the new ones into a staging slot before the previous frame's
-// wait, the command buffer copies them into the device pool ahead of the
-// passes, and the body's draws go through the pool instead of the sphere
-// levels while the tier is active. See render/terrain_tier.hpp.
+#include <cstring>
 
 namespace space::render {
 
 namespace {
-constexpr std::uint64_t patch_bytes = patch_vertex_count * sizeof(Vertex);
-}
+constexpr std::uint64_t height_tile_bytes = tile_side * tile_side * 2;
+constexpr std::uint64_t colour_tile_bytes = tile_side * tile_side * 4;
+constexpr std::uint64_t tile_total_bytes = height_tile_bytes + 2 * colour_tile_bytes;
+} // namespace
 
 void Renderer::Impl::create_terrain_tier() {
     if (!showcase.has_minor_planet())
         return;
     minor_planet_terrain.emplace(system.bodies[showcase.minor_planet()].material_seed);
-    buffers.patch_pool = UniqueGpuHeap::create(device, TerrainTier::slot_count * patch_bytes,
-                                               gpu::MemoryType::gpu_only);
-    buffers.patch_staging = UniqueGpuHeap::create(device, 2ull * TerrainTier::generate_per_frame * patch_bytes);
-    buffers.patch_args = UniqueGpuHeap::create(device, TerrainTier::slot_count * sizeof(DrawArgs),
-                                               gpu::MemoryType::gpu_only);
-    buffers.patch_args_staging = UniqueGpuHeap::create(device, 2ull * TerrainTier::slot_count * sizeof(DrawArgs));
-    panic_if(!buffers.patch_pool.range().gpu || !buffers.patch_staging.range().cpu || !buffers.patch_args.range().gpu ||
-                 !buffers.patch_args_staging.range().cpu,
-             "patch pool allocation failed");
-    patch_indices_address = upload_static(bytes_of(patch_indices()));
-    patch_scratch.resize(patch_vertex_count);
-    log::info("Near tier: {} patch slots of {} vertices, {} KiB device pool", TerrainTier::slot_count,
-              patch_vertex_count, TerrainTier::slot_count * patch_bytes >> 10);
+    tile_height = GpuImage::create_array(device, {tile_side, tile_side}, TerrainTier::slot_count,
+                                         gpu::Format::r16_unorm);
+    tile_albedo = GpuImage::create_array(device, {tile_side, tile_side}, TerrainTier::slot_count,
+                                         gpu::Format::rgba8_unorm);
+    tile_normal = GpuImage::create_array(device, {tile_side, tile_side}, TerrainTier::slot_count,
+                                         gpu::Format::rgba8_unorm);
+    bind(ArraySlot::terrain_height, tile_height);
+    bind(ArraySlot::terrain_albedo, tile_albedo);
+    bind(ArraySlot::terrain_normal, tile_normal);
+    const auto grid = patch_grid_mesh();
+    std::vector<Vertex> gpu_vertices(grid.vertices.size());
+    for (std::size_t i = 0; i < grid.vertices.size(); i++)
+        gpu_vertices[i] = {{grid.vertices[i].position.x, grid.vertices[i].position.y, grid.vertices[i].position.z, 0},
+                           {0, 0, 0, 0}};
+    grid_vertices_address = upload_static(bytes_of(gpu_vertices));
+    grid_indices_address = upload_static(bytes_of(grid.indices));
+    grid_index_count = unsigned(grid.indices.size());
+    buffers.patch_records = UniqueGpuHeap::create(device, TerrainTier::slot_count * sizeof(PatchInstance),
+                                                  gpu::MemoryType::gpu_only);
+    buffers.patch_records_staging = UniqueGpuHeap::create(device,
+                                                          2ull * TerrainTier::slot_count * sizeof(PatchInstance));
+    buffers.tile_staging = UniqueGpuHeap::create(device, 2ull * TerrainTier::generate_per_frame * tile_total_bytes);
+    panic_if(!buffers.patch_records.range().gpu || !buffers.patch_records_staging.range().cpu ||
+                 !buffers.tile_staging.range().cpu,
+             "terrain tier allocation failed");
+    log::info("Near tier: {} tile slots, {} KiB height + {} KiB albedo + {} KiB normal arrays", TerrainTier::slot_count,
+              TerrainTier::slot_count * height_tile_bytes >> 10, TerrainTier::slot_count * colour_tile_bytes >> 10,
+              TerrainTier::slot_count * colour_tile_bytes >> 10);
 }
 
 void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     patch_copies.clear();
+    tile_copies.clear();
     if (!minor_planet_terrain)
         return;
     if (!input.terrain.near_tier) {
@@ -57,7 +70,6 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                   .frustum = view_frustum(camera, tan_x, tan_y),
                   .height_pixels = float(extent.height),
                   .tan_y = tan_y};
-    // The body's frame as the shader's rotation(): the spin about y, then the tilt about z.
     const double tilt = system.bodies[body].axial_tilt;
     for (unsigned axis = 0; axis < 3; axis++) {
         const Vec3d e{axis == 0 ? 1. : 0., axis == 1 ? 1. : 0., axis == 2 ? 1. : 0.};
@@ -74,48 +86,66 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                   terrain_tier.resident());
     stats.frame.patches_drawn = unsigned(terrain_tier.draws().size());
     stats.frame.patches_resident = terrain_tier.resident();
-    // The drawn patches as one multi-draw's commands, a vertex offset each.
-    const std::uint64_t args_slot = (frame_index & 1) * std::uint64_t(TerrainTier::slot_count) * sizeof(DrawArgs);
-    auto* args = reinterpret_cast<DrawArgs*>(buffers.patch_args_staging.range().cpu + args_slot);
-    for (std::size_t i = 0; i < terrain_tier.draws().size(); i++)
-        args[i] = {.index_count = patch_index_count,
-                   .instance_count = 1,
-                   .first_index = 0,
-                   .vertex_offset = terrain_tier.draws()[i].slot * patch_vertex_count,
-                   .first_instance = 0};
-    patch_args_bytes = terrain_tier.draws().size() * sizeof(DrawArgs);
-    if (patch_args_bytes)
-        patch_copies.push_back(
-            {.source = reinterpret_cast<std::uint64_t>(buffers.patch_args_staging.range().gpu) + args_slot,
-             .destination = reinterpret_cast<std::uint64_t>(buffers.patch_args.range().gpu),
-             .bytes = patch_args_bytes});
-    // The new patches go to this frame's staging slot; the previous frame may still copy the other.
-    const std::uint64_t slot_offset = (frame_index & 1) * std::uint64_t(TerrainTier::generate_per_frame) * patch_bytes;
-    std::uint8_t* staging = buffers.patch_staging.range().cpu + slot_offset;
-    unsigned n = 0;
+    // Generate tiles for this frame's requests into the staging buffer.
+    const std::uint64_t tile_slot_offset = (frame_index & 1) * std::uint64_t(TerrainTier::generate_per_frame) *
+                                           tile_total_bytes;
+    std::uint8_t* tile_staging = buffers.tile_staging.range().cpu + tile_slot_offset;
+    const float height_range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
+    std::vector<float> heights(tile_side * tile_side);
+    std::vector<std::uint8_t> albedo_buf(tile_side * tile_side * 4), normal_buf(tile_side * tile_side * 4);
+    unsigned tile_n = 0;
     for (const TerrainTier::Generation& generation : terrain_tier.generate()) {
-        generate_patch(*minor_planet_terrain, generation.key, patch_scratch);
+        generate_height_tile(*minor_planet_terrain, generation.key, heights);
+        generate_colour_tiles(*minor_planet_terrain, generation.key, heights, albedo_buf, normal_buf);
         terrain_tier.mark_resident(generation.slot);
-        auto* out = reinterpret_cast<Vertex*>(staging + n * patch_bytes);
-        for (unsigned i = 0; i < patch_vertex_count; i++) {
-            const geometry::Vertex& v = patch_scratch[i];
-            out[i] = {{v.position.x, v.position.y, v.position.z, 1}, {v.normal.x, v.normal.y, v.normal.z, 0}};
-        }
-        patch_copies.push_back({.source = reinterpret_cast<std::uint64_t>(buffers.patch_staging.range().gpu) +
-                                          slot_offset + n * patch_bytes,
-                                .destination = reinterpret_cast<std::uint64_t>(buffers.patch_pool.range().gpu) +
-                                               generation.slot * patch_bytes,
-                                .bytes = patch_bytes});
-        n++;
+        std::uint8_t* dst = tile_staging + tile_n * tile_total_bytes;
+        auto* h16 = reinterpret_cast<std::uint16_t*>(dst);
+        for (unsigned i = 0; i < tile_side * tile_side; i++)
+            h16[i] = std::uint16_t(
+                std::clamp((heights[i] - MinorPlanetTerrain::height_min) / height_range, 0.0f, 1.0f) * 65535.0f + .5f);
+        std::memcpy(dst + height_tile_bytes, albedo_buf.data(), colour_tile_bytes);
+        std::memcpy(dst + height_tile_bytes + colour_tile_bytes, normal_buf.data(), colour_tile_bytes);
+        const auto staging_gpu = reinterpret_cast<std::uint64_t>(buffers.tile_staging.range().gpu) + tile_slot_offset +
+                                 tile_n * tile_total_bytes;
+        tile_copies.push_back({staging_gpu, height_tile_bytes, tile_height.texture(), generation.slot});
+        tile_copies.push_back(
+            {staging_gpu + height_tile_bytes, colour_tile_bytes, tile_albedo.texture(), generation.slot});
+        tile_copies.push_back({staging_gpu + height_tile_bytes + colour_tile_bytes, colour_tile_bytes,
+                               tile_normal.texture(), generation.slot});
+        tile_n++;
     }
+    // Write PatchInstance records for the drawn patches.
+    const std::uint64_t records_slot = (frame_index & 1) * std::uint64_t(TerrainTier::slot_count) *
+                                       sizeof(PatchInstance);
+    auto* records = reinterpret_cast<PatchInstance*>(buffers.patch_records_staging.range().cpu + records_slot);
+    for (std::size_t i = 0; i < terrain_tier.draws().size(); i++) {
+        const TerrainTier::Draw& draw = terrain_tier.draws()[i];
+        const auto cell = [&] {
+            const double size = 2.0 / double(1u << draw.key.level);
+            return ShaderFloat4{float(-1 + draw.key.x * size), float(-1 + draw.key.y * size), float(size),
+                                float(draw.key.level)};
+        }();
+        const float morph_end = terrain_tier.range(draw.key.level);
+        const float morph_start = 0.7f * morph_end;
+        records[i] = {.cell = cell, .morph = {morph_start, morph_end, 0, 0}, .tile = {draw.key.face, draw.slot, 0, 0}};
+    }
+    patch_records_bytes = terrain_tier.draws().size() * sizeof(PatchInstance);
+    if (patch_records_bytes)
+        patch_copies.push_back(
+            {.source = reinterpret_cast<std::uint64_t>(buffers.patch_records_staging.range().gpu) + records_slot,
+             .destination = reinterpret_cast<std::uint64_t>(buffers.patch_records.range().gpu),
+             .bytes = patch_records_bytes});
 }
 
 void Renderer::Impl::record_terrain_uploads(gpu::CommandBuffer* cmd) {
+    for (const TileCopy& copy : tile_copies)
+        gpu::copy_memory_to_texture(cmd, {reinterpret_cast<void*>(copy.source), copy.bytes}, copy.texture,
+                                    {.base_slice = copy.layer, .slice_count = 1, .extent = {tile_side, tile_side, 1}});
     for (const PatchCopy& copy : patch_copies)
         gpu::copy_memory(cmd, {reinterpret_cast<void*>(copy.source), copy.bytes},
                          {reinterpret_cast<void*>(copy.destination), copy.bytes});
-    if (patch_args_bytes)
-        synchronize(cmd, access::transfer_write, access::indirect_read);
+    if (!tile_copies.empty() || !patch_copies.empty())
+        synchronize(cmd, access::transfer_write, {gpu::Stage::vertex | gpu::Stage::fragment, gpu::Access::shader_read});
 }
 
 bool Renderer::Impl::terrain_tier_draws(unsigned body) const {
@@ -128,24 +158,14 @@ void Renderer::Impl::draw_body(gpu::CommandBuffer* cmd, Root& root, unsigned bod
         return;
     }
     root.base = body;
-    root.vertices = reinterpret_cast<std::uint64_t>(buffers.patch_pool.range().gpu);
-    const gpu::GpuRange indices{reinterpret_cast<void*>(patch_indices_address), std::uint64_t(patch_index_count) * 4};
+    root.vertices = grid_vertices_address;
+    root.patches = reinterpret_cast<std::uint64_t>(buffers.patch_records.range().gpu);
+    root.flags = ORBITAL_ROOT_PATCHES | (wireframe ? ORBITAL_ROOT_WIREFRAME : 0);
+    const gpu::GpuRange indices{reinterpret_cast<void*>(grid_indices_address), std::uint64_t(grid_index_count) * 4};
     const unsigned count = unsigned(terrain_tier.draws().size());
-    if (!wireframe) { // one multi-draw over the drawn patches; the wireframe's level per patch needs a draw each
-        root.flags = 0;
-        stats.frame.draw_calls++;
-        gpu::draw_indexed_indirect(cmd, root, indices, gpu::IndexType::uint32,
-                                   {buffers.patch_args.range().gpu, patch_args_bytes}, count, sizeof(DrawArgs));
-        stats.frame.triangles += count * (patch_index_count / 3);
-        return;
-    }
-    for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
-        root.flags = wireframe ? ORBITAL_ROOT_WIREFRAME | draw.key.level << 8 : 0;
-        stats.frame.draw_calls++;
-        gpu::draw_indexed(cmd, root, indices, gpu::IndexType::uint32, patch_index_count, 1, 0,
-                          std::int32_t(draw.slot * patch_vertex_count));
-        stats.frame.triangles += patch_index_count / 3;
-    }
+    stats.frame.draw_calls++;
+    gpu::draw_indexed(cmd, root, indices, gpu::IndexType::uint32, grid_index_count, count);
+    stats.frame.triangles += count * (grid_index_count / 3);
 }
 
 } // namespace space::render

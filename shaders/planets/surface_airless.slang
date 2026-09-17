@@ -23,7 +23,7 @@ static const float2 MINOR_PLANET_TEXELS = float2(2048.0, 1024.0);  // the minor 
 // Height range of the baked DEM alpha channel in radii (manifest height_min_m..height_max_m over the body radius).
 static const float MOON_HEIGHT_RANGE = 19603.0 / 1737400.0;
 static const float MARS_HEIGHT_RANGE = 29334.0 / 3396200.0;
-static const float MINOR_PLANET_HEIGHT_RANGE = .10; // MinorPlanetTerrain::height_max - height_min
+static const float MINOR_PLANET_HEIGHT_RANGE = MINOR_PLANET_HEIGHT_MAX - MINOR_PLANET_HEIGHT_MIN;
 
 // Short shadow trace through the DEM height stored in the normal map's alpha:
 // marches up-sun in texture space and darkens where terrain rises above the
@@ -128,7 +128,9 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
                                             : moonMaterial(input, rotate, s.N, s.L, s.visibility, root.detail);
     float3 irradiance = sunlight(root.frame);
     float3 colour = shadeSurface(m, s.L, s.V, irradiance, earthParams(root.frame).glint, lightParams(root.frame).ambientFill);
-    if (root.flags & ORBITAL_ROOT_WIREFRAME)
-        colour = wireframe(colour, normalize(input.localNormal), root.flags >> 8, irradiance);
+    if (root.flags & ORBITAL_ROOT_WIREFRAME) {
+        uint wfLevel = (root.flags & ORBITAL_ROOT_PATCHES) ? input.patchLevel : root.flags >> 8;
+        colour = wireframe(colour, normalize(input.localNormal), wfLevel, irradiance);
+    }
     return float4(colour, 1);
 }

@@ -43,6 +43,9 @@ Renderer::Impl::~Impl() {
     material_images.clear();
     frame_targets = {};
     fixed_targets = {};
+    tile_height.reset();
+    tile_albedo.reset();
+    tile_normal.reset();
     array_placeholder.reset();
     static_upload.staging.reset(); // empty after start-up; here for an init that stopped early
     buffers = {};
@@ -468,14 +471,13 @@ void Renderer::Impl::collect_memory_stats() {
     memory.mapped = {};
     heap(memory.mapped, buffers.data);
     heap(memory.mapped, buffers.belt_state_staging);
-    heap(memory.mapped, buffers.patch_staging);
-    heap(memory.mapped, buffers.patch_args_staging);
+    heap(memory.mapped, buffers.patch_records_staging);
+    heap(memory.mapped, buffers.tile_staging);
     memory.mapped.used = memory.mapped.bytes;
     memory.device_buffers = {};
     heap(memory.device_buffers, buffers.cull_device);
     heap(memory.device_buffers, buffers.belt_state);
-    heap(memory.device_buffers, buffers.patch_pool);
-    heap(memory.device_buffers, buffers.patch_args);
+    heap(memory.device_buffers, buffers.patch_records);
     heap(memory.device_buffers, buffers.meter_device);
     memory.device_buffers.used = memory.device_buffers.bytes;
     memory.readback = {};

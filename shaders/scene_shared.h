@@ -28,6 +28,9 @@ using ShaderMatrix4 = float[16];
 #define ORBITAL_ROOT_FOLD_CLOUDS 1 // the cloud shell is not drawn: the ground shader blends the clouds in
 #define ORBITAL_ROOT_WIREFRAME 2   // a terrain patch's quad grid drawn over it; its level in bits 8 to 15
 #define ORBITAL_ROOT_PATCHES 4     // this draw uses the CDLOD patch path: root.patches points to PatchInstance records
+// The minor planet's terrain height range in radii (MinorPlanetTerrain::height_min/max).
+#define MINOR_PLANET_HEIGHT_MIN (-.05)
+#define MINOR_PLANET_HEIGHT_MAX (.05)
 // The Earth's cloud shell above the surface, in radii (the mesh scale and the shadow geometry).
 #define ORBITAL_CLOUD_HEIGHT 0.009
 // Instance.rotation_kind.w (SurfaceKind on the C++ side); each kind has its own fragment shader.

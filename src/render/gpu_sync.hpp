@@ -12,6 +12,7 @@ inline constexpr AccessScope compute_read_write{gpu::Stage::compute,
                                                 gpu::Access::shader_read | gpu::Access::shader_write};
 inline constexpr AccessScope color_write{gpu::Stage::color_output, gpu::Access::color_write};
 inline constexpr AccessScope color_blend{gpu::Stage::color_output, gpu::Access::color_read | gpu::Access::color_write};
+inline constexpr AccessScope vertex_sample{gpu::Stage::vertex, gpu::Access::shader_read};
 inline constexpr AccessScope fragment_sample{gpu::Stage::fragment, gpu::Access::shader_read};
 inline constexpr AccessScope depth_write{gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_write};
 inline constexpr AccessScope depth_read{gpu::Stage::depth_stencil_tests, gpu::Access::depth_stencil_read};

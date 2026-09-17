@@ -268,12 +268,11 @@ struct Renderer::Impl {
         UniqueGpuHeap meter_device, meter_zero,
             meter_readback;                       // the exposure histogram, its zero source and its readback
         UniqueGpuHeap cull_device, cull_readback; // GPU output and completed scratch for CPU statistics
-        UniqueGpuHeap belt_state;         // device-only: two slices of per-rock state, this frame's and the last
-        UniqueGpuHeap belt_state_staging; // host-visible: the CPU writes this frame's slice here for the copy
-        UniqueGpuHeap patch_pool;         // device-only: the near tier's patch vertices, a slot per patch
-        UniqueGpuHeap patch_staging;      // host-visible: this frame's new patches, two slots by frame parity
-        UniqueGpuHeap patch_args;         // device-only: the drawn patches' indirect commands, one multi-draw a pass
-        UniqueGpuHeap patch_args_staging; // host-visible: the CPU writes them here, two slots by frame parity
+        UniqueGpuHeap belt_state;            // device-only: two slices of per-rock state, this frame's and the last
+        UniqueGpuHeap belt_state_staging;    // host-visible: the CPU writes this frame's slice here for the copy
+        UniqueGpuHeap patch_records;         // device-only: PatchInstance records for the drawn patches
+        UniqueGpuHeap patch_records_staging; // host-visible: two slots by frame parity
+        UniqueGpuHeap tile_staging;          // host-visible: this frame's tile planes, two slots by frame parity
     } buffers;
     std::uint64_t static_cursor = 0;
     struct StaticUpload { // the staging path of upload_static, open until finish_static_uploads
@@ -375,13 +374,20 @@ struct Renderer::Impl {
     // quadtree and cache, and this frame's staging-to-pool copies.
     std::optional<MinorPlanetTerrain> minor_planet_terrain;
     TerrainTier terrain_tier;
-    std::uint64_t patch_indices_address = 0; // static heap: the index triples every patch shares
-    std::vector<geometry::Vertex> patch_scratch;
+    GpuImage tile_height, tile_albedo, tile_normal; // the three tile arrays, 1024 layers each
+    std::uint64_t grid_vertices_address = 0, grid_indices_address = 0;
+    unsigned grid_index_count = 0;
     struct PatchCopy {
         std::uint64_t source, destination, bytes;
     };
+    struct TileCopy {
+        std::uint64_t source, bytes;
+        gpu::Texture* texture;
+        unsigned layer;
+    };
     std::vector<PatchCopy> patch_copies;
-    std::uint64_t patch_args_bytes = 0; // this frame's commands to copy, and the multi-draw's extent
+    std::vector<TileCopy> tile_copies;
+    std::uint64_t patch_records_bytes = 0;
     // The staging heap has two slots, written by frame parity before the wait for the
     // previous frame, which may still be copying the other; the version each holds
     // says whether a standing state must be written again into a stale slot.
