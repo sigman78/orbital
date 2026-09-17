@@ -32,7 +32,6 @@ static const float DUST_ISOTROPIC = .35; // share of an isotropic lobe, standing
 static const float DUST_SLAB = 3.5;      // slab half-height in flared scale heights; the Gaussian is negligible beyond
 static const int DISC_STEPS = 12;
 static const float ROCK_AMBIENT = .004;  // the splats' ambient share, relative to the sun's irradiance
-static const int MAX_FOOTPRINT = 4;      // box-filter taps per axis when the rock map is minified
 
 float dustPhase(float c) { return lerp(henyeyGreenstein(c, DUST_FORWARD), 1.0 / (4.0 * PI), DUST_ISOTROPIC); }
 
@@ -111,18 +110,6 @@ float4 bakeSunlight(float2 position)
 }
 
 // --- The far tier -------------------------------------------------------------------
-float4 rockMapAt(float2 uv, int taps)
-{
-    float texels = beltDiscParams(root.frame).rockTexels;
-    if (taps <= 1) return textures[TEX_BELT_DISC_ROCKS].SampleLevel(samplers[SAMPLER_CLAMP], uv, 0.0);
-    float4 sum = float4(0.0, 0.0, 0.0, 0.0);
-    float2 step = 1.0 / texels;
-    for (int j = 0; j < taps; ++j)
-        for (int i = 0; i < taps; ++i)
-            sum += textures[TEX_BELT_DISC_ROCKS].SampleLevel(samplers[SAMPLER_CLAMP], uv + (float2(i, j) - .5 * float(taps - 1)) * step, 0.0);
-    return sum / float(taps * taps);
-}
-
 // Premultiplied radiance and opacity of the far belt along this pixel's ray, unweighted.
 float4 farBelt(float2 position)
 {
@@ -142,12 +129,11 @@ float4 farBelt(float2 position)
     float3 colour = dustColour(frame);
     float dustDensity = dustSettings.density * farScale, dustBrightness = dustSettings.brightness;
 
-    // Rock map minification: texels per pixel at the slab's distance.
-    float texelSize = 2.0 * disc.half.x / disc.rockTexels;
-    float pixelAngle = 2.0 * view.tanHalfFov / view.size.y;
-    int taps = clamp(int(round(t0 * pixelAngle / texelSize)), 3, MAX_FOOTPRINT); // at least 3x3: the map is a rock-count estimate and wants smoothing
-
     float jitter = marchJitter(position, view.frame, temporalParams(frame).enabled);
+    // The sun is far: one light direction and one phase serve the whole segment.
+    float3 light = normalize(sunLight.position - rd * (.5 * (t0 + t1)));
+    float dustPhaseValue = dustPhase(dot(light, rd));
+    float rockPhase = lambertSpherePhase(acos(clamp(dot(light, -rd), -1.0, 1.0)));
     float ds = (t1 - t0) / float(DISC_STEPS);
     float transmittance = 1.0;
     float3 radiance = float3(0.0, 0.0, 0.0);
@@ -166,14 +152,13 @@ float4 farBelt(float2 position)
         float2 uv = discUv(frame, p);
         float3 baked = textures[TEX_BELT_DISC_LIGHT].SampleLevel(samplers[SAMPLER_CLAMP], uv, 0.0).rgb;
         float dustSunlight = sunLight.radiance * baked.r * baked.b, rockSunlight = sunLight.radiance * baked.g * baked.b;
-        float3 light = normalize(sunLight.position - p);
 
         float sigmaDust = density * BELT_EXTINCTION * DUST_DENSITY * dustDensity;
-        float3 dust = colour * DUST_ALBEDO * dustBrightness * sigmaDust * dustPhase(dot(light, rd)) * dustSunlight;
+        float3 dust = colour * DUST_ALBEDO * dustBrightness * sigmaDust * dustPhaseValue * dustSunlight;
 
-        float4 rocks = rockMapAt(uv, taps) * profile; // coverage per unit length along the ray
-        float phase = acos(clamp(dot(light, -rd), -1.0, 1.0));
-        float3 rock = rocks.rgb * (rockSunlight / PI * lambertSpherePhase(phase) + sunLight.radiance * ROCK_AMBIENT);
+        // The map is splatted pre-blurred (discsplat.slang), so one texel is the smoothed estimate.
+        float4 rocks = textures[TEX_BELT_DISC_ROCKS].SampleLevel(samplers[SAMPLER_CLAMP], uv, 0.0) * profile; // coverage per unit length along the ray
+        float3 rock = rocks.rgb * (rockSunlight / PI * rockPhase + sunLight.radiance * ROCK_AMBIENT);
 
         float sigma = sigmaDust + rocks.a;
         if (sigma < 1e-6) continue;

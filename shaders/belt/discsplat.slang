@@ -42,12 +42,15 @@ SplatVaryings vertexMain(uint vertexIndex : SV_VertexID, uint instanceId : SV_In
     uint composition = rockClass(instanceId, radial);
     float3 albedo = rockColour(composition, instanceId) * (composition == CLASS_C ? ROCK_SET_AVERAGE_C : ROCK_SET_AVERAGE_S);
 
-    // Splat at least one texel wide; the weight keeps the covered area right.
+    // Splat at least ORBITAL_ROCK_MAP_FOOTPRINT texels each way; the weight keeps the covered area
+    // right. The map is a rock-count estimate and wants smoothing, and spreading each
+    // rock here is the smoothing: the far march then reads one texel where it box-filtered
+    // sixteen.
     BeltDiscParams disc = beltDiscParams(root.frame);
     float4 clip = mul(beltDiscProjection(root.frame), float4(position, 1.0));
     float halfExtent = disc.half.x, texels = disc.rockTexels;
     float2 halfNdc = radius / halfExtent;
-    float2 texelNdc = 1.0 / texels; // half a texel each way
+    float2 texelNdc = ORBITAL_ROCK_MAP_FOOTPRINT / texels; // half the footprint each way, in texels
     float2 extent = max(halfNdc, texelNdc);
     float texelArea = (2.0 * halfExtent / texels) * (2.0 * halfExtent / texels);
     float coverage = SPLAT_AREA * 3.141592653589793 * radius * radius / texelArea; // area fraction of one texel
