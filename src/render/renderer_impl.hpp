@@ -497,7 +497,8 @@ struct Renderer::Impl {
     void prepare_terrain_tier(const FrameInput& input);        // before the wait: the patches to draw and the new ones
     void record_terrain_uploads(gpu::CommandBuffer* cmd);      // the new patches into the pool
     bool terrain_tier_draws(unsigned body) const;              // the body draws as patches this frame
-    void draw_body(gpu::CommandBuffer* cmd, Root& root, unsigned body); // its sphere level, or its patches
+    void draw_body(gpu::CommandBuffer* cmd, Root& root, unsigned body,
+                   bool wireframe = false); // its sphere level, or its patches, their grid drawn in the scene pass
     void cull_bodies(const FrameInput& input, const FrameData& frame);
     void write_cull_scratch(const FrameInput& input, const FrameData& frame, CullScratch& scratch,
                             std::uint64_t instance_address);

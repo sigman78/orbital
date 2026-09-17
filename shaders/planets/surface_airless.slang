@@ -3,6 +3,7 @@
 #include "../surface/lighting.slang"
 #include "../surface/brdf.slang"
 #include "../lib/math.slang"
+#include "../lib/color.slang"
 #include "../lib/noise.slang"
 #include "../lib/sampling.slang"
 
@@ -93,6 +94,30 @@ Material marsMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L
     return m;
 }
 
+// The near tier's review: the patch's quad grid over the surface, in the cube
+// face's cell coordinates of scene/terrain_patch.hpp (the face by the major
+// axis, s and t through the tangent warp), the patch borders in a second
+// colour. Lines are a pixel and a half wide from the coordinates' derivatives,
+// and they take their brightness from the sunlight so they read at any exposure.
+static const float3 CUBE_AXIS[6] = { float3(1, 0, 0), float3(-1, 0, 0), float3(0, 1, 0), float3(0, -1, 0), float3(0, 0, 1), float3(0, 0, -1) };
+static const float3 CUBE_S[6] = { float3(0, 0, -1), float3(0, 0, 1), float3(1, 0, 0), float3(1, 0, 0), float3(1, 0, 0), float3(-1, 0, 0) };
+static const float3 CUBE_T[6] = { float3(0, 1, 0), float3(0, 1, 0), float3(0, 0, -1), float3(0, 0, 1), float3(0, 1, 0), float3(0, 1, 0) };
+
+float3 wireframe(float3 colour, float3 n, uint level, float3 irradiance)
+{
+    float3 a = abs(n);
+    int face = a.x >= a.y && a.x >= a.z ? (n.x > 0 ? 0 : 1) : a.y >= a.z ? (n.y > 0 ? 2 : 3) : (n.z > 0 ? 4 : 5);
+    float axis = dot(n, CUBE_AXIS[face]);
+    float2 st = float2(atan2(dot(n, CUBE_S[face]), axis), atan2(dot(n, CUBE_T[face]), axis)) * (4.0 / PI);
+    float2 quads = st * (8.0 * exp2(float(level)));  // the quads across the face at this level, halved for the [-1, 1] span
+    float2 cell = frac(quads), patch = frac(quads / 16.0);
+    float2 lineQuad = 1.0 - smoothstep(0.0, fwidth(quads) * 1.5, min(cell, 1.0 - cell));
+    float2 linePatch = 1.0 - smoothstep(0.0, fwidth(quads / 16.0) * 1.5, min(patch, 1.0 - patch));
+    float bright = max(luma709(irradiance) * .04, 1e-4);
+    colour = lerp(colour, float3(.15, 1.0, .35) * bright, max(lineQuad.x, lineQuad.y) * .8);
+    return lerp(colour, float3(1.0, .75, .2) * bright, max(linePatch.x, linePatch.y));
+}
+
 [shader("fragment")]
 float4 fragmentMain(SurfaceVaryings input) : SV_Target0
 {
@@ -101,5 +126,9 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
     Material m = s.kind == KIND_MARS        ? marsMaterial(input, rotate, s.N, s.L, s.visibility, root.detail)
                : s.kind == KIND_MINOR_PLANET   ? minorPlanetMaterial(input, rotate, s.N, s.L, s.visibility, root.detail)
                                             : moonMaterial(input, rotate, s.N, s.L, s.visibility, root.detail);
-    return float4(shadeSurface(m, s.L, s.V, sunlight(root.frame), earthParams(root.frame).glint, lightParams(root.frame).ambientFill), 1);
+    float3 irradiance = sunlight(root.frame);
+    float3 colour = shadeSurface(m, s.L, s.V, irradiance, earthParams(root.frame).glint, lightParams(root.frame).ambientFill);
+    if (root.flags & ORBITAL_ROOT_WIREFRAME)
+        colour = wireframe(colour, normalize(input.localNormal), root.flags >> 8, irradiance);
+    return float4(colour, 1);
 }

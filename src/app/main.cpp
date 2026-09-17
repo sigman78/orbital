@@ -67,6 +67,8 @@ void handle_key(AppState& app, Key key) {
         free_camera(app);
     else if (key == platform::letter_key('X'))
         app.tone.auto_exposure = !app.tone.auto_exposure;
+    else if (key == platform::letter_key('Z'))
+        app.slow_travel = !app.slow_travel;
     else if (const auto digit = platform::digit_of(key); digit && *digit >= 1 && *digit <= bookmark_count) {
         const std::size_t index = *digit - 1;
         select_bookmark(app, index);
@@ -85,7 +87,8 @@ Input gather_input(platform::Window& window, AppState& app, bool keyboard_free) 
         input.move_up = axis('E', 'Q');
     }
     input.move_right += app.pan;
-    input.speed_scale = window.key_down(Key::shift) ? control::fast_speed_scale : 1.0f;
+    input.speed_scale = (window.key_down(Key::shift) ? control::fast_speed_scale : 1.0f) *
+                        (app.slow_travel ? control::slow_speed_scale : 1.0f);
     input.telescope = window.middle_button_down();
     const platform::MouseDelta mouse = window.take_mouse_look_delta();
     input.mouse_dx = mouse.dx;
@@ -131,6 +134,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.belt_dust.enabled = options.dust != 0;
     app.belt.disc = options.disc != 0;
     app.terrain.near_tier = options.near_tier != 0;
+    app.terrain.wireframe = options.wireframe != 0;
     app.belt.lod_scale = options.lod_scale;
     app.vsync = options.vsync < 0 ? options.benchmark.empty() : options.vsync != 0;
     app.tone.exposure = options.exposure;

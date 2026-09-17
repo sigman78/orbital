@@ -255,6 +255,8 @@ void quality_controls(bool& high, render::TerrainSettings& terrain) {
     ImGui::SameLine();
     ImGui::TextDisabled(high ? "520k rocks" : "280k rocks");
     ImGui::Checkbox("Near tier", &terrain.near_tier); // the minor planet's patches close in; off keeps its sphere
+    ImGui::SameLine();
+    ImGui::Checkbox("Wireframe", &terrain.wireframe); // the patches' quad grid over the surface
 }
 void anti_aliasing_controls(render::AntiAliasingSettings& settings) {
     ImGui::Checkbox("Temporal (F5)", &settings.temporal_aa);
@@ -559,6 +561,8 @@ void camera_controls(AppState& app) {
     if (ImGui::Button("Free (F)", {104, 0}))
         free_camera(app);
     ImGui::Checkbox("Pause (Space)", &app.paused);
+    ImGui::SameLine();
+    ImGui::Checkbox("Slow travel (Z)", &app.slow_travel); // a tenth of the speed, for a small body
 }
 void overlay_controls(AppState& app) {
     ImGui::Checkbox("HUD (F1)", &app.overlay);

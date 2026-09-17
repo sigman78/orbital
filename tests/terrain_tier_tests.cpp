@@ -47,7 +47,9 @@ int main() {
     }
     assert(converged_at && tier.active() && !tier.draws().empty());
     // Every drawn slot is drawn once, and no slot is both drawn and regenerated in one frame.
-    std::vector<unsigned> drawn(tier.draws().begin(), tier.draws().end());
+    std::vector<unsigned> drawn;
+    for (const auto& draw : tier.draws())
+        drawn.push_back(draw.slot);
     std::sort(drawn.begin(), drawn.end());
     assert(std::adjacent_find(drawn.begin(), drawn.end()) == drawn.end());
     std::printf("terrain tier: converged at frame %u with %zu patches drawn, %u resident, %u nodes\n", converged_at,
@@ -62,7 +64,8 @@ int main() {
     for (unsigned f = frame + 3; f < frame + 60; f++) {
         tier.update(view_at(.2, radius), f);
         for (const auto& g : tier.generate())
-            assert(std::find(tier.draws().begin(), tier.draws().end(), g.slot) == tier.draws().end());
+            for (const auto& draw : tier.draws())
+                assert(draw.slot != g.slot);
     }
     // Backing off past the threshold switches the tier off again.
     tier.update(view_at(20, radius), frame + 61);

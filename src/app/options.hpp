@@ -16,7 +16,8 @@ inline constexpr std::string_view usage =
     "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..9\n"
     "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --pan-stop-frame N "
     "--rocks N --sun-at X Y (turn the camera so the sun projects there, 1 the frame edge; for lens review)\n"
-    "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --disc 0|1 --near-tier 0|1 --lod-scale X --vsync 0|1 "
+    "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --disc 0|1 --near-tier 0|1 --wireframe 0|1 --lod-scale X "
+    "--vsync 0|1 "
     "--splat 0..3 --tone "
     "0|1|2 --hdr 0|1|2 (SDR, scRGB, HDR10; needs the OS in HDR) "
     "--maximize-at N "
@@ -31,7 +32,8 @@ inline constexpr std::string_view usage =
     "(hidden window)\n"
     "Controls: RMB mouse look; MMB hold telescope (5x); WASD move; Q/E vertical; Shift fast; 1-8 bookmarks; O orbit; F "
     "free;\n"
-    "T tour; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt extinction;\n"
+    "T tour; Z slow travel; Space pause; +/- exposure; X auto exposure; F1 HUD; F2 quality; F3 belt light map; F4 belt "
+    "extinction;\n"
     "F5 temporal AA; F6 rock splat cut-off; F7 splat lighting in both cull passes; F8 tone curve;\n"
     "F9 spatial AA (off, FXAA, SMAA); Alt+Enter borderless fullscreen;\n"
     "F10 capture; F11 belt dust; F12 control panel (--ui shows it at start); Esc exit.";
@@ -50,6 +52,7 @@ struct Options {
     unsigned dust = render::BeltDustSettings{}.enabled;                     // volumetric belt dust
     unsigned disc = render::BeltSettings{}.disc;                            // far-belt disc LOD
     unsigned near_tier = render::TerrainSettings{}.near_tier;               // the minor planet's patches close in
+    unsigned wireframe = render::TerrainSettings{}.wireframe;               // their quad grid drawn over the surface
     float lod_scale = render::BeltSettings{}.lod_scale;                     // far-belt fade distance scale
     unsigned spatial = unsigned(render::AntiAliasingSettings{}.spatial_aa); // spatial pass: 0 off, 1 FXAA, 2 SMAA
     std::optional<double> galaxy_view;           // galactic longitude in degrees; absent means normal camera

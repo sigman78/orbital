@@ -98,7 +98,7 @@ bool Renderer::Impl::terrain_tier_draws(unsigned body) const {
     return minor_planet_terrain && body == showcase.minor_planet() && terrain_tier.active();
 }
 
-void Renderer::Impl::draw_body(gpu::CommandBuffer* cmd, Root& root, unsigned body) {
+void Renderer::Impl::draw_body(gpu::CommandBuffer* cmd, Root& root, unsigned body, bool wireframe) {
     if (!terrain_tier_draws(body)) {
         draw_mesh(cmd, root, body_mesh(body, body_level[body]), body, 1);
         return;
@@ -106,10 +106,11 @@ void Renderer::Impl::draw_body(gpu::CommandBuffer* cmd, Root& root, unsigned bod
     root.base = body;
     root.vertices = reinterpret_cast<std::uint64_t>(buffers.patch_pool.range().gpu);
     const gpu::GpuRange indices{reinterpret_cast<void*>(patch_indices_address), std::uint64_t(patch_index_count) * 4};
-    for (const unsigned slot : terrain_tier.draws()) {
+    for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
+        root.flags = wireframe ? ORBITAL_ROOT_WIREFRAME | draw.level << 8 : 0;
         stats.frame.draw_calls++;
         gpu::draw_indexed(cmd, root, indices, gpu::IndexType::uint32, patch_index_count, 1, 0,
-                          std::int32_t(slot * patch_vertex_count));
+                          std::int32_t(draw.slot * patch_vertex_count));
         stats.frame.triangles += patch_index_count / 3;
     }
 }

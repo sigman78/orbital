@@ -48,7 +48,7 @@ int main() {
            !parse_shot(*base, "name=", 3));
     assert(!parse({"orbital", "--duration", "-1"}));
     assert(!parse({"orbital", "--exposure", "0"}));
-    for (const char* flag : {"--taa", "--dust", "--disc", "--near-tier", "--vsync"})
+    for (const char* flag : {"--taa", "--dust", "--disc", "--near-tier", "--wireframe", "--vsync"})
         assert(!parse({"orbital", flag, "2"}));
     for (const char* flag : {"--spatial", "--tone", "--galaxy"})
         assert(!parse({"orbital", flag, "3"}));

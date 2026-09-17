@@ -40,12 +40,16 @@ public:
         PatchKey key;
         unsigned slot;
     };
+    struct Draw {
+        unsigned slot;
+        unsigned level;
+    };
 
     void update(const TierView& view, unsigned frame);
     void disable(); // the switch off: the tree collapses, the cache stays
     // True once the tier covers the body: the sphere levels draw until then.
     bool active() const { return active_; }
-    std::span<const unsigned> draws() const { return draws_; } // slots, this frame
+    std::span<const Draw> draws() const { return draws_; } // this frame's patches
     std::span<const Generation> generate() const { return generate_; }
     unsigned resident() const { return unsigned(slots_by_key_.size()); }
     unsigned nodes() const { return unsigned(nodes_.size() - free_blocks_.size() * 4); }
@@ -85,7 +89,7 @@ private:
     std::vector<Slot> slots_;
     std::vector<unsigned> free_slots_;
     std::unordered_map<std::uint32_t, unsigned> slots_by_key_;
-    std::vector<unsigned> draws_;
+    std::vector<Draw> draws_;
     std::vector<Request> requests_;
     std::vector<Generation> generate_;
     unsigned frame_ = 0;

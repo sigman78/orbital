@@ -132,7 +132,7 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view) {
         }
     }
     if (const unsigned slot = slot_of(key); slot != no_slot)
-        draws_.push_back(slot);
+        draws_.push_back({.slot = slot, .level = key.level});
     else
         request(key, seen.pixels); // a root, before the tier is active
 }

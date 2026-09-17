@@ -68,7 +68,7 @@ void Renderer::Impl::record_depth_prepass(gpu::CommandBuffer* cmd, Root root) {
 // their pre-pass, atmosphere and clouds.
 void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const FrameInput& input,
                                        const FrameData& frame, std::uint64_t args_address) {
-    (void)input;
+    const bool wireframe = input.terrain.wireframe;
     root.mode = std::uint32_t(SurfaceMode::opaque);
     gpu::ColorAttachment color{.render_view = frame_targets.hdr.view(), .load = gpu::LoadOp::clear};
     {
@@ -89,7 +89,7 @@ void Renderer::Impl::record_scene_pass(gpu::CommandBuffer* cmd, Root root, const
                 gpu::bind_pso(cmd, surface_pso(surface_kind(system.bodies[i].body_class)));
                 root.detail = body_detail[i];
                 root.flags = i == showcase.earth() && !body_shell[i] ? ORBITAL_ROOT_FOLD_CLOUDS : 0;
-                draw_body(cmd, root, i);
+                draw_body(cmd, root, i, wireframe);
             }
             root.detail = 0;
             root.flags = 0;

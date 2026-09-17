@@ -146,7 +146,8 @@ struct SkySettings {
 };
 
 struct TerrainSettings {
-    bool near_tier = true; // the minor planet's cube-sphere patches close in; off keeps its sphere levels
+    bool near_tier = true;  // the minor planet's cube-sphere patches close in; off keeps its sphere levels
+    bool wireframe = false; // the patches' quad grid drawn over the surface, the quadtree's review
 };
 
 struct GasSettings {
