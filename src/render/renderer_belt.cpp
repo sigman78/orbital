@@ -120,7 +120,7 @@ void Renderer::Impl::record_cull_passes(gpu::CommandBuffer* cmd, const CullRoot&
 }
 
 void Renderer::Impl::record_belt_maps(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root,
-                                      unsigned rock_limit, bool light_map, float far_weight) {
+                                      unsigned rock_limit, bool light_map, float far_weight, bool veil) {
     if (light_map) {
         GpuTimingScope timing(timings, GpuPass::BeltLight);
         // Only the size-tail rocks splat; their ids are sorted, so the tier limit is a prefix.
@@ -140,7 +140,7 @@ void Renderer::Impl::record_belt_maps(gpu::CommandBuffer* cmd, const CullRoot& c
                                  .state = cull_root.state,
                                  .pass = rock_limit,
                                  .unused = 0};
-        record_belt_disc_bakes(cmd, bake_root, root, rock_limit, far_weight);
+        record_belt_disc_bakes(cmd, bake_root, root, rock_limit, far_weight, veil);
     }
 }
 
@@ -168,8 +168,8 @@ void Renderer::Impl::record_belt_light_pass(gpu::CommandBuffer* cmd, const CullR
 // rocks' coverage splatted every few dozen frames, both only while the far
 // tier is in use (and once before it first shows).
 void Renderer::Impl::record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root,
-                                            unsigned rock_limit, float far_weight) {
-    if (far_weight <= 0)
+                                            unsigned rock_limit, float far_weight, bool veil) {
+    if (far_weight <= 0 && !veil) // the veil reads the light bake at any distance
         return;
     const bool bake_light = !belt_disc_baked || frame_index % targets::belt_disc_light_interval == 0;
     const bool bake_rocks = !belt_disc_baked || frame_index % targets::belt_disc_rock_interval == 0;
@@ -244,7 +244,8 @@ void Renderer::Impl::record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, 
     }
 }
 
-void Renderer::Impl::record_belt_dust_passes(gpu::CommandBuffer* cmd, Root& root, bool enabled, float far_weight) {
+void Renderer::Impl::record_belt_dust_passes(gpu::CommandBuffer* cmd, Root& root, bool enabled, float far_weight,
+                                             bool veil) {
     // Belt dust scatters over everything the belt lies in front of, after the atmospheres.
     // Belt dust and the far-belt disc: the near march at half resolution, then
     // one composite that mixes it with the far tier by the LOD weight.
@@ -253,7 +254,7 @@ void Renderer::Impl::record_belt_dust_passes(gpu::CommandBuffer* cmd, Root& root
         root.mode = 0;
         fullscreen_pass(cmd, frame_targets.belt_dust, pso.belt.dust, root);
     }
-    if (near_dust || far_weight > 0) {
+    if (near_dust || far_weight > 0 || veil) { // the composite also lays the veil
         root.mode = 1;
         fullscreen_pass(cmd, frame_targets.hdr, pso.belt.dust_blend, root, true);
     }

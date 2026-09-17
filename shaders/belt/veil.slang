@@ -3,25 +3,27 @@
 #include "belt.slang"
 
 // The twinkle veil: a fine glittering texture over the whole belt, standing for the
-// multitude of distant rocks. Points on three planes through the slab, in cells that
+// multitude of unresolved rocks. Points on three planes through the slab, in cells that
 // orbit with their band (world-anchored, so the veil drifts and parallaxes), each with
-// a facet that turns at its own rate and flashes when it lines up with the half vector
-// between the sun and the camera, so the twinkles are sparse, sunward, and die in the
-// planets' shadows and the belt's own. Art on top of the rocks, not energy accounting:
-// the panel sets density, brightness, sharpness, rate, drift and tint. Both marches take
-// it at their crossing of each plane, the near one at half resolution and the far
-// composite at full, each with its own pixel scale.
+// a fixed random facet: a facet near the half vector between the sun and the camera
+// flashes in pulses at its own rate and phase, the rest only glow. Each point's light is
+// the projected area of an average unresolved rock at its distance, so the veil is a
+// pixel-fine sparkle that dims with distance, lit by the far-belt bake (the belt's
+// extinction and the planets' shadows over the plane) and attenuated by the dust in front.
+// Evaluated once per pixel in the dust composite, at full resolution, so a point is never
+// wider than a pixel. Art on top of the rocks, not energy accounting: the panel sets
+// density, brightness, sharpness, rate, drift and tint.
 
 static const int VEIL_LAYERS = 3;
 static const float VEIL_HEIGHTS[VEIL_LAYERS] = { -1.0, 0.0, 1.0 }; // in half thicknesses
 static const float VEIL_CELL = .05;            // base cell, world units; octaves double it by the pixel footprint
 static const float VEIL_MAX_FOOTPRINT = 8.0;   // plane units a pixel may span before the veil gives up (grazing)
-static const float VEIL_SIGMA = .75;           // a point's footprint, pixels of the pass
-static const float VEIL_DENSITY = 3.0;         // points per unit plane area at ring density 1 and the slider at 1x
-static const float VEIL_FLASH = 8.0;           // a flash's peak, relative to the sun's irradiance, at the slider's 1x
-static const float VEIL_GLOW = .08;            // a point's diffuse glow between flashes, likewise
-static const float VEIL_EXPONENT = 120.0;      // the glint lobe at sharpness 1: about six degrees to half power
-static const float VEIL_HANDOVER = .5;         // far-tier weight at which the far composite takes the veil from the near march
+static const float VEIL_SIGMA = .5;            // a point's footprint, pixels
+static const float VEIL_DENSITY = 6.0;         // points per unit plane area at ring density 1 and the slider at 1x
+static const float VEIL_ROCK_RADIUS = .03;     // the average unresolved rock, world units: its projected area sets a point's light
+static const float VEIL_ROCK_AREA = .8;        // a rock's projected area relative to its bounding disc, as rockclass.slang's SPLAT_AREA
+static const float VEIL_FLASH = 4.0;           // a flash's peak over that area, relative to the sun's irradiance, at the slider's 1x
+static const float VEIL_GLOW = .3;             // a point's diffuse glow between flashes, likewise
 static const float VEIL_RATE = 3.0;            // a point's pulse, radians per second, at rate 1: a flash every two seconds
 static const float BELT_SPIN_RATE = .0012, BELT_SHEAR = .35; // mirrors renderer_belt.cpp: the bands' orbital rates
 
@@ -70,10 +72,9 @@ void veilCrossings(BeltParams belt, float3 rd, out float crossings[VEIL_LAYERS])
 }
 
 // The veil's points around this pixel's crossing of one layer, as radiance on the pixel.
-// pixelScale: full-resolution pixels per pixel of the calling pass. irradiance: the sun's,
-// shadowed, at the crossing.
+// irradiance: the sun's, shadowed, at the crossing.
 float3 veilLayer(Frame* frame, BeltParams belt, ViewParams view, VeilParams veil, float3 p, int layer, float3 rd, float3 light,
-                 float irradiance, float pixelScale)
+                 float irradiance)
 {
     float3 e1 = normalize(cross(belt.normal, float3(0.0, 0.0, 1.0))), e2 = cross(e1, belt.normal);
     float3 q = p - belt.centre;
@@ -101,7 +102,10 @@ float3 veilLayer(Frame* frame, BeltParams belt, ViewParams view, VeilParams veil
     float3 wx = e1 * ca + e2 * sa, wy = e2 * ca - e1 * sa;
     // Screen offset per unit of plane offset, in this pass's pixels, with the perspective term.
     float z = max(dot(p, view.forward), .1);
-    float pixelsPerUnit = view.size.y / (2.0 * view.tanHalfFov) / z / pixelScale;
+    float pixelsPerUnit = view.size.y / (2.0 * view.tanHalfFov) / z;
+    // An average unresolved rock's covered area here, pixels, at most one: the veil is sub-pixel.
+    float rockPixels = VEIL_ROCK_RADIUS * pixelsPerUnit;
+    float area = min(VEIL_ROCK_AREA * 3.141592653589793 * rockPixels * rockPixels, 1.0);
     float2 perp = float2(dot(p, view.right), dot(p, view.up)) / z;
     float2 sx = (float2(dot(wx, view.right), dot(wx, view.up)) - perp * dot(wx, view.forward)) * pixelsPerUnit;
     float2 sy = (float2(dot(wy, view.right), dot(wy, view.up)) - perp * dot(wy, view.forward)) * pixelsPerUnit;
@@ -115,9 +119,9 @@ float3 veilLayer(Frame* frame, BeltParams belt, ViewParams view, VeilParams veil
     float facing = 1.0 - .15 / veil.sharpness; // the facet's alignment a flash needs
     float pulseWidth = 24.0;
     float reach = (2.5 * VEIL_SIGMA) * (2.5 * VEIL_SIGMA);
-    // One octave, cells three to six footprints wide, the four around the crossing: they cover
+    // One octave, cells two to four footprints wide, the four around the crossing: they cover
     // a point's reach, and the twinkling hides the pattern's switch of scale as the camera moves.
-    int octave = int(ceil(log2(3.0 * footprint / VEIL_CELL)));
+    int octave = int(ceil(log2(2.0 * footprint / VEIL_CELL)));
     float cellSize = VEIL_CELL * exp2(float(octave));
     float mu = min(density * cellSize * cellSize, 1.0); // sparse: at most one point per cell
     if (mu < 1e-4) return float3(0.0, 0.0, 0.0);
@@ -147,5 +151,5 @@ float3 veilLayer(Frame* frame, BeltParams belt, ViewParams view, VeilParams veil
             }
             sum += kernel * (VEIL_FLASH * glint + glow);
         }
-    return sum * (veil.brightness * irradiance) * veil.tint;
+    return sum * (veil.brightness * irradiance * area) * veil.tint;
 }

@@ -144,7 +144,7 @@ bool Renderer::draw(const FrameInput& supplied) {
                 s.record_shadow_pass(cmd, root);
             }
             s.record_belt_maps(cmd, cull_root, root, scratch->params.rock_limit, input.belt.light_map,
-                               frame.belt_disc.y);
+                               frame.belt_disc.y, input.belt.veil);
         }
         {
             GpuTimingScope timing(s.timings, GpuPass::Surface);
@@ -167,7 +167,7 @@ bool Renderer::draw(const FrameInput& supplied) {
             }
             {
                 GpuTimingScope child(s.timings, GpuPass::BeltDust);
-                s.record_belt_dust_passes(cmd, root, input.belt_dust.enabled, frame.belt_disc.y);
+                s.record_belt_dust_passes(cmd, root, input.belt_dust.enabled, frame.belt_disc.y, input.belt.veil);
             }
             // Coverage is also needed by sun visibility with TAA disabled.
             synchronize(cmd, access::fragment_sample, access::depth_read);

@@ -484,13 +484,13 @@ struct Renderer::Impl {
     void read_cull_counts(const CullScratch& scratch);
     void record_cull_passes(gpu::CommandBuffer* cmd, const CullRoot& root);
     void record_belt_maps(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root, unsigned rock_limit,
-                          bool light_map, float far_weight);
+                          bool light_map, float far_weight, bool veil);
     void record_belt_light_pass(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root, unsigned rock_limit);
     void record_belt_disc_bakes(gpu::CommandBuffer* cmd, const CullRoot& cull_root, Root root, unsigned rock_limit,
-                                float far_weight);
+                                float far_weight, bool veil);
     // Records draws inside the scene pass; other record_* methods own their render passes.
     void record_splat_mask_pass(gpu::CommandBuffer* cmd, Root root, std::uint64_t args_address);
-    void record_belt_dust_passes(gpu::CommandBuffer* cmd, Root& root, bool enabled, float far_weight);
+    void record_belt_dust_passes(gpu::CommandBuffer* cmd, Root& root, bool enabled, float far_weight, bool veil);
 
     // Bodies, sky and atmosphere (renderer_scene.cpp).
     void record_shadow_pass(gpu::CommandBuffer* cmd, Root root);

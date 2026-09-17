@@ -276,21 +276,6 @@ float4 march(float2 fullResPixel, int2 depthPixel)
         float shadowing = solarVisibilityMasked(frame, crossing, shadows) * beltExtinction(frame, crossing) * beltRockTransmittance(frame, crossing);
         sv.shading = sunLight.radiance / PI * shadowing * (sv.rockPhase + sv.rim) + sunLight.radiance * ROCK_AMBIENT;
     }
-    // The twinkle veil at its layers' crossings, lit as the splats are at the plane crossing.
-    VeilParams veil = veilParams(frame);
-    float discWeight = beltDiscParams(frame).weight;
-    veil.enabled = veil.enabled && discWeight < VEIL_HANDOVER; // the far composite carries it beyond
-    float veilT[VEIL_LAYERS];
-    float veilIrradiance = 0.0;
-    if (veil.enabled)
-    {
-        veil.brightness /= 1.0 - discWeight; // the composite scales the near march by the rest
-        veilCrossings(belt, rd, veilT);
-        float hn = dot(-belt.centre, belt.normal), dn = dot(rd, belt.normal);
-        float3 crossing = rd * clamp(abs(dn) < 1e-5 ? t0 : -hn / dn, t0, t1);
-        veilIrradiance = sunLight.radiance / PI * solarVisibilityMasked(frame, crossing, shadows) * beltExtinction(frame, crossing)
-                       * beltRockTransmittance(frame, crossing);
-    }
     float ds = (t1 - t0) / float(DUST_STEPS);
     float transmittance = 1.0;
     float3 radiance = float3(0.0, 0.0, 0.0);
@@ -304,10 +289,6 @@ float4 march(float2 fullResPixel, int2 depthPixel)
             for (int k = 0; k < SPECKLE_LAYERS; ++k)
                 if (layerT[k] > tPrev && layerT[k] <= t)
                     speckleSum += speckleLayer(belt, view, sv, rd * layerT[k], k);
-        if (veil.enabled && transmittance > .05) // a crossing the dust has hidden is skipped
-            for (int k = 0; k < VEIL_LAYERS; ++k)
-                if (veilT[k] > tPrev && veilT[k] <= t)
-                    radiance += transmittance * veilLayer(frame, belt, view, veil, rd * veilT[k], k, rd, light, veilIrradiance, 2.0);
         tPrev = t;
         float3 q = p - belt.centre;
         float density = beltDensity(q, belt) * belt.density * farScale;
@@ -322,10 +303,6 @@ float4 march(float2 fullResPixel, int2 depthPixel)
         transmittance *= stepTransmittance;
         if (transmittance < .005) break;
     }
-    if (veil.enabled && transmittance > .05)
-        for (int k = 0; k < VEIL_LAYERS; ++k)
-            if (veilT[k] > tPrev && veilT[k] <= t1)
-                radiance += transmittance * veilLayer(frame, belt, view, veil, rd * veilT[k], k, rd, light, veilIrradiance, 2.0);
     if (speckle)
     {
         for (int k = 0; k < SPECKLE_LAYERS; ++k)
@@ -371,6 +348,34 @@ float4 upsampleNear(float2 position)
     return weightSum > 1e-4 ? sum / weightSum : fallback;
 }
 
+// The twinkle veil at this pixel: its layers' crossings inside the belt segment (so the
+// scene occludes it), lit by the far-belt bake, behind the dust's transmittance.
+float3 veilAt(float2 position, float transmittance)
+{
+    Frame* frame = root.frame;
+    VeilParams veil = veilParams(frame);
+    if (!veil.enabled || transmittance < .02) return float3(0.0, 0.0, 0.0);
+    BeltParams belt = beltParams(frame);
+    ViewParams view = viewParams(frame);
+    LightParams sunLight = lightParams(frame);
+    float3 rd = rayDirection(frame, position);
+    float t0, t1, aboveSlab, beyondEdge, halfHeight;
+    if (!beltSegment(frame, rd, int2(position), t0, t1, aboveSlab, beyondEdge, halfHeight))
+        return float3(0.0, 0.0, 0.0);
+    float3 light = normalize(sunLight.position - rd * (.5 * (t0 + t1)));
+    float crossings[VEIL_LAYERS];
+    veilCrossings(belt, rd, crossings);
+    float3 sum = float3(0.0, 0.0, 0.0);
+    for (int k = 0; k < VEIL_LAYERS; ++k)
+    {
+        if (crossings[k] < t0 || crossings[k] > t1) continue;
+        float3 crossing = rd * crossings[k];
+        float3 baked = textures[TEX_BELT_DISC_LIGHT].SampleLevel(samplers[SAMPLER_CLAMP], discUv(frame, crossing), 0.0).rgb;
+        sum += veilLayer(frame, belt, view, veil, crossing, k, rd, light, sunLight.radiance / PI * baked.g * baked.b);
+    }
+    return sum * transmittance;
+}
+
 [shader("fragment")]
 float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 {
@@ -384,8 +389,9 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
         int2 depthPixel = int2(position.xy) * 2;
         return march(float2(depthPixel) + .5, depthPixel);
     }
-    // One blend: the near march and the far disc mixed by the LOD weight.
+    // One blend: the near march and the far disc mixed by the LOD weight, the veil behind their dust.
     float4 near = dust.enabled && weight < 1.0 ? upsampleNear(position.xy) : float4(0.0, 0.0, 0.0, 0.0);
     float4 far = weight > 0.0 ? farBelt(position.xy) : float4(0.0, 0.0, 0.0, 0.0);
-    return near * (1.0 - weight) + far * weight;
+    float4 blended = near * (1.0 - weight) + far * weight;
+    return blended + float4(veilAt(position.xy, 1.0 - blended.a), 0.0);
 }
