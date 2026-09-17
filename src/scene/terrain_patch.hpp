@@ -42,8 +42,11 @@ struct PatchBounds {
 PatchBounds patch_bounds(PatchKey key);
 
 // The patch's vertices, patch_vertex_count of them: the grid row by row from
-// the cell's low corner, then the skirt around it.
-void generate_patch(const MinorPlanetTerrain& terrain, PatchKey key, std::span<geometry::Vertex> out);
+// the cell's low corner, then the skirt around it. Returns the patch's
+// geometric error: the farthest the terrain at a quad's centre lies from the
+// quad's bilinear surface, in radii, the sphere's own curvature included; the
+// tier splits a patch while that error projects larger than its tolerance.
+float generate_patch(const MinorPlanetTerrain& terrain, PatchKey key, std::span<geometry::Vertex> out);
 // The index triples every patch shares, patch_index_count of them.
 std::vector<std::uint32_t> patch_indices();
 

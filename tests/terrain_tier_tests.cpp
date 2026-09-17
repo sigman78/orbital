@@ -24,6 +24,13 @@ TierView view_at(double distance, double radius, Vec3d forward = {0, 0, -1}) {
     return view;
 }
 
+// The caller's part: an error per generated patch, here a sphere's sagitta
+// over a cell of the level, a quarter per level.
+void generated(TerrainTier& tier) {
+    for (auto& g : tier.generate())
+        g.error = float(.3 / std::pow(4.0, g.key.level));
+}
+
 int main() {
     constexpr double radius = 2.5 / 15;
     TerrainTier tier;
@@ -33,12 +40,14 @@ int main() {
     // Close in it wants the six faces first, and takes over once they are resident.
     const TierView close = view_at(.2, radius);
     tier.update(close, 2);
-    assert(!tier.active() && tier.generate().size() == TerrainTier::generate_per_frame);
+    assert(!tier.active() && tier.generate().size() == 6); // the faces; nothing else is known yet
     for (unsigned i = 0; i < 6; i++)
         assert(tier.generate()[i].key.level == 0);
+    generated(tier);
     unsigned frame = 3, converged_at = 0;
     for (; frame < 200; frame++) {
         tier.update(close, frame);
+        generated(tier);
         assert(tier.generate().size() <= TerrainTier::generate_per_frame);
         if (tier.active() && tier.generate().empty()) {
             converged_at = frame;
@@ -63,6 +72,7 @@ int main() {
     assert(tier.draws().size() < facing);
     for (unsigned f = frame + 3; f < frame + 60; f++) {
         tier.update(view_at(.2, radius), f);
+        generated(tier);
         for (const auto& g : tier.generate())
             for (const auto& draw : tier.draws())
                 assert(draw.slot != g.slot);

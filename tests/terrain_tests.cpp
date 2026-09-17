@@ -92,8 +92,9 @@ void test_patches() {
             assert(std::abs(length(cube_direction(face, s, .25)) - 1) < 1e-12);
     std::vector<geometry::Vertex> a(patch_vertex_count), b(patch_vertex_count);
     const PatchKey left{2, 3, 4, 5}, right{2, 3, 5, 5};
-    generate_patch(terrain, left, a);
+    const float error = generate_patch(terrain, left, a);
     generate_patch(terrain, right, b);
+    assert(error > 0 && error < .01f); // a level-3 cell: its curvature and terrain, well under the height range
     for (unsigned y = 0; y < patch_side; y++)
         assert(a[y * patch_side + patch_quads] == b[y * patch_side]);
     const PatchBounds bounds = patch_bounds(left);

@@ -46,12 +46,11 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
     const float bound = float(cap + view.radius * 2 * MinorPlanetTerrain::height_max);
     if (!geometry::sphere_in_frustum(view.frustum, to_float(centre), bound))
         return {};
-    // The cell's edge on screen, foreshortened toward the limb: a patch seen
-    // edge-on needs no more quads than its silhouette shows.
+    // The projected size per radius of extent, from the patch's distance; the
+    // cell's edge in those units orders the generation.
     const double distance = std::max(length(centre), cap);
-    const double facing = std::max(-dot(normal, centre) / distance, .25);
-    return {.visible = true,
-            .pixels = float(view.radius * b.angular_size * facing * view.height_pixels / (distance * view.tan_y))};
+    const float scale = float(view.radius * view.height_pixels / (distance * view.tan_y));
+    return {.visible = true, .scale = scale, .pixels = float(b.angular_size) * scale};
 }
 
 std::uint32_t TerrainTier::allocate_children(const Node& parent) {
@@ -85,6 +84,11 @@ unsigned TerrainTier::slot_of(PatchKey key) const {
     return found == slots_by_key_.end() ? no_slot : found->second;
 }
 
+float TerrainTier::error_of(PatchKey key) const {
+    const unsigned slot = slot_of(key);
+    return slot == no_slot ? 0 : slots_[slot].error;
+}
+
 void TerrainTier::touch(PatchKey key) {
     if (const unsigned slot = slot_of(key); slot != no_slot)
         slots_[slot].used = frame_;
@@ -102,9 +106,10 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view) {
     }
     const PatchKey key = nodes_[index].key;
     touch(key);
-    // The valve: with the tree near the pool's size no patch splits further.
+    // A resident patch splits while its error shows on screen; the valve holds
+    // the tree under the pool's size.
     const bool split = key.level < patch_level_max && (nodes_[index].children || nodes() < slot_count - 64) &&
-                       seen.pixels > split_pixels * (nodes_[index].children ? hysteresis : 1);
+                       error_of(key) * seen.scale > error_pixels * (nodes_[index].children ? hysteresis : 1);
     if (split && !nodes_[index].children)
         nodes_[index].children = allocate_children(nodes_[index]);
     if (!split && nodes_[index].children)
@@ -181,6 +186,8 @@ void TerrainTier::update(const TierView& view, unsigned frame) {
     frame_ = frame;
     draws_.clear();
     requests_.clear();
+    for (const Generation& g : generate_) // last frame's, generated since
+        slots_[g.slot].error = g.error;
     generate_.clear();
     ensure_roots();
     const double distance = std::max(length(view.body_centre), view.radius);

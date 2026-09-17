@@ -73,8 +73,8 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     const std::uint64_t slot_offset = (frame_index & 1) * std::uint64_t(TerrainTier::generate_per_frame) * patch_bytes;
     std::uint8_t* staging = buffers.patch_staging.range().cpu + slot_offset;
     unsigned n = 0;
-    for (const TerrainTier::Generation& generation : terrain_tier.generate()) {
-        generate_patch(*minor_planet_terrain, generation.key, patch_scratch);
+    for (TerrainTier::Generation& generation : terrain_tier.generate()) {
+        generation.error = generate_patch(*minor_planet_terrain, generation.key, patch_scratch);
         auto* out = reinterpret_cast<Vertex*>(staging + n * patch_bytes);
         for (unsigned i = 0; i < patch_vertex_count; i++) {
             const geometry::Vertex& v = patch_scratch[i];
