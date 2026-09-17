@@ -175,13 +175,22 @@ void test_tiles() {
     generate_height_tile(terrain, right_key, rh);
     for (unsigned y = 0; y < tile_side; y++)
         assert(lh[y * tile_side + (tile_side - 1)] == rh[y * tile_side]);
-    // Colour tiles match expected layout.
+    // Colour tiles match expected layout, and neighbours agree on their shared
+    // edge's texels byte for byte (the seam test).
     std::vector<std::uint8_t> albedo(tile_side * tile_side * 4), norm(tile_side * tile_side * 4);
     generate_colour_tiles(terrain, key, a, albedo, norm);
     for (unsigned i = 0; i < tile_side * tile_side; i++) {
         assert(albedo[i * 4 + 3] == 255);
-        assert(norm[i * 4 + 2] > 0); // z component of normal is positive (outward)
+        assert(norm[i * 4 + 2] > 128); // the normal points outward
     }
+    std::vector<std::uint8_t> ra(tile_side * tile_side * 4), rn(tile_side * tile_side * 4);
+    generate_colour_tiles(terrain, right_key, rh, ra, rn);
+    generate_colour_tiles(terrain, left_key, lh, albedo, norm);
+    for (unsigned y = 0; y < tile_side; y++)
+        for (unsigned c = 0; c < 4; c++) {
+            const std::size_t l = (y * tile_side + tile_side - 1) * 4 + c, r = (y * tile_side) * 4 + c;
+            assert(albedo[l] == ra[r] && norm[l] == rn[r]);
+        }
     // Patch error positive and reasonable.
     const float error = patch_error(terrain, key);
     assert(error > 0 && error < .01f);

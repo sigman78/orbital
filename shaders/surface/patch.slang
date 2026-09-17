@@ -32,10 +32,10 @@ struct PatchResult {
     float3 worldPosition;
     float3 worldNormal;
     float3 localNormal;
-    uint level;
     float2 tileUV;
     uint slot;
     uint face;
+    float3 bary; // one-hot per triangle corner on the unindexed wireframe grid, zero otherwise
 };
 
 PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
@@ -50,7 +50,6 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     float skirt = grid.position.z;
     float2 cell_origin = patch.cell.xy;
     float cell_size = patch.cell.z;
-    uint level = uint(patch.cell.w);
     uint face = patch.tile[0];
     uint slot = patch.tile[1];
 
@@ -75,9 +74,9 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     r.worldPosition = inst.center_radius.xyz + mul(rotate, p) * radius;
     r.worldNormal = normalize(mul(rotate, d));
     r.localNormal = d;
-    r.level = level;
     r.tileUV = gm / PATCH_QUADS;
     r.slot = slot;
     r.face = face;
+    r.bary = grid.normal.xyz;
     return r;
 }

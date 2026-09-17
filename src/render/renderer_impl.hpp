@@ -377,6 +377,7 @@ struct Renderer::Impl {
     TerrainTier terrain_tier;
     GpuImage tile_height, tile_albedo, tile_normal; // the three tile arrays, 1024 layers each
     std::uint64_t grid_vertices_address = 0, grid_indices_address = 0;
+    std::uint64_t grid_wire_address = 0; // the grid unindexed, a one-hot barycentric per corner, for the wireframe
     unsigned grid_index_count = 0;
     struct PatchCopy {
         std::uint64_t source, destination, bytes;

@@ -215,6 +215,9 @@ Fixed in the PR after review:
   Pending slots are not evicted, and `mark_resident(slot, key)` checks the key.
 - The motion pass placed the previous position with the unmorphed height and no skirt drop, so morphing
   patches carried false motion vectors into TAA.
+- The wireframe was an analytic grid in the face's cell coordinates, not the mesh. It now draws the
+  triangles from a barycentric each corner carries (an unindexed copy of the grid, drawn only with the
+  overlay on), with the patch borders from the tile coordinate; the sphere path has no overlay.
 - `init` bound the 1x1 placeholder to every array slot after `create_terrain_tier` had bound the tile
   arrays, so the shaders sampled the placeholder: every height read as `height_min` (a smooth sphere at
   0.95 radii) and the albedo as black. The placeholder now goes in first. Found because the near tier
@@ -229,13 +232,16 @@ Open, in the order they matter:
    the displaced vertex. Heights reach ±0.02 radii and `range[8]` is about 0.01 radii at 900 px, so low
    over raised ground the tier under-selects and the morph disagrees with the selection. The tier needs the
    camera's height over the terrain, not the sphere.
-3. **Tile normals are too shallow and the tangent frame is not on the sphere.** `generate_colour_tiles`
-   differentiates in face s and t units; one unit of s is 0.735 radians at the face centre (more toward
-   the edges), so slopes and the albedo's slope input are about 1.36 times too small there. `patchMaterial`
-   uses the raw face S and T axes as the tangent frame; off the face centre they are not tangent to the
-   sphere. Acceptance 2.
-4. **Shading seams at tile edges**: edge texels use one-sided differences, so neighbouring tiles disagree
-   about the shared edge's normal. Generate heights with a one-texel border (67x67).
+3. **The tile tangent frame is only nearly orthonormal.** The slopes are now per unit of arc (the chord
+   between the two neighbours) and the shader projects the face's S and T axes onto the sphere's tangent
+   plane, but off the face centre those projections are not orthogonal to each other, so the shading
+   normal tilts slightly. Acceptance 2 compares the tile path with the equirect path: with the seams gone
+   the mean brightness matches (19.3 against 19.2 at bookmark 10, 1600x900) and 23 percent of pixels still
+   differ by over eight codes, the tiles resolving finer relief than the 2048-texel map and the height
+   trace missing (item 6).
+4. Fixed after review: shading seams at tile edges. `generate_colour_tiles` samples a one-texel ring around
+   the tile so both sides of an edge take the same central difference; `terrain_tests` checks that
+   neighbours' edge texels match byte for byte.
 5. **`SKIRT_DROP` is a fixed 0.002 radii**, not a fraction of the cell size; at levels 0 and 1 the cracks
    of item 1 exceed it.
 6. **The patch material drops the `root.detail` fade and the regolith grain.** The height-trace shadow is

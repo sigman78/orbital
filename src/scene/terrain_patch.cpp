@@ -182,25 +182,34 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
     ORBITAL_ASSERT(albedo.size() == tile_side * tile_side * 4);
     ORBITAL_ASSERT(normal.size() == tile_side * tile_side * 4);
     const Cell cell = cell_of(key);
-    constexpr unsigned quads = tile_side - 1;
+    constexpr unsigned quads = tile_side - 1, bordered = tile_side + 2;
     const float range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
-    for (unsigned y = 0; y < tile_side; y++)
-        for (unsigned x = 0; x < tile_side; x++) {
+    const auto direction = [&](int x, int y) {
+        return cube_direction(key.face, cell.s0 + x * cell.size / quads, cell.t0 + y * cell.size / quads);
+    };
+    // The tile's heights with a one-texel ring around them, sampled here, so an
+    // edge texel's central difference is the one its neighbour tile computes.
+    const PatchBounds bounds = patch_bounds(key);
+    const MinorPlanetTerrain::Region region = terrain.region(bounds.centre,
+                                                             bounds.angular_radius + 2 * bounds.angular_size / quads);
+    std::vector<float> h(bordered * bordered);
+    const auto at = [&](int x, int y) -> float& { return h[(y + 1) * bordered + (x + 1)]; };
+    for (int y = -1; y <= int(tile_side); y++)
+        for (int x = -1; x <= int(tile_side); x++)
+            at(x, y) = x >= 0 && y >= 0 && x < int(tile_side) && y < int(tile_side)
+                           ? heights[y * tile_side + x]
+                           : terrain.height(direction(x, y), region);
+    for (int y = 0; y < int(tile_side); y++)
+        for (int x = 0; x < int(tile_side); x++) {
             const unsigned i = y * tile_side + x;
-            const double s = cell.s0 + double(x) * cell.size / quads;
-            const double t = cell.t0 + double(y) * cell.size / quads;
-            const Vec3d d = cube_direction(key.face, s, t);
-            const float h = heights[i];
-            const float hx0 = x > 0 ? heights[i - 1] : h;
-            const float hx1 = x < quads ? heights[i + 1] : h;
-            const float hy0 = y > 0 ? heights[i - tile_side] : h;
-            const float hy1 = y < quads ? heights[i + tile_side] : h;
-            const float step = float(cell.size) / quads;
-            const float dx = (hx1 - hx0) / (x > 0 && x < quads ? 2 * step : step);
-            const float dy = (hy1 - hy0) / (y > 0 && y < quads ? 2 * step : step);
+            const Vec3d d = direction(x, y);
+            const float hc = at(x, y);
+            // Slopes per unit of arc: the height change over the chord between the two neighbours.
+            const float dx = (at(x + 1, y) - at(x - 1, y)) / float(length(direction(x + 1, y) - direction(x - 1, y)));
+            const float dy = (at(x, y + 1) - at(x, y - 1)) / float(length(direction(x, y + 1) - direction(x, y - 1)));
             const float slope = std::sqrt(dx * dx + dy * dy);
             const Vec3f n = normalized(Vec3f{-dx, -dy, 1});
-            const Vec3f a = terrain.albedo(d, h, std::min(slope, 1.0f));
+            const Vec3f a = terrain.albedo(d, hc, std::min(slope, 1.0f));
             const auto u8 = [](float v) { return std::uint8_t(std::clamp(v * 255.0f + 0.5f, 0.0f, 255.0f)); };
             const std::size_t p = i * 4;
             albedo[p] = u8(a.x);
@@ -210,7 +219,7 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
             normal[p] = u8(n.x * .5f + .5f);
             normal[p + 1] = u8(n.y * .5f + .5f);
             normal[p + 2] = u8(n.z * .5f + .5f);
-            normal[p + 3] = u8((h - MinorPlanetTerrain::height_min) / range);
+            normal[p + 3] = u8((hc - MinorPlanetTerrain::height_min) / range);
         }
 }
 

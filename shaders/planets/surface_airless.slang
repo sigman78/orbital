@@ -104,8 +104,11 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     float3 albedo = textureArrays[TEX_ARRAY_TERRAIN_ALBEDO].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0).rgb;
     float4 nm = textureArrays[TEX_ARRAY_TERRAIN_NORMAL].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0);
     float3 mapN = nm.xyz * 2.0 - 1.0;
-    float3 T = normalize(mul(rotate, FACE_S[face]));
-    float3 B = normalize(mul(rotate, FACE_T[face]));
+    // The tile's slopes run along the face's s and t on the sphere: the face axes
+    // projected onto the tangent plane (not orthogonal off the face centre; small).
+    float3 nl = normalize(input.localNormal);
+    float3 T = normalize(mul(rotate, FACE_S[face] - nl * dot(nl, FACE_S[face])));
+    float3 B = normalize(mul(rotate, FACE_T[face] - nl * dot(nl, FACE_T[face])));
     Material m;
     m.N = normalize(T * mapN.x + B * mapN.y + N * max(mapN.z, .2));
     m.albedo = albedo;
@@ -115,29 +118,19 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     return m;
 }
 
-// The near tier's review: the patch's quad grid over the surface, in the cube
-// face's cell coordinates of scene/terrain_patch.hpp (the face by the major
-// axis, s and t through the tangent warp), the patch borders in a second
-// colour. Lines are a pixel and a half wide from the coordinates' derivatives,
-// and they take their brightness from the sunlight so they read at any exposure.
-static const float3 CUBE_AXIS[6] = { float3(1, 0, 0), float3(-1, 0, 0), float3(0, 1, 0), float3(0, -1, 0), float3(0, 0, 1), float3(0, 0, -1) };
-static const float3 CUBE_S[6] = { float3(0, 0, -1), float3(0, 0, 1), float3(1, 0, 0), float3(1, 0, 0), float3(1, 0, 0), float3(-1, 0, 0) };
-static const float3 CUBE_T[6] = { float3(0, 1, 0), float3(0, 1, 0), float3(0, 0, -1), float3(0, 0, 1), float3(0, 1, 0), float3(0, 1, 0) };
-
-float3 wireframe(float3 colour, float3 n, uint level, float3 irradiance)
+// The near tier's review: the drawn triangles, from the barycentric coordinate
+// the unindexed wireframe grid carries (a pixel-wide line at each edge), and the
+// patch borders in a second colour from the tile coordinate. The lines take
+// their brightness from the sunlight so they read at any exposure.
+float3 wireframe(float3 colour, SurfaceVaryings input, float3 irradiance)
 {
-    float3 a = abs(n);
-    int face = a.x >= a.y && a.x >= a.z ? (n.x > 0 ? 0 : 1) : a.y >= a.z ? (n.y > 0 ? 2 : 3) : (n.z > 0 ? 4 : 5);
-    float axis = dot(n, CUBE_AXIS[face]);
-    float2 uv = float2(dot(n, CUBE_S[face]), dot(n, CUBE_T[face])) / axis;
-    float2 st = atan(uv * TAN_K) / EVERITT_K;
-    float2 quads = st * (PATCH_QUADS / 2.0 * exp2(float(level)));
-    float2 cell = frac(quads), patch = frac(st * (0.5 * exp2(float(level))));
-    float2 lineQuad = 1.0 - smoothstep(0.0, fwidth(quads) * 1.5, min(cell, 1.0 - cell));
-    float2 linePatch = 1.0 - smoothstep(0.0, fwidth(patch) * 1.5, min(patch, 1.0 - patch));
+    float3 edge = input.bary / max(fwidth(input.bary), 1e-6);
+    float lineTriangle = 1.0 - smoothstep(0.0, 1.0, min(edge.x, min(edge.y, edge.z)));
+    float2 border = min(input.tileUV, 1.0 - input.tileUV) / max(fwidth(input.tileUV), 1e-6);
+    float linePatch = 1.0 - smoothstep(0.0, 1.5, min(border.x, border.y));
     float bright = max(luma709(irradiance) * .04, 1e-4);
-    colour = lerp(colour, float3(.15, 1.0, .35) * bright, max(lineQuad.x, lineQuad.y) * .8);
-    return lerp(colour, float3(1.0, .75, .2) * bright, max(linePatch.x, linePatch.y));
+    colour = lerp(colour, float3(.15, 1.0, .35) * bright, lineTriangle * .8);
+    return lerp(colour, float3(1.0, .75, .2) * bright, linePatch);
 }
 
 [shader("fragment")]
@@ -151,9 +144,7 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
                                                     : moonMaterial(input, rotate, s.N, s.L, s.visibility, root.detail);
     float3 irradiance = sunlight(root.frame);
     float3 colour = shadeSurface(m, s.L, s.V, irradiance, earthParams(root.frame).glint, lightParams(root.frame).ambientFill);
-    if (root.flags & ORBITAL_ROOT_WIREFRAME) {
-        uint wfLevel = (root.flags & ORBITAL_ROOT_PATCHES) ? input.patchLevel : root.flags >> 8;
-        colour = wireframe(colour, normalize(input.localNormal), wfLevel, irradiance);
-    }
+    if ((root.flags & (ORBITAL_ROOT_WIREFRAME | ORBITAL_ROOT_PATCHES)) == (ORBITAL_ROOT_WIREFRAME | ORBITAL_ROOT_PATCHES))
+        colour = wireframe(colour, input, irradiance);
     return float4(colour, 1);
 }

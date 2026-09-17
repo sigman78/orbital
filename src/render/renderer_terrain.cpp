@@ -43,6 +43,12 @@ void Renderer::Impl::create_terrain_tier() {
                            {0, 0, 0, 0}};
     grid_vertices_address = upload_static(bytes_of(gpu_vertices));
     grid_indices_address = upload_static(bytes_of(grid.indices));
+    std::vector<Vertex> wire(grid.indices.size());
+    for (std::size_t i = 0; i < wire.size(); i++) {
+        wire[i] = gpu_vertices[grid.indices[i]];
+        wire[i].normal = {i % 3 == 0 ? 1.f : 0.f, i % 3 == 1 ? 1.f : 0.f, i % 3 == 2 ? 1.f : 0.f, 0};
+    }
+    grid_wire_address = upload_static(bytes_of(wire));
     grid_index_count = unsigned(grid.indices.size());
     buffers.patch_records = UniqueGpuHeap::create(device, TerrainTier::slot_count * sizeof(PatchInstance),
                                                   gpu::MemoryType::gpu_only);
@@ -193,13 +199,18 @@ void Renderer::Impl::draw_body(gpu::CommandBuffer* cmd, Root& root, unsigned bod
         return;
     }
     root.base = body;
-    root.vertices = grid_vertices_address;
     root.patches = reinterpret_cast<std::uint64_t>(buffers.patch_records.range().gpu);
     root.flags = ORBITAL_ROOT_PATCHES | (wireframe ? ORBITAL_ROOT_WIREFRAME : 0);
-    const gpu::GpuRange indices{reinterpret_cast<void*>(grid_indices_address), std::uint64_t(grid_index_count) * 4};
     const unsigned count = unsigned(terrain_tier.draws().size());
     stats.frame.draw_calls++;
-    gpu::draw_indexed(cmd, root, indices, gpu::IndexType::uint32, grid_index_count, count);
+    if (wireframe) { // the unindexed grid: the corner barycentrics the overlay needs
+        root.vertices = grid_wire_address;
+        gpu::draw(cmd, root, grid_index_count, count);
+    } else {
+        root.vertices = grid_vertices_address;
+        const gpu::GpuRange indices{reinterpret_cast<void*>(grid_indices_address), std::uint64_t(grid_index_count) * 4};
+        gpu::draw_indexed(cmd, root, indices, gpu::IndexType::uint32, grid_index_count, count);
+    }
     stats.frame.triangles += count * (grid_index_count / 3);
 }
 

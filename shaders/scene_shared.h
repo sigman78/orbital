@@ -26,7 +26,7 @@ using ShaderMatrix4 = float[16];
 #define ORBITAL_SURFACE_SPLAT_MASK 4
 // Root.flags for a body draw.
 #define ORBITAL_ROOT_FOLD_CLOUDS 1 // the cloud shell is not drawn: the ground shader blends the clouds in
-#define ORBITAL_ROOT_WIREFRAME 2   // a terrain patch's quad grid drawn over it; its level in bits 8 to 15
+#define ORBITAL_ROOT_WIREFRAME 2   // the near tier's triangles and patch borders drawn over it (with ORBITAL_ROOT_PATCHES)
 #define ORBITAL_ROOT_PATCHES 4     // this draw uses the CDLOD patch path: root.patches points to PatchInstance records
 // The minor planet's terrain height range in radii (MinorPlanetTerrain::height_min/max).
 #define MINOR_PLANET_HEIGHT_MIN (-.05)
