@@ -77,7 +77,9 @@ GROUPS = {
                   f'name=belt-no-disc bookmark=5 disc=0 {STILL}',
                   f'name=belt-splat-0 bookmark=5 splat=0 {STILL}',
                   f'name=belt-high bookmark=5 high {STILL}',
-                  f'name=dawn-high bookmark=4 high {STILL}'],
+                  f'name=dawn-high bookmark=4 high {STILL}',
+                  f'name=dust-shadow bookmark=6 {STILL}',
+                  f'name=dust-grazing bookmark=7 {STILL}'],
     },
     'taa': {
         'paths': ['shaders/aa/*', 'shaders/scene/motes.slang'],
