@@ -146,7 +146,7 @@ constexpr SurfaceKind surface_kind(BodyClass body_class) {
 // Culling counters and generated instances live in another device-only heap.
 struct HeapLayout {
     std::uint64_t static_budget = 80ull << 20; // meshes, rock records and sky tables, written once
-    std::uint64_t cull_offset = 1280;          // FrameData (1104 bytes, padded), then culling parameters/counters
+    std::uint64_t cull_offset = 1280;          // FrameData (1136 bytes, padded), then culling parameters/counters
     std::uint64_t instance_offset = 1280 + 8192;
     std::uint64_t staging_budget = 64ull << 20; // bounded upload staging, released after start-up
     std::uint64_t ui_bytes = 4ull << 20;

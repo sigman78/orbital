@@ -75,7 +75,9 @@ Between the rocks a half-resolution march through the same density field scatter
 Rocks projecting under the point cut-off (a belt setting, 0.06 pixels by default) are not drawn; with the
 analytic speckle on, the march stands in for them with a point field on three planes through the slab,
 cells co-rotating with their band, rocks drawn from the population's size law, lit and attenuated as the
-splats are, so the cut-off can move without the belt's brightness moving (belt/dust.slang).
+splats are, so the cut-off can move without the belt's brightness moving (belt/dust.slang). A second
+toggle, the twinkle veil (belt/veil.slang), is art rather than accounting: sparse sunward flashes and a faint
+glow from points that orbit with the belt, taken by whichever march carries the belt at that distance.
 
 ## Frame
 

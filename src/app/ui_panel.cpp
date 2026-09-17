@@ -277,6 +277,19 @@ void belt_controls(render::BeltSettings& belt, render::BeltDustSettings& dust, f
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Rocks projecting smaller than this are not drawn; the splats fade out towards it.");
     ImGui::Checkbox("Analytic speckle under it", &belt.speckle); // the dust march's point field stands in for them
+    ImGui::Checkbox("Twinkle veil", &belt.veil);                 // sparse glints over the whole belt, drifting with it
+    ImGui::BeginDisabled(!belt.veil);
+    ImGui::SliderFloat("Veil density", &belt.veil_density, .1f, 10.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("Veil brightness", &belt.veil_brightness, .1f, 10.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("Glint sharpness", &belt.veil_sharpness, .1f, 10.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("Twinkle rate", &belt.veil_rate, .05f, 10.f, "%.2f x", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("Veil drift", &belt.veil_drift, 0.f, 50.f, "%.1f x belt");
+    ImGui::ColorEdit3("Veil tint", belt.veil_tint, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_Float);
+    if (ImGui::SmallButton("Reset veil")) {
+        belt.veil_density = belt.veil_brightness = belt.veil_sharpness = belt.veil_rate = belt.veil_drift = 1;
+        belt.veil_tint[0] = belt.veil_tint[1] = belt.veil_tint[2] = 1;
+    }
+    ImGui::EndDisabled();
     ImGui::Checkbox("Light splats in both cull passes (F7)", &belt.splat_light_twice);
     ImGui::Checkbox("Freeze culling", &belt.freeze_culling); // the rock set, levels and splats of this view stay put
     if (ImGui::IsItemHovered())

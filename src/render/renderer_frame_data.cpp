@@ -123,6 +123,10 @@ FrameData Renderer::Impl::build_frame(const FrameInput& input) {
     frame.dust_tint = {input.belt_dust.tint[0], input.belt_dust.tint[1], input.belt_dust.tint[2], 0};
     frame.speckle = {input.belt.speckle ? input.belt.point_cutoff : 0.f,
                      float(active_rock_count(input)) / belt_population_area, 0, 0};
+    frame.veil = {input.belt.veil ? input.belt.veil_density : 0.f, input.belt.veil_brightness,
+                  input.belt.veil_sharpness, input.belt.veil_rate};
+    frame.veil_tint = {input.belt.veil_tint[0], input.belt.veil_tint[1], input.belt.veil_tint[2],
+                       input.belt.veil_drift};
     // The jitter seed counts frames, not seconds: a paused simulation still decorrelates the
     // marches for the temporal pass, and a shot's frame gets the same seed wherever it sits.
     frame.sequence = {float(frames_since_cut % 4096), 0, 0, 0};

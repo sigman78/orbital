@@ -7,6 +7,7 @@
 #include "../lib/color.slang"
 #include "../lib/scattering.slang"
 #include "belt.slang"
+#include "veil.slang"
 
 // The belt dust and the far-belt disc share these: the medium's constants,
 // the sunlight bake over the belt plane, and the far tier's march through
@@ -134,13 +135,31 @@ float4 farBelt(float2 position)
     float3 light = normalize(sunLight.position - rd * (.5 * (t0 + t1)));
     float dustPhaseValue = dustPhase(dot(light, rd));
     float rockPhase = lambertSpherePhase(acos(clamp(dot(light, -rd), -1.0, 1.0)));
+    // The twinkle veil at its layers' crossings, lit by the baked sunlight there.
+    VeilParams veil = veilParams(frame);
+    veil.enabled = veil.enabled && disc.weight >= VEIL_HANDOVER; // the near march carries it until then
+    veil.brightness /= max(disc.weight, VEIL_HANDOVER);          // the composite scales the far tier by the weight
+    float veilT[VEIL_LAYERS];
+    veilCrossings(belt, rd, veilT);
     float ds = (t1 - t0) / float(DISC_STEPS);
     float transmittance = 1.0;
     float3 radiance = float3(0.0, 0.0, 0.0);
+    float tPrev = t0;
     for (int i = 0; i < DISC_STEPS; ++i)
     {
         float t = t0 + (float(i) + jitter) * ds;
         float3 p = rd * t;
+        if (veil.enabled)
+        {
+            for (int k = 0; k < VEIL_LAYERS; ++k)
+                if (veilT[k] > tPrev && veilT[k] <= t)
+                {
+                    float3 crossing = rd * veilT[k];
+                    float3 baked = textures[TEX_BELT_DISC_LIGHT].SampleLevel(samplers[SAMPLER_CLAMP], discUv(frame, crossing), 0.0).rgb;
+                    radiance += transmittance * veilLayer(frame, belt, view, veil, crossing, k, rd, light, sunLight.radiance / PI * baked.g * baked.b, 1.0);
+                }
+            tPrev = t;
+        }
         float3 q = p - belt.centre;
         float h = dot(q, belt.normal);
         float r = length(q - belt.normal * h);
@@ -167,5 +186,13 @@ float4 farBelt(float2 position)
         transmittance *= stepTransmittance;
         if (transmittance < .005) break;
     }
+    if (veil.enabled)
+        for (int k = 0; k < VEIL_LAYERS; ++k)
+            if (veilT[k] > tPrev && veilT[k] <= t1)
+            {
+                float3 crossing = rd * veilT[k];
+                float3 baked = textures[TEX_BELT_DISC_LIGHT].SampleLevel(samplers[SAMPLER_CLAMP], discUv(frame, crossing), 0.0).rgb;
+                radiance += transmittance * veilLayer(frame, belt, view, veil, crossing, k, rd, light, sunLight.radiance / PI * baked.g * baked.b, 1.0);
+            }
     return float4(radiance, 1.0 - transmittance);
 }

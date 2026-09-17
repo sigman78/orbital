@@ -59,6 +59,10 @@ struct BeltSettings {
     bool freeze_culling = false; // hold the cull camera (frustum, levels, far-tier weight) so the view can inspect it
     float point_cutoff = .06f; // projected radius in pixels under which a rock is not drawn (the splats fade out to it)
     bool speckle = false;      // the dust march stands in for the rocks under the cut-off with an analytic point field
+    // The twinkle veil (belt/veil.slang): sparse glints over the whole belt, drifting with it.
+    bool veil = false;
+    float veil_density = 1, veil_brightness = 1, veil_sharpness = 1, veil_rate = 1, veil_drift = 1;
+    float veil_tint[3] = {1, 1, 1};
 
     constexpr float billboard_radius() const {
         return splat_radii[std::min<std::size_t>(unsigned(splat_mode), splat_radii.size() - 1)];

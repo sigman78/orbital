@@ -62,7 +62,6 @@ static const float SPLAT_RIM = .12;     // as cull.slang
 static const float ROCK_SIZE_MIN = .5, ROCK_SIZE_MAX = 12.0, ROCK_RADIUS_SCALE = .025; // mirrors geometry.cpp's population and belt::rock_radius_scale
 static const float ROCK_SIZE_RATIO = 1.0 / 576.0; // (max / min)^(1 - 3), the size law's inverse-transform constant
 static const float ROCK_AXIS_SQUARE = 1.0208;     // E[(.75 + .5 u)^2], the generator's per-axis scale jitter
-static const float BELT_SPIN_RATE = .0012, BELT_SHEAR = .35; // mirrors renderer_belt.cpp
 
 struct SpeckleView
 {
@@ -277,6 +276,21 @@ float4 march(float2 fullResPixel, int2 depthPixel)
         float shadowing = solarVisibilityMasked(frame, crossing, shadows) * beltExtinction(frame, crossing) * beltRockTransmittance(frame, crossing);
         sv.shading = sunLight.radiance / PI * shadowing * (sv.rockPhase + sv.rim) + sunLight.radiance * ROCK_AMBIENT;
     }
+    // The twinkle veil at its layers' crossings, lit as the splats are at the plane crossing.
+    VeilParams veil = veilParams(frame);
+    float discWeight = beltDiscParams(frame).weight;
+    veil.enabled = veil.enabled && discWeight < VEIL_HANDOVER; // the far composite carries it beyond
+    float veilT[VEIL_LAYERS];
+    float veilIrradiance = 0.0;
+    if (veil.enabled)
+    {
+        veil.brightness /= 1.0 - discWeight; // the composite scales the near march by the rest
+        veilCrossings(belt, rd, veilT);
+        float hn = dot(-belt.centre, belt.normal), dn = dot(rd, belt.normal);
+        float3 crossing = rd * clamp(abs(dn) < 1e-5 ? t0 : -hn / dn, t0, t1);
+        veilIrradiance = sunLight.radiance / PI * solarVisibilityMasked(frame, crossing, shadows) * beltExtinction(frame, crossing)
+                       * beltRockTransmittance(frame, crossing);
+    }
     float ds = (t1 - t0) / float(DUST_STEPS);
     float transmittance = 1.0;
     float3 radiance = float3(0.0, 0.0, 0.0);
@@ -287,12 +301,14 @@ float4 march(float2 fullResPixel, int2 depthPixel)
         float t = t0 + (float(i) + jitter) * ds;
         float3 p = rd * t;
         if (speckle)
-        {
             for (int k = 0; k < SPECKLE_LAYERS; ++k)
                 if (layerT[k] > tPrev && layerT[k] <= t)
                     speckleSum += speckleLayer(belt, view, sv, rd * layerT[k], k);
-            tPrev = t;
-        }
+        if (veil.enabled && transmittance > .05) // a crossing the dust has hidden is skipped
+            for (int k = 0; k < VEIL_LAYERS; ++k)
+                if (veilT[k] > tPrev && veilT[k] <= t)
+                    radiance += transmittance * veilLayer(frame, belt, view, veil, rd * veilT[k], k, rd, light, veilIrradiance, 2.0);
+        tPrev = t;
         float3 q = p - belt.centre;
         float density = beltDensity(q, belt) * belt.density * farScale;
         if (density < 1e-5) continue;
@@ -306,6 +322,10 @@ float4 march(float2 fullResPixel, int2 depthPixel)
         transmittance *= stepTransmittance;
         if (transmittance < .005) break;
     }
+    if (veil.enabled && transmittance > .05)
+        for (int k = 0; k < VEIL_LAYERS; ++k)
+            if (veilT[k] > tPrev && veilT[k] <= t1)
+                radiance += transmittance * veilLayer(frame, belt, view, veil, rd * veilT[k], k, rd, light, veilIrradiance, 2.0);
     if (speckle)
     {
         for (int k = 0; k < SPECKLE_LAYERS; ++k)

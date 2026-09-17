@@ -132,6 +132,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.belt.disc = options.disc != 0;
     app.belt.point_cutoff = options.point_cutoff;
     app.belt.speckle = options.speckle != 0;
+    app.belt.veil = options.veil != 0;
     app.belt.lod_scale = options.lod_scale;
     app.vsync = options.vsync < 0 ? options.benchmark.empty() : options.vsync != 0;
     app.tone.exposure = options.exposure;
