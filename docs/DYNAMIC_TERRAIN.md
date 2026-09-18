@@ -241,6 +241,14 @@ Fixed in the PR after review:
   differences, and the shader rotates it: no frame, so no face can disagree. `terrain_tests` compares
   the normals of every cube-edge texel pair (168 pairs; corners excepted, where three grids meet) and
   finds them equal. Item 3 below is closed by the same change.
+- Seams still showed on crater slopes under a grazing sun after the normals were fixed: the crater-shadow
+  trace, which stepped through the tile's own heights along the face's skewed axes and stopped at the
+  tile's edge, so one side of a border found a wall's shadow and the other did not. The patch path now
+  traces through the baked equirect map exactly as the sphere path does, one continuous field over the
+  body (at the map's resolution, blocky close in; a tile trace that continues into the neighbouring
+  tiles would be the finer answer). `TerrainSettings::debug` (`--terrain-debug`, the panel's Patch view)
+  draws the patch path one term at a time (tile coordinate, normal, elevation, the shadow term, morph
+  and level) so a seam is attributed to the term that carries it.
 - `init` bound the 1x1 placeholder to every array slot after `create_terrain_tier` had bound the tile
   arrays, so the shaders sampled the placeholder: every height read as `height_min` (a smooth sphere at
   0.95 radii) and the albedo as black. The placeholder now goes in first. Found because the near tier
@@ -266,10 +274,10 @@ Open, in the order they matter (the numbering is kept from the review):
    shades as its parent, which its unsplit neighbour matches at the shared edge.
 5. **`SKIRT_DROP` is a fixed 0.002 radii**, not a fraction of the cell size. With 1 fixed it only covers
    the load transient; at levels 0 and 1 that transient's gap can exceed it.
-6. Mostly fixed: the patch path traces the crater-wall shadow through the tile's own heights
-   (`tileShadow`, clamped at the tile's edge, so a wall within six texels of an edge loses part of its
-   shadow), fades the tilt and the trace by `root.detail`, and passes the albedo's slope as `1 - n.z` as
-   the bake does (the raw gradient had brightened every slope). The regolith grain is still missing.
+6. Mostly fixed: the crater-wall shadow is the equirect trace (see above), the tilt and the trace fade by
+   `root.detail`, and the albedo's slope term is the bake's `1 - n.z` (the raw gradient had brightened
+   every slope). The regolith grain is still missing, and the shadow's resolution is the map's, not the
+   tile's.
 7. **Acceptance 6 is not measured** (main-thread time under 0.5 ms with 32 jobs in flight); the panel now
    shows the queue, the ring and the last tile's generation time, so it can be. Acceptance 3 (one draw a
    pass) was not read off the panel.

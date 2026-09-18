@@ -267,7 +267,12 @@ void quality_controls(bool& high, render::TerrainSettings& terrain) {
     ImGui::TextDisabled(high ? "520k rocks" : "280k rocks");
     ImGui::Checkbox("Near tier", &terrain.near_tier); // the minor planet's patches close in; off keeps its sphere
     ImGui::SameLine();
-    ImGui::Checkbox("Wireframe", &terrain.wireframe); // the patches' quad grid over the surface
+    ImGui::Checkbox("Wireframe", &terrain.wireframe); // the patches' triangles over the surface
+    const char* debug_views[] = {"Shaded",    "Tile coordinate", "Normal",
+                                 "Elevation", "Crater shadow",   "Morph and level"};
+    int debug = int(terrain.debug);
+    if (ImGui::Combo("Patch view", &debug, debug_views, 6))
+        terrain.debug = unsigned(debug);
 }
 void anti_aliasing_controls(render::AntiAliasingSettings& settings) {
     ImGui::Checkbox("Temporal (F5)", &settings.temporal_aa);

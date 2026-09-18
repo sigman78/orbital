@@ -19,7 +19,7 @@ struct SurfaceVaryings {
     [[vk::location(5)]] nointerpolation uint tileSlot : TILE_SLOT;
     [[vk::location(6)]] nointerpolation uint tileFace : TILE_FACE;
     [[vk::location(7)]] float3 bary : BARYCENTRIC;
-    [[vk::location(8)]] float2 patchMorph : PATCH_MORPH; // the morph factor and one texel's arc in radii
+    [[vk::location(8)]] float patchMorph : PATCH_MORPH; // 0 the patch's own shape and tiles, 1 its parent's
 };
 
 struct Material {

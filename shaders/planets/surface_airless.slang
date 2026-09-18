@@ -100,28 +100,11 @@ Material marsMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L
 // tangent frame is involved and faces cannot disagree at their edges) at the
 // fragment's tile coordinate, blended toward the parent tile's through the
 // morph zone so a level boundary shades as one surface, with the crater walls'
-// shadow traced through the tile's own heights as the equirect path traces its map.
-float tileShadow(uint slot, float2 g, float3 L, float3 N, float3 T, float3 B, float texelArc, float tier)
-{
-    float2 lightUV = float2(dot(L, T), dot(L, B));
-    float lightRise = max(dot(L, N), .02) / max(length(lightUV), 1e-4);
-    lightUV = normalize(lightUV + 1e-6);
-    float h0 = patchHeight(slot, g);
-    float shadow = 0.0;
-    for (int s = 1; s <= 6; ++s)
-    {
-        float distance = float(s) * 1.5;
-        float h = patchHeight(slot, g + lightUV * distance);
-        float rise = h - h0 - lightRise * distance * texelArc;
-        shadow = max(shadow, rise / (distance * texelArc) * 6.0);
-    }
-    return 1.0 - saturate(shadow) * .55 * tier;
-}
-
+// shadow traced through the baked equirect map as the sphere path traces it.
 Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility, float tier)
 {
     uint slot = input.tileSlot, face = input.tileFace & 0xff, parent = (input.tileFace >> 8) & 0xfff, quadrant = (input.tileFace >> 20) & 3;
-    float morph = input.patchMorph.x;
+    float morph = input.patchMorph;
     float2 uv = (input.tileUV * PATCH_QUADS + 0.5) / TILE_SIDE;
     float3 albedo = textureArrays[TEX_ARRAY_TERRAIN_ALBEDO].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0).rgb;
     float3 mapN = textureArrays[TEX_ARRAY_TERRAIN_NORMAL].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0).xyz * 2.0 - 1.0;
@@ -138,11 +121,15 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     m.visibility = visibility;
     if (tier > 0.0)
     {
-        // The trace steps along the tile's s and t: the face axes on the tangent plane.
-        float3 nl = normalize(input.localNormal);
-        float3 T = normalize(mul(rotate, FACE_S[face] - nl * dot(nl, FACE_S[face])));
-        float3 B = normalize(mul(rotate, FACE_T[face] - nl * dot(nl, FACE_T[face])));
-        m.visibility *= tileShadow(slot, input.tileUV * PATCH_QUADS, L, N, T, B, input.patchMorph.y, tier);
+        // The crater walls' shadow is traced through the baked equirect map, as the
+        // sphere path traces it: one continuous field over the body, where a trace
+        // through the tile's own heights would stop at the tile's edge and step
+        // along the face's skewed axes, and its cut would show along every border.
+        float3 localN = normalize(input.localNormal);
+        float3 T, B;
+        tangentFrame(localN, rotate, N, T, B);
+        m.visibility *= terrainShadow(textures[TEX_MINOR_PLANET_NORMAL], MINOR_PLANET_TEXELS, sphereUV(localN), L, N, T, B,
+                                      MINOR_PLANET_HEIGHT_RANGE, length(localN.xz), tier);
     }
     m.albedo = albedo;
     m.rough = .95;
@@ -185,6 +172,30 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
                : s.kind == KIND_MINOR_PLANET         ? minorPlanetMaterial(input, rotate, s.N, s.L, s.visibility, root.detail)
                                                     : moonMaterial(input, rotate, s.N, s.L, s.visibility, root.detail);
     float3 irradiance = sunlight(root.frame);
+    // The patch path's debug views (TerrainSettings::debug): one term at a time, so a
+    // seam is attributed to the term that carries it.
+    uint debug = uint(root.frame->sequence.y + .5);
+    if ((root.flags & ORBITAL_ROOT_PATCHES) && debug != 0)
+    {
+        float3 v = 0.0;
+        if (debug == 1)      // the tile coordinate as a checker of 8 cells, the slot's hue as a tint
+        {
+            float2 cells = floor(input.tileUV * 8.0);
+            float checker = fmod(cells.x + cells.y, 2.0);
+            float hue = frac(float(input.tileSlot) * .618034);
+            v = lerp(float3(.15, .15, .15), float3(.9, .9, .9), checker) * (0.6 + 0.4 * float3(hue, 1.0 - hue, .5));
+        }
+        else if (debug == 2) v = m.N * 0.5 + 0.5;                       // the shading normal, world frame
+        else if (debug == 3)                                             // elevation over the height range
+        {
+            float h = patchHeight(input.tileSlot, input.tileUV * PATCH_QUADS);
+            v = (h - MINOR_PLANET_HEIGHT_MIN) / MINOR_PLANET_HEIGHT_RANGE;
+        }
+        else if (debug == 4) v = s.visibility > 0.0 ? m.visibility / s.visibility : 0.0; // the crater-shadow term alone
+        else if (debug == 5)                                             // morph in red, the parent present in green, the level's parity in blue
+            v = float3(input.patchMorph, ((input.tileFace >> 8) & 0xfff) < ORBITAL_TERRAIN_SLOTS ? 1.0 : 0.0, float(input.tileSlot & 1));
+        return float4(v * 0.18, 1); // about the albedo's level, so the exposure leaves it readable
+    }
     float3 colour = shadeSurface(m, s.L, s.V, irradiance, earthParams(root.frame).glint, lightParams(root.frame).ambientFill);
     if ((root.flags & (ORBITAL_ROOT_WIREFRAME | ORBITAL_ROOT_PATCHES)) == (ORBITAL_ROOT_WIREFRAME | ORBITAL_ROOT_PATCHES))
         colour = wireframe(colour, input, irradiance);

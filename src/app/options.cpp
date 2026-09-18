@@ -84,6 +84,8 @@ bool apply_arguments(Options& options, std::span<const std::string_view> args) {
             ok = parse_choice(value(), options.near_tier, 2);
         else if (arg == "--wireframe")
             ok = parse_choice(value(), options.wireframe, 2);
+        else if (arg == "--terrain-debug")
+            ok = parse_choice(value(), options.terrain_debug, 6);
         else if (arg == "--dust")
             ok = parse_choice(value(), options.dust, 2);
         else if (arg == "--vsync")

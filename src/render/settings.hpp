@@ -147,7 +147,10 @@ struct SkySettings {
 
 struct TerrainSettings {
     bool near_tier = true;  // the minor planet's cube-sphere patches close in; off keeps its sphere levels
-    bool wireframe = false; // the patches' quad grid drawn over the surface, the quadtree's review
+    bool wireframe = false; // the patches' triangles drawn over the surface, the quadtree's review
+    // A debug view of the patch path in place of its shading: 1 tile coordinate, 2 normal, 3 elevation,
+    // 4 the crater-shadow term, 5 morph and level. Seams show against these one term at a time.
+    unsigned debug = 0;
 };
 
 struct GasSettings {
