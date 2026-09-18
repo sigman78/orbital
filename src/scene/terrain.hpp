@@ -34,15 +34,25 @@ public:
 
     explicit MinorPlanetTerrain(std::uint64_t seed);
 
-    // Micro-relief past where the terrain's own content stops, for the tiles' slope
-    // only: octaves at rising frequency, each weighted in once the sampling grid can
-    // carry it, so a tile never sees an octave it would only alias and a level
-    // boundary fades one in through the morph instead of switching it on. `nyquist`
-    // is half the grid's texels per radian; `strength` scales the whole stack, 0 off.
-    // The geometry does not take it, so the quadtree's error table is untouched.
-    static constexpr float detail_frequency = 150; // cycles per radian of the first octave
-    static constexpr unsigned detail_octaves = 5;
-    static constexpr float detail_slope = .15f; // rms tangent the full stack adds at strength 1
+    // Micro-relief past where the crater population stops, for the tiles' slope only.
+    // It continues the body's own construction rather than laying noise over it: a
+    // lattice of cells at each octave's frequency, at most one crater to a cell at a
+    // hashed place and size, with the flat floor, rising wall, raised rim and ejecta
+    // the big ones have. Everything scales with the frequency, so each octave adds
+    // the same slope and the stack is self-similar. The field is a function of the
+    // direction alone, so two tiles sharing a texel agree on it, and each octave is
+    // weighted in only once the sampling grid can carry it, so a tile never sees one
+    // it would alias and a level boundary fades it in through the morph rather than
+    // switching it on. `nyquist` is half the grid's texels per radian; `strength`
+    // scales the stack, 0 off. The geometry does not take it, so the quadtree's
+    // error table is untouched.
+    static constexpr float detail_frequency = 110; // lattice cells per radian of the first octave
+    static constexpr unsigned detail_octaves = 3;
+    static constexpr float detail_radius = .34f;  // a crater's, of a cell
+    static constexpr float detail_reach = 2.2f;   // ejecta out to this many radii
+    static constexpr float detail_depth = .3f;    // of the crater's radius, as the population's are
+    static constexpr float detail_density = .55f; // the share of cells carrying one
+    static constexpr float detail_slope = .15f;   // rms tangent the full stack adds at strength 1
     float detail(Vec3d direction, double nyquist, float strength) const;
 
     // Height above the reference sphere, radii, within [height_min, height_max].

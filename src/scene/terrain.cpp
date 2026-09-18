@@ -94,20 +94,53 @@ float MinorPlanetTerrain::detail(Vec3d direction, double nyquist, float strength
     if (strength <= 0)
         return 0;
     const Vec3d d = normalized(direction);
-    double h = 0;
+    // Measured against the tiles: the stack at full weight adds 0.082 of rms slope for
+    // a unit of detail_slope, so this makes detail_slope read as the tangent it adds.
+    constexpr double calibration = 1.85;
+    double total = 0;
     for (unsigned octave = 0; octave < detail_octaves; octave++) {
         const double frequency = double(detail_frequency) * (1u << octave);
         const double weight = std::clamp(std::log2(nyquist / frequency), 0.0, 1.0);
         if (weight <= 0)
             break; // and so is every octave above this one
-        // Equal slope from each octave, adding in quadrature, so the amplitude falls
-        // with the frequency. An octave of amplitude A at f cycles per radian has an
-        // RMS slope of about 1.1 * A * f on this noise, measured against the tiles.
-        const double amplitude = double(strength) * detail_slope /
-                                 (std::sqrt(double(detail_octaves)) * 1.1 * frequency);
-        h += weight * amplitude * gradient_noise(d * frequency, seed_ + 0xD1 + octave);
+        // The direction scaled into the lattice: the sphere runs through a shell of
+        // cells, and only those it passes through can hold a crater it meets.
+        const Vec3d p = d * frequency;
+        const Vec3d base{std::floor(p.x), std::floor(p.y), std::floor(p.z)};
+        double sum = 0;
+        for (int dz = -1; dz <= 1; dz++)
+            for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++) {
+                    const Vec3d cell{base.x + dx, base.y + dy, base.z + dz};
+                    const Vec3d centre = cell + Vec3d{.5, .5, .5};
+                    const double radial = length(centre) - frequency;
+                    if (std::abs(radial) > 1.4)
+                        continue; // off the shell: cheap, and most cells go here
+                    std::uint64_t state = mix64(std::uint64_t(std::int64_t(cell.x) * 73856093) ^
+                                                std::uint64_t(std::int64_t(cell.y) * 19349663) ^
+                                                std::uint64_t(std::int64_t(cell.z) * 83492791) ^
+                                                (seed_ + 0xD1 + octave));
+                    if (uniform(state) > detail_density)
+                        continue; // not every cell carries one
+                    const Vec3d place = cell + Vec3d{uniform(state), uniform(state), uniform(state)};
+                    const double len = length(place);
+                    if (len < 1e-9)
+                        continue;
+                    // The crater's own size, and where the point falls across it: both
+                    // in cells, so the whole octave scales with the frequency.
+                    const double radius = detail_radius * (.6 + .8 * uniform(state));
+                    const double x = length(place * (1 / len) - d) * frequency / radius;
+                    if (x > detail_reach)
+                        continue;
+                    const double depth = radius * detail_depth * (.5 + .5 * uniform(state));
+                    const double rim = .25 * depth;
+                    sum += x < 1 ? -depth + (depth + rim) * smoothstep(crater_floor, 1, float(x))
+                                 : rim * std::exp(-(x - 1) * 4);
+                }
+        // Cells are 1/frequency of a radian, and a radian of arc is a radius.
+        total += weight * sum / frequency;
     }
-    return float(h);
+    return float(total * double(strength) * detail_slope * calibration);
 }
 
 Vec3f MinorPlanetTerrain::albedo(Vec3d direction, float height, float slope) const {
