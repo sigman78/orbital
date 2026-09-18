@@ -41,8 +41,7 @@ bool options_valid(const Options& options) {
                          std::isfinite(options.duration) && options.duration >= 0;
     const bool exposure_ok = std::isfinite(options.exposure) && options.exposure > 0;
     const bool bookmark_ok = options.bookmark >= -1 && options.bookmark < int(bookmark_count);
-    const bool view_ok = std::isfinite(options.back) && options.back >= 0 && std::isfinite(options.fov_div) &&
-                         options.fov_div >= 1;
+    const bool view_ok = std::isfinite(options.back) && std::isfinite(options.fov_div) && options.fov_div >= 1;
     return size_ok && time_ok && exposure_ok && bookmark_ok && view_ok;
 }
 

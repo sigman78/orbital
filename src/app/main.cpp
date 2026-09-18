@@ -13,6 +13,7 @@
 #include "platform/process.hpp"
 #include "platform/window.hpp"
 #include "render/renderer.hpp"
+#include "scene/terrain.hpp"
 
 #include <algorithm>
 #include <array>
@@ -147,12 +148,15 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.bodies = evaluate_system(system, std::max(0.0, options.fixed_time));
     if (options.bookmark >= 0)
         select_bookmark(app, unsigned(options.bookmark));
-    // Away from the bookmark's body along its line, aimed at its centre: the far
-    // and zoomed views the size-dependent checks need, without a bookmark each.
+    // Along the bookmark's body's line, aimed at its centre: the far and zoomed views
+    // the size-dependent checks need, without a bookmark each. Negative comes in
+    // instead, for a view from the ground, and stops just above the highest terrain.
     if (const auto body = Camera::bookmark_body(options.bookmark >= 0 ? std::size_t(options.bookmark) : 0);
-        options.back > 0 && body < app.bodies.size()) {
+        options.back != 0 && body < app.bodies.size()) {
         const Vec3d centre = app.bodies[body].position, away = normalized(app.camera.position - centre);
-        app.camera.look_at(centre + away * (length(app.camera.position - centre) + options.back), centre);
+        const double floor = app.bodies[body].radius * (1 + double(MinorPlanetTerrain::height_max) + .002);
+        const double distance = std::max(length(app.camera.position - centre) + options.back, floor);
+        app.camera.look_at(centre + away * distance, centre);
         free_camera(app);
     }
     if (options.fov_div > 1)
