@@ -47,7 +47,7 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
     // The size is from the nearest point of the patch, not its centre: a cell the
     // camera sits over spans the screen whatever its centre is doing, and it is the
     // one to generate first. The body's radius cancels, both being in radii.
-    const double near = nearest_distance(view.camera_local, b);
+    const double near = nearest_distance(view.camera_local, b, height_range(node.key));
     const float scale = float(view.height_pixels / (std::max(near, 1e-4) * view.tan_y));
     return {.visible = true, .pixels = float(b.angular_size) * scale, .distance = near};
 }
@@ -83,14 +83,13 @@ unsigned TerrainTier::slot_of(PatchKey key) const {
     return found == slots_by_key_.end() ? no_slot : found->second;
 }
 
-double TerrainTier::nearest_distance(Vec3d camera_local, const PatchBounds& bounds) {
+double TerrainTier::nearest_distance(Vec3d camera_local, const PatchBounds& bounds, Range<float> heights) {
     const double len = length(camera_local);
     if (len < 1e-9)
         return 0;
     const double theta = std::acos(std::clamp(dot(camera_local, bounds.centre) / len, -1.0, 1.0));
     const double t = std::max(0.0, theta - bounds.angular_radius);
-    const double r = std::clamp(len * std::cos(t), 1 + double(MinorPlanetTerrain::height_min),
-                                1 + double(MinorPlanetTerrain::height_max));
+    const double r = std::clamp(len * std::cos(t), 1 + double(heights.min), 1 + double(heights.max));
     return std::sqrt(std::max(0.0, len * len + r * r - 2 * len * r * std::cos(t)));
 }
 
@@ -109,19 +108,19 @@ double TerrainTier::level_at(double distance) const {
 }
 
 // The levels the screen error asks for across a patch, its near end against its far.
-double TerrainTier::level_span(const TierView& view, const PatchBounds& bounds) const {
-    return level_at(nearest_distance(view.camera_local, bounds)) -
-           level_at(farthest_distance(view.camera_local, bounds));
+double TerrainTier::level_span(const TierView& view, const PatchBounds& bounds, Range<float> heights) const {
+    return level_at(nearest_distance(view.camera_local, bounds, heights)) -
+           level_at(farthest_distance(view.camera_local, bounds, heights));
 }
 
-double TerrainTier::farthest_distance(Vec3d camera_local, const PatchBounds& bounds) {
+double TerrainTier::farthest_distance(Vec3d camera_local, const PatchBounds& bounds, Range<float> heights) {
     const double len = length(camera_local);
     if (len < 1e-9)
-        return 1 + double(MinorPlanetTerrain::height_max);
+        return 1 + double(heights.max);
     const double theta = std::acos(std::clamp(dot(camera_local, bounds.centre) / len, -1.0, 1.0));
     const double t = std::min(theta + bounds.angular_radius, pi<double>);
     double far = 0;
-    for (double r : {1 + double(MinorPlanetTerrain::height_min), 1 + double(MinorPlanetTerrain::height_max)})
+    for (double r : {1 + double(heights.min), 1 + double(heights.max)})
         far = std::max(far, std::sqrt(std::max(0.0, len * len + r * r - 2 * len * r * std::cos(t))));
     return far;
 }
@@ -129,6 +128,11 @@ double TerrainTier::farthest_distance(Vec3d camera_local, const PatchBounds& bou
 unsigned TerrainTier::resident_slot(PatchKey key) const {
     const unsigned slot = slot_of(key);
     return slot != no_slot && slots_[slot].resident ? slot : no_slot;
+}
+
+Range<float> TerrainTier::height_range(PatchKey key) const {
+    const unsigned slot = resident_slot(key);
+    return slot != no_slot ? slots_[slot].heights : full_height_range;
 }
 
 unsigned TerrainTier::pending() const {
@@ -165,11 +169,15 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
     // the morph reaches one level and no further. Seam::span splits while that spread
     // is over a level, whatever the distance test says, so no drawn patch is asked for
     // more than it has.
-    const bool wide = seam_ == Seam::span && level_span(view, nodes_[index].bounds) >
+    const bool wide = seam_ == Seam::span && level_span(view, nodes_[index].bounds, height_range(key)) >
                                                  seam_span * (nodes_[index].children ? double(hysteresis) : 1.0);
+    // A resident tile bounds its own bilinear surface, not the unsampled relief in
+    // its children. Keep the full shell when deciding to discover children; gate
+    // each resident child below against the height range it actually renders.
+    const double descendant_distance = nearest_distance(view.camera_local, nodes_[index].bounds);
     const bool wants = key.level < patch_level_max && key.level + 1 < std::size(level_error) &&
-                       (wide || seen.distance < double(range_[key.level + 1]) *
-                                                    (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0));
+                       (wide || descendant_distance < double(range_[key.level + 1]) *
+                                                          (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0));
     const bool allowed = nodes_[index].children || nodes() < slot_count - 64;
     pressure_.splits_blocked += wants && !allowed;
     const bool split = wants && allowed;
@@ -195,12 +203,14 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
                 collapse(nodes_[children + i]);
                 continue;
             }
-            const double gate = seam_ == Seam::farthest ? farthest_distance(view.camera_local, child.bounds)
-                                                        : child_seen.distance;
+            const double gate = seam_ == Seam::farthest
+                                    ? farthest_distance(view.camera_local, child.bounds, height_range(child.key))
+                                    : child_seen.distance;
             // Under Seam::span a child is also drawn where its parent's spread is what
             // split it: the distance test alone would hand the quadrant back.
             const bool in_range = gate < double(range_[key.level + 1]) ||
-                                  (seam_ == Seam::span && level_span(view, child.bounds) > seam_span);
+                                  (seam_ == Seam::span &&
+                                   level_span(view, child.bounds, height_range(child.key)) > seam_span);
             const unsigned child_slot = slot_of(child.key);
             if (in_range && child_slot != no_slot && slots_[child_slot].resident) {
                 descend |= 1u << i;
@@ -354,11 +364,12 @@ void TerrainTier::disable() {
     active_ = wanted_ = false;
 }
 
-bool TerrainTier::mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp) {
+bool TerrainTier::mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights) {
     // Stamps start at one, so a slot cleared by invalidate() matches nothing in flight.
     if (slots_[slot].stamp != stamp || slots_[slot].key != key)
         return false; // recycled, or regenerated at another detail, since the request went out
     slots_[slot].resident = true;
+    slots_[slot].heights = heights;
     // The frame it can first be drawn in: residency is marked between updates.
     slots_[slot].resident_frame = frame_ + 1;
     return true;
@@ -413,7 +424,8 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     for (const Draw& draw : draws_) {
         pressure_.deepest = std::max(pressure_.deepest, unsigned(draw.key.level));
         const PatchBounds bounds = patch_bounds(draw.key);
-        const double near = nearest_distance(view.camera_local, bounds);
+        const Range<float> heights = height_range(draw.key);
+        const double near = nearest_distance(view.camera_local, bounds, heights);
         // What the screen error asks for at its nearest point against what it is drawn
         // at: a patch well over a level behind is one the selection left coarse.
         const double over = level_at(near) - double(draw.key.level);
@@ -426,7 +438,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         const auto morph = [&](double d) {
             return std::max(std::clamp((d - start) / std::max(end - start, 1e-9), 0.0, 1.0), double(draw.fade));
         };
-        const double lo = morph(near), hi = morph(farthest_distance(view.camera_local, bounds));
+        const double lo = morph(near), hi = morph(farthest_distance(view.camera_local, bounds, heights));
         if (hi - lo > .02)
             pressure_.graded++;
         else if (lo > .5)

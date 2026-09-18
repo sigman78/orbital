@@ -251,7 +251,108 @@ void test_morph_streaming() {
     assert(faded.total <= plain.total);
 }
 
+// A flat sphere at the camera collision altitude used to select level 7 from
+// the global +.05 height ceiling, although every vertex of levels 6 and 7 was
+// beyond its morph end. Both sides collapsed, leaving the persistent 2x border.
+void test_resident_height_selection() {
+    constexpr double radius = 2.5 / 15;
+    for (bool grazing : {false, true}) {
+        TierView view = view_over({.6, .3, 1}, .08, radius);
+        if (grazing) {
+            CameraView camera;
+            const Vec3d radial = normalized(view.camera_local);
+            camera.forward = normalized(normalized(cross(Vec3d{0, 1, 0}, radial)) - radial * .1);
+            camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
+            camera.up = cross(camera.right, camera.forward);
+            view.frustum = view_frustum(camera, view.tan_y * 16 / 9, view.tan_y);
+        }
+        unsigned deepest[2]{};
+        for (unsigned tight = 0; tight < 2; tight++) {
+            TerrainTier tier;
+            for (unsigned frame = 1; frame <= 120; frame++) {
+                tier.update(view, frame);
+                for (const auto& g : tier.generate())
+                    assert(tier.mark_resident(g.slot, g.key, g.stamp,
+                                              tight ? Range<float>{0, 0} : TerrainTier::full_height_range));
+            }
+            tier.update(view, 140);
+            assert(tier.active() && tier.generate().empty() && tier.pending() == 0);
+            assert(tier.pressure().splits_blocked == 0);
+            deepest[tight] = tier.pressure().deepest;
+            double least_morph = 1;
+            for (const auto& draw : tier.draws()) {
+                if (draw.key.level != deepest[tight])
+                    continue;
+                assert(draw.fade == 0);
+                const double size = 2.0 / (1u << draw.key.level);
+                const double end = tier.range(draw.key.level), start = .7 * end;
+                for (unsigned y = 0; y < tile_side; y++)
+                    for (unsigned x = 0; x < tile_side; x++) {
+                        const Vec3d d = cube_direction(draw.key.face,
+                                                       -1 + (draw.key.x + double(x) / (tile_side - 1)) * size,
+                                                       -1 + (draw.key.y + double(y) / (tile_side - 1)) * size);
+                        const double m = std::clamp((length(d - view.camera_local) - start) / (end - start), 0.0, 1.0);
+                        least_morph = std::min(least_morph, m);
+                    }
+            }
+            if (tight)
+                assert(least_morph < .01); // the finest grid is actually present
+            else
+                assert(least_morph == 1); // reproduce the previous all-collapsed selection
+        }
+        std::printf("terrain tier: %s flat sphere, finest level %u -> %u with resident height bounds\n",
+                    grazing ? "grazing" : "overhead", deepest[0], deepest[1]);
+        assert(deepest[1] < deepest[0]);
+    }
+}
+
+void test_height_range_lifetime() {
+    TerrainTier tier;
+    const TierView view = view_at(.2, 2.5 / 15);
+    tier.update(view, 1);
+    const auto first = tier.generate()[0];
+    const Range<float> heights{-.012f, .018f};
+    assert(tier.height_range(first.key) == TerrainTier::full_height_range);
+    assert(tier.mark_resident(first.slot, first.key, first.stamp, heights));
+    assert(tier.height_range(first.key) == heights);
+    tier.invalidate();
+    assert(tier.height_range(first.key) == TerrainTier::full_height_range);
+    tier.update(view, 2);
+    assert(!tier.mark_resident(first.slot, first.key, first.stamp, heights));
+    assert(tier.height_range(first.key) == TerrainTier::full_height_range);
+}
+
+void test_resident_terrain_morph() {
+    const MinorPlanetTerrain terrain(1007);
+    MorphCheck check{terrain};
+    unsigned checked = 0, bad = 0;
+    for (Vec3d spot : {Vec3d{.6, .3, 1}, Vec3d{1, .2, 1}}) {
+        TerrainTier tier;
+        const TierView view = view_over(spot, .08, 2.5 / 15);
+        for (unsigned frame = 1; frame <= 120; frame++) {
+            tier.update(view, frame);
+            for (const auto& g : tier.generate()) {
+                auto& heights = check.heights[g.key.packed()];
+                if (heights.empty()) {
+                    heights.resize(tile_side * tile_side);
+                    generate_height_tile(terrain, g.key, heights);
+                }
+                assert(tier.mark_resident(g.slot, g.key, g.stamp, height_tile_range(heights)));
+            }
+        }
+        tier.update(view, 140);
+        assert(tier.generate().empty() && tier.pressure().splits_blocked == 0);
+        bad += check.violations(tier, view, &checked);
+    }
+    std::printf("terrain tier: resident terrain bounds, %u boundary vertices checked, %u morph violations\n", checked,
+                bad);
+    assert(checked > 0 && bad == 0);
+}
+
 int main() {
+    test_resident_height_selection();
+    test_height_range_lifetime();
+    test_resident_terrain_morph();
     test_morph_bands();
     test_morph_continuity();
     test_morph_streaming();

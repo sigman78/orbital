@@ -119,24 +119,29 @@ public:
     bool active() const { return active_; }
     std::span<const Draw> draws() const { return draws_; } // this frame's patches
     std::span<const Generation> generate() const { return generate_; }
-    // Marks a slot resident if it still holds key; false if it was recycled meanwhile.
-    bool mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp);
+    static constexpr Range<float> full_height_range{MinorPlanetTerrain::height_min, MinorPlanetTerrain::height_max};
+    // Accept the uploaded tile and its rendered height range only if this assignment
+    // still owns the slot. Unknown ranges retain the conservative full shell.
+    bool mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights = full_height_range);
+    // Only resident tiles supply a tighter range. Unknown tiles retain the full shell.
+    Range<float> height_range(PatchKey key) const;
     float range(unsigned level) const { return level < std::size(range_) ? range_[level] : 0; }
     unsigned resident_slot(PatchKey key) const; // the tile's slot, slot_count when absent or pending
     unsigned pending() const;                   // slots handed out whose tile has not arrived
-    // The closest the camera (body frame, radii) can be to any point of the patch: its cap
-    // over the shell between the terrain's lowest and highest heights. The shader morphs by
-    // the vertex's own distance, which is never less, so an unsplit neighbour's edge is
-    // beyond the child's range and the child is fully morphed there.
-    static double nearest_distance(Vec3d camera_local, const PatchBounds& bounds);
+    // Distance bounds for the cap over the supplied height interval. Resident tiles
+    // use their own range for drawing decisions; undiscovered descendants keep the
+    // full terrain shell. Skirts are excluded, as in the shader's morph distance.
+    static double nearest_distance(Vec3d camera_local, const PatchBounds& bounds,
+                                   Range<float> heights = full_height_range);
     // The other end of the same cap: what Seam::farthest gates a child on.
-    static double farthest_distance(Vec3d camera_local, const PatchBounds& bounds);
+    static double farthest_distance(Vec3d camera_local, const PatchBounds& bounds,
+                                    Range<float> heights = full_height_range);
     // The fractional level the screen error asks for at a distance, and how far that
     // varies across a patch. Seam::span splits while the spread is over seam_span,
     // since the morph can only carry one level of it.
     static constexpr double seam_span = 1.0;
     double level_at(double distance) const;
-    double level_span(const TierView& view, const PatchBounds& bounds) const;
+    double level_span(const TierView& view, const PatchBounds& bounds, Range<float> heights = full_height_range) const;
     unsigned resident() const;
     unsigned nodes() const { return unsigned(nodes_.size() - free_blocks_.size() * 4); }
 
@@ -154,6 +159,7 @@ private:
         // issued once per assignment and never reissued, so a result that was in
         // flight across the change is told apart from the one that replaced it.
         std::uint32_t stamp = 0;
+        Range<float> heights = full_height_range;
         bool resident = false;
     };
     struct Request {

@@ -100,6 +100,10 @@ float patch_error(const MinorPlanetTerrain& terrain, PatchKey key);
 // out of it. The colour pass samples the terrain itself rather than the height tile,
 // so past ratio 1 it sees relief the grid never carries.
 void generate_height_tile(const MinorPlanetTerrain& terrain, PatchKey key, std::span<float> out);
+// Bounds of the rendered height tile, including r16_unorm quantization and float
+// decode roundoff. Bilinear sampling and grid morphing stay within this interval.
+// These are not bounds on unsampled terrain in a finer descendant.
+Range<float> height_tile_range(std::span<const float> heights);
 void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<std::uint8_t> albedo,
                            std::span<std::uint16_t> slope, float detail = 1);
 

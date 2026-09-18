@@ -399,7 +399,8 @@ struct Renderer::Impl {
         unsigned slot;
         unsigned ring;
         std::uint32_t stamp; // the tier's name for this generation of this slot
-        float ms;            // the generation's time on its worker
+        Range<float> heights;
+        float ms; // the generation's time on its worker
     };
     // A tile generated but not yet copied into the pool. It is held until a frame
     // records it: a frame that gives up after preparing must not leave the slot
@@ -408,6 +409,7 @@ struct Renderer::Impl {
         PatchKey key;
         unsigned slot, ring;
         std::uint32_t stamp;
+        Range<float> heights;
     };
     static constexpr unsigned tile_ring_count = 32;
     std::unique_ptr<WorkerPool<TileResult>> tile_pool;

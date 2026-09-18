@@ -79,7 +79,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     if (tile_pool)
         for (const TileResult& result : tile_pool->poll()) {
             ring_state[result.ring] = RingState::upload;
-            tile_uploads.push_back({result.key, result.slot, result.ring, result.stamp});
+            tile_uploads.push_back({result.key, result.slot, result.ring, result.stamp, result.heights});
             stats.frame.terrain.generate_ms = result.ms;
         }
     if (!input.terrain.near_tier) {
@@ -209,7 +209,11 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                         .5f);
                 std::memcpy(dst + albedo_offset, albedo.data(), colour_tile_bytes);
                 std::memcpy(dst + slope_offset, slope.data(), colour_tile_bytes);
-                return {key, slot, ring, stamp,
+                return {key,
+                        slot,
+                        ring,
+                        stamp,
+                        height_tile_range(heights),
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count()};
             });
         }
@@ -258,7 +262,7 @@ void Renderer::Impl::record_terrain_uploads(gpu::CommandBuffer* cmd) {
         // The copy and the residency are one decision. A slot recycled since its worker
         // finished must have neither: the copy would land on the tile now using it, and
         // the residency would vouch for contents belonging to another patch.
-        if (terrain_tier.mark_resident(upload.slot, upload.key, upload.stamp)) {
+        if (terrain_tier.mark_resident(upload.slot, upload.key, upload.stamp, upload.heights)) {
             const auto staging = reinterpret_cast<std::uint64_t>(buffers.tile_staging.range().gpu) +
                                  upload.ring * tile_total_bytes;
             plane(staging, height_tile_bytes, tile_height.texture(), upload.slot, tile_side);

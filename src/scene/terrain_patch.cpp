@@ -224,6 +224,13 @@ void generate_height_tile(const MinorPlanetTerrain& terrain, PatchKey key, std::
         }
 }
 
+Range<float> height_tile_range(std::span<const float> heights) {
+    ORBITAL_ASSERT(!heights.empty());
+    const auto [low, high] = std::minmax_element(heights.begin(), heights.end());
+    constexpr float padding = (MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min) / 65535.f + 1e-6f;
+    return {*low - padding, *high + padding};
+}
+
 void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<std::uint8_t> albedo,
                            std::span<std::uint16_t> slope, float detail) {
     ORBITAL_ASSERT(albedo.size() == tile_colour_side * tile_colour_side * 4);

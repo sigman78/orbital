@@ -2,6 +2,7 @@
 #include "core/noise.hpp"
 #include "scene/terrain_patch.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -358,6 +359,26 @@ void calibrate_level_errors() {
     }
 }
 
+void test_height_tile_range() {
+    const MinorPlanetTerrain terrain(1007);
+    for (PatchKey key : {PatchKey{4, 1, 0, 1}, PatchKey{4, 6, 37, 31}}) {
+        std::vector<float> heights(tile_side * tile_side);
+        generate_height_tile(terrain, key, heights);
+        const Range<float> bounds = height_tile_range(heights);
+        for (float h : heights) {
+            // Match the renderer's encoding and the shader's float decode.
+            const float span = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
+            const auto encoded = std::uint16_t(
+                std::clamp((h - MinorPlanetTerrain::height_min) / span, 0.f, 1.f) * 65535.f + .5f);
+            const float decoded = MinorPlanetTerrain::height_min + (float(encoded) / 65535.f) * span;
+            assert(bounds.contains(h) && bounds.contains(decoded));
+        }
+        // Sub-texel bilinear values (including morph positions) stay between texel extrema.
+        for (unsigned i = 0; i + 1 < heights.size(); i++)
+            assert(bounds.contains(heights[i] * .37f + heights[i + 1] * .63f));
+    }
+}
+
 void test_grid_mesh() {
     const auto mesh = patch_grid_mesh();
     constexpr unsigned expected_vertices = tile_side * tile_side + 4 * tile_side;
@@ -380,6 +401,7 @@ int main() {
     test_cube_coordinates();
     test_tiles();
     test_grid_mesh();
+    test_height_tile_range();
     calibrate_level_errors();
     return 0;
 }
