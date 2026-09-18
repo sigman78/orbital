@@ -24,6 +24,7 @@ struct TierView {
     float height_pixels = 0, tan_y = 0;
     float activate_pixels = TerrainTier_activate_default; // the switch from the sphere levels
     float lod_bias = 0;                                   // every level's range times 2^bias
+    unsigned seam = 0;                                    // TerrainTier::Seam
 };
 
 // The near tier's CPU side: which patches of the cube sphere to draw this frame
@@ -57,10 +58,27 @@ public:
         PatchKey key;
         unsigned slot;
     };
+    // What to do where a patch meets a finer one. A patch is drawn out to its own
+    // range and morphs over the outer part of it, and from a grazing view one patch
+    // spans distances from under the camera to the horizon, so a border with a finer
+    // neighbour can sit deep inside the coarse patch's morph band. The finer side is
+    // fully morphed to the coarse patch's own shape there, and the coarse patch is
+    // most of the way to its parent's: a seam, which a view from above never shows
+    // because the patch subtends too little distance for the two to part.
+    enum class Seam : unsigned {
+        none,     // as it was: the band is trusted to have cleared the hand-over
+        farthest, // a child is drawn only once its whole cap is in range, never part of it
+        clamp,    // the coarse patch stops morphing along the sides that meet a finer one
+        count
+    };
+
     struct Draw {
         PatchKey key;
         unsigned slot;
         unsigned quadrants; // the grid quadrants to draw (bit i: x = i & 1, y = i >> 1); 0xf the whole patch
+        // The sides of this patch that meet a finer surface, for Seam::clamp: bit 0
+        // low x, 1 high x, 2 low y, 3 high y.
+        unsigned finer = 0;
         // A floor under the vertex shader's morph, 1 the moment the patch is drawn
         // for the first time and 0 once it has settled. The four children of one
         // split share it, so they agree with each other while they fade in.
@@ -86,6 +104,8 @@ public:
     // the vertex's own distance, which is never less, so an unsplit neighbour's edge is
     // beyond the child's range and the child is fully morphed there.
     static double nearest_distance(Vec3d camera_local, const PatchBounds& bounds);
+    // The other end of the same cap: what Seam::farthest gates a child on.
+    static double farthest_distance(Vec3d camera_local, const PatchBounds& bounds);
     unsigned resident() const;
     unsigned nodes() const { return unsigned(nodes_.size() - free_blocks_.size() * 4); }
 
@@ -119,6 +139,7 @@ private:
     void touch(PatchKey key);
     void request(PatchKey key, float pixels);
     void choose_generation(unsigned budget);
+    void mark_finer_sides(); // the post-pass Seam::clamp needs: who meets whom
 
     std::vector<Node> nodes_;
     std::vector<std::uint32_t> free_blocks_;
@@ -130,6 +151,7 @@ private:
     std::vector<Generation> generate_;
     float range_[13] = {};
     unsigned frame_ = 0;
+    Seam seam_ = Seam::none;
     bool active_ = false, wanted_ = false;
 };
 

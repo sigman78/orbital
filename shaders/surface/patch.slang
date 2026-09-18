@@ -96,6 +96,22 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     // just arrived is drawn as its parent's shape and relaxes to its own, so the
     // detail it adds fades in where it would otherwise appear between two frames.
     float m = max(saturate((dist - patch.morph.x) / max(patch.morph.y - patch.morph.x, 1e-6)), patch.morph.z);
+    // Sides that meet a finer patch (TerrainTier::Seam::clamp). The finer one is
+    // fully morphed to this patch's own shape along them, so this patch has to be
+    // standing at that shape too: the morph falls to nothing at such a side and
+    // comes back over a quarter of the grid, which is smooth inside the patch and
+    // leaves the other three sides to meet their own neighbours as they did.
+    uint finer = uint(patch.morph.w);
+    if (finer != 0)
+    {
+        float2 u = g / PATCH_QUADS;
+        float inward = 1.0;
+        if (finer & 1) inward = min(inward, u.x);
+        if (finer & 2) inward = min(inward, 1.0 - u.x);
+        if (finer & 4) inward = min(inward, u.y);
+        if (finer & 8) inward = min(inward, 1.0 - u.y);
+        m *= smoothstep(0.0, 0.25, inward);
+    }
 
     float2 gm = g - frac(g * 0.5) * 2.0 * m;
     st = cell_origin + gm / PATCH_QUADS * cell_size;

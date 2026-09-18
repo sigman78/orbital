@@ -94,6 +94,18 @@ double TerrainTier::nearest_distance(Vec3d camera_local, const PatchBounds& boun
     return std::sqrt(std::max(0.0, len * len + r * r - 2 * len * r * std::cos(t)));
 }
 
+double TerrainTier::farthest_distance(Vec3d camera_local, const PatchBounds& bounds) {
+    const double len = length(camera_local);
+    if (len < 1e-9)
+        return 1 + double(MinorPlanetTerrain::height_max);
+    const double theta = std::acos(std::clamp(dot(camera_local, bounds.centre) / len, -1.0, 1.0));
+    const double t = std::min(theta + bounds.angular_radius, pi<double>);
+    double far = 0;
+    for (double r : {1 + double(MinorPlanetTerrain::height_min), 1 + double(MinorPlanetTerrain::height_max)})
+        far = std::max(far, std::sqrt(std::max(0.0, len * len + r * r - 2 * len * r * std::cos(t))));
+    return far;
+}
+
 unsigned TerrainTier::resident_slot(PatchKey key) const {
     const unsigned slot = slot_of(key);
     return slot != no_slot && slots_[slot].resident ? slot : no_slot;
@@ -154,7 +166,9 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
                 collapse(nodes_[children + i]);
                 continue;
             }
-            const bool in_range = child_seen.distance < double(range_[key.level + 1]);
+            const double gate = seam_ == Seam::farthest ? farthest_distance(view.camera_local, child.bounds)
+                                                        : child_seen.distance;
+            const bool in_range = gate < double(range_[key.level + 1]);
             const unsigned child_slot = slot_of(child.key);
             if (in_range && child_slot != no_slot && slots_[child_slot].resident) {
                 descend |= 1u << i;
@@ -188,6 +202,58 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
         draws_.push_back({.key = key, .slot = slot, .quadrants = quadrants, .fade = fade});
     else if (slot == no_slot)
         request(key, seen.pixels);
+}
+
+// Which of a drawn patch's four sides meet a finer surface. A patch draws quadrants
+// rather than always its whole cell, so the question is asked of quadrants: every
+// drawn quadrant maps to a cell one level down, and what covers the cell across each
+// of its outer sides is that cell's own entry, the nearest ancestor with one, or,
+// when neither exists, something finer that has been split under it.
+void TerrainTier::mark_finer_sides() {
+    std::unordered_map<std::uint32_t, unsigned> cover;
+    for (const Draw& draw : draws_)
+        for (unsigned i = 0; i < 4; i++)
+            if (draw.quadrants >> i & 1)
+                cover[draw.key.child(i).packed()] = draw.key.level;
+    const auto covering = [&](PatchKey cell) {
+        for (int up = 0; up <= int(cell.level); up++) {
+            if (const auto found = cover.find(cell.packed()); found != cover.end())
+                return int(found->second);
+            if (!cell.level)
+                break;
+            cell = {cell.face, std::uint8_t(cell.level - 1), std::uint16_t(cell.x / 2), std::uint16_t(cell.y / 2)};
+        }
+        return -1; // split under it: finer
+    };
+    for (Draw& draw : draws_) {
+        draw.finer = 0;
+        const unsigned level = draw.key.level + 1u, cells = 1u << level;
+        const double size = 2.0 / cells;
+        for (unsigned i = 0; i < 4; i++) {
+            if (!(draw.quadrants >> i & 1))
+                continue;
+            const PatchKey q = draw.key.child(i);
+            const unsigned qx = i & 1, qy = i >> 1;
+            // Its two sides that are also the patch's: low or high in x, then in y.
+            for (unsigned axis = 0; axis < 2; axis++) {
+                const bool high = axis == 0 ? qx : qy;
+                const int dx = axis == 0 ? (high ? 1 : -1) : 0, dy = axis == 1 ? (high ? 1 : -1) : 0;
+                const int nx = int(q.x) + dx, ny = int(q.y) + dy;
+                PatchKey neighbour{q.face, std::uint8_t(level), std::uint16_t(nx), std::uint16_t(ny)};
+                if (nx < 0 || ny < 0 || nx >= int(cells) || ny >= int(cells)) {
+                    const CubeCoord c = cube_coordinates(
+                        cube_direction(q.face, -1 + (q.x + .5) * size + dx * size, -1 + (q.y + .5) * size + dy * size));
+                    const auto index = [&](double v) {
+                        return std::uint16_t(std::clamp(int((v + 1) / size), 0, int(cells) - 1));
+                    };
+                    neighbour = {std::uint8_t(c.face), std::uint8_t(level), index(c.s), index(c.t)};
+                }
+                const int found = covering(neighbour);
+                if (found < 0 || found > int(draw.key.level))
+                    draw.finer |= 1u << (axis == 0 ? (high ? 1 : 0) : (high ? 3 : 2));
+            }
+        }
+    }
 }
 
 // Coarse levels first, then the largest on screen; a slot comes from the free
@@ -259,6 +325,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     draws_.clear();
     requests_.clear();
     generate_.clear();
+    seam_ = view.seam < unsigned(Seam::count) ? Seam(view.seam) : Seam::none;
     const float bias = std::exp2(view.lod_bias);
     for (unsigned level = 0; level < std::size(level_error); level++)
         range_[level] = level_error[level] * view.height_pixels / (view.tan_y * error_pixels) * bias;
@@ -289,6 +356,8 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     }
     if (!active_)
         draws_.clear();
+    if (seam_ == Seam::clamp)
+        mark_finer_sides();
     choose_generation(budget);
 }
 

@@ -106,7 +106,8 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                   .height_pixels = float(extent.height),
                   .tan_y = tan_y,
                   .activate_pixels = input.terrain.activate_pixels,
-                  .lod_bias = input.terrain.lod_bias};
+                  .lod_bias = input.terrain.lod_bias,
+                  .seam = input.terrain.seam};
     const double tilt = system.bodies[body].axial_tilt;
     for (unsigned axis = 0; axis < 3; axis++) {
         const Vec3d e{axis == 0 ? 1. : 0., axis == 1 ? 1. : 0., axis == 2 ? 1. : 0.};
@@ -200,12 +201,13 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         // The fade wants the parent's shape, and the fragment path blends toward the
         // parent's tile: without it resident the two would disagree, so it is dropped.
         const unsigned parent_slot = draw.key.level ? terrain_tier.resident_slot(parent) : TerrainTier::slot_count;
-        records[i] = {.cell = cell,
-                      .morph = {morph_start, morph_end, parent_slot < TerrainTier::slot_count ? draw.fade : 0, 0},
-                      .tile = {draw.key.face, draw.slot, parent_slot,
-                               (draw.key.x & 1u) | (draw.key.y & 1u) << 1 | (draw.key.x == 0) << 2 |
-                                   (draw.key.x + 1 == 1u << draw.key.level) << 3 | (draw.key.y == 0) << 4 |
-                                   (draw.key.y + 1 == 1u << draw.key.level) << 5 | draw.quadrants << 6}};
+        records[i] = {
+            .cell = cell,
+            .morph = {morph_start, morph_end, parent_slot < TerrainTier::slot_count ? draw.fade : 0, float(draw.finer)},
+            .tile = {draw.key.face, draw.slot, parent_slot,
+                     (draw.key.x & 1u) | (draw.key.y & 1u) << 1 | (draw.key.x == 0) << 2 |
+                         (draw.key.x + 1 == 1u << draw.key.level) << 3 | (draw.key.y == 0) << 4 |
+                         (draw.key.y + 1 == 1u << draw.key.level) << 5 | draw.quadrants << 6}};
     }
     patch_records_bytes = terrain_tier.draws().size() * sizeof(PatchInstance);
     if (patch_records_bytes)

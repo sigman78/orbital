@@ -163,6 +163,11 @@ struct TerrainSettings {
     // Micro-relief the tiles' slope carries past the terrain's own content, scaling
     // MinorPlanetTerrain's detail octaves; 0 is off. Changing it rebuilds every tile.
     float detail = 1;
+    // What to do where a patch meets a finer one (TerrainTier::Seam): 0 nothing, 1 a
+    // child waits until its whole cap is in range, 2 the coarse patch stops morphing
+    // along the sides that meet a finer one. The seam it is about shows from the
+    // ground, where one patch spans from under the camera to the horizon.
+    unsigned seam = 0;
 };
 
 struct GasSettings {
