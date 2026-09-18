@@ -228,8 +228,11 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
         }
         if (!quadrants)
             return;
-        // This node is the shape its children fade from, so its own quadrants must
-        // stand still while they do: a morphing reference would crack against them.
+        // This node is the shape its children fade from, so it does not also take a
+        // fade of its own from above. It is not held still by this: the shader morphs
+        // by max(distance, fade), and dropping the floor leaves the distance term. Held
+        // still it would crack against its outer neighbours instead, which is the
+        // granularity limit: one node carries one level of transition, not two.
         if (descend)
             fade = 0;
     }
@@ -252,14 +255,15 @@ void TerrainTier::mark_finer_sides() {
             if (draw.quadrants >> i & 1)
                 cover[draw.key.child(i).packed()] = draw.key.level;
     const auto covering = [&](PatchKey cell) {
-        for (int up = 0; up <= int(cell.level); up++) {
+        // Up to the root: a counter that grows while the level shrinks meets it halfway
+        // and leaves the coarsest ancestors unchecked, which reads as finer than it is.
+        for (;;) {
             if (const auto found = cover.find(cell.packed()); found != cover.end())
                 return int(found->second);
             if (!cell.level)
-                break;
+                return -1; // nothing covers it at or above its level: split under it
             cell = {cell.face, std::uint8_t(cell.level - 1), std::uint16_t(cell.x / 2), std::uint16_t(cell.y / 2)};
         }
-        return -1; // split under it: finer
     };
     for (Draw& draw : draws_) {
         draw.finer = 0;
@@ -324,9 +328,9 @@ void TerrainTier::choose_generation(unsigned budget) {
             pressure_.evicted_recent += slots_[slot].used + 60 > frame_;
             slots_by_key_.erase(slots_[slot].key.packed());
         }
-        slots_[slot] = {.key = r.key, .used = frame_, .resident = false};
+        slots_[slot] = {.key = r.key, .used = frame_, .stamp = ++stamp_, .resident = false};
         slots_by_key_[r.key.packed()] = slot;
-        generate_.push_back({.key = r.key, .slot = slot});
+        generate_.push_back({.key = r.key, .slot = slot, .stamp = stamp_});
     }
 }
 
@@ -350,9 +354,10 @@ void TerrainTier::disable() {
     active_ = wanted_ = false;
 }
 
-bool TerrainTier::mark_resident(unsigned slot, PatchKey key) {
-    if (slots_[slot].key != key)
-        return false; // recycled since the request went out
+bool TerrainTier::mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp) {
+    // Stamps start at one, so a slot cleared by invalidate() matches nothing in flight.
+    if (slots_[slot].stamp != stamp || slots_[slot].key != key)
+        return false; // recycled, or regenerated at another detail, since the request went out
     slots_[slot].resident = true;
     // The frame it can first be drawn in: residency is marked between updates.
     slots_[slot].resident_frame = frame_ + 1;

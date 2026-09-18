@@ -392,23 +392,35 @@ struct Renderer::Impl {
     struct PatchCopy {
         std::uint64_t source, destination, bytes;
     };
-    struct TileCopy {
-        std::uint64_t source, bytes;
-        gpu::Texture* texture;
-        unsigned layer, side; // the colour planes are a finer grid than the height plane
-    };
     std::vector<PatchCopy> patch_copies;
-    std::vector<TileCopy> tile_copies;
     std::uint64_t patch_records_bytes = 0;
     struct TileResult {
         PatchKey key;
         unsigned slot;
         unsigned ring;
-        float ms; // the generation's time on its worker
+        std::uint32_t stamp; // the tier's name for this generation of this slot
+        float ms;            // the generation's time on its worker
+    };
+    // A tile generated but not yet copied into the pool. It is held until a frame
+    // records it: a frame that gives up after preparing must not leave the slot
+    // marked resident over contents that were never uploaded.
+    struct TileUpload {
+        PatchKey key;
+        unsigned slot, ring;
+        std::uint32_t stamp;
     };
     static constexpr unsigned tile_ring_count = 32;
     std::unique_ptr<WorkerPool<TileResult>> tile_pool;
-    unsigned ring_used_frame[tile_ring_count] = {};
+    std::vector<TileUpload> tile_uploads;
+    // A staging entry belongs to its worker until the result is polled and to the copy
+    // it feeds until that copy is recorded. A frame number cannot say "still working":
+    // a job that outlives the count hands its buffer to the next one mid-write.
+    enum class RingState : std::uint8_t { free, worker, upload };
+    RingState ring_state[tile_ring_count] = {};
+    unsigned ring_used_frame[tile_ring_count] = {}; // the frame its copy was recorded in
+    bool ring_available(unsigned i) const {
+        return ring_state[i] == RingState::free && (!ring_used_frame[i] || frame_index >= ring_used_frame[i] + 2);
+    }
     unsigned tile_workers = 0;
     unsigned ring_head = 0;
     // The staging heap has two slots, written by frame parity before the wait for the

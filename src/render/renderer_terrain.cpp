@@ -70,30 +70,22 @@ void Renderer::Impl::create_terrain_tier() {
 
 void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     patch_copies.clear();
-    tile_copies.clear();
     stats.frame.terrain.uploaded = 0;
     if (!minor_planet_terrain)
         return;
+    // Finished tiles are taken from the pool whether or not the tier is drawing, so a
+    // staging entry is never left to a worker that nothing will collect. Their copies
+    // and their residency are settled together, in record_terrain_uploads.
+    if (tile_pool)
+        for (const TileResult& result : tile_pool->poll()) {
+            ring_state[result.ring] = RingState::upload;
+            tile_uploads.push_back({result.key, result.slot, result.ring, result.stamp});
+            stats.frame.terrain.generate_ms = result.ms;
+        }
     if (!input.terrain.near_tier) {
         terrain_tier.disable();
         stats.frame.terrain = {.slots = TerrainTier::slot_count, .workers = tile_workers};
         return;
-    }
-    // Poll finished tiles from the worker pool and record their copies.
-    if (tile_pool) {
-        for (const TileResult& result : tile_pool->poll()) {
-            terrain_tier.mark_resident(result.slot, result.key);
-            const auto staging_gpu = reinterpret_cast<std::uint64_t>(buffers.tile_staging.range().gpu) +
-                                     result.ring * tile_total_bytes;
-            tile_copies.push_back({staging_gpu, height_tile_bytes, tile_height.texture(), result.slot, tile_side});
-            tile_copies.push_back(
-                {staging_gpu + albedo_offset, colour_tile_bytes, tile_albedo.texture(), result.slot, tile_colour_side});
-            tile_copies.push_back(
-                {staging_gpu + slope_offset, colour_tile_bytes, tile_slope.texture(), result.slot, tile_colour_side});
-            ring_used_frame[result.ring] = frame_index;
-            stats.frame.terrain.uploaded++;
-            stats.frame.terrain.generate_ms = result.ms;
-        }
     }
     const unsigned body = showcase.minor_planet();
     const CameraView& camera = frozen_cull ? frozen_cull->camera : input.camera;
@@ -120,7 +112,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     // Only as many requests as there are ring entries to generate them into.
     unsigned free_rings = 0;
     for (unsigned i = 0; i < tile_ring_count; i++)
-        free_rings += frame_index >= ring_used_frame[i] + 2 || ring_used_frame[i] == 0;
+        free_rings += ring_available(i);
     // A change to how the tiles are generated makes the resident ones wrong.
     if (input.terrain.detail != tile_detail) {
         tile_detail = input.terrain.detail;
@@ -187,7 +179,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
             unsigned ring = tile_ring_count;
             for (unsigned i = 0; i < tile_ring_count; i++) {
                 const unsigned idx = (ring_head + i) % tile_ring_count;
-                if (frame_index >= ring_used_frame[idx] + 2 || ring_used_frame[idx] == 0) {
+                if (ring_available(idx)) {
                     ring = idx;
                     ring_head = (idx + 1) % tile_ring_count;
                     break;
@@ -195,13 +187,14 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
             }
             if (ring == tile_ring_count)
                 break;
-            ring_used_frame[ring] = frame_index + 100;
+            ring_state[ring] = RingState::worker; // held until its result is polled, however long that takes
             std::uint8_t* dst = buffers.tile_staging.range().cpu + ring * tile_total_bytes;
             const MinorPlanetTerrain* terrain = &*minor_planet_terrain;
             const PatchKey key = generation.key;
             const unsigned slot = generation.slot;
+            const std::uint32_t stamp = generation.stamp;
             const float detail = tile_detail;
-            tile_pool->submit([terrain, key, slot, ring, dst, height_range, detail]() -> TileResult {
+            tile_pool->submit([terrain, key, slot, ring, stamp, dst, height_range, detail]() -> TileResult {
                 const auto start = std::chrono::steady_clock::now();
                 std::vector<float> heights(tile_side * tile_side);
                 std::vector<std::uint8_t> albedo(tile_colour_side * tile_colour_side * 4);
@@ -216,7 +209,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                         .5f);
                 std::memcpy(dst + albedo_offset, albedo.data(), colour_tile_bytes);
                 std::memcpy(dst + slope_offset, slope.data(), colour_tile_bytes);
-                return {key, slot, ring,
+                return {key, slot, ring, stamp,
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count()};
             });
         }
@@ -256,14 +249,32 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
 }
 
 void Renderer::Impl::record_terrain_uploads(gpu::CommandBuffer* cmd) {
-    for (const TileCopy& copy : tile_copies)
-        gpu::copy_memory_to_texture(cmd, {reinterpret_cast<void*>(copy.source), copy.bytes}, copy.texture,
-                                    {.base_slice = copy.layer, .slice_count = 1, .extent = {copy.side, copy.side, 1}});
+    const auto plane = [&](std::uint64_t source, std::uint64_t bytes, gpu::Texture* texture, unsigned layer,
+                           unsigned side) {
+        gpu::copy_memory_to_texture(cmd, {reinterpret_cast<void*>(source), bytes}, texture,
+                                    {.base_slice = layer, .slice_count = 1, .extent = {side, side, 1}});
+    };
+    for (const TileUpload& upload : tile_uploads) {
+        // The copy and the residency are one decision. A slot recycled since its worker
+        // finished must have neither: the copy would land on the tile now using it, and
+        // the residency would vouch for contents belonging to another patch.
+        if (terrain_tier.mark_resident(upload.slot, upload.key, upload.stamp)) {
+            const auto staging = reinterpret_cast<std::uint64_t>(buffers.tile_staging.range().gpu) +
+                                 upload.ring * tile_total_bytes;
+            plane(staging, height_tile_bytes, tile_height.texture(), upload.slot, tile_side);
+            plane(staging + albedo_offset, colour_tile_bytes, tile_albedo.texture(), upload.slot, tile_colour_side);
+            plane(staging + slope_offset, colour_tile_bytes, tile_slope.texture(), upload.slot, tile_colour_side);
+            stats.frame.terrain.uploaded++;
+        }
+        ring_state[upload.ring] = RingState::free;
+        ring_used_frame[upload.ring] = frame_index;
+    }
     for (const PatchCopy& copy : patch_copies)
         gpu::copy_memory(cmd, {reinterpret_cast<void*>(copy.source), copy.bytes},
                          {reinterpret_cast<void*>(copy.destination), copy.bytes});
-    if (!tile_copies.empty() || !patch_copies.empty())
+    if (!tile_uploads.empty() || !patch_copies.empty())
         synchronize(cmd, access::transfer_write, {gpu::Stage::vertex | gpu::Stage::fragment, gpu::Access::shader_read});
+    tile_uploads.clear();
 }
 
 bool Renderer::Impl::terrain_tier_draws(unsigned body) const {

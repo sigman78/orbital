@@ -57,6 +57,7 @@ public:
     struct Generation {
         PatchKey key;
         unsigned slot;
+        std::uint32_t stamp; // which assignment of this slot asked for it
     };
     // What to do where a patch meets a finer one. A patch is drawn out to its own
     // range and morphs over the outer part of it, and from a grazing view one patch
@@ -119,7 +120,7 @@ public:
     std::span<const Draw> draws() const { return draws_; } // this frame's patches
     std::span<const Generation> generate() const { return generate_; }
     // Marks a slot resident if it still holds key; false if it was recycled meanwhile.
-    bool mark_resident(unsigned slot, PatchKey key);
+    bool mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp);
     float range(unsigned level) const { return level < std::size(range_) ? range_[level] : 0; }
     unsigned resident_slot(PatchKey key) const; // the tile's slot, slot_count when absent or pending
     unsigned pending() const;                   // slots handed out whose tile has not arrived
@@ -148,6 +149,11 @@ private:
     struct Slot {
         PatchKey key;
         unsigned used = 0, resident_frame = 0;
+        // Slot and key do not name a generation: a patch evicted and asked for again,
+        // or asked for again at another detail setting, gets both back. The stamp is
+        // issued once per assignment and never reissued, so a result that was in
+        // flight across the change is told apart from the one that replaced it.
+        std::uint32_t stamp = 0;
         bool resident = false;
     };
     struct Request {
@@ -181,6 +187,7 @@ private:
     std::vector<Generation> generate_;
     float range_[13] = {};
     unsigned frame_ = 0;
+    std::uint32_t stamp_ = 0; // the last generation stamp issued, never reused
     Pressure pressure_;
     Seam seam_ = Seam::none;
     bool active_ = false, wanted_ = false;

@@ -54,6 +54,7 @@ struct AsyncTiles {
     struct Pending {
         unsigned slot;
         PatchKey key;
+        std::uint32_t stamp;
         unsigned due;
     };
     std::vector<Pending> pending;
@@ -64,7 +65,7 @@ struct AsyncTiles {
         step++;
         for (auto it = pending.begin(); it != pending.end();) {
             if (it->due <= step) {
-                const bool ok = tier.mark_resident(it->slot, it->key);
+                const bool ok = tier.mark_resident(it->slot, it->key, it->stamp);
                 assert(ok);
                 it = pending.erase(it);
             } else {
@@ -73,7 +74,7 @@ struct AsyncTiles {
         }
         tier.update(view, frame, budget);
         for (const auto& g : tier.generate())
-            pending.push_back({g.slot, g.key, step + 2});
+            pending.push_back({g.slot, g.key, g.stamp, step + 2});
     }
 };
 
@@ -133,12 +134,14 @@ struct MorphCheck {
         // The surface covering a cell: itself, or the nearest ancestor drawn as a
         // quadrant. None means finer cells cover it, and they run the check instead.
         const auto coverer = [&](PatchKey cell) -> const Surface* {
-            for (int up = 0; up <= int(cell.level); up++) {
+            // Up to the root, not halfway: the counter must not shrink with the level.
+            for (;;) {
                 if (const auto found = cover.find(cell.packed()); found != cover.end())
                     return &surfaces[found->second];
+                if (!cell.level)
+                    return static_cast<const Surface*>(nullptr);
                 cell = {cell.face, std::uint8_t(cell.level - 1), std::uint16_t(cell.x / 2), std::uint16_t(cell.y / 2)};
             }
-            return nullptr;
         };
         unsigned bad = 0;
         for (const auto& [packed, index] : cover) {
@@ -205,7 +208,7 @@ void test_morph_continuity() {
             for (unsigned frame = 1; frame <= 96; frame++) {
                 tier.update(view, frame, TerrainTier::slot_count);
                 for (const auto& g : tier.generate())
-                    tier.mark_resident(g.slot, g.key);
+                    tier.mark_resident(g.slot, g.key, g.stamp);
             }
             tier.update(view, 200, TerrainTier::slot_count);
             bad += check.violations(tier, view, &checked);
@@ -351,9 +354,25 @@ int main() {
     const TerrainTier::Generation first = stale.generate()[0];
     const PatchKey wrong_key{std::uint8_t((first.key.face + 1) % 6), first.key.level, first.key.x, first.key.y};
     assert(stale.resident() == 0);
-    assert(!stale.mark_resident(first.slot, wrong_key));
+    assert(!stale.mark_resident(first.slot, wrong_key, first.stamp));
     assert(stale.resident() == 0);
-    assert(stale.mark_resident(first.slot, first.key));
+    assert(stale.mark_resident(first.slot, first.key, first.stamp));
     assert(stale.resident() == 1);
+
+    // Slot and key repeat; the stamp does not. A result in flight when the tiles were
+    // invalidated names a generation that no longer exists, even though the same patch
+    // is asked for again and is handed back the same slot.
+    TerrainTier reissued;
+    reissued.update(view_at(.2, radius), 1, 3);
+    const TerrainTier::Generation before = reissued.generate()[0];
+    reissued.invalidate();
+    reissued.update(view_at(.2, radius), 2, 3);
+    const TerrainTier::Generation after = reissued.generate()[0];
+    assert(after.key == before.key && after.slot == before.slot);
+    assert(after.stamp != before.stamp);
+    assert(!reissued.mark_resident(before.slot, before.key, before.stamp));
+    assert(reissued.resident() == 0);
+    assert(reissued.mark_resident(after.slot, after.key, after.stamp));
+    assert(reissued.resident() == 1);
     return 0;
 }
