@@ -16,7 +16,9 @@ The asteroid belt is a deterministic rock population drawn as meshes near the ca
 
 The minor planet carries a second terrain tier. Close in it stops being a textured sphere and becomes a CDLOD cube sphere: one shared grid mesh instanced per patch, shape and colour read from per-patch tiles that a CPU worker pool generates and streams into texture arrays, levels meeting without cracks by vertex morphing. How it works and what is still wrong with it is in [docs/DYNAMIC_TERRAIN.md](docs/DYNAMIC_TERRAIN.md).
 
-![The minor planet close in, drawn by the near tier](docs/images/minor-planet.jpg)
+![The near tier's patch grid over the minor planet's surface, with Earth and the sun beyond it](docs/images/minor-planet.jpg)
+
+Above is that tier with its wireframe on (`--wireframe 1`, or the panel), from low over the surface: green for the shared grid mesh's triangles, orange for the patch borders, red where a patch lies on a cube-face edge. The triangles coarsen with distance as the selector gives each patch the level its screen error asks for. Earth hangs off to the left. With the wireframe off it is a cratered surface and nothing else.
 
 ## Build
 
@@ -46,10 +48,8 @@ Tab opens the control panel (`--ui` opens it at start), which holds frame statis
 ./build/release/orbital.exe --bookmark 5 --time 0 --frames 300 --high --benchmark belt.csv
 ./build/release/orbital.exe --bookmark 4 --time 0 --frames 60 --no-hud --capture captures/dawn.png
 ./build/release/orbital.exe --bookmark 5 --time 0 --frames 40 --pan 3 --spatial 0 --capture captures/pan.png
-./build/release/orbital.exe --bookmark 9 --time 1200 --back 0.05 --frames 120 --no-hud --high --width 1920 --height 1080 --capture captures/minor-planet.png
+./build/release/orbital.exe --bookmark 9 --time 1200 --back 0.05 --frames 120 --no-hud --high --capture captures/minor-planet.png
 ```
-
-The last of those is the image at the top of this page, pixel for pixel.
 
 `--help` lists every option. `--time` freezes the simulation and exposure adaptation for reproducible captures; `--benchmark` writes per-frame CPU and GPU pass timings and runs with vsync off (`--vsync 0|1` overrides, and the panel has a switch), because a vsynced GPU idles between frames and clocks down, which inflates its timestamps on a fast card; `--pan` strafes the camera at a fixed rate to compare anti-aliasing modes in motion; `--rocks N` overrides the belt size.
 
