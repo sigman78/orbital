@@ -45,10 +45,14 @@ public:
     static constexpr float hysteresis = .8f; // the fraction of either the way back
     // Fade new tiles from their parent's shape over a fixed frame count for deterministic captures.
     static constexpr unsigned fade_frames = 15;
-    // Seed-1007 calibration: 64 patches/level, 32 quads, Everitt warp; levels 9..12 extrapolate by 2.3x.
+    // Seed-1007 calibration, 32 quads, Everitt warp (`terrain_tests --calibrate`): a uniform
+    // sample per level, then a hill climb around its worst patch, since relief clusters and a
+    // uniform sample misses it. Levels 9..12 previously extrapolated at about half the true
+    // error. One method for the whole table: test_morph_bands constrains adjacent ratios, so a
+    // level measured more thoroughly than its neighbour breaks the band it hands over in.
     static constexpr float level_error[] = {
-        .018342f,  .0126785f, .00478311f, .00138083f, .000601649f, .000284836f, .000119656f,
-        .0000752f, .0000272f, 1.18e-5f,   5.1e-6f,    2.2e-6f,     9.6e-7f,
+        .018342f,     .0126785f,    .00478311f,   .00225514f,  .000698864f, .000284836f, .000153035f,
+        .0000752807f, .0000374019f, .0000214279f, 9.11951e-6f, 4.02331e-6f, 1.99676e-6f,
     };
 
     struct Generation {

@@ -50,6 +50,9 @@ only delays a request to the next frame.
 8. The tree size (`node_budget`) is not the cache size. A node is 64 bytes of CPU bookkeeping and
    only drawn patches need slots, so the two have no reason to share a number. They did once, and
    capping the tree at `slot_count - 64` starved splits long before memory justified it.
+9. `patch_level_max` is 11: cells of 90 degrees over 2048, quads of 24 urad, about 10 m on this body.
+   Every field carrying a cell index is guarded by a `static_assert` in `terrain_patch.hpp`, because
+   overflowing one truncates silently. 12 is the ceiling `PatchKey::packed`'s 12-bit x and y allow.
 
 ## Design
 
@@ -112,8 +115,18 @@ carry false motion vectors into TAA.
 
 ### Selection
 
-`level_error[level]` is the worst measured geometric error per level in radii, calibrated over 64
-random patches a level. Each frame the tier derives
+`level_error[level]` is the worst measured geometric error per level in radii, from
+`terrain_tests --calibrate`: a uniform sample per level (64 patches, 1024 below level 9), then a hill
+climb around the worst one found, because relief clusters and a uniform sample of a deep level misses
+it entirely. Levels 9..12 used to be extrapolated at 2.3x a level and ran about **half** the true
+error, which understated their ranges and held those levels back until the camera was far too close.
+
+The whole table must come from one method. `test_morph_bands` requires every adjacent ratio to exceed
+`1 / 0.7`, so a level measured more thoroughly than its neighbour shrinks the step between them and
+breaks the band it hands over in — measuring only 9..12 fails at the 8->9 step. Re-derive all of it
+or none of it.
+
+Each frame the tier derives
 `range[level] = level_error[level] * height_pixels / (tan_y * error_pixels)` with `error_pixels` 3 in
 `cull_bodies`' units, and `morph.start = 0.7 * range[level]`.
 
@@ -196,19 +209,21 @@ Host-visible heaps count against the BAR aperture (`tools/check-bar1.py`).
 ### 1. The range ratios are not a geometric series
 
 CDLOD wants each level's range to be half the one above, because the morph band is defined as a
-fraction of a range whose neighbour is assumed to be half of it. Measured against the drawn triangles,
-the ratios between adjacent ranges run:
+fraction of a range whose neighbour is assumed to be half of it. With the re-derived table the ratios
+between adjacent ranges run:
 
-| levels | 0→1 | 1→2 | 2→3 | 3→4 | 4→5 | 5→6 | 6→7 | 7→8 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| from the table | 1.45 | 2.65 | 3.46 | 2.30 | 2.11 | 2.38 | 1.59 | 2.76 |
-| from the true geometric error | 1.62 | 2.41 | 1.81 | 3.52 | 2.10 | 3.04 | 1.24 | 4.28 |
+| levels | 0→1 | 1→2 | 2→3 | 3→4 | 4→5 | 5→6 | 6→7 | 7→8 | 8→9 | 9→10 | 10→11 | 11→12 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| now | 1.45 | 2.65 | 2.12 | 3.23 | 2.45 | 1.86 | 2.03 | 2.01 | 1.75 | 2.35 | 2.27 | 2.01 |
+| before | 1.45 | 2.65 | 3.46 | 2.30 | 2.11 | 2.38 | 1.59 | 2.76 | 2.31 | 2.31 | 2.32 | 2.29 |
 
-No morph band spans steps between 1.24× and 4.28× consistently. This is the strongest candidate for the
-hard level edge seen from the ground, and it is the one open item that matches the reported symptom.
+One consistent measurement narrowed the spread from 1.45–3.46 to 1.45–3.23 and put most steps near 2,
+but no morph band spans 1.45 and 3.23 alike. `test_morph_bands` reports 1.013x headroom at the 0→1
+step — it passes, with almost nothing to spare, and any future re-measure that lowers level 0 or
+raises level 1 breaks it.
 
-The fix is a design decision, not a bug fix: prescribe the ×2 series and use the measured errors to
-*place* it rather than to define each step.
+The fix is still a design decision, not a bug fix: prescribe the x2 series and use the measured errors
+to *place* it rather than to define each step.
 
 Related: `patch_error` compares scalar radii using `length(d)` on a normalized direction, so sphere
 curvature is excluded despite the comment. Correcting that does not fix the ratios — it reshuffles
@@ -240,11 +255,11 @@ settles stable and inadequate. That is what a lone coarse patch among refined ne
 and it does not heal, which is how it differs from streaming lag.
 
 Raising `node_budget` off `slot_count` removed it at the measured demand: `splits_blocked` went from
-93 to 0, the tree settled at its true 1398 nodes, and the worst run of a patch more than one level
-behind fell from 101 frames to 66. **The grandfathering and the fixed order are still
+93 to 0, the tree settled at its true 1398 nodes (2422 at level 11), and the worst run of a patch more
+than one level behind fell from 101 frames to 66. **The grandfathering and the fixed order are still
 there** — they simply have headroom now, and would bite again at a ceiling.
 
-What is left at `--lod-bias 2` is capacity, not selection: 3396 of 8515 evictions are of tiles used
+What is left at `--lod-bias 2` is capacity, not selection: 4198 of 8515 evictions are of tiles used
 within the last 60 frames, so the working set genuinely exceeds 1024 slots and tiles are thrown out
 before they are done with. At bias 0 nothing warm is evicted in any flight measured — stationary,
 rotating, orbiting fast or slow. Wants slot count scaled with bias, or eviction ordered by view
@@ -269,21 +284,26 @@ A level `L` node splits against `range[L + 1]`, so it stays selected past its ow
 and morph bands want deriving together from the error of the geometry actually drawn; changing one
 comparison alone invalidates the seam relationships.
 
-### 6. Detail stops at the depth cap
+### 6. Detail still stops at the depth cap, further in
 
-`patch_level_max` bounds how fine the geometry goes, and the error metric keeps asking past it. At 10
-the smallest quad is 48 urad, about 20 m on this body, and the metric wants finer from roughly 1.3 km
+`patch_level_max` bounds how fine the geometry goes, and the error metric keeps asking past it. At 11
+the smallest quad is 24 urad, about 10 m on this body, and the metric wants finer from roughly 650 m
 up. Below that the near patches sit at the cap while their farther neighbours are served correctly —
 correct saturation, but it reads as a stall, and it is worth ruling out before chasing one.
 
+Level 12 is the last the packing allows and needs no code change beyond the constant, but each level
+multiplies the near working set against a cache already short at bias 2. The cheaper answer is the
+detail octaves below tile resolution listed under *Later*: what is missing up close is small relief,
+not accurate large shapes, and shader detail costs no tiles, no slots and no CPU generation.
+
 ### 7. Leftovers
 
-- `calibrate_level_errors` runs inside `terrain_tests` (13.9 s of a 25 s ctest); it wants a flag.
 - Constants duplicated between C++ and the shaders: the Everitt constant, the face tables, `tile_side`.
 - `draw_body` leaves `ORBITAL_ROOT_PATCHES` and `root.patches` on the caller's `Root`; harmless only
   because the minor planet is drawn last.
 - Acceptance never read off the panel: main-thread time in `prepare_terrain_tier` under 0.5 ms with 32
-  jobs in flight, and one draw call per pass.
+  jobs in flight, and one draw call per pass. Selection now walks a larger tree for a deeper cap, so
+  this is the number to watch: measured in isolation it roughly doubled at bias 2.
 
 ## Later, out of scope
 

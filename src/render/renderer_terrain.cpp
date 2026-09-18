@@ -21,6 +21,11 @@ constexpr std::uint64_t colour_tile_bytes = tile_colour_side * tile_colour_side 
 constexpr std::uint64_t albedo_offset = align4(height_tile_bytes);
 constexpr std::uint64_t slope_offset = albedo_offset + colour_tile_bytes;
 constexpr std::uint64_t tile_total_bytes = align4(slope_offset + colour_tile_bytes);
+// PatchInstance::tile[3] carries six edge/quadrant flags plus the four quadrant bits, and the
+// shaders' debug packing reads tile[2] and tile[3] through 12-bit fields (see patch.slang).
+constexpr unsigned patch_tile_flag_bits = 10;
+static_assert(patch_tile_flag_bits <= 12, "tile[3] is unpacked from a 12-bit field");
+static_assert(TerrainTier::slot_count <= 0xfff, "tile[2] carries the parent slot in a 12-bit field");
 } // namespace
 
 void Renderer::Impl::create_terrain_tier() {
