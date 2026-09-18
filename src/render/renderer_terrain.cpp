@@ -142,6 +142,40 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     ts.slots = TerrainTier::slot_count;
     ts.nodes = terrain_tier.nodes();
     ts.workers = tile_workers;
+    const TerrainTier::Pressure& p = terrain_tier.pressure();
+    ts.node_budget = p.node_budget;
+    ts.splits_blocked = p.splits_blocked;
+    ts.requested = p.requested;
+    ts.served = p.served;
+    ts.evictions = p.evictions;
+    ts.evicted_recent = p.evicted_recent;
+    ts.starved = p.starved;
+    ts.out_of_range = p.out_of_range;
+    ts.deepest = p.deepest;
+    ts.behind_one = p.behind_one;
+    ts.behind_mean = p.behind_mean;
+    // A line a flight can be read back from: every second or so while the tier draws,
+    // and straight away the first time a limit actually bites.
+    if (terrain_tier.active()) {
+        const bool pinched = p.splits_blocked || p.evicted_recent || p.requested > p.served;
+        if (pinched && !tier_pinched) {
+            log::info("Near tier pinched at frame {}: {} splits blocked, {} of {} requests served, {} warm "
+                      "evictions",
+                      frame_index, p.splits_blocked, p.served, p.requested, p.evicted_recent);
+            tier_pinched = true;
+        } else if (!pinched) {
+            tier_pinched = false;
+        }
+        if (frame_index >= tier_log_frame + 60) {
+            tier_log_frame = frame_index;
+            log::info("Near tier f{}: {} drawn to level {}, {}/{} tiles ({} pending), nodes {}/{}, "
+                      "blocked {}, req {}/{}, evict {} ({} warm), cover starved {} range {}, behind {:.2f} "
+                      "({} over a level)",
+                      frame_index, ts.drawn, p.deepest, ts.resident, ts.slots, ts.pending, p.nodes, p.node_budget,
+                      p.splits_blocked, p.served, p.requested, p.evictions, p.evicted_recent, p.starved, p.out_of_range,
+                      p.behind_mean, p.behind_one);
+        }
+    }
     // Submit new generation requests to the worker pool.
     if (tile_pool) {
         const float height_range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;

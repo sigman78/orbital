@@ -167,10 +167,12 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
     // more than it has.
     const bool wide = seam_ == Seam::span && level_span(view, nodes_[index].bounds) >
                                                  seam_span * (nodes_[index].children ? double(hysteresis) : 1.0);
-    const bool split = key.level < patch_level_max && key.level + 1 < std::size(level_error) &&
-                       (nodes_[index].children || nodes() < slot_count - 64) &&
+    const bool wants = key.level < patch_level_max && key.level + 1 < std::size(level_error) &&
                        (wide || seen.distance < double(range_[key.level + 1]) *
                                                     (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0));
+    const bool allowed = nodes_[index].children || nodes() < slot_count - 64;
+    pressure_.splits_blocked += wants && !allowed;
+    const bool split = wants && allowed;
     if (split && !nodes_[index].children)
         nodes_[index].children = allocate_children(nodes_[index]);
     if (!split && nodes_[index].children)
@@ -206,10 +208,14 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
                 continue;
             }
             quadrants |= 1u << i;
-            if (!in_range)
+            if (!in_range) {
                 collapse(nodes_[children + i]);
-            else if (child_slot == no_slot)
-                request(child.key, child_seen.pixels);
+                pressure_.out_of_range++;
+            } else {
+                pressure_.starved++; // it wanted this child and has no tile for it
+                if (child_slot == no_slot)
+                    request(child.key, child_seen.pixels);
+            }
             if (child_slot != no_slot)
                 touch(child.key);
         }
@@ -313,6 +319,9 @@ void TerrainTier::choose_generation(unsigned budget) {
                 }
             if (slot == no_slot)
                 break; // nothing evictable: every other slot is pending
+            pressure_.evictions++;
+            // Recycled while still warm: the pool is smaller than the flight needs.
+            pressure_.evicted_recent += slots_[slot].used + 60 > frame_;
             slots_by_key_.erase(slots_[slot].key.packed());
         }
         slots_[slot] = {.key = r.key, .used = frame_, .resident = false};
@@ -355,6 +364,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     draws_.clear();
     requests_.clear();
     generate_.clear();
+    pressure_ = {};
     seam_ = view.seam < unsigned(Seam::count) ? Seam(view.seam) : Seam::none;
     const float bias = std::exp2(view.lod_bias);
     for (unsigned level = 0; level < std::size(level_error); level++)
@@ -389,6 +399,23 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     if (seam_ == Seam::clamp)
         mark_finer_sides();
     choose_generation(budget);
+    // What the frame cost the tier, for the panel and the log.
+    pressure_.nodes = nodes();
+    pressure_.node_budget = slot_count - 64;
+    pressure_.requested = unsigned(requests_.size());
+    pressure_.served = unsigned(generate_.size());
+    double behind = 0;
+    for (const Draw& draw : draws_) {
+        pressure_.deepest = std::max(pressure_.deepest, unsigned(draw.key.level));
+        // What the screen error asks for at its nearest point against what it is drawn
+        // at: a patch well over a level behind is one the selection left coarse.
+        const double want = level_at(nearest_distance(view.camera_local, patch_bounds(draw.key)));
+        const double over = want - double(draw.key.level);
+        behind += over;
+        pressure_.behind_one += over > 1;
+    }
+    pressure_.behind_count = unsigned(draws_.size());
+    pressure_.behind_mean = draws_.empty() ? 0 : float(behind / double(draws_.size()));
 }
 
 } // namespace space::render

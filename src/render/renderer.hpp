@@ -73,6 +73,12 @@ struct FrameStats {
         unsigned nodes = 0;                 // quadtree nodes alive
         unsigned workers = 0;
         float generate_ms = 0; // the last finished tile's time on its worker
+        // What the tier ran out of this frame (TerrainTier::Pressure).
+        unsigned node_budget = 0, splits_blocked = 0;
+        unsigned requested = 0, served = 0;
+        unsigned evictions = 0, evicted_recent = 0;
+        unsigned starved = 0, out_of_range = 0, deepest = 0, behind_one = 0;
+        float behind_mean = 0;
     } terrain;
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
     float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc

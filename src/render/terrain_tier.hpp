@@ -86,6 +86,22 @@ public:
         float fade = 0;
     };
 
+    // Everything the tier can run out of in a frame, so a flight can be flown and the
+    // log read back afterwards. The two that change what is drawn are `starved`, a
+    // quadrant the parent covered because its child had no tile, and `splits_blocked`,
+    // a node that wanted to split and was refused by the node budget; `out_of_range`
+    // is the same cover for the ordinary reason and is not a limit at all.
+    struct Pressure {
+        unsigned nodes = 0, node_budget = 0, splits_blocked = 0;
+        unsigned requested = 0, served = 0;         // tiles asked for, and given a slot
+        unsigned evictions = 0, evicted_recent = 0; // resident slots recycled, and those still warm
+        unsigned starved = 0, out_of_range = 0;     // quadrants the parent covered, by reason
+        unsigned deepest = 0;                       // finest level drawn
+        unsigned behind_one = 0, behind_count = 0;  // patches over a level coarser than asked for
+        float behind_mean = 0;                      // levels coarser than asked for, averaged
+    };
+    const Pressure& pressure() const { return pressure_; }
+
     void update(const TierView& view, unsigned frame, unsigned budget = generate_per_frame);
     void disable(); // the switch off: the tree collapses, the cache stays
     // Drops every tile: what a change to how they are generated needs. Tiles in
@@ -158,6 +174,7 @@ private:
     std::vector<Generation> generate_;
     float range_[13] = {};
     unsigned frame_ = 0;
+    Pressure pressure_;
     Seam seam_ = Seam::none;
     bool active_ = false, wanted_ = false;
 };

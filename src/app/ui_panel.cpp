@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <vector>
 
@@ -257,7 +258,27 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
                                 terrain.pending);
         ImGui::Text("Tiles: %u queued on %u workers, %u uploaded, %.1f ms each", terrain.queued, terrain.workers,
                     terrain.uploaded, terrain.generate_ms);
-        ImGui::Text("Ring %u / %u free, %u nodes", terrain.rings_free, terrain.rings, terrain.nodes);
+        ImGui::Text("Ring %u / %u free, nodes %u / %u", terrain.rings_free, terrain.rings, terrain.nodes,
+                    terrain.node_budget);
+        // What the tier ran out of: red while a limit is actually biting.
+        const auto pinch = [](bool bad, const char* text, ...) {
+            va_list args;
+            va_start(args, text);
+            if (bad)
+                ImGui::TextColoredV(ImVec4(1.f, .45f, .35f, 1.f), text, args);
+            else
+                ImGui::TextV(text, args);
+            va_end(args);
+        };
+        pinch(terrain.splits_blocked > 0, "Splits blocked by the node budget: %u", terrain.splits_blocked);
+        pinch(terrain.requested > terrain.served, "Tiles asked for %u, given a slot %u", terrain.requested,
+              terrain.served);
+        pinch(terrain.evicted_recent > 0, "Evictions %u, of them still warm %u", terrain.evictions,
+              terrain.evicted_recent);
+        pinch(terrain.starved > 0, "Quadrants covered: %u for want of a tile, %u out of range", terrain.starved,
+              terrain.out_of_range);
+        pinch(terrain.behind_mean > 1.f, "Finest level %u, drawn %.2f levels coarser than asked (%u over one)",
+              terrain.deepest, double(terrain.behind_mean), terrain.behind_one);
     }
     ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
 }
