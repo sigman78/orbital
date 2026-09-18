@@ -8,8 +8,6 @@ namespace space::render {
 namespace {
 
 constexpr unsigned no_slot = TerrainTier::slot_count;
-// A peak at the terrain's top height shows past the limb by about this much.
-const double horizon_allowance = std::acos(1 / (1 + double(MinorPlanetTerrain::height_max)));
 
 Vec3d to_world(const TierView& view, Vec3d local) {
     return view.axes[0] * local.x + view.axes[1] * local.y + view.axes[2] * local.z;
@@ -32,19 +30,27 @@ void TerrainTier::ensure_roots() {
 
 TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView& view) const {
     const PatchBounds& b = node.bounds;
-    // Cull caps beyond the horizon only when the camera is outside the reference sphere.
+    // Cull against the patch's own heights once its tile is resident, padded for the relief a
+    // child may still reveal. Unknown tiles keep the global shell, so the bound stays sound.
+    const Range<float> heights = height_range(node.key);
+    const float margin = relief_margin(node.key.level);
+    const Range<float> reach{heights.min - margin, heights.max + margin};
+    // Cull caps beyond the horizon only when the camera is outside the reference sphere. Only
+    // ground standing above that surface shows past the limb, so a low patch allows nothing.
     const double d = length(view.camera_local);
     if (d > 1) {
+        const double allowance = std::acos(std::clamp(1 / (1 + std::max(double(reach.max), 0.0)), -1.0, 1.0));
         const double angle = std::acos(std::clamp(dot(b.centre, view.camera_local * (1 / d)), -1.0, 1.0));
-        if (angle > std::acos(1 / d) + b.angular_radius + horizon_allowance)
+        if (angle > std::acos(1 / d) + b.angular_radius + allowance)
             return {};
     }
+    const PatchSphere sphere = patch_cull_sphere(b, reach);
     const Vec3d normal = to_world(view, b.centre);
-    const Vec3d centre = view.body_centre + normal * view.radius;
-    if (!geometry::sphere_in_frustum(view.frustum, to_float(centre), float(view.radius * b.bound_radius)))
+    const Vec3d centre = view.body_centre + normal * (view.radius * sphere.offset);
+    if (!geometry::sphere_in_frustum(view.frustum, to_float(centre), float(view.radius * sphere.radius)))
         return {};
     // Prioritize nearby patch coverage; distances and sizes are both in radii.
-    const double near = nearest_distance(view.camera_local, b, height_range(node.key));
+    const double near = nearest_distance(view.camera_local, b, heights);
     const float scale = float(view.height_pixels / (std::max(near, 1e-4) * view.tan_y));
     return {.visible = true, .pixels = float(b.angular_size) * scale, .distance = near};
 }
@@ -159,7 +165,7 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
     const bool wants = key.level < patch_level_max && key.level + 1 < std::size(level_error) &&
                        descendant_distance <
                            double(range_[key.level + 1]) * (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0);
-    const bool allowed = nodes_[index].children || nodes() < slot_count - 64;
+    const bool allowed = nodes_[index].children || nodes() < node_budget;
     pressure_.splits_blocked += wants && !allowed;
     const bool split = wants && allowed;
     if (split && !nodes_[index].children)
@@ -221,6 +227,19 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
 // Serve coarse/large patches first; LRU eviction protects pending and currently used slots.
 void TerrainTier::choose_generation(unsigned budget) {
     const unsigned cap = std::min(budget, generate_per_frame);
+    // Reclaim slots whose generation never came back, whatever lost it. `used` cannot say:
+    // a visible pending patch is touched every frame, so the assignment frame decides.
+    // A cursor over a window per frame rather than the whole array: there is no queue to
+    // overrun, and a slot waits at most slot_count / sweep_window extra frames.
+    for (unsigned n = 0; n < sweep_window; n++) {
+        Slot& slot = slots_[sweep_cursor_];
+        sweep_cursor_ = (sweep_cursor_ + 1) % slot_count;
+        if (!slot.resident && slot.stamp && slot.assigned_frame + pending_timeout < frame_) {
+            slots_by_key_.erase(slot.key.packed());
+            free_slots_.push_back(unsigned(&slot - slots_.data()));
+            slot = {};
+        }
+    }
     std::sort(requests_.begin(), requests_.end(), [](const Request& a, const Request& b) {
         return a.key.level != b.key.level ? a.key.level < b.key.level : a.pixels > b.pixels;
     });
@@ -246,7 +265,7 @@ void TerrainTier::choose_generation(unsigned budget) {
             pressure_.evicted_recent += slots_[slot].used + 60 > frame_;
             slots_by_key_.erase(slots_[slot].key.packed());
         }
-        slots_[slot] = {.key = r.key, .used = frame_, .stamp = ++stamp_, .resident = false};
+        slots_[slot] = {.key = r.key, .used = frame_, .assigned_frame = frame_, .stamp = ++stamp_, .resident = false};
         slots_by_key_[r.key.packed()] = slot;
         generate_.push_back({.key = r.key, .slot = slot, .stamp = stamp_});
     }
@@ -270,6 +289,15 @@ void TerrainTier::disable() {
     for (unsigned face = 0; face < std::min<std::size_t>(6, nodes_.size()); face++)
         collapse(nodes_[face]);
     active_ = wanted_ = false;
+}
+
+void TerrainTier::release(unsigned slot, PatchKey key, std::uint32_t stamp) {
+    // Stamps start at one, so a cleared slot matches nothing; a resident slot is not ours to free.
+    if (slot >= slot_count || slots_[slot].stamp != stamp || slots_[slot].key != key || slots_[slot].resident)
+        return;
+    slots_by_key_.erase(key.packed());
+    slots_[slot] = {};
+    free_slots_.push_back(slot);
 }
 
 bool TerrainTier::mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights) {
@@ -320,7 +348,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         draws_.clear();
     choose_generation(budget);
     pressure_.nodes = nodes();
-    pressure_.node_budget = slot_count - 64;
+    pressure_.node_budget = node_budget;
     pressure_.requested = unsigned(requests_.size());
     pressure_.served = unsigned(generate_.size());
     double behind = 0, fade = 0;

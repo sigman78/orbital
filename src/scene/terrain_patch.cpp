@@ -70,14 +70,19 @@ PatchBounds patch_bounds(PatchKey key) {
     }
     bounds.angular_size = 2 * std::atan(std::tan(everitt_k * cell.size / 2) / tan_k);
     bounds.angular_radius += 1e-6;
-    // Bound both height-shell ends about the reference-surface centre, including the skirt.
-    const double cosine = std::cos(bounds.angular_radius);
-    const auto chord = [cosine](double radius) {
-        return std::sqrt(std::max(0.0, radius * radius + 1 - 2 * radius * cosine));
-    };
-    bounds.bound_radius = std::max(chord(1 + MinorPlanetTerrain::height_max),
-                                   chord(1 + MinorPlanetTerrain::height_min - patch_skirt_drop));
     return bounds;
+}
+
+PatchSphere patch_cull_sphere(const PatchBounds& bounds, Range<float> heights) {
+    const double top = 1 + double(heights.max);
+    const double bottom = 1 + double(heights.min) - patch_skirt_drop;
+    const double mid = (top + bottom) * .5;
+    const double cosine = std::cos(bounds.angular_radius);
+    // Farthest point of either shell end from a centre out at mid, over the cap.
+    const auto chord = [cosine, mid](double radius) {
+        return std::sqrt(std::max(0.0, radius * radius + mid * mid - 2 * radius * mid * cosine));
+    };
+    return {.offset = mid, .radius = std::max(chord(top), chord(bottom))};
 }
 
 // Use the neighbor's grid beyond cube edges so both faces share derivative stencils.

@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <string_view>
 
 using namespace space;
 
@@ -263,18 +264,25 @@ void test_tiles() {
                         const PatchKey k{std::uint8_t(face), std::uint8_t(level), std::uint16_t(cx), std::uint16_t(cy)};
                         const PatchBounds bounds = patch_bounds(k);
                         const double size = 2.0 / cells;
-                        double reach = 0;
-                        for (unsigned i = 0; i <= 16; i++)
-                            for (unsigned j = 0; j <= 16; j++) {
-                                const Vec3d d = cube_direction(face, -1 + cx * size + i * size / 16,
-                                                               -1 + cy * size + j * size / 16);
-                                for (double h : {double(MinorPlanetTerrain::height_max),
-                                                 double(MinorPlanetTerrain::height_min) - patch_skirt_drop})
-                                    reach = std::max(reach, length(d * (1 + h) - bounds.centre));
-                            }
-                        assert(reach <= bounds.bound_radius); // conservative, always
-                        worst_fill = std::max(worst_fill, bounds.bound_radius / reach);
-                        tightest = std::min(tightest, bounds.bound_radius / reach);
+                        // Both the global shell and a tight interval well off the reference
+                        // surface, which is where centring the sphere on it used to cost.
+                        for (Range<float> heights :
+                             {Range<float>{MinorPlanetTerrain::height_min, MinorPlanetTerrain::height_max},
+                              Range<float>{-.031f, -.029f}}) {
+                            const PatchSphere sphere = patch_cull_sphere(bounds, heights);
+                            const Vec3d centre = bounds.centre * sphere.offset;
+                            double reach = 0;
+                            for (unsigned i = 0; i <= 16; i++)
+                                for (unsigned j = 0; j <= 16; j++) {
+                                    const Vec3d d = cube_direction(face, -1 + cx * size + i * size / 16,
+                                                                   -1 + cy * size + j * size / 16);
+                                    for (double h : {double(heights.max), double(heights.min) - patch_skirt_drop})
+                                        reach = std::max(reach, length(d * (1 + h) - centre));
+                                }
+                            assert(reach <= sphere.radius * (1 + 1e-12)); // conservative, always
+                            worst_fill = std::max(worst_fill, sphere.radius / reach);
+                            tightest = std::min(tightest, sphere.radius / reach);
+                        }
                         sampled++;
                     }
         }
@@ -287,23 +295,72 @@ void test_tiles() {
     std::printf("tiles: patch error at level 3: %g radii\n", double(error));
 }
 
+// Minutes of work, and only needed when level_error is re-derived: --calibrate runs it.
 void calibrate_level_errors() {
     const MinorPlanetTerrain terrain(1007);
     std::uint64_t rng = 42;
-    std::printf("calibration: max patch_error per level, 64 random patches, seed 1007, Everitt warp:\n");
-    for (unsigned level = 0; level <= 8; level++) {
+    std::printf("calibration: max patch_error per level, seed 1007, Everitt warp:\n");
+    for (unsigned level = 0; level <= 12; level++) {
         const unsigned cells = 1u << level;
+        // A deep cell covers so little of the body that a uniform sample of 64 misses the
+        // relief entirely; take more, then climb to the local worst, which relief clusters near.
+        const unsigned trials = level <= 8 ? 64 : 1024;
         float worst = 0;
-        for (unsigned trial = 0; trial < 64; trial++) {
+        PatchKey peak{};
+        for (unsigned trial = 0; trial < trials; trial++) {
             const unsigned face = unsigned(uniform(rng) * 6) % 6;
             const unsigned x = unsigned(uniform(rng) * cells) % cells;
             const unsigned y = unsigned(uniform(rng) * cells) % cells;
-            const float e = patch_error(
-                terrain, PatchKey{std::uint8_t(face), std::uint8_t(level), std::uint16_t(x), std::uint16_t(y)});
-            if (e > worst)
+            const PatchKey key{std::uint8_t(face), std::uint8_t(level), std::uint16_t(x), std::uint16_t(y)};
+            const float e = patch_error(terrain, key);
+            if (e > worst) {
                 worst = e;
+                peak = key;
+            }
         }
-        std::printf("  level %u: %.6g\n", level, double(worst));
+        const float sampled = worst;
+        for (unsigned round = 0; round < 6; round++) {
+            PatchKey best = peak;
+            for (int dy = -2; dy <= 2; dy++)
+                for (int dx = -2; dx <= 2; dx++) {
+                    const int nx = int(peak.x) + dx, ny = int(peak.y) + dy;
+                    if (nx < 0 || ny < 0 || nx >= int(cells) || ny >= int(cells))
+                        continue;
+                    const PatchKey key{peak.face, peak.level, std::uint16_t(nx), std::uint16_t(ny)};
+                    if (const float e = patch_error(terrain, key); e > worst) {
+                        worst = e;
+                        best = key;
+                    }
+                }
+            if (best == peak)
+                break;
+            peak = best;
+        }
+        std::printf("  level %2u: %.6g (%u sampled: %.6g)\n", level, double(worst), trials, double(sampled));
+    }
+    // How far a child's heights reach outside its parent's, which is what the cull bound must
+    // be padded by before a patch may be culled against its own tile.
+    std::printf("descendant relief: worst child excess over the parent tile's range:\n");
+    for (unsigned level = 1; level < patch_level_max; level++) {
+        const unsigned cells = 1u << level, trials = level <= 6 ? 120 : 400;
+        const auto range_of = [&](PatchKey key) {
+            std::vector<float> h(tile_side * tile_side);
+            generate_height_tile(terrain, key, h);
+            return height_tile_range(h);
+        };
+        double worst = 0;
+        for (unsigned t = 0; t < trials; t++) {
+            const unsigned face = unsigned(uniform(rng) * 6) % 6;
+            const PatchKey parent{std::uint8_t(face), std::uint8_t(level),
+                                  std::uint16_t(unsigned(uniform(rng) * cells) % cells),
+                                  std::uint16_t(unsigned(uniform(rng) * cells) % cells)};
+            const Range<float> p = range_of(parent);
+            for (unsigned i = 0; i < 4; i++) {
+                const Range<float> c = range_of(parent.child(i));
+                worst = std::max({worst, double(c.max - p.max), double(p.min - c.min)});
+            }
+        }
+        std::printf("  level %2u: %.6g\n", level, worst);
     }
 }
 
@@ -341,7 +398,12 @@ void test_grid_mesh() {
     std::printf("grid mesh: %zu vertices, %zu indices\n", mesh.vertices.size(), mesh.indices.size());
 }
 
-int main() {
+int main(int argc, char** argv) {
+    for (int i = 1; i < argc; i++)
+        if (std::string_view(argv[i]) == "--calibrate") {
+            calibrate_level_errors();
+            return 0;
+        }
     test_noise();
     test_terrain();
     test_bake();
@@ -350,6 +412,6 @@ int main() {
     test_tiles();
     test_grid_mesh();
     test_height_tile_range();
-    calibrate_level_errors();
+
     return 0;
 }

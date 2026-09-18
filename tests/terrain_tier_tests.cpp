@@ -54,13 +54,23 @@ struct AsyncTiles {
     };
     std::vector<Pending> pending;
     unsigned step = 0;
+    // Set to hand the tier each tile's own height bounds, as the renderer does. Left null the
+    // residency carries the global shell, which is cheaper and all most tests need.
+    const MinorPlanetTerrain* terrain = nullptr;
 
     void update(TerrainTier& tier, const TierView& view, unsigned frame,
                 unsigned budget = TerrainTier::generate_per_frame) {
         step++;
         for (auto it = pending.begin(); it != pending.end();) {
             if (it->due <= step) {
-                const bool ok = tier.mark_resident(it->slot, it->key, it->stamp);
+                bool ok = false;
+                if (terrain) {
+                    std::vector<float> heights(tile_side * tile_side);
+                    generate_height_tile(*terrain, it->key, heights);
+                    ok = tier.mark_resident(it->slot, it->key, it->stamp, height_tile_range(heights));
+                } else {
+                    ok = tier.mark_resident(it->slot, it->key, it->stamp);
+                }
                 assert(ok);
                 it = pending.erase(it);
             } else {
@@ -169,6 +179,73 @@ struct MorphCheck {
         return bad;
     }
 };
+
+// No drawn patch may be one the frustum or the horizon could have rejected outright: every
+// sample of it outside one shared plane, or every sample below the camera's horizon.
+void test_cull_waste() {
+    constexpr double radius = 2.5 / 15;
+    const MinorPlanetTerrain terrain(1007);
+    const auto to_world = [](const TierView& v, Vec3d local) {
+        return v.axes[0] * local.x + v.axes[1] * local.y + v.axes[2] * local.z;
+    };
+    for (auto [altitude, pitch] : {std::pair{.05, 0.}, {.15, 0.}, {.05, .87}, {.15, 1.22}}) {
+        const Vec3d over = normalized(Vec3d{.6, .3, 1}) * (1 + altitude);
+        CameraView camera;
+        const Vec3d down = over * -1;
+        const Vec3d east = normalized(cross(Vec3d{0, 1, 0}, down));
+        camera.forward = normalized(down * std::cos(pitch) + east * std::sin(pitch));
+        camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
+        camera.up = cross(camera.right, camera.forward);
+        const float tan_y = float(std::tan(camera.vertical_fov / 2));
+        const TierView view{.body_centre = over * -radius,
+                            .radius = radius,
+                            .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
+                            .camera_local = over,
+                            .frustum = view_frustum(camera, tan_y * 16 / 9, tan_y),
+                            .height_pixels = 900,
+                            .tan_y = tan_y};
+        TerrainTier tier;
+        AsyncTiles async;
+        async.terrain = &terrain; // the tight bounds are the point of this test
+        for (unsigned frame = 1; frame <= 300; frame++)
+            async.update(tier, view, frame);
+        unsigned drawn = 0, wasted = 0;
+        for (const auto& draw : tier.draws()) {
+            drawn++;
+            const Range<float> h = tier.height_range(draw.key);
+            const double size = 2.0 / double(1u << draw.key.level);
+            const double s0 = -1 + draw.key.x * size, t0 = -1 + draw.key.y * size;
+            std::vector<Vec3f> points;
+            bool any_visible_over_horizon = false;
+            const double len = length(view.camera_local);
+            for (unsigned i = 0; i <= 4; i++)
+                for (unsigned j = 0; j <= 4; j++) {
+                    const Vec3d d = cube_direction(draw.key.face, s0 + i * size / 4, t0 + j * size / 4);
+                    if (dot(d, view.camera_local * (1 / len)) * len >= 1 + double(h.max))
+                        any_visible_over_horizon = true;
+                    for (float e : {h.min, h.max})
+                        points.push_back(to_float(view.body_centre + to_world(view, d * (1 + double(e))) * radius));
+                }
+            bool outside = false;
+            for (const auto& plane : view.frustum.planes) {
+                bool all_out = true;
+                for (const Vec3f& p : points)
+                    if (dot(plane.normal, p) + plane.distance >= 0) {
+                        all_out = false;
+                        break;
+                    }
+                outside = outside || all_out;
+            }
+            wasted += outside || !any_visible_over_horizon;
+        }
+        std::printf("terrain tier: cull at %.2f radii pitch %.2f: %u drawn, %u provably invisible\n", altitude, pitch,
+                    drawn, wasted);
+        assert(drawn > 0);
+        // The sphere is still looser than the patch, so allow a margin; the defect this guards
+        // put two thirds of the set here.
+        assert(wasted * 2 < drawn);
+    }
+}
 
 // Parent morphing must start beyond the child handover distance.
 void test_morph_bands() {
@@ -347,6 +424,7 @@ int main() {
     test_morph_bands();
     test_morph_continuity();
     test_morph_streaming();
+    test_cull_waste();
     constexpr double radius = 2.5 / 15;
     TerrainTier tier;
     AsyncTiles async;
@@ -444,6 +522,40 @@ int main() {
     assert(stale.resident() == 0);
     assert(stale.mark_resident(first.slot, first.key, first.stamp));
     assert(stale.resident() == 1);
+
+    // A released slot returns to the pool and its patch is asked for again.
+    TerrainTier released;
+    released.update(view_at(.2, radius), 1, 3);
+    const TerrainTier::Generation unserved = released.generate()[0];
+    released.release(unserved.slot, unserved.key, unserved.stamp);
+    assert(released.pending() == 2); // the other two of the batch
+    released.update(view_at(.2, radius), 2, 3);
+    unsigned reissued_count = 0;
+    for (const auto& g : released.generate())
+        reissued_count += g.key == unserved.key;
+    assert(reissued_count == 1);
+    // Releasing twice, or against a stale stamp, must not free a slot that moved on.
+    released.release(unserved.slot, unserved.key, unserved.stamp);
+    const TerrainTier::Generation again = released.generate()[0];
+    assert(released.mark_resident(again.slot, again.key, again.stamp));
+    assert(released.resident() == 1);
+
+    // A generation that never arrives is reclaimed, so the patch is not stuck forever.
+    TerrainTier abandoned;
+    abandoned.update(view_at(.2, radius), 1, 3);
+    const TerrainTier::Generation dropped = abandoned.generate()[0];
+    assert(abandoned.pending() == 3);
+    // The sweep walks a window per frame, so a full pass takes slot_count / sweep_window frames.
+    constexpr unsigned sweep_cycle = TerrainTier::slot_count / TerrainTier::sweep_window;
+    for (unsigned f = 0; f <= sweep_cycle; f++)
+        abandoned.update(view_at(.2, radius), 2 + TerrainTier::pending_timeout + f, 0);
+    assert(abandoned.pending() == 0);
+    assert(!abandoned.mark_resident(dropped.slot, dropped.key, dropped.stamp));
+    abandoned.update(view_at(.2, radius), 3 + TerrainTier::pending_timeout + sweep_cycle, 3);
+    unsigned re_requested = 0;
+    for (const auto& g : abandoned.generate())
+        re_requested += g.key == dropped.key;
+    assert(re_requested == 1);
 
     // After invalidation, the same key/slot must reject the previous generation stamp.
     TerrainTier reissued;

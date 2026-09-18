@@ -21,6 +21,11 @@ constexpr std::uint64_t colour_tile_bytes = tile_colour_side * tile_colour_side 
 constexpr std::uint64_t albedo_offset = align4(height_tile_bytes);
 constexpr std::uint64_t slope_offset = albedo_offset + colour_tile_bytes;
 constexpr std::uint64_t tile_total_bytes = align4(slope_offset + colour_tile_bytes);
+// PatchInstance::tile[3] carries six edge/quadrant flags plus the four quadrant bits, and the
+// shaders' debug packing reads tile[2] and tile[3] through 12-bit fields (see patch.slang).
+constexpr unsigned patch_tile_flag_bits = 10;
+static_assert(patch_tile_flag_bits <= 12, "tile[3] is unpacked from a 12-bit field");
+static_assert(TerrainTier::slot_count <= 0xfff, "tile[2] carries the parent slot in a 12-bit field");
 } // namespace
 
 void Renderer::Impl::create_terrain_tier() {
@@ -113,6 +118,9 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     }
     const bool was_active = terrain_tier.active();
     terrain_tier.update(view, frame_index, tile_pool ? free_rings : 0);
+    // The tier's generation budget is the free ring count, so every generation below finds a
+    // ring. Nothing else enforces it, and a generation left unserved strands its slot.
+    ORBITAL_ASSERT(terrain_tier.generate().size() <= free_rings);
     if (terrain_tier.active() != was_active)
         log::info("Near tier {} at frame {}, {} patches resident", terrain_tier.active() ? "on" : "off", frame_index,
                   terrain_tier.resident());
@@ -155,8 +163,15 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                     break;
                 }
             }
-            if (ring == tile_ring_count)
-                break;
+            if (ring == tile_ring_count) {
+                // The assert above states the invariant; recover anyway rather than keep a slot
+                // no tile will ever fill, which would hold its key forever: visit() re-requests
+                // only keys with no slot, and eviction passes over anything not resident.
+                log::error("Near tier: no staging ring for {}, slot {} released", generation.key.packed(),
+                           generation.slot);
+                terrain_tier.release(generation.slot, generation.key, generation.stamp);
+                continue;
+            }
             ring_state[ring] = RingState::worker; // held until its result is polled, however long that takes
             std::uint8_t* dst = buffers.tile_staging.range().cpu + ring * tile_total_bytes;
             const MinorPlanetTerrain* terrain = &*minor_planet_terrain;

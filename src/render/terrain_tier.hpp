@@ -29,16 +29,40 @@ struct TierView {
 class TerrainTier {
 public:
     static constexpr unsigned slot_count = 1024; // 35 MiB of tiles; a close view holds 400 of them
+    // Tree size, deliberately not the slot count: a node is 64 bytes and only drawn patches
+    // need slots, so the tile cache's LRU is the real limit. Demand peaks near 1400 at bias 2,
+    // and a node blocked here never recovers, since a split already made is grandfathered.
+    static constexpr unsigned node_budget = 4096;
+    // A generation whose slot is never served would hold its key forever: nothing evicts a
+    // pending slot and visit() only re-requests keys without one. Reclaim it well past any
+    // real generation, which takes milliseconds. The sweep walks a window of slots per frame,
+    // so the whole cache is covered every slot_count / sweep_window frames.
+    static constexpr unsigned pending_timeout = 240;
+    static constexpr unsigned sweep_window = 64;
+    // Culling a patch against its own tile would drop relief only its children reveal, so the
+    // interval is padded by how far a child's heights reach outside its parent's: measured at
+    // twice the worst of 120 to 400 patches a level (`terrain_tests --calibrate`), which is
+    // 0.0037 radii at level 1 and nothing by level 9.
+    static constexpr float descendant_relief[] = {
+        .008f, .0075f, .0026f, .0023f, .0008f, .0004f, .00012f, .00009f, .00004f, .000012f, 4e-6f, 2e-6f, 2e-6f,
+    };
+    static constexpr float relief_margin(unsigned level) {
+        return level < std::size(descendant_relief) ? descendant_relief[level] : 0.f;
+    }
     static constexpr unsigned generate_per_frame = 8;
     // Sizes are in cull_bodies' units: a projected radius over the half height, twice the pixels.
     static constexpr float error_pixels = 3; // a patch's geometric error on screen: it splits above 1.5 px
     static constexpr float hysteresis = .8f; // the fraction of either the way back
     // Fade new tiles from their parent's shape over a fixed frame count for deterministic captures.
     static constexpr unsigned fade_frames = 15;
-    // Seed-1007 calibration: 64 patches/level, 32 quads, Everitt warp; levels 9..12 extrapolate by 2.3x.
+    // Seed-1007 calibration, 32 quads, Everitt warp (`terrain_tests --calibrate`): a uniform
+    // sample per level, then a hill climb around its worst patch, since relief clusters and a
+    // uniform sample misses it. Levels 9..12 previously extrapolated at about half the true
+    // error. One method for the whole table: test_morph_bands constrains adjacent ratios, so a
+    // level measured more thoroughly than its neighbour breaks the band it hands over in.
     static constexpr float level_error[] = {
-        .018342f,  .0126785f, .00478311f, .00138083f, .000601649f, .000284836f, .000119656f,
-        .0000752f, .0000272f, 1.18e-5f,   5.1e-6f,    2.2e-6f,     9.6e-7f,
+        .018342f,     .0126785f,    .00478311f,   .00225514f,  .000698864f, .000284836f, .000153035f,
+        .0000752807f, .0000374019f, .0000214279f, 9.11951e-6f, 4.02331e-6f, 1.99676e-6f,
     };
 
     struct Generation {
@@ -80,6 +104,9 @@ public:
     static constexpr Range<float> full_height_range{MinorPlanetTerrain::height_min, MinorPlanetTerrain::height_max};
     // Accept uploaded contents and height bounds only for the current slot assignment.
     bool mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights = full_height_range);
+    // Hand back a slot from generate() the caller could not serve, so the patch is asked for
+    // again. The stamp rejects a slot already reassigned, as mark_resident does.
+    void release(unsigned slot, PatchKey key, std::uint32_t stamp);
     // Only resident tiles supply a tighter range. Unknown tiles retain the full shell.
     Range<float> height_range(PatchKey key) const;
     float range(unsigned level) const { return level < std::size(range_) ? range_[level] : 0; }
@@ -104,6 +131,7 @@ private:
     struct Slot {
         PatchKey key;
         unsigned used = 0, resident_frame = 0;
+        unsigned assigned_frame = 0; // when the generation went out; `used` tracks visits instead
         // Distinguishes repeated assignments of the same key and slot, including detail changes.
         std::uint32_t stamp = 0;
         Range<float> heights = full_height_range;
@@ -139,7 +167,8 @@ private:
     std::vector<Generation> generate_;
     float range_[13] = {};
     unsigned frame_ = 0;
-    std::uint32_t stamp_ = 0; // the last generation stamp issued, never reused
+    unsigned sweep_cursor_ = 0; // where the pending-slot reclaim sweep resumes
+    std::uint32_t stamp_ = 0;   // the last generation stamp issued, never reused
     Pressure pressure_;
     bool active_ = false, wanted_ = false;
 };

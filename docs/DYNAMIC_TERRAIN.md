@@ -9,6 +9,30 @@ fills the same tile contract without a renderer change.
 Historical record of how this got here is in `docs/DECISIONS.md`. This document is what the code does
 now and what is still wrong with it.
 
+## Terms
+
+Five things are counted separately here and are easy to confuse, because a patch usually has one of
+each and the limits on them are unrelated.
+
+| Term | What it is | How many |
+|---|---|---|
+| **Patch** | A cell of a face's quadtree, named by a `PatchKey` (face, level, x, y). The unit of drawing. | one draw instance each |
+| **Node** | The quadtree bookkeeping for a patch the selector is tracking: its key, bounds and child link. 64 bytes, CPU only. | `node_budget`, 4096 |
+| **Tile** | A patch's three textures: heights, albedo, slope. What a worker generates and the GPU samples. | one per resident patch |
+| **Slot** | One layer index shared by the three texture arrays, holding one tile. The cache entry, LRU-evicted. | `slot_count`, 1024 |
+| **Ring** | One entry of the staging ring buffer: a CPU-writable, GPU-readable scratch block sized for one tile's three planes. | `tile_ring_count`, 32 |
+
+A **ring** is the hand-off lane between a worker thread and the GPU, and the name is literal: entries
+are taken in order by `ring_head`, which wraps. A worker generates a tile *into* a ring entry; later,
+inside the command buffer, a copy moves those bytes from the ring into the tile's array layer. Each
+entry cycles `free -> worker -> upload -> free`, and ownership is explicit rather than by frame number
+because a job can outlive any frame count. Rings are what cap generation: the tier is handed the free
+ring count as its per-frame budget, so it never asks for more tiles than there are lanes to carry them.
+
+Not to be confused: a **slot** is where a tile *lives* (GPU, for as long as it is cached); a **ring** is
+how it *travels* (CPU, for a few frames). Running out of slots evicts something; running out of rings
+only delays a request to the next frame.
+
 ## Decisions that stand
 
 1. Tiles live in texture arrays, one layer per slot: heights `r16_unorm`, albedo `rgba8_unorm` in
@@ -23,13 +47,20 @@ now and what is still wrong with it.
    within about 11 percent, against 43 for a plain tangent warp.
 6. Generation stays on the CPU on a persistent worker pool.
 7. Texture compression of tiles is out of scope. Heights stay 16-bit raw in any case.
+8. The tree size (`node_budget`) is not the cache size. A node is 64 bytes of CPU bookkeeping and
+   only drawn patches need slots, so the two have no reason to share a number. They did once, and
+   capping the tree at `slot_count - 64` starved splits long before memory justified it.
+9. `patch_level_max` is 11: cells of 90 degrees over 2048, quads of 24 urad, about 10 m on this body.
+   Every field carrying a cell index is guarded by a `static_assert` in `terrain_patch.hpp`, because
+   overflowing one truncates silently. 12 is the ceiling `PatchKey::packed`'s 12-bit x and y allow.
 
 ## Design
 
 ### Patches, tiles, slots
 
 A patch is a cell of a face's quadtree (`PatchKey`: face, level, x, y, packed to 32 bits).
-`patch_bounds` gives its cap, angular size and bounding radius.
+`patch_bounds` gives its cap centre, angular radius and angular size; `patch_cull_sphere` turns those
+and a height interval into the sphere the culling tests use.
 
 A tile is that patch's textures: `tile_side` (33) squared heights and `tile_colour_side` (65) squared
 albedo and slope texels. Texel (i, j) is the terrain sampled at cell coordinates `s0 + i * size / 32`
@@ -85,8 +116,18 @@ carry false motion vectors into TAA.
 
 ### Selection
 
-`level_error[level]` is the worst measured geometric error per level in radii, calibrated over 64
-random patches a level. Each frame the tier derives
+`level_error[level]` is the worst measured geometric error per level in radii, from
+`terrain_tests --calibrate`: a uniform sample per level (64 patches, 1024 below level 9), then a hill
+climb around the worst one found, because relief clusters and a uniform sample of a deep level misses
+it entirely. Levels 9..12 used to be extrapolated at 2.3x a level and ran about **half** the true
+error, which understated their ranges and held those levels back until the camera was far too close.
+
+The whole table must come from one method. `test_morph_bands` requires every adjacent ratio to exceed
+`1 / 0.7`, so a level measured more thoroughly than its neighbour shrinks the step between them and
+breaks the band it hands over in — measuring only 9..12 fails at the 8->9 step. Re-derive all of it
+or none of it.
+
+Each frame the tier derives
 `range[level] = level_error[level] * height_pixels / (tan_y * error_pixels)` with `error_pixels` 3 in
 `cull_bodies`' units, and `morph.start = 0.7 * range[level]`.
 
@@ -104,8 +145,26 @@ range is fully morphed wherever an unsplit neighbour meets it.
 measured from the tile it uploaded and padded by one `r16_unorm` quantum plus float decode roundoff.
 The asymmetry here is deliberate and easy to get backwards: **the split test keeps the global shell**,
 because a tile bounds its own bilinear surface and says nothing about relief its children will reveal.
-Only drawing and gating use the tight range, and frustum culling keeps `bound_radius` off the global
-shell and the skirt drop.
+Drawing, gating and culling use the tight range.
+
+### Culling
+
+Both tests take the resident tile's range, padded by `descendant_relief[level]` — how far a child's
+heights are measured to reach outside its parent's, twice the worst of 120 to 400 patches a level,
+0.0037 radii at level 1 and nothing by level 9. A patch with no tile keeps the global shell, so the
+bound stays sound while the relief is unknown.
+
+The horizon test allows only what stands above the reference surface, per patch, rather than a
+constant 17.75 degrees taken from the shell's `height_max`. The terrain's true relief is -0.029 to
++0.023 radii, so the constant let a patch 130 km past the limb survive.
+
+`patch_cull_sphere` centres the sphere on the patch's own shell rather than the reference surface.
+Centred on the surface, a tile lying 0.03 radii below it spends 0.03 of bound before reaching any of
+its own geometry, which is most of the bound for a patch whose cell is a few hundred metres across.
+
+All three were one defect seen three ways: culling a patch by a shell it does not occupy. Together
+they cut the drawn set by a fifth to a half, and the share of it provably off screen from two thirds
+to a third. `test_cull_waste` holds the line by re-deriving visibility from the patch's own samples.
 
 ### Generation and upload
 
@@ -119,6 +178,23 @@ a generation: evict a patch and ask for it again, or change the detail setting a
 same patch is handed back the same slot, so an older result would pass a check made of both. Stamps
 start at 1 and `invalidate()` clears slots to 0, so nothing in flight across an invalidation is
 accepted.
+
+**A slot handed out must come back.** `choose_generation` commits the slot — key in `slots_by_key_`,
+stamp issued, `resident` false — before the renderer has found a ring for it. A slot left in that
+state is unreachable: `visit` re-requests only keys with *no* slot, eviction passes over anything not
+resident, and `free_slots_` refills only on `invalidate()`. So the patch never refines again and the
+slot is gone from the cache for the session. Two things close it:
+
+- `release(slot, key, stamp)` hands a slot back, stamp-guarded exactly as `mark_resident` is. The
+  renderer calls it if no ring was free, instead of dropping the generation on the floor.
+- `choose_generation` sweeps for slots still pending past `pending_timeout` (240 frames) and reclaims
+  them, whatever lost them. The sweep is a cursor over `sweep_window` (64) slots a frame rather than
+  the whole array, so there is no queue to overrun and a slot waits at most 16 extra frames. `used`
+  cannot drive this: a visible pending patch is touched every frame, so `assigned_frame` decides.
+
+The renderer's path is unreachable today, and `ORBITAL_ASSERT` after `update()` says so: the tier's
+budget *is* the free ring count, so every generation finds a ring. Nothing else enforces that coupling,
+and it spans two files.
 
 The copy and the residency are one decision, taken together in `record_terrain_uploads` inside the
 command buffer. A tile counts as resident exactly when the upload that makes it so has been recorded;
@@ -142,6 +218,7 @@ path one term at a time so a seam can be attributed.
 | Albedo and slope arrays, 1024 layers of 65×65 at 4 B | 16.5 MiB each |
 | Patch records, 1024 × 48 B, two staging slots plus device | 150 KiB |
 | Staging ring, 32 tiles | 1.1 MiB host-visible |
+| Quadtree nodes, 4096 × 64 B worst case | 256 KiB |
 | Shared grid | 1221 vertices, 6912 indices, static |
 
 Host-visible heaps count against the BAR aperture (`tools/check-bar1.py`).
@@ -151,19 +228,21 @@ Host-visible heaps count against the BAR aperture (`tools/check-bar1.py`).
 ### 1. The range ratios are not a geometric series
 
 CDLOD wants each level's range to be half the one above, because the morph band is defined as a
-fraction of a range whose neighbour is assumed to be half of it. Measured against the drawn triangles,
-the ratios between adjacent ranges run:
+fraction of a range whose neighbour is assumed to be half of it. With the re-derived table the ratios
+between adjacent ranges run:
 
-| levels | 0→1 | 1→2 | 2→3 | 3→4 | 4→5 | 5→6 | 6→7 | 7→8 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| from the table | 1.45 | 2.65 | 3.46 | 2.30 | 2.11 | 2.38 | 1.59 | 2.76 |
-| from the true geometric error | 1.62 | 2.41 | 1.81 | 3.52 | 2.10 | 3.04 | 1.24 | 4.28 |
+| levels | 0→1 | 1→2 | 2→3 | 3→4 | 4→5 | 5→6 | 6→7 | 7→8 | 8→9 | 9→10 | 10→11 | 11→12 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| now | 1.45 | 2.65 | 2.12 | 3.23 | 2.45 | 1.86 | 2.03 | 2.01 | 1.75 | 2.35 | 2.27 | 2.01 |
+| before | 1.45 | 2.65 | 3.46 | 2.30 | 2.11 | 2.38 | 1.59 | 2.76 | 2.31 | 2.31 | 2.32 | 2.29 |
 
-No morph band spans steps between 1.24× and 4.28× consistently. This is the strongest candidate for the
-hard level edge seen from the ground, and it is the one open item that matches the reported symptom.
+One consistent measurement narrowed the spread from 1.45–3.46 to 1.45–3.23 and put most steps near 2,
+but no morph band spans 1.45 and 3.23 alike. `test_morph_bands` reports 1.013x headroom at the 0→1
+step — it passes, with almost nothing to spare, and any future re-measure that lowers level 0 or
+raises level 1 breaks it.
 
-The fix is a design decision, not a bug fix: prescribe the ×2 series and use the measured errors to
-*place* it rather than to define each step.
+The fix is still a design decision, not a bug fix: prescribe the x2 series and use the measured errors
+to *place* it rather than to define each step.
 
 Related: `patch_error` compares scalar radii using `length(d)` on a normalized direction, so sphere
 curvature is excluded despite the comment. Correcting that does not fix the ratios — it reshuffles
@@ -186,19 +265,24 @@ once per adjacent quadrant (64 at two quadrants, the centre at four, so +67 of 1
 and carry an explicit quadrant index per vertex. Duplicates hold identical positions, so the morph and
 the collapse invariant are untouched.
 
-### 3. Existing splits can block more important new splits
+### 3. The tile cache is too small above the default bias
 
-Children already allocated bypass the node budget; new children need `nodes() < slot_count - 64`.
-Traversal is in fixed face and child order and there is no way to reclaim a low-priority split for a
-more demanding patch, so the selection can settle stable and inadequate — a patch requesting a split
-that is always refused issues no generation requests, so an idle queue does not prove convergence.
+Children already allocated bypass the node budget, traversal is in fixed face and child order, and
+there is no way to reclaim a low-priority split for a more demanding patch. So whichever patches split
+first keep their splits, and a patch refused at the ceiling is refused *every* frame — the selection
+settles stable and inadequate. That is what a lone coarse patch among refined neighbours looks like,
+and it does not heal, which is how it differs from streaming lag.
 
-Only bites above the default bias. At `--lod-bias 2` from the ground:
-`nodes 962/960, blocked 52, req 2/405, starved 433, behind 1.35`. At bias 0 a ground flight reads
-`blocked 0, nodes 370/960`.
+Raising `node_budget` off `slot_count` removed it at the measured demand: `splits_blocked` went from
+93 to 0, the tree settled at its true 1398 nodes (2422 at level 11), and the worst run of a patch more
+than one level behind fell from 101 frames to 66. **The grandfathering and the fixed order are still
+there** — they simply have headroom now, and would bite again at a ceiling.
 
-Wants budget redistribution by view importance with a controlled merge policy. More generation
-throughput cannot fix a selection that never admits the splits.
+What is left at `--lod-bias 2` is capacity, not selection: 4198 of 8515 evictions are of tiles used
+within the last 60 frames, so the working set genuinely exceeds 1024 slots and tiles are thrown out
+before they are done with. At bias 0 nothing warm is evicted in any flight measured — stationary,
+rotating, orbiting fast or slow. Wants slot count scaled with bias, or eviction ordered by view
+importance instead of plain LRU. More generation throughput does not fix a cache that is too small.
 
 ### 4. The fade does not enforce continuity at partial boundaries
 
@@ -219,14 +303,38 @@ A level `L` node splits against `range[L + 1]`, so it stays selected past its ow
 and morph bands want deriving together from the error of the geometry actually drawn; changing one
 comparison alone invalidates the seam relationships.
 
-### 6. Leftovers
+### 6. A sphere is a weak bound for a patch, and worthless near the ground
 
-- `calibrate_level_errors` runs inside `terrain_tests` (13.9 s of a 25 s ctest); it wants a flag.
+A third of the drawn set is still provably off screen after the culling fix, and the bound's shape is
+why. Every frustum plane passes through the camera, so close to the surface any sphere of comparable
+size touches all of them: at 0.05 radii the test barely discriminates. Coarse parent patches covering
+out-of-range quadrants have caps of 0.1 to 0.4 radii and always pass whatever the camera does.
+
+A patch is a cap, not a ball, and testing its samples instead removes essentially all of the
+remainder — `test_cull_waste` measures precisely that difference. It wants the cap's bulge accounted
+for so it stays conservative at coarse levels, and costs about 40 dot products a node against 5. A
+change of bound rather than a bug fix, so it is recorded here rather than folded into one.
+
+### 7. Detail still stops at the depth cap, further in
+
+`patch_level_max` bounds how fine the geometry goes, and the error metric keeps asking past it. At 11
+the smallest quad is 24 urad, about 10 m on this body, and the metric wants finer from roughly 650 m
+up. Below that the near patches sit at the cap while their farther neighbours are served correctly —
+correct saturation, but it reads as a stall, and it is worth ruling out before chasing one.
+
+Level 12 is the last the packing allows and needs no code change beyond the constant, but each level
+multiplies the near working set against a cache already short at bias 2. The cheaper answer is the
+detail octaves below tile resolution listed under *Later*: what is missing up close is small relief,
+not accurate large shapes, and shader detail costs no tiles, no slots and no CPU generation.
+
+### 8. Leftovers
+
 - Constants duplicated between C++ and the shaders: the Everitt constant, the face tables, `tile_side`.
 - `draw_body` leaves `ORBITAL_ROOT_PATCHES` and `root.patches` on the caller's `Root`; harmless only
   because the minor planet is drawn last.
 - Acceptance never read off the panel: main-thread time in `prepare_terrain_tier` under 0.5 ms with 32
-  jobs in flight, and one draw call per pass.
+  jobs in flight, and one draw call per pass. Selection now walks a larger tree for a deeper cap, so
+  this is the number to watch: measured in isolation it roughly doubled at bias 2.
 
 ## Later, out of scope
 
