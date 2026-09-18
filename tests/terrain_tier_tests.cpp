@@ -326,24 +326,36 @@ void test_resident_terrain_morph() {
     const MinorPlanetTerrain terrain(1007);
     MorphCheck check{terrain};
     unsigned checked = 0, bad = 0;
-    for (Vec3d spot : {Vec3d{.6, .3, 1}, Vec3d{1, .2, 1}}) {
-        TerrainTier tier;
-        const TierView view = view_over(spot, .08, 2.5 / 15);
-        for (unsigned frame = 1; frame <= 120; frame++) {
-            tier.update(view, frame);
-            for (const auto& g : tier.generate()) {
-                auto& heights = check.heights[g.key.packed()];
-                if (heights.empty()) {
-                    heights.resize(tile_side * tile_side);
-                    generate_height_tile(terrain, g.key, heights);
+    for (Vec3d spot : {Vec3d{.6, .3, 1}, Vec3d{1, .2, 1}})
+        for (double altitude : {.004, .02, .08})
+            for (bool grazing : {false, true}) {
+                TerrainTier tier;
+                TierView view = view_over(spot, altitude, 2.5 / 15);
+                // Looking down culls the grazing boundaries where a level meets the next, which
+                // are the ones a tighter height bound could part. Aim along the surface too.
+                if (grazing) {
+                    CameraView camera;
+                    const Vec3d radial = normalized(view.camera_local);
+                    camera.forward = normalized(normalized(cross(Vec3d{0, 1, 0}, radial)) - radial * .1);
+                    camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
+                    camera.up = cross(camera.right, camera.forward);
+                    view.frustum = view_frustum(camera, view.tan_y * 16 / 9, view.tan_y);
                 }
-                assert(tier.mark_resident(g.slot, g.key, g.stamp, height_tile_range(heights)));
+                for (unsigned frame = 1; frame <= 120; frame++) {
+                    tier.update(view, frame);
+                    for (const auto& g : tier.generate()) {
+                        auto& heights = check.heights[g.key.packed()];
+                        if (heights.empty()) {
+                            heights.resize(tile_side * tile_side);
+                            generate_height_tile(terrain, g.key, heights);
+                        }
+                        assert(tier.mark_resident(g.slot, g.key, g.stamp, height_tile_range(heights)));
+                    }
+                }
+                tier.update(view, 140);
+                assert(tier.generate().empty() && tier.pressure().splits_blocked == 0);
+                bad += check.violations(tier, view, &checked);
             }
-        }
-        tier.update(view, 140);
-        assert(tier.generate().empty() && tier.pressure().splits_blocked == 0);
-        bad += check.violations(tier, view, &checked);
-    }
     std::printf("terrain tier: resident terrain bounds, %u boundary vertices checked, %u morph violations\n", checked,
                 bad);
     assert(checked > 0 && bad == 0);
