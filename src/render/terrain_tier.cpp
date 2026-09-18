@@ -159,7 +159,7 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
     const bool wants = key.level < patch_level_max && key.level + 1 < std::size(level_error) &&
                        descendant_distance <
                            double(range_[key.level + 1]) * (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0);
-    const bool allowed = nodes_[index].children || nodes() < slot_count - 64;
+    const bool allowed = nodes_[index].children || nodes() < node_budget;
     pressure_.splits_blocked += wants && !allowed;
     const bool split = wants && allowed;
     if (split && !nodes_[index].children)
@@ -221,6 +221,19 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
 // Serve coarse/large patches first; LRU eviction protects pending and currently used slots.
 void TerrainTier::choose_generation(unsigned budget) {
     const unsigned cap = std::min(budget, generate_per_frame);
+    // Reclaim slots whose generation never came back, whatever lost it. `used` cannot say:
+    // a visible pending patch is touched every frame, so the assignment frame decides.
+    // A cursor over a window per frame rather than the whole array: there is no queue to
+    // overrun, and a slot waits at most slot_count / sweep_window extra frames.
+    for (unsigned n = 0; n < sweep_window; n++) {
+        Slot& slot = slots_[sweep_cursor_];
+        sweep_cursor_ = (sweep_cursor_ + 1) % slot_count;
+        if (!slot.resident && slot.stamp && slot.assigned_frame + pending_timeout < frame_) {
+            slots_by_key_.erase(slot.key.packed());
+            free_slots_.push_back(unsigned(&slot - slots_.data()));
+            slot = {};
+        }
+    }
     std::sort(requests_.begin(), requests_.end(), [](const Request& a, const Request& b) {
         return a.key.level != b.key.level ? a.key.level < b.key.level : a.pixels > b.pixels;
     });
@@ -246,7 +259,7 @@ void TerrainTier::choose_generation(unsigned budget) {
             pressure_.evicted_recent += slots_[slot].used + 60 > frame_;
             slots_by_key_.erase(slots_[slot].key.packed());
         }
-        slots_[slot] = {.key = r.key, .used = frame_, .stamp = ++stamp_, .resident = false};
+        slots_[slot] = {.key = r.key, .used = frame_, .assigned_frame = frame_, .stamp = ++stamp_, .resident = false};
         slots_by_key_[r.key.packed()] = slot;
         generate_.push_back({.key = r.key, .slot = slot, .stamp = stamp_});
     }
@@ -270,6 +283,15 @@ void TerrainTier::disable() {
     for (unsigned face = 0; face < std::min<std::size_t>(6, nodes_.size()); face++)
         collapse(nodes_[face]);
     active_ = wanted_ = false;
+}
+
+void TerrainTier::release(unsigned slot, PatchKey key, std::uint32_t stamp) {
+    // Stamps start at one, so a cleared slot matches nothing; a resident slot is not ours to free.
+    if (slot >= slot_count || slots_[slot].stamp != stamp || slots_[slot].key != key || slots_[slot].resident)
+        return;
+    slots_by_key_.erase(key.packed());
+    slots_[slot] = {};
+    free_slots_.push_back(slot);
 }
 
 bool TerrainTier::mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights) {
@@ -320,7 +342,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         draws_.clear();
     choose_generation(budget);
     pressure_.nodes = nodes();
-    pressure_.node_budget = slot_count - 64;
+    pressure_.node_budget = node_budget;
     pressure_.requested = unsigned(requests_.size());
     pressure_.served = unsigned(generate_.size());
     double behind = 0, fade = 0;

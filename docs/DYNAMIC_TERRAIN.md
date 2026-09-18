@@ -9,6 +9,30 @@ fills the same tile contract without a renderer change.
 Historical record of how this got here is in `docs/DECISIONS.md`. This document is what the code does
 now and what is still wrong with it.
 
+## Terms
+
+Five things are counted separately here and are easy to confuse, because a patch usually has one of
+each and the limits on them are unrelated.
+
+| Term | What it is | How many |
+|---|---|---|
+| **Patch** | A cell of a face's quadtree, named by a `PatchKey` (face, level, x, y). The unit of drawing. | one draw instance each |
+| **Node** | The quadtree bookkeeping for a patch the selector is tracking: its key, bounds and child link. 64 bytes, CPU only. | `node_budget`, 4096 |
+| **Tile** | A patch's three textures: heights, albedo, slope. What a worker generates and the GPU samples. | one per resident patch |
+| **Slot** | One layer index shared by the three texture arrays, holding one tile. The cache entry, LRU-evicted. | `slot_count`, 1024 |
+| **Ring** | One entry of the staging ring buffer: a CPU-writable, GPU-readable scratch block sized for one tile's three planes. | `tile_ring_count`, 32 |
+
+A **ring** is the hand-off lane between a worker thread and the GPU, and the name is literal: entries
+are taken in order by `ring_head`, which wraps. A worker generates a tile *into* a ring entry; later,
+inside the command buffer, a copy moves those bytes from the ring into the tile's array layer. Each
+entry cycles `free -> worker -> upload -> free`, and ownership is explicit rather than by frame number
+because a job can outlive any frame count. Rings are what cap generation: the tier is handed the free
+ring count as its per-frame budget, so it never asks for more tiles than there are lanes to carry them.
+
+Not to be confused: a **slot** is where a tile *lives* (GPU, for as long as it is cached); a **ring** is
+how it *travels* (CPU, for a few frames). Running out of slots evicts something; running out of rings
+only delays a request to the next frame.
+
 ## Decisions that stand
 
 1. Tiles live in texture arrays, one layer per slot: heights `r16_unorm`, albedo `rgba8_unorm` in
@@ -23,6 +47,9 @@ now and what is still wrong with it.
    within about 11 percent, against 43 for a plain tangent warp.
 6. Generation stays on the CPU on a persistent worker pool.
 7. Texture compression of tiles is out of scope. Heights stay 16-bit raw in any case.
+8. The tree size (`node_budget`) is not the cache size. A node is 64 bytes of CPU bookkeeping and
+   only drawn patches need slots, so the two have no reason to share a number. They did once, and
+   capping the tree at `slot_count - 64` starved splits long before memory justified it.
 
 ## Design
 
@@ -120,6 +147,23 @@ same patch is handed back the same slot, so an older result would pass a check m
 start at 1 and `invalidate()` clears slots to 0, so nothing in flight across an invalidation is
 accepted.
 
+**A slot handed out must come back.** `choose_generation` commits the slot — key in `slots_by_key_`,
+stamp issued, `resident` false — before the renderer has found a ring for it. A slot left in that
+state is unreachable: `visit` re-requests only keys with *no* slot, eviction passes over anything not
+resident, and `free_slots_` refills only on `invalidate()`. So the patch never refines again and the
+slot is gone from the cache for the session. Two things close it:
+
+- `release(slot, key, stamp)` hands a slot back, stamp-guarded exactly as `mark_resident` is. The
+  renderer calls it if no ring was free, instead of dropping the generation on the floor.
+- `choose_generation` sweeps for slots still pending past `pending_timeout` (240 frames) and reclaims
+  them, whatever lost them. The sweep is a cursor over `sweep_window` (64) slots a frame rather than
+  the whole array, so there is no queue to overrun and a slot waits at most 16 extra frames. `used`
+  cannot drive this: a visible pending patch is touched every frame, so `assigned_frame` decides.
+
+The renderer's path is unreachable today, and `ORBITAL_ASSERT` after `update()` says so: the tier's
+budget *is* the free ring count, so every generation finds a ring. Nothing else enforces that coupling,
+and it spans two files.
+
 The copy and the residency are one decision, taken together in `record_terrain_uploads` inside the
 command buffer. A tile counts as resident exactly when the upload that makes it so has been recorded;
 uploads no frame recorded are retained, not dropped. A frame abandoned after preparation therefore
@@ -142,6 +186,7 @@ path one term at a time so a seam can be attributed.
 | Albedo and slope arrays, 1024 layers of 65×65 at 4 B | 16.5 MiB each |
 | Patch records, 1024 × 48 B, two staging slots plus device | 150 KiB |
 | Staging ring, 32 tiles | 1.1 MiB host-visible |
+| Quadtree nodes, 4096 × 64 B worst case | 256 KiB |
 | Shared grid | 1221 vertices, 6912 indices, static |
 
 Host-visible heaps count against the BAR aperture (`tools/check-bar1.py`).
@@ -186,19 +231,24 @@ once per adjacent quadrant (64 at two quadrants, the centre at four, so +67 of 1
 and carry an explicit quadrant index per vertex. Duplicates hold identical positions, so the morph and
 the collapse invariant are untouched.
 
-### 3. Existing splits can block more important new splits
+### 3. The tile cache is too small above the default bias
 
-Children already allocated bypass the node budget; new children need `nodes() < slot_count - 64`.
-Traversal is in fixed face and child order and there is no way to reclaim a low-priority split for a
-more demanding patch, so the selection can settle stable and inadequate — a patch requesting a split
-that is always refused issues no generation requests, so an idle queue does not prove convergence.
+Children already allocated bypass the node budget, traversal is in fixed face and child order, and
+there is no way to reclaim a low-priority split for a more demanding patch. So whichever patches split
+first keep their splits, and a patch refused at the ceiling is refused *every* frame — the selection
+settles stable and inadequate. That is what a lone coarse patch among refined neighbours looks like,
+and it does not heal, which is how it differs from streaming lag.
 
-Only bites above the default bias. At `--lod-bias 2` from the ground:
-`nodes 962/960, blocked 52, req 2/405, starved 433, behind 1.35`. At bias 0 a ground flight reads
-`blocked 0, nodes 370/960`.
+Raising `node_budget` off `slot_count` removed it at the measured demand: `splits_blocked` went from
+93 to 0, the tree settled at its true 1398 nodes, and the worst run of a patch more than one level
+behind fell from 101 frames to 66. **The grandfathering and the fixed order are still
+there** — they simply have headroom now, and would bite again at a ceiling.
 
-Wants budget redistribution by view importance with a controlled merge policy. More generation
-throughput cannot fix a selection that never admits the splits.
+What is left at `--lod-bias 2` is capacity, not selection: 3396 of 8515 evictions are of tiles used
+within the last 60 frames, so the working set genuinely exceeds 1024 slots and tiles are thrown out
+before they are done with. At bias 0 nothing warm is evicted in any flight measured — stationary,
+rotating, orbiting fast or slow. Wants slot count scaled with bias, or eviction ordered by view
+importance instead of plain LRU. More generation throughput does not fix a cache that is too small.
 
 ### 4. The fade does not enforce continuity at partial boundaries
 
@@ -219,7 +269,14 @@ A level `L` node splits against `range[L + 1]`, so it stays selected past its ow
 and morph bands want deriving together from the error of the geometry actually drawn; changing one
 comparison alone invalidates the seam relationships.
 
-### 6. Leftovers
+### 6. Detail stops at the depth cap
+
+`patch_level_max` bounds how fine the geometry goes, and the error metric keeps asking past it. At 10
+the smallest quad is 48 urad, about 20 m on this body, and the metric wants finer from roughly 1.3 km
+up. Below that the near patches sit at the cap while their farther neighbours are served correctly —
+correct saturation, but it reads as a stall, and it is worth ruling out before chasing one.
+
+### 7. Leftovers
 
 - `calibrate_level_errors` runs inside `terrain_tests` (13.9 s of a 25 s ctest); it wants a flag.
 - Constants duplicated between C++ and the shaders: the Everitt constant, the face tables, `tile_side`.

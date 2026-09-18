@@ -445,6 +445,40 @@ int main() {
     assert(stale.mark_resident(first.slot, first.key, first.stamp));
     assert(stale.resident() == 1);
 
+    // A released slot returns to the pool and its patch is asked for again.
+    TerrainTier released;
+    released.update(view_at(.2, radius), 1, 3);
+    const TerrainTier::Generation unserved = released.generate()[0];
+    released.release(unserved.slot, unserved.key, unserved.stamp);
+    assert(released.pending() == 2); // the other two of the batch
+    released.update(view_at(.2, radius), 2, 3);
+    unsigned reissued_count = 0;
+    for (const auto& g : released.generate())
+        reissued_count += g.key == unserved.key;
+    assert(reissued_count == 1);
+    // Releasing twice, or against a stale stamp, must not free a slot that moved on.
+    released.release(unserved.slot, unserved.key, unserved.stamp);
+    const TerrainTier::Generation again = released.generate()[0];
+    assert(released.mark_resident(again.slot, again.key, again.stamp));
+    assert(released.resident() == 1);
+
+    // A generation that never arrives is reclaimed, so the patch is not stuck forever.
+    TerrainTier abandoned;
+    abandoned.update(view_at(.2, radius), 1, 3);
+    const TerrainTier::Generation dropped = abandoned.generate()[0];
+    assert(abandoned.pending() == 3);
+    // The sweep walks a window per frame, so a full pass takes slot_count / sweep_window frames.
+    constexpr unsigned sweep_cycle = TerrainTier::slot_count / TerrainTier::sweep_window;
+    for (unsigned f = 0; f <= sweep_cycle; f++)
+        abandoned.update(view_at(.2, radius), 2 + TerrainTier::pending_timeout + f, 0);
+    assert(abandoned.pending() == 0);
+    assert(!abandoned.mark_resident(dropped.slot, dropped.key, dropped.stamp));
+    abandoned.update(view_at(.2, radius), 3 + TerrainTier::pending_timeout + sweep_cycle, 3);
+    unsigned re_requested = 0;
+    for (const auto& g : abandoned.generate())
+        re_requested += g.key == dropped.key;
+    assert(re_requested == 1);
+
     // After invalidation, the same key/slot must reject the previous generation stamp.
     TerrainTier reissued;
     reissued.update(view_at(.2, radius), 1, 3);
