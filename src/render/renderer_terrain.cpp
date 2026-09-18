@@ -188,7 +188,10 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         const unsigned parent_slot = draw.key.level ? terrain_tier.resident_slot(parent) : TerrainTier::slot_count;
         records[i] = {.cell = cell,
                       .morph = {morph_start, morph_end, 0, 0},
-                      .tile = {draw.key.face, draw.slot, parent_slot, (draw.key.x & 1u) | (draw.key.y & 1u) << 1}};
+                      .tile = {draw.key.face, draw.slot, parent_slot,
+                               (draw.key.x & 1u) | (draw.key.y & 1u) << 1 | (draw.key.x == 0) << 2 |
+                                   (draw.key.x + 1 == 1u << draw.key.level) << 3 | (draw.key.y == 0) << 4 |
+                                   (draw.key.y + 1 == 1u << draw.key.level) << 5 | draw.quadrants << 6}};
     }
     patch_records_bytes = terrain_tier.draws().size() * sizeof(PatchInstance);
     if (patch_records_bytes)

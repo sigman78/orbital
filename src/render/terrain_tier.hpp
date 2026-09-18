@@ -51,6 +51,7 @@ public:
     struct Draw {
         PatchKey key;
         unsigned slot;
+        unsigned quadrants; // the grid quadrants to draw (bit i: x = i & 1, y = i >> 1); 0xf the whole patch
     };
 
     void update(const TierView& view, unsigned frame, unsigned budget = generate_per_frame);

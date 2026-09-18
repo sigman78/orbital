@@ -66,7 +66,7 @@ struct Vertex { SHADER_FLOAT4 position; SHADER_FLOAT4 normal; };
 struct PatchInstance {
     SHADER_FLOAT4 cell;  // s0, t0, size, level
     SHADER_FLOAT4 morph; // start distance (radii), end distance, unused, unused
-    SHADER_UINT tile[4]; // face, slot, the parent's slot (or the slot count: none), the child's quadrant bits (x & 1, y & 1 << 1)
+    SHADER_UINT tile[4]; // face, slot, the parent's slot (or the slot count: none), the child's quadrant bits (x & 1, y & 1 << 1) and, bits 2 to 5, which sides lie on a cube edge (s low, s high, t low, t high), bits 6 to 9 the grid quadrants drawn
 };
 struct Frame {
     SHADER_MATRIX4 view_projection;

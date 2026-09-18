@@ -135,33 +135,40 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view) {
         nodes_[index].children = allocate_children(nodes_[index]);
     if (!split && nodes_[index].children)
         collapse(nodes_[index]);
+    // A child within its own range and resident is visited; any other visible
+    // quadrant the node draws itself, so nothing is ever drawn beyond its level's
+    // range: at the shared edge the child's vertices are past its range and fully
+    // morphed to this node's shape, and this node morphs as its own neighbours do.
+    unsigned quadrants = 0xf;
     if (const std::uint32_t children = nodes_[index].children) {
-        bool ready = true;
+        quadrants = 0;
         for (unsigned i = 0; i < 4; i++) {
             const Node& child = nodes_[children + i];
             const Visibility child_seen = visibility(child, view);
-            if (!child_seen.visible)
+            if (!child_seen.visible) {
+                collapse(nodes_[children + i]);
                 continue;
-            const unsigned child_slot = slot_of(child.key);
-            if (child_slot == no_slot) {
-                request(child.key, child_seen.pixels);
-                ready = false;
-            } else if (!slots_[child_slot].resident) {
-                touch(child.key);
-                ready = false;
-            } else {
-                touch(child.key);
             }
-        }
-        if (ready) {
-            for (unsigned i = 0; i < 4; i++)
+            const bool in_range = nearest_distance(view.camera_local, child.bounds) < double(range_[key.level + 1]);
+            const unsigned child_slot = slot_of(child.key);
+            if (in_range && child_slot != no_slot && slots_[child_slot].resident) {
                 visit(children + i, view);
-            return;
+                continue;
+            }
+            quadrants |= 1u << i;
+            if (!in_range)
+                collapse(nodes_[children + i]);
+            else if (child_slot == no_slot)
+                request(child.key, child_seen.pixels);
+            if (child_slot != no_slot)
+                touch(child.key);
         }
+        if (!quadrants)
+            return;
     }
     const unsigned slot = slot_of(key);
     if (slot != no_slot && slots_[slot].resident)
-        draws_.push_back({.key = key, .slot = slot});
+        draws_.push_back({.key = key, .slot = slot, .quadrants = quadrants});
     else if (slot == no_slot)
         request(key, seen.pixels);
 }

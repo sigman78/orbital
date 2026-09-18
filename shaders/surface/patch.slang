@@ -50,6 +50,12 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
 
     float2 g = grid.position.xy;
     float skirt = grid.position.z;
+    // A quadrant a child draws instead: its triangles go, by a vertex strictly
+    // inside it (the ones on the quadrant seams stay for the neighbouring quadrants).
+    uint quadrants = (patch.tile[3] >> 6) & 0xf;
+    bool2 low = g < PATCH_QUADS * 0.5, high = g > PATCH_QUADS * 0.5;
+    uint quadrant = (high.x ? 1 : 0) | (high.y ? 2 : 0);
+    bool dropped = (low.x || high.x) && (low.y || high.y) && !((quadrants >> quadrant) & 1);
     float2 cell_origin = patch.cell.xy;
     float cell_size = patch.cell.z;
     uint face = patch.tile[0];
@@ -72,13 +78,15 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
         p = d * (1 + h - SKIRT_DROP);
 
     PatchResult r;
+    if (dropped)
+        p = float3(asfloat(0x7fc00000), 0, 0); // NaN: the triangle is discarded
     r.localPosition = p;
     r.worldPosition = inst.center_radius.xyz + mul(rotate, p) * radius;
     r.worldNormal = normalize(mul(rotate, d));
     r.localNormal = d;
     r.tileUV = gm / PATCH_QUADS;
     r.slot = slot;
-    r.face = face | patch.tile[2] << 8 | patch.tile[3] << 20; // the parent's slot and the quadrant packed beside the face
+    r.face = face | patch.tile[2] << 8 | patch.tile[3] << 20; // the parent's slot, the quadrant and the cube-edge sides packed beside the face
     r.bary = grid.normal.xyz;
     r.morph = m;
     r.texelArc = cell_size / PATCH_QUADS * EVERITT_K / TAN_K; // the warp's slope at the face centre

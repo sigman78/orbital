@@ -100,17 +100,17 @@ Material marsMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L
 // coordinate, blended toward the parent tile's through the morph zone so a
 // level boundary shades as one surface, with the crater walls' shadow traced
 // through the tile's own heights as the equirect path traces its map.
-float tileShadow(uint slot, float2 uv, float3 L, float3 N, float3 T, float3 B, float texelArc, float tier)
+float tileShadow(uint slot, float2 g, float3 L, float3 N, float3 T, float3 B, float texelArc, float tier)
 {
     float2 lightUV = float2(dot(L, T), dot(L, B));
     float lightRise = max(dot(L, N), .02) / max(length(lightUV), 1e-4);
     lightUV = normalize(lightUV + 1e-6);
-    float h0 = patchHeight(slot, uv * PATCH_QUADS);
+    float h0 = patchHeight(slot, g);
     float shadow = 0.0;
     for (int s = 1; s <= 6; ++s)
     {
         float distance = float(s) * 1.5;
-        float h = patchHeight(slot, (uv + lightUV * distance / TILE_SIDE) * PATCH_QUADS);
+        float h = patchHeight(slot, g + lightUV * distance);
         float rise = h - h0 - lightRise * distance * texelArc;
         shadow = max(shadow, rise / (distance * texelArc) * 6.0);
     }
@@ -119,7 +119,7 @@ float tileShadow(uint slot, float2 uv, float3 L, float3 N, float3 T, float3 B, f
 
 Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility, float tier)
 {
-    uint slot = input.tileSlot, face = input.tileFace & 0xff, parent = (input.tileFace >> 8) & 0xfff, quadrant = input.tileFace >> 20;
+    uint slot = input.tileSlot, face = input.tileFace & 0xff, parent = (input.tileFace >> 8) & 0xfff, quadrant = (input.tileFace >> 20) & 3;
     float morph = input.patchMorph.x;
     float2 uv = (input.tileUV * PATCH_QUADS + 0.5) / TILE_SIDE;
     float3 albedo = textureArrays[TEX_ARRAY_TERRAIN_ALBEDO].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0).rgb;
@@ -141,7 +141,7 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     m.N = normalize(T * mapN.x * tier + B * mapN.y * tier + N * lerp(1.0, max(mapN.z, .2), tier));
     m.visibility = visibility;
     if (tier > 0.0)
-        m.visibility *= tileShadow(slot, uv, L, N, T, B, input.patchMorph.y, tier);
+        m.visibility *= tileShadow(slot, input.tileUV * PATCH_QUADS, L, N, T, B, input.patchMorph.y, tier);
     m.albedo = albedo;
     m.rough = .95;
     m.water = 0.0;
@@ -158,9 +158,19 @@ float3 wireframe(float3 colour, SurfaceVaryings input, float3 irradiance)
     float lineTriangle = 1.0 - smoothstep(0.0, 1.0, min(edge.x, min(edge.y, edge.z)));
     float2 border = min(input.tileUV, 1.0 - input.tileUV) / max(fwidth(input.tileUV), 1e-6);
     float linePatch = 1.0 - smoothstep(0.0, 1.5, min(border.x, border.y));
+    // The sides on a cube edge, in a third colour.
+    uint sides = (input.tileFace >> 22) & 0xf;
+    float2 lowSide = input.tileUV / max(fwidth(input.tileUV), 1e-6), highSide = (1.0 - input.tileUV) / max(fwidth(input.tileUV), 1e-6);
+    float cubeEdge = 1e9;
+    if (sides & 1) cubeEdge = min(cubeEdge, lowSide.x);
+    if (sides & 2) cubeEdge = min(cubeEdge, highSide.x);
+    if (sides & 4) cubeEdge = min(cubeEdge, lowSide.y);
+    if (sides & 8) cubeEdge = min(cubeEdge, highSide.y);
+    float lineCube = 1.0 - smoothstep(0.0, 2.0, cubeEdge);
     float bright = max(luma709(irradiance) * .04, 1e-4);
     colour = lerp(colour, float3(.15, 1.0, .35) * bright, lineTriangle * .8);
-    return lerp(colour, float3(1.0, .75, .2) * bright, linePatch);
+    colour = lerp(colour, float3(1.0, .75, .2) * bright, linePatch);
+    return lerp(colour, float3(1.0, .15, .1) * bright, lineCube);
 }
 
 [shader("fragment")]

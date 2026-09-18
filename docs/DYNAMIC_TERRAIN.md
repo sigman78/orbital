@@ -218,6 +218,16 @@ Fixed in the PR after review:
 - The wireframe was an analytic grid in the face's cell coordinates, not the mesh. It now draws the
   triangles from a barycentric each corner carries (an unindexed copy of the grid, drawn only with the
   overlay on), with the patch borders from the tile coordinate; the sphere path has no overlay.
+- A split node drew all four children, the far ones fully morphed to its shape, as designed. That is
+  not crack-free: the far children stand at this node's level unmorphed, while an unsplit neighbour at
+  the same level, farther than 0.7 of its range there, is already morphing toward the level above, up to a
+  full level apart in geometry and shading along their shared border. On a face edge (a border at every
+  level) with the camera over the other face it read as one whole face shaded flatter. Now, as in the
+  original CDLOD, a child is drawn only within its own range and when resident; the node draws every other
+  visible quadrant itself (`Draw::quadrants`, the vertex shader dropping the rest of its grid), so nothing
+  is drawn beyond its level's range and neighbours at one level morph alike. This also makes residency
+  per quadrant: a patch refines as each child's tile arrives. The tier test checks that a drawn ancestor
+  covers no drawn descendant's quadrant.
 - `init` bound the 1x1 placeholder to every array slot after `create_terrain_tier` had bound the tile
   arrays, so the shaders sampled the placeholder: every height read as `height_min` (a smooth sphere at
   0.95 radii) and the albedo as black. The placeholder now goes in first. Found because the near tier

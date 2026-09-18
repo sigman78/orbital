@@ -109,18 +109,30 @@ int main() {
     for (const auto& g : tier.generate())
         for (const auto& draw : tier.draws())
             assert(draw.slot != g.slot);
-    // No drawn patch has a drawn ancestor, and every drawn child is still within
-    // its parent's own split range (the condition that let the parent descend).
+    // A drawn ancestor covers only quadrants no drawn descendant lies in, and
+    // every drawn child is still within its parent's own split range (the
+    // condition that let the parent descend).
+    unsigned parents_resident = 0, children_drawn = 0, partial = 0;
     for (const auto& a : tier.draws()) {
+        assert(a.quadrants && a.quadrants <= 0xf);
+        partial += a.quadrants != 0xf;
         for (const auto& b : tier.draws())
-            assert(!is_ancestor(a.key, b.key));
+            if (is_ancestor(a.key, b.key)) {
+                const unsigned shift = a.key.level - b.key.level - 1;
+                const unsigned quadrant = ((a.key.x >> shift) & 1) | ((a.key.y >> shift) & 1) << 1;
+                assert(!((b.quadrants >> quadrant) & 1));
+            }
         if (a.key.level == 0)
             continue;
         const PatchKey parent{a.key.face, std::uint8_t(a.key.level - 1), std::uint16_t(a.key.x / 2),
                               std::uint16_t(a.key.y / 2)};
         const double dist = TerrainTier::nearest_distance(close.camera_local, patch_bounds(parent));
+        parents_resident += tier.resident_slot(parent) != TerrainTier::slot_count;
+        children_drawn++;
         assert(dist < double(tier.range(a.key.level)) / TerrainTier::hysteresis);
     }
+    std::printf("terrain tier: %u of %u drawn children have a resident parent, %u partial draws\n", parents_resident,
+                children_drawn, partial);
     // A still view stays converged; a turn away draws fewer and generates the newly seen side.
     async.update(tier, close, frame + 1);
     assert(tier.generate().empty());
