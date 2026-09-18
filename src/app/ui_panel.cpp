@@ -617,7 +617,7 @@ void overlay_controls(AppState& app) {
     ImGui::SameLine();
     if (ImGui::Button("Capture (F10)"))
         request_capture(app);
-    ImGui::TextDisabled("F12 hides this panel");
+    ImGui::TextDisabled("Tab hides this panel");
 }
 
 } // namespace

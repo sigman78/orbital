@@ -41,7 +41,7 @@ inline constexpr std::string_view usage =
     "extinction;\n"
     "F5 temporal AA; F6 rock splat cut-off; F7 splat lighting in both cull passes; F8 tone curve;\n"
     "F9 spatial AA (off, FXAA, SMAA); Alt+Enter borderless fullscreen;\n"
-    "F10 capture; F11 belt dust; F12 control panel (--ui shows it at start); Esc exit.";
+    "F10 capture; F11 belt dust; Tab control panel (--ui shows it at start); Esc exit.";
 
 struct Options {
     std::uint64_t seed = showcase_seed;

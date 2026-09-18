@@ -30,7 +30,7 @@ struct AppState {
     Camera camera;
     BodyStates bodies;
     bool running = true, paused = false, high = false, overlay = true;
-    bool show_ui = false; // F12
+    bool show_ui = false; // Tab
     bool vsync = true;
     bool slow_travel = false; // a fiftieth of the flight speed (Z)
     float pan = 0;            // lateral drift added to the move axis (--pan)

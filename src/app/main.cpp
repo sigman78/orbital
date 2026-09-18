@@ -55,7 +55,7 @@ void handle_key(AppState& app, Key key) {
     case Key::f8: cycle_choice(app.tone.tone_curve); break;
     case Key::f10: request_capture(app); break;
     case Key::f11: app.belt_dust.enabled = !app.belt_dust.enabled; break;
-    case Key::f12: app.show_ui = !app.show_ui; break;
+    case Key::tab: app.show_ui = !app.show_ui; break;
     case Key::plus: app.tone.exposure = exposure_keys::range.clamp(app.tone.exposure * exposure_keys::step); break;
     case Key::minus: app.tone.exposure = exposure_keys::range.clamp(app.tone.exposure / exposure_keys::step); break;
     default: break;
@@ -401,7 +401,7 @@ int run(const Options& options) {
     renderer.set_ui_font({{atlas.width, atlas.height},
                           assets::PixelLayout::Rgba8,
                           {atlas.rgba, std::size_t(atlas.width) * atlas.height * 4}});
-    log::info("Ready at {} ms. RMB + WASD: fly | 1-9: views | T: tour | F12: control panel | F10: capture | --help "
+    log::info("Ready at {} ms. RMB + WASD: fly | 1-9: views | T: tour | Tab: control panel | F10: capture | --help "
               "for all controls",
               since_start());
     std::string report;
