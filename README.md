@@ -2,8 +2,6 @@
 
 Native Windows and Linux C++20 space demo on a compatibility fork of [NoGraphicsAPI](https://github.com/sebbbi/NoGraphicsAPI): an Earth-like world, a gas giant with an asteroid belt, a rocky moon, a desert world with two small moons, and a minor planet whose surface is generated as you approach it.
 
-![The minor planet at close range, the terminator across its cratered surface](docs/images/minor-planet.jpg)
-
 ![Earth with the gas giant and its belt behind it](docs/images/earth.jpg)
 
 | ![Inside the asteroid belt](docs/images/belt.jpg) | ![The gas giant with the belt seen from above](docs/images/jupiter.jpg) |
@@ -16,7 +14,9 @@ Sourced material maps, atmospheric scattering, shadows, HDR with exposure adapta
 
 The asteroid belt is a deterministic rock population drawn as meshes near the camera and splats further out, with its own transmittance and extinction maps, forward-scattering dust and a lit disc. The sky is the Milky Way fitted as splats over a star catalogue.
 
-The minor planet carries a second terrain tier. Close in it stops being a textured sphere and becomes a CDLOD cube sphere: one shared grid mesh instanced per patch, shape and colour read from per-patch tiles that a CPU worker pool generates and streams into texture arrays, levels meeting without cracks by vertex morphing. The image above is that tier. How it works and what is still wrong with it is in [docs/DYNAMIC_TERRAIN.md](docs/DYNAMIC_TERRAIN.md).
+The minor planet carries a second terrain tier. Close in it stops being a textured sphere and becomes a CDLOD cube sphere: one shared grid mesh instanced per patch, shape and colour read from per-patch tiles that a CPU worker pool generates and streams into texture arrays, levels meeting without cracks by vertex morphing. How it works and what is still wrong with it is in [docs/DYNAMIC_TERRAIN.md](docs/DYNAMIC_TERRAIN.md).
+
+![The minor planet close in, drawn by the near tier](docs/images/minor-planet.jpg)
 
 ## Build
 
