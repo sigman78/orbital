@@ -70,8 +70,7 @@ PatchBounds patch_bounds(PatchKey key) {
     }
     bounds.angular_size = 2 * std::atan(std::tan(everitt_k * cell.size / 2) / tan_k);
     bounds.angular_radius += 1e-6;
-    // Bound chords from the reference-surface centre to both height-shell ends.
-    // Include the skirt; sin(angular_radius) alone bounds the cap about a different centre.
+    // Bound both height-shell ends about the reference-surface centre, including the skirt.
     const double cosine = std::cos(bounds.angular_radius);
     const auto chord = [cosine](double radius) {
         return std::sqrt(std::max(0.0, radius * radius + 1 - 2 * radius * cosine));
@@ -158,8 +157,7 @@ std::vector<std::uint32_t> patch_indices() {
     return indices;
 }
 
-// Sample border texels on the neighboring face's own grid for matching edge
-// derivatives. Extrapolating this face's warp would use a different stencil.
+// Use the neighbor's grid beyond cube edges so both faces share derivative stencils.
 namespace {
 Vec3d ring_direction(unsigned face, double s, double t) {
     const bool out_s = s < -1 || s > 1, out_t = t < -1 || t > 1;
@@ -173,8 +171,7 @@ Vec3d ring_direction(unsigned face, double s, double t) {
     const double d = dot(f.axis, edge);
     double sn = std::atan(dot(f.s, edge) / d * tan_k) / everitt_k;
     double tn = std::atan(dot(f.t, edge) / d * tan_k) / everitt_k;
-    // Select the neighbor axis parallel to this face's normal. Comparing coordinate
-    // magnitudes is ambiguous at cube corners and gives inconsistent stencils.
+    // Axis alignment avoids the coordinate-magnitude tie at cube corners.
     if (std::abs(dot(f.s, faces[face].axis)) > .5)
         sn -= std::copysign(delta, sn);
     else
@@ -235,7 +232,6 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
     const PatchBounds bounds = patch_bounds(key);
     const MinorPlanetTerrain::Region region = terrain.region(bounds.centre,
                                                              bounds.angular_radius + 2 * bounds.angular_size / quads);
-    // Nyquist frequency controls which detail octaves the colour grid can represent.
     const double nyquist = .5 * quads / bounds.angular_size;
     std::vector<float> h(bordered * bordered);
     const auto at = [&](int x, int y) -> float& { return h[(y + 1) * bordered + (x + 1)]; };
@@ -249,8 +245,7 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
             const unsigned i = y * tile_colour_side + x;
             const Vec3d d = direction(x, y);
             const float hc = at(x, y);
-            // The gradient from the height changes along the two grid directions (not
-            // orthogonal off the face centre, so solve rather than assume).
+            // Solve the gradient in the skewed grid basis.
             const Vec3d us = direction(x + 1, y) - direction(x - 1, y), vt = direction(x, y + 1) - direction(x, y - 1);
             const Vec3d u = normalized(us), v = normalized(vt);
             const double ds = (at(x + 1, y) - at(x - 1, y)) / length(us),
@@ -265,7 +260,6 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
             albedo[p + 1] = u8(a.y);
             albedo[p + 2] = u8(a.z);
             albedo[p + 3] = 255;
-            // Encode in the same local tangent frame the fragment shader reconstructs.
             const TangentFrame frame = patch_tangent_frame(key.face, d);
             const auto u16 = [](double s) {
                 return std::uint16_t(std::clamp(s / tile_slope_scale * .5 + .5, 0.0, 1.0) * 65535.0 + .5);

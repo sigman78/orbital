@@ -9,9 +9,7 @@
 #include "../lib/noise.slang"
 #include "../lib/sampling.slang"
 
-// Moon/Mars DEMs and procedural minor-planet maps share normal+height sampling.
-// root.detail fades normal tilt and terrain shadows with draw size; grain fades
-// with texture magnification.
+// Shared airless-body shading; root.detail controls relief and texture magnification controls grain.
 
 static const float2 DEM_TEXELS = float2(4096.0, 2048.0);     // Moon and Mars albedo and normal+height maps
 static const float2 MINOR_PLANET_TEXELS = float2(2048.0, 1024.0);  // the minor planet's, baked at start-up
@@ -20,8 +18,7 @@ static const float MOON_HEIGHT_RANGE = 19603.0 / 1737400.0;
 static const float MARS_HEIGHT_RANGE = 29334.0 / 3396200.0;
 static const float MINOR_PLANET_HEIGHT_RANGE = MINOR_PLANET_HEIGHT_MAX - MINOR_PLANET_HEIGHT_MIN;
 
-// Trace toward the sun through DEM alpha. heightRange converts to radii;
-// cosLatitude corrects the longitude step near the poles.
+// Trace DEM alpha toward the sun, correcting longitude steps for latitude.
 float terrainShadow(Texture2D<float4> normalMap, float2 texels, float2 uv, float3 L, float3 N, float3 T, float3 B,
                    float heightRange, float cosLatitude, float tier)
 {
@@ -42,8 +39,7 @@ float terrainShadow(Texture2D<float4> normalMap, float2 texels, float2 uv, float
     return 1.0 - saturate(shadow) * .55 * tier;
 }
 
-// Shared normal blend for sphere and patch paths; bound the upright component
-// so scaled tilt cannot turn the shading normal below the surface.
+// Keep scaled normal-map tilt above the surface in both rendering paths.
 float3 blendMapNormal(float3 axis, float3 tangential, float upright, float strength, float tier)
 {
     return normalize(axis * lerp(1.0, max(upright, .2), tier) + tangential * (strength * tier));
@@ -99,8 +95,7 @@ Material marsMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L
     return m;
 }
 
-// Blend tile albedo and tangent slopes toward the parent through the morph band.
-// Parent and child use the same tangent frame; cube faces decode into body space.
+// Blend parent/child albedo and slopes in their shared tangent frame.
 Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility, float tier)
 {
     uint slot = input.tileSlot, face = input.tileFace & 7, parent = (input.tileFace >> 8) & 0xfff, quadrant = (input.tileFace >> 20) & 3;
@@ -119,7 +114,6 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     }
     float3 tangent, bitangent;
     patchTangentFrame(face, localN, tangent, bitangent);
-    // Convert the blended tangent gradient to a shading normal.
     float3 tilt = (tangent * slope.x + bitangent * slope.y) * -MINOR_PLANET_SLOPE_SCALE;
     float upright = rsqrt(1.0 + dot(tilt, tilt));
     Material m;
@@ -133,7 +127,6 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
         m.visibility *= terrainShadow(textures[TEX_MINOR_PLANET_NORMAL], MINOR_PLANET_TEXELS, sphereUV(localN), L, N, T, B,
                                       MINOR_PLANET_HEIGHT_RANGE, length(localN.xz), tier);
     }
-    // Match the sphere path's grain when tile texels are magnified.
     float2 tileTexels = float2(TILE_COLOUR_SIDE, TILE_COLOUR_SIDE);
     m.albedo = regolithGrain(albedo, sphereUV(localN), magnificationGrad(ddx(uv), ddy(uv), tileTexels));
     m.rough = .95;
@@ -141,15 +134,13 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     return m;
 }
 
-// Wireframe from triangle barycentrics, with separate patch and cube-edge colours.
-// Sunlight scales line brightness to follow exposure.
+// Barycentric wireframe with sunlight-scaled patch and cube-edge colours.
 float3 wireframe(float3 colour, SurfaceVaryings input, float3 irradiance)
 {
     float3 edge = input.bary / max(fwidth(input.bary), 1e-6);
     float lineTriangle = 1.0 - smoothstep(0.0, 1.0, min(edge.x, min(edge.y, edge.z)));
     float2 border = min(input.tileUV, 1.0 - input.tileUV) / max(fwidth(input.tileUV), 1e-6);
     float linePatch = 1.0 - smoothstep(0.0, 1.5, min(border.x, border.y));
-    // The sides on a cube edge, in a third colour.
     uint sides = (input.tileFace >> 22) & 0xf;
     float2 lowSide = input.tileUV / max(fwidth(input.tileUV), 1e-6), highSide = (1.0 - input.tileUV) / max(fwidth(input.tileUV), 1e-6);
     float cubeEdge = 1e9;
@@ -174,7 +165,6 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
                : s.kind == KIND_MINOR_PLANET         ? minorPlanetMaterial(input, rotate, s.N, s.L, s.visibility, root.detail)
                                                     : moonMaterial(input, rotate, s.N, s.L, s.visibility, root.detail);
     float3 irradiance = sunlight(root.frame);
-    // Isolate patch attributes to diagnose seams (TerrainSettings::debug).
     uint debug = uint(root.frame->sequence.y + .5);
     if ((root.flags & ORBITAL_ROOT_PATCHES) && debug != 0)
     {

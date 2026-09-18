@@ -260,7 +260,6 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
                     terrain.uploaded, terrain.generate_ms);
         ImGui::Text("Ring %u / %u free, nodes %u / %u", terrain.rings_free, terrain.rings, terrain.nodes,
                     terrain.node_budget);
-        // What the tier ran out of: red while a limit is actually biting.
         const auto pinch = [](bool bad, const char* text, ...) {
             va_list args;
             va_start(args, text);
@@ -279,7 +278,6 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
               terrain.out_of_range);
         pinch(terrain.behind_mean > 1.f, "Finest level %u, drawn %.2f levels coarser than asked (%u over one)",
               terrain.deepest, double(terrain.behind_mean), terrain.behind_one);
-        // A patch whose morph reads the same at both ends is switched, not blended.
         pinch(terrain.graded * 2 < terrain.drawn, "Morph grades %u, switches %u near + %u far, fade %.2f",
               terrain.graded, terrain.flat_near, terrain.flat_far, double(terrain.fade_mean));
     }
@@ -297,11 +295,9 @@ void quality_controls(bool& high, render::TerrainSettings& terrain) {
     int debug = int(terrain.debug);
     if (ImGui::Combo("Patch view", &debug, debug_views, 6))
         terrain.debug = unsigned(debug);
-    // Lower switches to the patches further out, where their coarse levels draw.
     ImGui::SliderFloat("Tier switch", &terrain.activate_pixels, 50.f, 2400.f, "%.0f px", ImGuiSliderFlags_Logarithmic);
-    // Positive splits sooner: the patches carry more detail at the same distance.
     ImGui::SliderFloat("LOD bias", &terrain.lod_bias, -3.f, 3.f, "%+.2f");
-    // Rebuilds every tile, so it streams back in over a second or two.
+    // Changing detail regenerates all tiles.
     ImGui::SliderFloat("Surface detail", &terrain.detail, 0.f, 2.5f, "%.2f");
     static constexpr const char* seams[] = {"None", "Child waits for its cap", "Clamp at finer sides"};
     combo("LOD seam", terrain.seam, seams);

@@ -22,8 +22,7 @@ float3 patchCubeDirection(uint face, float2 st)
     return normalize(FACE_AXIS[face] + FACE_S[face] * w.x + FACE_T[face] * w.y);
 }
 
-// Match the CPU's patch_tangent_frame: project FACE_S onto the local tangent
-// plane so face-local slopes decode consistently across cube edges.
+// Match CPU patch_tangent_frame so decoded slopes agree across cube edges.
 void patchTangentFrame(uint face, float3 direction, out float3 tangent, out float3 bitangent)
 {
     tangent = normalize(FACE_S[face] - direction * dot(FACE_S[face], direction));
@@ -69,7 +68,6 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     uint face = patch.tile[0];
     uint slot = patch.tile[1];
 
-    // Skip height fetches and warps for discarded vertices.
     if (dropped)
     {
         PatchResult dead = {};
@@ -89,8 +87,7 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     float dist = length(world) / radius;
     // Arrival fade is a floor under the distance morph, relaxing from the parent shape.
     float m = max(saturate((dist - patch.morph.x) / max(patch.morph.y - patch.morph.x, 1e-6)), patch.morph.z);
-    // Seam::clamp holds coarse edges at their own shape to meet finer neighbors,
-    // restoring the distance morph over a quarter-patch width from the edge.
+    // Clamp coarse edges to their own shape, blending back over a quarter-patch width.
     uint finer = uint(patch.morph.w);
     if (finer != 0)
     {
@@ -119,8 +116,7 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     r.localNormal = d;
     r.tileUV = gm / PATCH_QUADS;
     r.slot = slot;
-    // The face in 0..2, the level in 3..6, the parent's slot in 8..19, then the
-    // quadrant and the cube-edge sides.
+    // Packed fields: face [0:2], level [3:6], parent slot [8:19], tile flags [20:].
     r.face = face | uint(patch.cell.w) << 3 | patch.tile[2] << 8 | patch.tile[3] << 20;
     r.bary = grid.normal.xyz;
     r.morph = m;

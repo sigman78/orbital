@@ -285,8 +285,7 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     create_device(window);
     phase("device");
     create_samplers();
-    // Every array slot holds a valid descriptor before the first draw; the
-    // terrain's arrays replace three of them below.
+    // Initialize every array descriptor before drawing; terrain replaces its slots below.
     array_placeholder = GpuImage::create_array(device, {1, 1}, 1, gpu::Format::rgba8_unorm);
     for (unsigned i = 0; i < unsigned(ArraySlot::count); i++)
         bind(ArraySlot(i), array_placeholder);

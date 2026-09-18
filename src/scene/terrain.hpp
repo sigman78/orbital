@@ -7,8 +7,7 @@
 
 namespace space {
 
-// Shared procedural shape and colour for baked maps and cube-sphere tiles.
-// Inputs are body-local directions; heights are signed fractions of the reference radius.
+// Shared map/tile terrain: body-local directions, heights in reference radii.
 class MinorPlanetTerrain {
 public:
     struct Crater {
@@ -28,9 +27,7 @@ public:
 
     explicit MinorPlanetTerrain(std::uint64_t seed);
 
-    // Slope-only micro-craters; geometry and LOD error are unaffected.
-    // Octaves scale size/depth together and fade in as sampling resolution permits.
-    // nyquist is half the texels per radian; strength scales the result, with 0 disabling it.
+    // Slope-only micro-craters; nyquist = half texels/radian, strength = amplitude (0 disables).
     static constexpr float detail_frequency = 110; // lattice cells per radian of the first octave
     static constexpr unsigned detail_octaves = 3;
     static constexpr float detail_radius = .34f;  // a crater's, of a cell

@@ -73,7 +73,7 @@ struct FrameStats {
         unsigned nodes = 0;                 // quadtree nodes alive
         unsigned workers = 0;
         float generate_ms = 0; // the last finished tile's time on its worker
-        // What the tier ran out of this frame (TerrainTier::Pressure).
+        // TerrainTier::Pressure counters.
         unsigned node_budget = 0, splits_blocked = 0;
         unsigned requested = 0, served = 0;
         unsigned evictions = 0, evicted_recent = 0;

@@ -149,9 +149,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.bodies = evaluate_system(system, std::max(0.0, options.fixed_time));
     if (options.bookmark >= 0)
         select_bookmark(app, unsigned(options.bookmark));
-    // Along the bookmark's body's line, aimed at its centre: the far and zoomed views
-    // the size-dependent checks need, without a bookmark each. Negative comes in
-    // instead, for a view from the ground, and stops just above the highest terrain.
+    // Offset the bookmark along its body radius; clamp inward moves above the height ceiling.
     if (const auto body = Camera::bookmark_body(options.bookmark >= 0 ? std::size_t(options.bookmark) : 0);
         options.back != 0 && body < app.bodies.size()) {
         const Vec3d centre = app.bodies[body].position, away = normalized(app.camera.position - centre);

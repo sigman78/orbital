@@ -43,8 +43,7 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
     const Vec3d centre = view.body_centre + normal * view.radius;
     if (!geometry::sphere_in_frustum(view.frustum, to_float(centre), float(view.radius * b.bound_radius)))
         return {};
-    // Prioritize by nearest distance so patches under the camera receive detail first.
-    // Radius cancels because both distance and patch size are in radii.
+    // Prioritize nearby patch coverage; distances and sizes are both in radii.
     const double near = nearest_distance(view.camera_local, b, height_range(node.key));
     const float scale = float(view.height_pixels / (std::max(near, 1e-4) * view.tan_y));
     return {.visible = true, .pixels = float(b.angular_size) * scale, .distance = near};
@@ -104,7 +103,6 @@ double TerrainTier::level_at(double distance) const {
     return double(std::size(range_) - 1);
 }
 
-// The levels the screen error asks for across a patch, its near end against its far.
 double TerrainTier::level_span(const TierView& view, const PatchBounds& bounds, Range<float> heights) const {
     return level_at(nearest_distance(view.camera_local, bounds, heights)) -
            level_at(farthest_distance(view.camera_local, bounds, heights));
@@ -164,8 +162,7 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
     // Seam::span requests subdivision when a patch spans more than one level's morph.
     const bool wide = seam_ == Seam::span && level_span(view, nodes_[index].bounds, height_range(key)) >
                                                  seam_span * (nodes_[index].children ? double(hysteresis) : 1.0);
-    // Discover children using the full shell: resident heights do not bound unsampled
-    // descendants. Gate each resident child against its own height range below.
+    // Use the full shell for undiscovered children; resident tile bounds cover only their own geometry.
     const double descendant_distance = nearest_distance(view.camera_local, nodes_[index].bounds);
     const bool wants = key.level < patch_level_max && key.level + 1 < std::size(level_error) &&
                        (wide || descendant_distance < double(range_[key.level + 1]) *
@@ -224,8 +221,7 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
         }
         if (!quadrants)
             return;
-        // Children fade from this node, so remove its inherited arrival fade.
-        // Distance morphing still applies; one node cannot represent two transitions.
+        // Drop inherited arrival fade when children use this node as their reference; keep distance morphing.
         if (descend)
             fade = 0;
     }
@@ -236,8 +232,7 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
         request(key, seen.pixels);
 }
 
-// Find finer neighbors across drawn quadrants' outer sides. Coverage comes from
-// the adjacent cell or an ancestor; missing coverage is treated as finer.
+// Classify quadrant neighbors by covering ancestors; missing coverage is treated as finer.
 void TerrainTier::mark_finer_sides() {
     std::unordered_map<std::uint32_t, unsigned> cover;
     for (const Draw& draw : draws_)
@@ -245,7 +240,6 @@ void TerrainTier::mark_finer_sides() {
             if (draw.quadrants >> i & 1)
                 cover[draw.key.child(i).packed()] = draw.key.level;
     const auto covering = [&](PatchKey cell) {
-        // Search every ancestor through the root.
         for (;;) {
             if (const auto found = cover.find(cell.packed()); found != cover.end())
                 return int(found->second);
@@ -263,7 +257,7 @@ void TerrainTier::mark_finer_sides() {
                 continue;
             const PatchKey q = draw.key.child(i);
             const unsigned qx = i & 1, qy = i >> 1;
-            // Its two sides that are also the patch's: low or high in x, then in y.
+            // Test only sides on the patch perimeter.
             for (unsigned axis = 0; axis < 2; axis++) {
                 const bool high = axis == 0 ? qx : qy;
                 const int dx = axis == 0 ? (high ? 1 : -1) : 0, dy = axis == 1 ? (high ? 1 : -1) : 0;
@@ -285,8 +279,7 @@ void TerrainTier::mark_finer_sides() {
     }
 }
 
-// Prioritize coarse levels, then screen size. Evict the least recently used resident
-// slot, protecting tiles used this frame and all pending generations.
+// Serve coarse/large patches first; LRU eviction protects pending and currently used slots.
 void TerrainTier::choose_generation(unsigned budget) {
     const unsigned cap = std::min(budget, generate_per_frame);
     std::sort(requests_.begin(), requests_.end(), [](const Request& a, const Request& b) {
@@ -311,7 +304,6 @@ void TerrainTier::choose_generation(unsigned budget) {
             if (slot == no_slot)
                 break; // nothing evictable: every other slot is pending
             pressure_.evictions++;
-            // Recycled while still warm: the pool is smaller than the flight needs.
             pressure_.evicted_recent += slots_[slot].used + 60 > frame_;
             slots_by_key_.erase(slots_[slot].key.packed());
         }
@@ -391,7 +383,6 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     if (seam_ == Seam::clamp)
         mark_finer_sides();
     choose_generation(budget);
-    // What the frame cost the tier, for the panel and the log.
     pressure_.nodes = nodes();
     pressure_.node_budget = slot_count - 64;
     pressure_.requested = unsigned(requests_.size());
@@ -402,7 +393,6 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         const PatchBounds bounds = patch_bounds(draw.key);
         const Range<float> heights = height_range(draw.key);
         const double near = nearest_distance(view.camera_local, bounds, heights);
-        // Difference between desired and drawn level at the patch's nearest bound.
         const double over = level_at(near) - double(draw.key.level);
         behind += over;
         pressure_.behind_one += over > 1;

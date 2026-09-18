@@ -135,25 +135,21 @@ void test_cube_coordinates() {
                 assert(c.face == face);
                 assert(std::abs(c.s - s) < 1e-9 && std::abs(c.t - t) < 1e-9);
             }
-    // A direction on the face boundary goes to the right face.
     const CubeCoord c = cube_coordinates(normalized(Vec3d{1, .5, .3}));
     assert(c.face == 0); // +x dominant
 }
 
 void test_tiles() {
     const MinorPlanetTerrain terrain(1007);
-    // Height tile determinism.
     std::vector<float> a(tile_side * tile_side), b(tile_side * tile_side);
     const PatchKey key{2, 3, 4, 5};
     generate_height_tile(terrain, key, a);
     generate_height_tile(terrain, key, b);
     for (unsigned i = 0; i < a.size(); i++)
         assert(a[i] == b[i]);
-    // Heights within range.
     for (float h : a)
         assert(h >= MinorPlanetTerrain::height_min && h <= MinorPlanetTerrain::height_max);
-    // Parent-child even-texel agreement: child's even texels sample the same
-    // directions as the parent's texels in the overlapping region.
+    // Even child texels coincide with parent texels.
     std::vector<float> parent(tile_side * tile_side), child(tile_side * tile_side);
     const PatchKey parent_key{0, 2, 1, 1};
     generate_height_tile(terrain, parent_key, parent);
@@ -169,15 +165,13 @@ void test_tiles() {
     std::printf("tiles: parent-child even-texel mismatches %u of %u\n", mismatches,
                 (tile_side / 2 + 1) * (tile_side / 2 + 1));
     assert(mismatches == 0);
-    // Neighbours share their edge exactly.
     const PatchKey left_key{2, 3, 4, 5}, right_key{2, 3, 5, 5};
     std::vector<float> lh(tile_side * tile_side), rh(tile_side * tile_side);
     generate_height_tile(terrain, left_key, lh);
     generate_height_tile(terrain, right_key, rh);
     for (unsigned y = 0; y < tile_side; y++)
         assert(lh[y * tile_side + (tile_side - 1)] == rh[y * tile_side]);
-    // Colour tiles match expected layout, and neighbours agree on their shared
-    // edge's texels byte for byte (the seam test).
+    // Adjacent tiles must share identical edge texels.
     const auto tile_normal = [](const std::uint16_t* slope, unsigned face, Vec3d d) {
         const TangentFrame frame = patch_tangent_frame(face, d);
         const auto s = [&](unsigned c) { return (slope[c] / 65535.0 * 2 - 1) * tile_slope_scale; };
@@ -192,7 +186,6 @@ void test_tiles() {
         const double size = 2.0 / double(1u << key.level);
         const Vec3d d = cube_direction(key.face, -1 + key.x * size + (i % tile_colour_side) * size / colour_quads,
                                        -1 + key.y * size + (i / tile_colour_side) * size / colour_quads);
-        // The normal the slope reads back points outward, within 45 degrees of the sphere's.
         assert(dot(tile_normal(&norm[i * 2], key.face, d), d) > .7);
     }
     std::vector<std::uint8_t> ra(albedo.size());
@@ -205,10 +198,7 @@ void test_tiles() {
         for (unsigned c = 0; c < 2; c++)
             assert(norm[(y * tile_colour_side + tile_colour_side - 1) * 2 + c] == rn[(y * tile_colour_side) * 2 + c]);
     }
-    // Across every cube edge the two faces agree on the albedo and on the normal at
-    // every shared edge texel, corners excepted: three grids meet there and no one
-    // difference pair serves all three. The two faces hold the gradient in their own
-    // frames, so the bytes differ there and the normal read back does not.
+    // Cube-edge slopes differ by face frame; compare decoded normals, excluding corners.
     {
         const auto world_normal = [&](unsigned face, unsigned x, unsigned y, const std::uint16_t* slope, PatchKey key) {
             const double size = 2.0 / double(1u << key.level);
@@ -216,8 +206,7 @@ void test_tiles() {
                                            -1 + key.y * size + y * size / (tile_colour_side - 1));
             return tile_normal(slope, face, d);
         };
-        // The colour grid is finer than the height grid, so a shared texel is found by
-        // its direction rather than by its height.
+        // Match shared texels by direction across faces.
         const auto colour_direction = [](PatchKey k, unsigned x, unsigned y) {
             constexpr unsigned q = tile_colour_side - 1;
             const double size = 2.0 / double(1u << k.level);
@@ -261,11 +250,7 @@ void test_tiles() {
         std::fprintf(stderr, "tiles: %u cube-edge texel pairs compared, world normals within %.4f\n", compared, worst);
         assert(compared > 100 && worst < 5e-4); // measured 1e-4, about two 16-bit slope codes on each side
     }
-    // The eight cube corners, where three faces meet and each writes a texel. The
-    // ring texel past an edge is the neighbour's texel one step in along the edge
-    // that was crossed; at a corner both of the neighbour's coordinates read 1, so
-    // naming it by the larger of them picked arbitrarily and the three faces
-    // differentiated over three stencils, up to 26 degrees apart at any level.
+    // Regression: coordinate-magnitude ties at corners selected inconsistent derivative stencils.
     {
         struct Corner {
             Vec3d direction;
@@ -298,11 +283,7 @@ void test_tiles() {
         std::fprintf(stderr, "tiles: %u cube-corner face pairs compared, world normals within %.4f\n", compared, worst);
         assert(compared == 24 && worst < 5e-4); // three faces at each of the eight corners
     }
-    // The bounding sphere the cull tests the frustum against holds every point the
-    // patch can draw: its grid over the height shell and its skirt below that. A
-    // sphere short of it culls a patch that shows, and an invisible child is not
-    // drawn by its parent either, so the miss is a hole. It must not be far over
-    // it either: the cull is only as tight as this.
+    // Culling bounds must contain the full height shell and skirts without excessive slack.
     {
         double worst_fill = 0, tightest = 1e9;
         unsigned sampled = 0;
@@ -333,7 +314,6 @@ void test_tiles() {
                      sampled, tightest, worst_fill);
         assert(sampled > 100 && worst_fill < 1.01); // the cap's corner is a sampled point, so it is nearly exact
     }
-    // Patch error positive and reasonable.
     const float error = patch_error(terrain, key);
     assert(error > 0 && error < .01f);
     std::printf("tiles: patch error at level 3: %g radii\n", double(error));
@@ -373,7 +353,7 @@ void test_height_tile_range() {
             const float decoded = MinorPlanetTerrain::height_min + (float(encoded) / 65535.f) * span;
             assert(bounds.contains(h) && bounds.contains(decoded));
         }
-        // Sub-texel bilinear values (including morph positions) stay between texel extrema.
+        // Bilinear morph samples must remain within the height range.
         for (unsigned i = 0; i + 1 < heights.size(); i++)
             assert(bounds.contains(heights[i] * .37f + heights[i + 1] * .63f));
     }

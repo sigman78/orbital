@@ -27,9 +27,7 @@ TierView view_at(double distance, double radius, Vec3d forward = {0, 0, -1}) {
     return view;
 }
 
-// A camera hovering over a given point of the body, aimed at its centre: the
-// morph check needs the camera over a cube edge or a corner, where the levels
-// meeting there are not the mirror image of each other.
+// Camera above a chosen surface direction, looking at the body centre.
 TierView view_over(Vec3d over, double altitude, double radius) {
     const Vec3d local = normalized(over) * (1 + altitude);
     CameraView camera;
@@ -46,10 +44,7 @@ TierView view_over(Vec3d over, double altitude, double radius) {
             .tan_y = tan_y};
 }
 
-// Models asynchronous generation, like the renderer's worker threads: a slot
-// handed out by generate() this update is only marked resident two updates
-// later (and the renderer polls before it calls update(), so resolution here
-// happens before the wrapped update() call too).
+// Complete simulated uploads two updates later, before selection as in the renderer.
 struct AsyncTiles {
     struct Pending {
         unsigned slot;
@@ -86,12 +81,7 @@ bool is_ancestor(PatchKey a, PatchKey b) {
     return (a.x >> shift) == b.x && (a.y >> shift) == b.y;
 }
 
-// The cross-level morph, checked the way the vertex shader computes it. A drawn
-// patch's grid is morphed by the vertex's own distance to the camera, so two
-// drawn surfaces of different level meet without a crack only where the finer
-// one is fully morphed to the coarser one's shape (m == 1) and the coarser one
-// has not begun morphing toward its own parent (m == 0). This walks every such
-// boundary and counts the vertices that break it.
+// Check shared-edge continuity: fine morph must be 1, coarse morph must be 0.
 struct MorphCheck {
     const MinorPlanetTerrain& terrain;
     std::unordered_map<std::uint32_t, std::vector<float>> heights; // by patch, kept across frames
@@ -102,7 +92,7 @@ struct MorphCheck {
         const std::vector<float>* height = nullptr;
     };
 
-    // shaders/surface/patch.slang: saturate((dist - morph.x) / (morph.y - morph.x)).
+    // Match the vertex shader morph.
     float morph_at(const Surface& s, unsigned x, unsigned y, Vec3d camera_local) {
         constexpr unsigned quads = tile_side - 1;
         const double size = 2.0 / double(1u << s.key.level);
@@ -113,7 +103,6 @@ struct MorphCheck {
                         s.floor);
     }
 
-    // Violating boundary vertices over the tier's current draws.
     unsigned violations(const TerrainTier& tier, const TierView& view, unsigned* checked = nullptr,
                         bool use_fade = true) {
         constexpr unsigned quads = tile_side - 1;
@@ -131,10 +120,8 @@ struct MorphCheck {
                     cover[draw.key.child(i).packed()] = unsigned(surfaces.size());
             surfaces.push_back({draw.key, .7f * end, end, use_fade ? draw.fade : 0.f, &height});
         }
-        // The surface covering a cell: itself, or the nearest ancestor drawn as a
-        // quadrant. None means finer cells cover it, and they run the check instead.
+        // Find the covering ancestor; finer neighbors perform their own check.
         const auto coverer = [&](PatchKey cell) -> const Surface* {
-            // Up to the root, not halfway: the counter must not shrink with the level.
             for (;;) {
                 if (const auto found = cover.find(cell.packed()); found != cover.end())
                     return &surfaces[found->second];
@@ -154,7 +141,7 @@ struct MorphCheck {
                 const int nx = int(cell.x) + dx, ny = int(cell.y) + dy;
                 PatchKey neighbour{cell.face, cell.level, std::uint16_t(nx), std::uint16_t(ny)};
                 if (nx < 0 || ny < 0 || nx >= int(cells) || ny >= int(cells)) {
-                    // Over a cube edge: step past it and ask which face and cell that is.
+                    // Map the adjacent cell onto its cube face.
                     const double size = 2.0 / cells;
                     const CubeCoord c = cube_coordinates(cube_direction(
                         cell.face, -1 + (cell.x + .5) * size + dx * size, -1 + (cell.y + .5) * size + dy * size));
@@ -183,8 +170,7 @@ struct MorphCheck {
     }
 };
 
-// A level's morph band must not reach below where its child hands over, or the
-// coarser side is already morphing where the finer one meets it.
+// Parent morphing must start beyond the child handover distance.
 void test_morph_bands() {
     double worst = 1e9;
     for (unsigned level = 0; level + 1 < std::size(TerrainTier::level_error); level++)
@@ -197,8 +183,7 @@ void test_morph_continuity() {
     constexpr double radius = 2.5 / 15;
     const MinorPlanetTerrain terrain(1007);
     MorphCheck check{terrain};
-    // Settled, over a face centre, a cube edge, a corner and off-axis: the levels
-    // that meet must meet cleanly wherever the camera stands.
+    // Check settled boundaries across faces, edges, corners, and altitudes.
     const Vec3d spots[] = {{0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {.9, .1, 1}, {.3, .2, 1}};
     unsigned checked = 0, bad = 0, partial = 0, drawn = 0;
     for (const Vec3d& spot : spots)
@@ -221,10 +206,7 @@ void test_morph_continuity() {
     assert(checked > 20000 && bad == 0);
 }
 
-// While tiles stream in, a node draws the quadrants whose children have not
-// arrived. A resident child beside one of those is inside its own range, so it is
-// not fully morphed, and the two do not meet: the transient crack the skirt
-// covers. The fade closes it by holding a newly drawn child at its parent's shape.
+// Arrival fading should reduce mismatches beside missing-child fallback quadrants.
 void test_morph_streaming() {
     constexpr double radius = 2.5 / 15;
     const MinorPlanetTerrain terrain(1007);
@@ -251,9 +233,7 @@ void test_morph_streaming() {
     assert(faded.total <= plain.total);
 }
 
-// A flat sphere at the camera collision altitude used to select level 7 from
-// the global +.05 height ceiling, although every vertex of levels 6 and 7 was
-// beyond its morph end. Both sides collapsed, leaving the persistent 2x border.
+// Regression: loose height bounds fully collapsed adjacent finest levels, leaving a 2x border.
 void test_resident_height_selection() {
     constexpr double radius = 2.5 / 15;
     for (bool grazing : {false, true}) {
@@ -331,8 +311,7 @@ void test_resident_terrain_morph() {
             for (bool grazing : {false, true}) {
                 TerrainTier tier;
                 TierView view = view_over(spot, altitude, 2.5 / 15);
-                // Looking down culls the grazing boundaries where a level meets the next, which
-                // are the ones a tighter height bound could part. Aim along the surface too.
+                // Grazing views expose LOD boundaries hidden by downward-facing frusta.
                 if (grazing) {
                     CameraView camera;
                     const Vec3d radial = normalized(view.camera_local);
@@ -379,13 +358,11 @@ int main() {
     async.update(tier, close, 2);
     assert(!tier.active());
     assert(tier.generate().size() > 0 && tier.generate().size() <= TerrainTier::generate_per_frame);
-    // Coarse first: the six face roots are the first six.
     unsigned roots = 0;
     for (const auto& g : tier.generate())
         roots += g.key.level == 0;
     assert(roots == 6);
-    // The roots haven't landed yet: the tier stays off and draws nothing (not a
-    // slot standing in for a tile that hasn't arrived).
+    // Keep the sphere until all root uploads arrive.
     async.update(tier, close, 3);
     assert(!tier.active() && tier.draws().empty());
     unsigned frame = 4, converged_at = 0;
@@ -412,9 +389,7 @@ int main() {
     for (const auto& g : tier.generate())
         for (const auto& draw : tier.draws())
             assert(draw.slot != g.slot);
-    // A drawn ancestor covers only quadrants no drawn descendant lies in, and
-    // every drawn child is still within its parent's own split range (the
-    // condition that let the parent descend).
+    // Require disjoint ancestor/descendant coverage and valid child split ranges.
     unsigned parents_resident = 0, children_drawn = 0, partial = 0;
     for (const auto& a : tier.draws()) {
         assert(a.quadrants && a.quadrants <= 0xf);
@@ -452,15 +427,13 @@ int main() {
     tier.update(view_at(20, radius), frame + 61);
     assert(!tier.active() && tier.draws().empty());
 
-    // Budget caps how many entries a single update may generate.
     TerrainTier budgeted;
     budgeted.update(view_at(.2, radius), 1, 0);
     assert(budgeted.generate().empty());
     budgeted.update(view_at(.2, radius), 2, 3);
     assert(budgeted.generate().size() <= 3);
 
-    // A stale mark_resident (wrong key: the slot was recycled) is refused and
-    // leaves the slot non-resident; the right key still marks it.
+    // Reject stale keys without establishing residency.
     TerrainTier stale;
     stale.update(view_at(.2, radius), 1, 3);
     assert(!stale.generate().empty());
@@ -472,9 +445,7 @@ int main() {
     assert(stale.mark_resident(first.slot, first.key, first.stamp));
     assert(stale.resident() == 1);
 
-    // Slot and key repeat; the stamp does not. A result in flight when the tiles were
-    // invalidated names a generation that no longer exists, even though the same patch
-    // is asked for again and is handed back the same slot.
+    // After invalidation, the same key/slot must reject the previous generation stamp.
     TerrainTier reissued;
     reissued.update(view_at(.2, radius), 1, 3);
     const TerrainTier::Generation before = reissued.generate()[0];

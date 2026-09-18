@@ -28,16 +28,16 @@ using ShaderMatrix4 = float[16];
 #define ORBITAL_ROOT_FOLD_CLOUDS 1 // the cloud shell is not drawn: the ground shader blends the clouds in
 #define ORBITAL_ROOT_WIREFRAME 2   // the near tier's triangles and patch borders drawn over it (with ORBITAL_ROOT_PATCHES)
 #define ORBITAL_ROOT_PATCHES 4     // this draw uses the CDLOD patch path: root.patches points to PatchInstance records
-// The near tier's tile slots (TerrainTier::slot_count): a PatchInstance without a parent tile carries this.
+// Must match TerrainTier::slot_count; also the missing-parent sentinel.
 #define ORBITAL_TERRAIN_SLOTS 1024
-// The minor planet's terrain height range in radii (MinorPlanetTerrain::height_min/max).
+// Height range in radii; must match MinorPlanetTerrain::height_min/max.
 #define MINOR_PLANET_HEIGHT_MIN (-.05)
 #define MINOR_PLANET_HEIGHT_MAX (.05)
-// The span of the slope tile's two channels, radii per radian (tile_slope_scale).
+// Slope range in radii/radian; must match tile_slope_scale.
 #define MINOR_PLANET_SLOPE_SCALE 3.0
-// How far a patch's skirt hangs below its edge, radii (patch_skirt_drop).
+// Skirt drop in radii; must match patch_skirt_drop.
 #define MINOR_PLANET_SKIRT_DROP 0.002
-// Colour texels per height texel along a tile's edge (tile_colour_ratio).
+// Colour samples per height interval; must match tile_colour_ratio.
 #define MINOR_PLANET_COLOUR_RATIO 2
 // The Earth's cloud shell above the surface, in radii (the mesh scale and the shadow geometry).
 #define ORBITAL_CLOUD_HEIGHT 0.009

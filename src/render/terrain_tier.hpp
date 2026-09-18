@@ -9,8 +9,7 @@
 
 namespace space::render {
 
-// Where the tier takes the body over from its sphere levels, in cull_bodies' units;
-// TerrainSettings::activate_pixels overrides it per frame.
+// Default near-tier activation threshold in cull_bodies' units; overridable per frame.
 inline constexpr float TerrainTier_activate_default = 1200;
 
 // The tier's view of one frame: the body relative to the camera, its spin, and
@@ -27,9 +26,7 @@ struct TierView {
     unsigned seam = 0;                                    // TerrainTier::Seam
 };
 
-// Cube-sphere selection and tile cache. Distance ranges select patches with hysteresis;
-// parents cover unavailable children. Pending and currently used slots cannot be evicted.
-// Upload completion establishes residency only for the matching generation stamp.
+// Distance-based quadtree selection with parent fallback and a generation-checked tile cache.
 class TerrainTier {
 public:
     static constexpr unsigned slot_count = 1024; // 11 MiB of vertices; a close view holds 400 of them
@@ -39,9 +36,7 @@ public:
     static constexpr float hysteresis = .8f; // the fraction of either the way back
     // Fade new tiles from their parent's shape over a fixed frame count for deterministic captures.
     static constexpr unsigned fade_frames = 15;
-    // Worst measured geometric error per level, radii, from 64 random patches per level
-    // on the seed-1007 terrain with the Everitt warp, at 32 quads to a tile
-    // (2026-09-18). Levels 9..12 extrapolated by the measured ratio of 2.3 per level.
+    // Seed-1007 calibration: 64 patches/level, 32 quads, Everitt warp; levels 9..12 extrapolate by 2.3x.
     static constexpr float level_error[] = {
         .018342f,  .0126785f, .00478311f, .00138083f, .000601649f, .000284836f, .000119656f,
         .0000752f, .0000272f, 1.18e-5f,   5.1e-6f,    2.2e-6f,     9.6e-7f,
@@ -52,8 +47,7 @@ public:
         unsigned slot;
         std::uint32_t stamp; // which assignment of this slot asked for it
     };
-    // At grazing angles, a patch can span several morph bands. These policies handle
-    // boundaries where the coarse side would otherwise morph away from the fine side.
+    // Policies for coarse/fine boundaries that span overlapping morph bands.
     enum class Seam : unsigned {
         none,     // as it was: the band is trusted to have cleared the hand-over
         farthest, // a child is drawn only once its whole cap is in range, never part of it
@@ -66,15 +60,13 @@ public:
         PatchKey key;
         unsigned slot;
         unsigned quadrants; // the grid quadrants to draw (bit i: x = i & 1, y = i >> 1); 0xf the whole patch
-        // The sides of this patch that meet a finer surface, for Seam::clamp: bit 0
-        // low x, 1 high x, 2 low y, 3 high y.
+        // Seam::clamp mask: low x, high x, low y, high y in bits 0..3.
         unsigned finer = 0;
         // Morph floor shared by siblings: 1 on arrival, decreasing to 0 over fade_frames.
         float fade = 0;
     };
 
-    // Selection/cache pressure. starved and splits_blocked indicate limits;
-    // out_of_range is ordinary parent coverage.
+    // Per-frame limits and coverage diagnostics; out_of_range is normal coverage.
     struct Pressure {
         unsigned nodes = 0, node_budget = 0, splits_blocked = 0;
         unsigned requested = 0, served = 0;         // tiles asked for, and given a slot
@@ -83,8 +75,7 @@ public:
         unsigned deepest = 0;                       // finest level drawn
         unsigned behind_one = 0, behind_count = 0;  // patches over a level coarser than asked for
         float behind_mean = 0;                      // levels coarser than asked for, averaged
-        // Morph variation over each drawn patch's distance bounds; these are estimates.
-        // fade_mean is the average arrival morph floor.
+        // Estimated spatial morph variation and mean arrival fade.
         unsigned flat_near = 0, flat_far = 0, graded = 0;
         float fade_mean = 0;
     };
@@ -99,23 +90,19 @@ public:
     std::span<const Draw> draws() const { return draws_; } // this frame's patches
     std::span<const Generation> generate() const { return generate_; }
     static constexpr Range<float> full_height_range{MinorPlanetTerrain::height_min, MinorPlanetTerrain::height_max};
-    // Accept the uploaded tile and its rendered height range only if this assignment
-    // still owns the slot. Unknown ranges retain the conservative full shell.
+    // Accept uploaded contents and height bounds only for the current slot assignment.
     bool mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights = full_height_range);
     // Only resident tiles supply a tighter range. Unknown tiles retain the full shell.
     Range<float> height_range(PatchKey key) const;
     float range(unsigned level) const { return level < std::size(range_) ? range_[level] : 0; }
     unsigned resident_slot(PatchKey key) const; // the tile's slot, slot_count when absent or pending
     unsigned pending() const;                   // slots handed out whose tile has not arrived
-    // Distance bounds for the cap over the supplied height interval. Resident tiles
-    // use their own range for drawing decisions; undiscovered descendants keep the
-    // full terrain shell. Skirts are excluded, as in the shader's morph distance.
+    // Cap distance over the supplied height interval, excluding skirts as in the shader.
     static double nearest_distance(Vec3d camera_local, const PatchBounds& bounds,
                                    Range<float> heights = full_height_range);
-    // The other end of the same cap: what Seam::farthest gates a child on.
     static double farthest_distance(Vec3d camera_local, const PatchBounds& bounds,
                                     Range<float> heights = full_height_range);
-    // Fractional desired level and its spread across a patch. Seam::span limits that spread.
+    // Desired fractional LOD and its spread across a patch.
     static constexpr double seam_span = 1.0;
     double level_at(double distance) const;
     double level_span(const TierView& view, const PatchBounds& bounds, Range<float> heights = full_height_range) const;

@@ -121,8 +121,7 @@ bool Window::pump_events() {
                 const Key key = event.key.keysym.sym == SDLK_RETURN && (event.key.keysym.mod & KMOD_ALT)
                                     ? Key::alt_enter
                                     : key_from_sdl(event.key.keysym.sym);
-                // Tab toggles the panel, so it reaches the application even while a field
-                // of the panel has focus: what opened it has to be able to close it.
+                // Let Tab close the panel even when a UI field has keyboard focus.
                 if (key != Key::none && (!capture_keyboard || key == Key::tab))
                     state.presses.try_push_back(key);
             }

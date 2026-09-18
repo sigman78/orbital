@@ -71,8 +71,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     stats.frame.terrain.uploaded = 0;
     if (!minor_planet_terrain)
         return;
-    // Poll even while disabled to release workers' staging entries. Upload recording
-    // accepts the copies and establishes residency together.
+    // Poll even while disabled; upload recording commits residency and releases staging ownership.
     if (tile_pool)
         for (const TileResult& result : tile_pool->poll()) {
             ring_state[result.ring] = RingState::upload;
@@ -106,11 +105,9 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     view.camera_local = Vec3d{dot(view.axes[0], camera_relative), dot(view.axes[1], camera_relative),
                               dot(view.axes[2], camera_relative)} *
                         (1 / state.radius);
-    // Only as many requests as there are ring entries to generate them into.
     unsigned free_rings = 0;
     for (unsigned i = 0; i < tile_ring_count; i++)
         free_rings += ring_available(i);
-    // A change to how the tiles are generated makes the resident ones wrong.
     if (input.terrain.detail != tile_detail) {
         tile_detail = input.terrain.detail;
         terrain_tier.invalidate();
@@ -168,7 +165,6 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                       p.behind_mean, p.behind_one, p.graded, p.flat_near, p.flat_far, p.fade_mean);
         }
     }
-    // Submit new generation requests to the worker pool.
     if (tile_pool) {
         const float height_range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
         for (const TerrainTier::Generation& generation : terrain_tier.generate()) {
@@ -214,7 +210,6 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
             });
         }
     }
-    // Write PatchInstance records for the drawn patches.
     const std::uint64_t records_slot = (frame_index & 1) * std::uint64_t(TerrainTier::slot_count) *
                                        sizeof(PatchInstance);
     auto* records = reinterpret_cast<PatchInstance*>(buffers.patch_records_staging.range().cpu + records_slot);

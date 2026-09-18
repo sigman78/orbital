@@ -148,25 +148,15 @@ struct SkySettings {
 struct TerrainSettings {
     bool near_tier = true;  // the minor planet's cube-sphere patches close in; off keeps its sphere levels
     bool wireframe = false; // the patches' triangles drawn over the surface, the quadtree's review
-    // A debug view of the patch path in place of its shading: 1 tile coordinate, 2 normal, 3 elevation,
-    // 4 the crater-shadow term, 5 morph and level. Seams show against these one term at a time.
+    // Debug: 0 shaded, 1 UV, 2 normal, 3 height, 4 shadow, 5 morph/level.
     unsigned debug = 0;
-    // The projected size, in cull_bodies' units (twice the pixel radius), above which the
-    // tier takes the body over from its sphere levels. Lowering it switches further out,
-    // where the tier draws its coarse levels: the way to review those without flying to
-    // the ground. The default is where the finest sphere level runs out.
+    // Near-tier activation threshold, in twice the projected pixel radius.
     float activate_pixels = 1200;
-    // Shifts every level's range by 2^bias, so positive draws finer patches sooner and
-    // negative holds them coarser. Every range moves together, so the morph bands keep
-    // their spacing against the level below and the level boundaries stay seamless.
+    // Multiply all LOD ranges by 2^bias; positive selects finer detail.
     float lod_bias = 0;
-    // Micro-relief the tiles' slope carries past the terrain's own content, scaling
-    // MinorPlanetTerrain's detail octaves; 0 is off. Changing it rebuilds every tile.
+    // Slope detail strength; 0 disables it. Changes regenerate all tiles.
     float detail = 1;
-    // What to do where a patch meets a finer one (TerrainTier::Seam): 0 nothing, 1 a
-    // child waits until its whole cap is in range, 2 the coarse patch stops morphing
-    // along the sides that meet a finer one. The seam it is about shows from the
-    // ground, where one patch spans from under the camera to the horizon.
+    // TerrainTier::Seam policy for boundaries between LOD levels.
     unsigned seam = 0;
 };
 

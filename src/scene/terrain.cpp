@@ -100,7 +100,6 @@ float MinorPlanetTerrain::detail(Vec3d direction, double nyquist, float strength
         const double weight = std::clamp(std::log2(nyquist / frequency), 0.0, 1.0);
         if (weight <= 0)
             break; // and so is every octave above this one
-        // Search the lattice shell intersecting the sphere at this octave.
         const Vec3d p = d * frequency;
         const Vec3d base{std::floor(p.x), std::floor(p.y), std::floor(p.z)};
         double sum = 0;
@@ -122,7 +121,7 @@ float MinorPlanetTerrain::detail(Vec3d direction, double nyquist, float strength
                     const double len = length(place);
                     if (len < 1e-9)
                         continue;
-                    // Size and distance are in lattice cells, so octaves scale together.
+                    // Crater dimensions are in lattice cells.
                     const double radius = detail_radius * (.6 + .8 * uniform(state));
                     const double x = length(place * (1 / len) - d) * frequency / radius;
                     if (x > detail_reach)
@@ -132,7 +131,7 @@ float MinorPlanetTerrain::detail(Vec3d direction, double nyquist, float strength
                     sum += x < 1 ? -depth + (depth + rim) * smoothstep(crater_floor, 1, float(x))
                                  : rim * std::exp(-(x - 1) * 4);
                 }
-        // Cells are 1/frequency of a radian, and a radian of arc is a radius.
+        // Convert lattice-cell depth to radii.
         total += weight * sum / frequency;
     }
     return float(total * double(strength) * detail_slope * calibration);
