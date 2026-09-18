@@ -144,6 +144,31 @@ std::vector<std::uint32_t> patch_indices() {
     return indices;
 }
 
+// A ring texel past a cube edge is the neighbouring face's texel one step inside
+// its edge: this face's warp extrapolated would land off that face's rows (its
+// lines of constant t are not the neighbour's), and the two faces' edge texels
+// would differentiate over different points and disagree. Ring corners are unused.
+namespace {
+Vec3d ring_direction(unsigned face, double s, double t) {
+    const bool out_s = s < -1 || s > 1, out_t = t < -1 || t > 1;
+    if (!out_s && !out_t)
+        return cube_direction(face, s, t);
+    const double sc = std::clamp(s, -1.0, 1.0), tc = std::clamp(t, -1.0, 1.0);
+    const Vec3d edge = cube_direction(face, sc, tc);
+    const double delta = out_s ? std::abs(s - sc) : std::abs(t - tc);
+    const unsigned neighbour = cube_coordinates(cube_direction(face, s, t)).face;
+    const Face& f = faces[neighbour];
+    const double d = dot(f.axis, edge);
+    double sn = std::atan(dot(f.s, edge) / d * tan_k) / everitt_k;
+    double tn = std::atan(dot(f.t, edge) / d * tan_k) / everitt_k;
+    if (std::abs(sn) > std::abs(tn))
+        sn -= std::copysign(delta, sn);
+    else
+        tn -= std::copysign(delta, tn);
+    return cube_direction(neighbour, sn, tn);
+}
+} // namespace
+
 float patch_error(const MinorPlanetTerrain& terrain, PatchKey key) {
     const Cell cell = cell_of(key);
     const PatchBounds bounds = patch_bounds(key);
@@ -185,7 +210,7 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
     constexpr unsigned quads = tile_side - 1, bordered = tile_side + 2;
     const float range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
     const auto direction = [&](int x, int y) {
-        return cube_direction(key.face, cell.s0 + x * cell.size / quads, cell.t0 + y * cell.size / quads);
+        return ring_direction(key.face, cell.s0 + x * cell.size / quads, cell.t0 + y * cell.size / quads);
     };
     // The tile's heights with a one-texel ring around them, sampled here, so an
     // edge texel's central difference is the one its neighbour tile computes.
@@ -204,11 +229,18 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
             const unsigned i = y * tile_side + x;
             const Vec3d d = direction(x, y);
             const float hc = at(x, y);
-            // Slopes per unit of arc: the height change over the chord between the two neighbours.
-            const float dx = (at(x + 1, y) - at(x - 1, y)) / float(length(direction(x + 1, y) - direction(x - 1, y)));
-            const float dy = (at(x, y + 1) - at(x, y - 1)) / float(length(direction(x, y + 1) - direction(x, y - 1)));
-            const Vec3f n = normalized(Vec3f{-dx, -dy, 1});
-            const Vec3f a = terrain.albedo(d, hc, 1 - n.z); // the slope term as the bake passes it
+            // The gradient from the height changes along the two grid directions (not
+            // orthogonal off the face centre, so solve rather than assume), and the
+            // normal in the body frame: no tangent frame, so faces cannot disagree.
+            const Vec3d us = direction(x + 1, y) - direction(x - 1, y), vt = direction(x, y + 1) - direction(x, y - 1);
+            const Vec3d u = normalized(us), v = normalized(vt);
+            const double ds = (at(x + 1, y) - at(x - 1, y)) / length(us),
+                         dt = (at(x, y + 1) - at(x, y - 1)) / length(vt);
+            const double c = dot(u, v), det = std::max(1 - c * c, 1e-6);
+            const Vec3d g = u * ((ds - c * dt) / det) + v * ((dt - c * ds) / det);
+            const Vec3f n = to_float(normalized(d - g));
+            const Vec3f a = terrain.albedo(
+                d, hc, float(1 - dot(normalized(d - g), d))); // the slope term as the bake passes it
             const auto u8 = [](float v) { return std::uint8_t(std::clamp(v * 255.0f + 0.5f, 0.0f, 255.0f)); };
             const std::size_t p = i * 4;
             albedo[p] = u8(a.x);

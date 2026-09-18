@@ -181,7 +181,11 @@ void test_tiles() {
     generate_colour_tiles(terrain, key, a, albedo, norm);
     for (unsigned i = 0; i < tile_side * tile_side; i++) {
         assert(albedo[i * 4 + 3] == 255);
-        assert(norm[i * 4 + 2] > 128); // the normal points outward
+        const Vec3d n{norm[i * 4] / 127.5 - 1, norm[i * 4 + 1] / 127.5 - 1, norm[i * 4 + 2] / 127.5 - 1};
+        const double size = 2.0 / double(1u << key.level);
+        const Vec3d d = cube_direction(key.face, -1 + key.x * size + (i % tile_side) * size / 64,
+                                       -1 + key.y * size + (i / tile_side) * size / 64);
+        assert(dot(n, d) > .7); // the body-frame normal points outward, within 45 degrees of the sphere's
     }
     std::vector<std::uint8_t> ra(tile_side * tile_side * 4), rn(tile_side * tile_side * 4);
     generate_colour_tiles(terrain, right_key, rh, ra, rn);
@@ -191,6 +195,51 @@ void test_tiles() {
             const std::size_t l = (y * tile_side + tile_side - 1) * 4 + c, r = (y * tile_side) * 4 + c;
             assert(albedo[l] == ra[r] && norm[l] == rn[r]);
         }
+    // Across every cube edge the two faces agree on the albedo and on the normal
+    // (stored in the body frame) at every shared edge texel, corners excepted: three
+    // grids meet there and no one difference pair serves all three.
+    {
+        const auto world_normal = [&](unsigned, unsigned, unsigned, const std::uint8_t* n, PatchKey) {
+            return normalized(Vec3d{n[0] / 127.5 - 1, n[1] / 127.5 - 1, n[2] / 127.5 - 1});
+        };
+        std::vector<float> h1(tile_side * tile_side), h2(tile_side * tile_side);
+        std::vector<std::uint8_t> a1(h1.size() * 4), n1(a1.size()), a2(a1.size()), n2(a1.size());
+        unsigned compared = 0;
+        double worst = 0;
+        for (unsigned f1 = 0; f1 < 6; f1++)
+            for (unsigned f2 = f1 + 1; f2 < 6; f2++) {
+                if (f2 == (f1 ^ 1)) // opposite faces share no edge
+                    continue;
+                for (unsigned i1 = 0; i1 < 4; i1++)
+                    for (unsigned i2 = 0; i2 < 4; i2++) {
+                        const PatchKey p1{std::uint8_t(f1), 1, std::uint16_t(i1 & 1), std::uint16_t(i1 >> 1)};
+                        const PatchKey p2{std::uint8_t(f2), 1, std::uint16_t(i2 & 1), std::uint16_t(i2 >> 1)};
+                        generate_height_tile(terrain, p1, h1);
+                        generate_height_tile(terrain, p2, h2);
+                        generate_colour_tiles(terrain, p1, h1, a1, n1);
+                        generate_colour_tiles(terrain, p2, h2, a2, n2);
+                        for (unsigned y1 = 0; y1 < tile_side; y1 += 8)
+                            for (unsigned x1 = 0; x1 < tile_side; x1 += 8)
+                                for (unsigned y2 = 0; y2 < tile_side; y2 += 8)
+                                    for (unsigned x2 = 0; x2 < tile_side; x2 += 8) {
+                                        const unsigned j1 = y1 * tile_side + x1, j2 = y2 * tile_side + x2;
+                                        const bool edge_x = x1 == 0 || x1 == tile_side - 1,
+                                                   edge_y = y1 == 0 || y1 == tile_side - 1;
+                                        if (h1[j1] != h2[j2] || !(edge_x ^ edge_y))
+                                            continue;
+                                        for (unsigned c = 0; c < 4; c++)
+                                            assert(a1[j1 * 4 + c] == a2[j2 * 4 + c]);
+                                        assert(n1[j1 * 4 + 3] == n2[j2 * 4 + 3]);
+                                        const Vec3d w1 = world_normal(f1, x1, y1, &n1[j1 * 4], p1);
+                                        const Vec3d w2 = world_normal(f2, x2, y2, &n2[j2 * 4], p2);
+                                        worst = std::max(worst, length(w1 - w2));
+                                        compared++;
+                                    }
+                    }
+            }
+        std::fprintf(stderr, "tiles: %u cube-edge texel pairs compared, world normals within %.4f\n", compared, worst);
+        assert(compared > 100 && worst < .02); // a little over two 8-bit codes
+    }
     // Patch error positive and reasonable.
     const float error = patch_error(terrain, key);
     assert(error > 0 && error < .01f);

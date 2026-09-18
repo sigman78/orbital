@@ -96,10 +96,11 @@ Material marsMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L
     return m;
 }
 
-// The patch path: the tile's albedo and normal at the fragment's tile
-// coordinate, blended toward the parent tile's through the morph zone so a
-// level boundary shades as one surface, with the crater walls' shadow traced
-// through the tile's own heights as the equirect path traces its map.
+// The patch path: the tile's albedo and normal (in the body frame, so no
+// tangent frame is involved and faces cannot disagree at their edges) at the
+// fragment's tile coordinate, blended toward the parent tile's through the
+// morph zone so a level boundary shades as one surface, with the crater walls'
+// shadow traced through the tile's own heights as the equirect path traces its map.
 float tileShadow(uint slot, float2 g, float3 L, float3 N, float3 T, float3 B, float texelArc, float tier)
 {
     float2 lightUV = float2(dot(L, T), dot(L, B));
@@ -132,16 +133,17 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
         albedo = lerp(albedo, parentAlbedo, morph);
         mapN = normalize(lerp(mapN, parentN, morph));
     }
-    // The tile's slopes run along the face's s and t on the sphere: the face axes
-    // projected onto the tangent plane (not orthogonal off the face centre; small).
-    float3 nl = normalize(input.localNormal);
-    float3 T = normalize(mul(rotate, FACE_S[face] - nl * dot(nl, FACE_S[face])));
-    float3 B = normalize(mul(rotate, FACE_T[face] - nl * dot(nl, FACE_T[face])));
     Material m;
-    m.N = normalize(T * mapN.x * tier + B * mapN.y * tier + N * lerp(1.0, max(mapN.z, .2), tier));
+    m.N = normalize(lerp(N, mul(rotate, normalize(mapN)), tier));
     m.visibility = visibility;
     if (tier > 0.0)
+    {
+        // The trace steps along the tile's s and t: the face axes on the tangent plane.
+        float3 nl = normalize(input.localNormal);
+        float3 T = normalize(mul(rotate, FACE_S[face] - nl * dot(nl, FACE_S[face])));
+        float3 B = normalize(mul(rotate, FACE_T[face] - nl * dot(nl, FACE_T[face])));
         m.visibility *= tileShadow(slot, input.tileUV * PATCH_QUADS, L, N, T, B, input.patchMorph.y, tier);
+    }
     m.albedo = albedo;
     m.rough = .95;
     m.water = 0.0;

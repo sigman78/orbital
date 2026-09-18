@@ -71,10 +71,11 @@ must scale to a whole-planet tier later (the far tier as the same cube sphere at
   normal+height texels. Texel (i, j) of a tile is the terrain sampled at the cell coordinates
   `s0 + i * size / 64`, `t0 + j * size / 64`, through the warp. So a child's even texels are its parent's
   texels at the same directions, and a fully morphed child edge lands on the parent's edge.
-- The height texel is the height over `[height_min, height_max]` in 16 bits. The normal texel is the tangent
-  normal (x east, y south in the face's s and t) with the height in alpha, from finite differences of the
-  tile's own heights (no extra terrain samples). The albedo texel is `MinorPlanetTerrain::albedo` at the
-  texel's direction, height and slope.
+- The height texel is the height over `[height_min, height_max]` in 16 bits. The normal texel is the
+  surface normal in the body frame (no tangent frame: see the review) with the height in alpha, from
+  central differences of the tile's heights with a one-texel ring around them (past a cube edge, the
+  neighbouring face's texel). The albedo texel is `MinorPlanetTerrain::albedo` at the texel's direction,
+  height and slope.
 - A slot is one layer index shared by the three arrays. `TerrainTier` owns the slot cache; the renderer owns
   the arrays. Slot count 1024 (see the memory table).
 
@@ -228,6 +229,18 @@ Fixed in the PR after review:
   is drawn beyond its level's range and neighbours at one level morph alike. This also makes residency
   per quadrant: a patch refines as each child's tile arrives. The tier test checks that a drawn ancestor
   covers no drawn descendant's quadrant.
+- Seams along the cube edges, plainly under a grazing sun. Two causes. The ring texel past a face edge
+  was this face's warp extrapolated, which lands off the neighbouring face's rows (their lines of
+  constant t differ, by up to six tenths of a texel along the edge), so the two faces' edge texels
+  differentiated over different points; `ring_direction` now takes the neighbour's own texel one step
+  inside its edge, and both sides use the same pair. Then the tangent frame: the tile's normal was stored
+  as (x along s, y along t) and rebuilt from the face axes projected onto the tangent plane, which are
+  orthogonal only at the face centre and skewed differently on the two faces along an edge, so the same
+  gradient rebuilt to different world normals (21 degrees apart on a steep slope in the test). The tile
+  now stores the normal in the body frame, from the gradient solved out of the two grid-direction
+  differences, and the shader rotates it: no frame, so no face can disagree. `terrain_tests` compares
+  the normals of every cube-edge texel pair (168 pairs; corners excepted, where three grids meet) and
+  finds them equal. Item 3 below is closed by the same change.
 - `init` bound the 1x1 placeholder to every array slot after `create_terrain_tier` had bound the tile
   arrays, so the shaders sampled the placeholder: every height read as `height_min` (a smooth sphere at
   0.95 radii) and the albedo as black. The placeholder now goes in first. Found because the near tier
@@ -241,12 +254,10 @@ Open, in the order they matter (the numbering is kept from the review):
    edge lies beyond the child's range and the child is fully morphed there. The tier test checks the
    drawn children against it.
 2. Fixed with 1: the shell bound covers the displaced vertex.
-3. **The tile tangent frame is only nearly orthonormal.** The slopes are per unit of arc (the chord between
-   the two neighbours) and the shader projects the face's S and T axes onto the sphere's tangent plane, but
-   off the face centre those projections are not orthogonal to each other, so the shading normal tilts
-   slightly. Acceptance 2 compares the tile path with the equirect path: mean 18.2 against 19.2 and
-   contrast 17.7 against 19.2 (standard deviation of the frame) at bookmark 10, 1600x900, the tiles
-   resolving finer relief than the 2048-texel map.
+3. Fixed after review: the tangent frame (see the cube-edge item above). Acceptance 2 compares the tile
+   path with the equirect path: mean 19.8 against 20.2 and contrast 17.0 against 18.3 (standard deviation
+   of the frame) at bookmark 10, 1600x900, the tiles resolving finer relief than the 2048-texel map and
+   the regolith grain missing (item 6).
 4. Fixed after review: shading seams. Same-level seams came from one-sided edge differences
    (`generate_colour_tiles` now samples a one-texel ring; `terrain_tests` checks neighbours' edge texels
    match byte for byte). Level-boundary seams came from the coarser tile's coarser-scale normal:
