@@ -29,7 +29,7 @@ constexpr unsigned patch_quads = 16, patch_side = patch_quads + 1;
 constexpr unsigned patch_vertex_count = patch_side * patch_side + 4 * patch_side; // the grid, then the skirt
 constexpr unsigned patch_index_count = (patch_quads * patch_quads + 4 * patch_quads) * 6;
 constexpr unsigned patch_level_max = 10; // a cell of 90 degrees over 1024, quads of 0.1 mrad
-constexpr unsigned tile_side = 65;       // texels per tile edge, covering 64 quads
+constexpr unsigned tile_side = 33;       // texels per tile edge, covering 32 quads
 // Colour texels per height texel along an edge. The albedo and the slope carry
 // detail the grid does not: at 1 the near tier's texels are four times coarser than
 // the equirect maps it takes over from until it reaches level 3, which is what makes

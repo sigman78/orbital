@@ -47,11 +47,11 @@ public:
     // Counted in frames, not seconds, so a capture is the same every run.
     static constexpr unsigned fade_frames = 15;
     // Worst measured geometric error per level, radii, from 64 random patches per level
-    // on the seed-1007 terrain with the Everitt warp (2026-09-18). Levels 9..12
-    // extrapolated by the measured ratio of 2.5 per level.
+    // on the seed-1007 terrain with the Everitt warp, at 32 quads to a tile
+    // (2026-09-18). Levels 9..12 extrapolated by the measured ratio of 2.3 per level.
     static constexpr float level_error[] = {
-        .01458f,   .00478f,   .00215f, .000761f, .000300f, .000136f, .0000862f,
-        .0000356f, .0000145f, 5.8e-6f, 2.3e-6f,  9.3e-7f,  3.7e-7f,
+        .018342f,  .0126785f, .00478311f, .00138083f, .000601649f, .000284836f, .000119656f,
+        .0000752f, .0000272f, 1.18e-5f,   5.1e-6f,    2.2e-6f,     9.6e-7f,
     };
 
     struct Generation {
