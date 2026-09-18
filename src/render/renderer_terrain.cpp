@@ -102,7 +102,8 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                   .radius = state.radius,
                   .frustum = view_frustum(camera, tan_x, tan_y),
                   .height_pixels = float(extent.height),
-                  .tan_y = tan_y};
+                  .tan_y = tan_y,
+                  .activate_pixels = input.terrain.activate_pixels};
     const double tilt = system.bodies[body].axial_tilt;
     for (unsigned axis = 0; axis < 3; axis++) {
         const Vec3d e{axis == 0 ? 1. : 0., axis == 1 ? 1. : 0., axis == 2 ? 1. : 0.};

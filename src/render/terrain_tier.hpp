@@ -9,6 +9,10 @@
 
 namespace space::render {
 
+// Where the tier takes the body over from its sphere levels, in cull_bodies' units;
+// TerrainSettings::activate_pixels overrides it per frame.
+inline constexpr float TerrainTier_activate_default = 1200;
+
 // The tier's view of one frame: the body relative to the camera, its spin, and
 // the projection, in the units cull_bodies uses.
 struct TierView {
@@ -18,6 +22,7 @@ struct TierView {
     Vec3d camera_local; // the camera in the body's local frame, radii
     geometry::Frustum frustum;
     float height_pixels = 0, tan_y = 0;
+    float activate_pixels = TerrainTier_activate_default; // the switch from the sphere levels
 };
 
 // The near tier's CPU side: which patches of the cube sphere to draw this frame
@@ -33,9 +38,8 @@ public:
     static constexpr unsigned slot_count = 1024; // 11 MiB of vertices; a close view holds 400 of them
     static constexpr unsigned generate_per_frame = 8;
     // Sizes are in cull_bodies' units: a projected radius over the half height, twice the pixels.
-    static constexpr float activate_pixels = 1200; // the body's, where the finest sphere level runs out
-    static constexpr float error_pixels = 3;       // a patch's geometric error on screen: it splits above 1.5 px
-    static constexpr float hysteresis = .8f;       // the fraction of either the way back
+    static constexpr float error_pixels = 3; // a patch's geometric error on screen: it splits above 1.5 px
+    static constexpr float hysteresis = .8f; // the fraction of either the way back
     // A tile just arrived is drawn morphed to its parent's shape and relaxes to its
     // own over this many frames, so detail fades in where it would otherwise pop.
     // Counted in frames, not seconds, so a capture is the same every run.

@@ -252,7 +252,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     ensure_roots();
     const double distance = std::max(length(view.body_centre), view.radius);
     const float projected = float(view.radius * view.height_pixels / (distance * view.tan_y));
-    wanted_ = projected > activate_pixels * (wanted_ ? hysteresis : 1);
+    wanted_ = projected > view.activate_pixels * (wanted_ ? hysteresis : 1);
     if (!wanted_) {
         for (unsigned face = 0; face < 6; face++)
             collapse(nodes_[face]);

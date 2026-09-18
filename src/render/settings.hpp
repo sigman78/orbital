@@ -151,6 +151,11 @@ struct TerrainSettings {
     // A debug view of the patch path in place of its shading: 1 tile coordinate, 2 normal, 3 elevation,
     // 4 the crater-shadow term, 5 morph and level. Seams show against these one term at a time.
     unsigned debug = 0;
+    // The projected size, in cull_bodies' units (twice the pixel radius), above which the
+    // tier takes the body over from its sphere levels. Lowering it switches further out,
+    // where the tier draws its coarse levels: the way to review those without flying to
+    // the ground. The default is where the finest sphere level runs out.
+    float activate_pixels = 1200;
 };
 
 struct GasSettings {

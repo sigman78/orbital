@@ -273,6 +273,8 @@ void quality_controls(bool& high, render::TerrainSettings& terrain) {
     int debug = int(terrain.debug);
     if (ImGui::Combo("Patch view", &debug, debug_views, 6))
         terrain.debug = unsigned(debug);
+    // Lower switches to the patches further out, where their coarse levels draw.
+    ImGui::SliderFloat("Tier switch", &terrain.activate_pixels, 50.f, 2400.f, "%.0f px", ImGuiSliderFlags_Logarithmic);
 }
 void anti_aliasing_controls(render::AntiAliasingSettings& settings) {
     ImGui::Checkbox("Temporal (F5)", &settings.temporal_aa);
