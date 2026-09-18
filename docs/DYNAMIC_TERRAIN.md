@@ -59,8 +59,9 @@ only delays a request to the next frame.
 ### Patches, tiles, slots
 
 A patch is a cell of a face's quadtree (`PatchKey`: face, level, x, y, packed to 32 bits).
-`patch_bounds` gives its cap centre, angular radius and angular size, with that radius' cosine and
-sine for `patch_support`, which both culling tests are built on.
+`patch_bounds` gives its cap centre, angular radius and angular size, that radius' cosine and sine for
+`patch_support`, and the cell itself -- four corner directions and the four plane normals bounding it
+-- for `patch_cell_support`. Both culling tests are built on those two.
 
 A tile is that patch's textures: `tile_side` (33) squared heights and `tile_colour_side` (65) squared
 albedo and slope texels. Texel (i, j) is the terrain sampled at cell coordinates `s0 + i * size / 32`
@@ -177,15 +178,32 @@ interval when that reach is positive and the near end when it is not. `patch_bou
 and `sin θ` so a node never recomputes them, and `update` carries the frustum into the body's frame
 once, so a plane test is a dot and a compare.
 
-A cap is not a ball, and the difference is the whole point. A sphere drawn around a cap also contains
-the space behind it, which is most of its volume once the cap is wide; close to the ground that space
-alone reaches every frustum plane, since they all pass through the camera. Measured over four views,
-the support test draws 34 and 34 patches where the sphere drew 44 and 47, and takes 0.047 and 0.035 ms
-against 0.070 and 0.056.
+A cap is not a ball, and a cell is not its cap. A sphere drawn around a cap also contains the space
+behind it, which is most of its volume once the cap is wide; close to the ground that space alone
+reaches every frustum plane, since they all pass through the camera. And a cap reaches its angular
+radius in every direction where the cell is a factor of root two closer along its edges, which at
+level 2 is 0.085 radii of slack, 36 km on this body -- enough to keep a patch that far outside the
+frustum, and what detached islands in a frozen-cull view were made of.
+
+So `patch_cell_support` bounds the cell itself, which is exact: the cell is a convex cone of four
+planes through the origin, since its `s = s0` boundary lies in the plane of the face axis offset by
+the warp and the face's t axis. The maximum over a convex cone is the normal itself where it points
+inside, and otherwise on the boundary, at a corner or on one edge arc -- four corner dots and four
+arc projections, against the cap's one dot. The cap still runs first, since it is conservative and
+settles any plane it already rejects.
+
+| bound | drawn, looking down at 0.05 and 0.15 radii | of those provably off screen | selection |
+|---|---|---|---|
+| sphere | 44, 47 | 16, 18 | 0.070, 0.056 ms |
+| cap | 34, 34 | 6, 5 | 0.047, 0.035 ms |
+| cell | 28, 29 | **0, 0** | 0.098, 0.080 ms |
+
+The cell bound costs about half again what the sphere did and draws a third fewer patches for it.
 
 The occluder for the horizon is the shell's floor, never the reference surface: ground below that
 surface sets the horizon further out, so assuming the surface itself would hide terrain that can in
-fact be seen over it. That costs about one patch a view and is the sounder of the two.
+fact be seen over it. The horizon takes the cell support too, which at a steep pitch is worth four
+patches of thirty-four.
 
 ### Generation and upload
 
@@ -324,18 +342,17 @@ A level `L` node splits against `range[L + 1]`, so it stays selected past its ow
 and morph bands want deriving together from the error of the geometry actually drawn; changing one
 comparison alone invalidates the seam relationships.
 
-### 6. The cap is not the cell
+### 6. What the cull still keeps, and nothing says whether it costs
 
-A sixth of the drawn set is still provably off screen, and the shape of the bound is still why,
-though one step in rather than two. `patch_support` is exact for the **cap**, and the cap is not the
-**cell**: a cap reaches its angular radius in every direction, while the cell only reaches it at four
-corners. A whole face is 90 degrees across and its cap 54.7 in every direction, so the support gives
-away 0.19 radii at level 0 and 0.07 from level 3 down, measured in `test_tiles`.
+Two of five views draw nothing that is provably off screen, and the other three keep one or two
+patches of thirty to sixty. What is left is the tail of the same thing: a plane rejects on the
+shell's extremes, and a patch can have a corner inside the frustum while almost all of it is outside.
+Closing that wants per-quadrant culling, which is a change to what a draw is, not to the bound.
 
-Closing it wants a bound that knows the cell's shape — four corner planes, or the support of the
-cell's own convex hull rather than its cap. Neither is expensive; both want care at a cube edge, where
-the cell is not convex in any single face's coordinates. Worth doing only if the sixth turns out to
-cost anything, and nothing on the panel says whether it does.
+There is also no counter for it. `test_cull_waste` measures waste offline by re-deriving visibility
+from each patch's samples, far too slow for a frame, and the frozen-cull view shows culled quadrants
+and kept islands alike with no number beside them. A cheap proxy on the panel would say whether the
+remaining tail is worth anything at all.
 
 ### 7. Detail still stops at the depth cap, further in
 

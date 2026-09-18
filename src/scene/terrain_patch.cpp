@@ -72,7 +72,47 @@ PatchBounds patch_bounds(PatchKey key) {
     bounds.angular_radius += 1e-6;
     bounds.cos_radius = std::cos(bounds.angular_radius);
     bounds.sin_radius = std::sin(bounds.angular_radius);
+    // Around the cell, so consecutive corners share an edge.
+    const double s[4] = {cell.s0, cell.s0 + cell.size, cell.s0 + cell.size, cell.s0};
+    const double t[4] = {cell.t0, cell.t0, cell.t0 + cell.size, cell.t0 + cell.size};
+    for (unsigned i = 0; i < 4; i++)
+        bounds.corners[i] = cube_direction(key.face, s[i], t[i]);
+    for (unsigned i = 0; i < 4; i++) {
+        const Vec3d normal = normalized(cross(bounds.corners[i], bounds.corners[(i + 1) & 3]));
+        // Inward, so the cell is where all four are non-negative.
+        bounds.edges[i] = dot(normal, bounds.centre) < 0 ? normal * -1 : normal;
+    }
     return bounds;
+}
+
+double patch_cell_support(const PatchBounds& bounds, Vec3d normal, Range<float> heights) {
+    const double top = 1 + double(heights.max);
+    const double bottom = 1 + double(heights.min) - patch_skirt_drop;
+    bool inside = true;
+    for (unsigned i = 0; i < 4; i++)
+        inside = inside && dot(normal, bounds.edges[i]) >= 0;
+    double reach = -1;
+    if (inside) {
+        reach = 1; // the normal's own direction is in the cell, and nothing beats it
+    } else {
+        for (const Vec3d& corner : bounds.corners)
+            reach = std::max(reach, dot(normal, corner));
+        for (unsigned i = 0; i < 4; i++) {
+            // The best direction on this edge's great circle is the normal projected into its
+            // plane; it only counts when it falls between the two corners it runs between.
+            const Vec3d projected = normal - bounds.edges[i] * dot(normal, bounds.edges[i]);
+            const double len = length(projected);
+            if (len <= 1e-12)
+                continue;
+            const Vec3d& a = bounds.corners[i];
+            const Vec3d& b = bounds.corners[(i + 1) & 3];
+            const double span = dot(a, b);
+            const Vec3d candidate = projected * (1 / len);
+            if (dot(candidate, a) >= span && dot(candidate, b) >= span)
+                reach = std::max(reach, len); // dot(normal, candidate) is the projection's length
+        }
+    }
+    return reach >= 0 ? top * reach : bottom * reach;
 }
 
 double patch_support(const PatchBounds& bounds, Vec3d normal, Range<float> heights) {

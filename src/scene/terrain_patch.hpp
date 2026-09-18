@@ -63,6 +63,11 @@ struct PatchBounds {
     double angular_radius = 0;             // radians, the cap holding every vertex
     double angular_size = 0;               // radians, the cell's edge at its centre
     double cos_radius = 1, sin_radius = 0; // of angular_radius, for patch_support
+    // The cell itself: four corner directions around it, and the inward normals of the four
+    // planes through the origin that bound it. A cell's s = s0 boundary lies in the plane of
+    // the face axis offset by the warp and the face's t axis, so the cell is a convex cone.
+    Vec3d corners[4];
+    Vec3d edges[4]; // edges[i] bounds the arc from corners[i] to corners[(i + 1) & 3]
 };
 PatchBounds patch_bounds(PatchKey key);
 
@@ -75,6 +80,15 @@ PatchBounds patch_bounds(PatchKey key);
 // behind the cap, which is most of its volume once the cap is wide, and near the camera that
 // space alone can reach every frustum plane. `normal` must be unit length.
 double patch_support(const PatchBounds& bounds, Vec3d normal, Range<float> heights);
+
+// The same support over the cell rather than the cap around it, which is exact: the maximum
+// over a convex cone is the normal itself where it points inside, and otherwise lies on the
+// boundary, at a corner or on one edge arc. A cap reaches its angular radius in every
+// direction while the cell is a factor of root two closer along its edges, and what that gives
+// away is 0.085 radii at level 2 and 0.025 at level 4 -- tens of kilometres on this body, which
+// is enough to keep a patch that far outside the frustum. Dearer than the cap, so the cap
+// still serves where its slack costs nothing.
+double patch_cell_support(const PatchBounds& bounds, Vec3d normal, Range<float> heights);
 
 // Height-only error at quad centres against bilinear corner heights, in radii.
 float patch_error(const MinorPlanetTerrain& terrain, PatchKey key);

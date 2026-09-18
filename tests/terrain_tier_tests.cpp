@@ -243,9 +243,9 @@ void test_cull_waste() {
         std::printf("terrain tier: cull at %.2f radii pitch %.2f: %u drawn, %u provably invisible\n", altitude, pitch,
                     drawn, wasted);
         assert(drawn > 0);
-        // What is left is the cell bowing inside its cap, so a margin stays; the defect this
-        // guards put two thirds of the set here, and a sphere bound a third.
-        assert(wasted * 3 < drawn);
+        // The defect this guards put two thirds of the set here, a sphere bound a third, and a
+        // cap around the cell a sixth. Bounding the cell itself leaves almost nothing.
+        assert(wasted * 8 < drawn);
     }
 }
 

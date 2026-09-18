@@ -42,13 +42,16 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
     // out, and assuming the surface itself would hide terrain that can be seen over it.
     const double d = length(view.camera_local);
     constexpr double occluder = 1 + double(MinorPlanetTerrain::height_min);
-    if (d > 1 && patch_support(b, view.camera_local * (1 / d), reach) * d < occluder * occluder)
+    if (d > 1 && patch_cell_support(b, view.camera_local * (1 / d), reach) * d < occluder * occluder)
         return {};
-    // The patch is a cap, not a ball: reject on the shell's own support rather than a sphere
-    // drawn around it, whose empty side alone can reach every plane from close to the ground.
-    for (const LocalPlane& plane : planes_)
+    // The patch is a cell, not a ball and not the cap around it. The cap is conservative, so it
+    // settles any plane it already rejects on one dot; the cell's own support decides the rest.
+    for (const LocalPlane& plane : planes_) {
         if (plane.offset + patch_support(b, plane.normal, reach) < 0)
             return {};
+        if (plane.offset + patch_cell_support(b, plane.normal, reach) < 0)
+            return {};
+    }
     // Prioritize nearby patch coverage; distances and sizes are both in radii.
     const double near = nearest_distance(view.camera_local, b, heights);
     const float scale = float(view.height_pixels / (std::max(near, 1e-4) * view.tan_y));

@@ -39,12 +39,14 @@ public:
     // so the whole cache is covered every slot_count / sweep_window frames.
     static constexpr unsigned pending_timeout = 240;
     static constexpr unsigned sweep_window = 64;
-    // Culling a patch against its own tile would drop relief only its children reveal, so the
-    // interval is padded by how far a child's heights reach outside its parent's: measured at
-    // twice the worst of 120 to 400 patches a level (`terrain_tests --calibrate`), which is
-    // 0.0037 radii at level 1 and nothing by level 9.
+    // Culling a patch against its own tile would drop relief only its descendants reveal, so
+    // the interval is padded by how far they reach outside it. `terrain_tests --calibrate`
+    // measures one step, parent to child; the pad must cover the **whole subtree**, so these
+    // are the running sums of those steps from each level down, at twice for headroom. One
+    // step is not enough: at level 6 it is 0.000057 against a subtree's 0.000128, and the gap
+    // culls patches whose children stand higher than they do.
     static constexpr float descendant_relief[] = {
-        .008f, .0075f, .0026f, .0023f, .0008f, .0004f, .00012f, .00009f, .00004f, .000012f, 4e-6f, 2e-6f, 2e-6f,
+        .0286f, .0136f, .0061f, .0036f, .0014f, .00056f, .00026f, .00015f, .000055f, .000016f, .000004f, 2e-6f, 2e-6f,
     };
     static constexpr float relief_margin(unsigned level) {
         return level < std::size(descendant_relief) ? descendant_relief[level] : 0.f;
