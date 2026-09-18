@@ -62,10 +62,17 @@ struct PatchBounds {
     Vec3d centre;              // unit direction
     double angular_radius = 0; // radians, the cap holding every vertex
     double angular_size = 0;   // radians, the cell's edge at its centre
-    // Culling sphere radius about the reference-surface centre; includes height and skirts.
-    double bound_radius = 0;
 };
 PatchBounds patch_bounds(PatchKey key);
+
+// The culling sphere over a height interval, the skirt drop included. Its centre sits on the
+// patch's own shell, not the reference surface: a tile lying 0.03 radii below that surface
+// would otherwise spend 0.03 of bound before reaching any of its own geometry.
+struct PatchSphere {
+    double offset = 1; // the centre is the cap's, scaled by this
+    double radius = 0; // radii
+};
+PatchSphere patch_cull_sphere(const PatchBounds& bounds, Range<float> heights);
 
 // Height-only error at quad centres against bilinear corner heights, in radii.
 float patch_error(const MinorPlanetTerrain& terrain, PatchKey key);

@@ -59,7 +59,8 @@ only delays a request to the next frame.
 ### Patches, tiles, slots
 
 A patch is a cell of a face's quadtree (`PatchKey`: face, level, x, y, packed to 32 bits).
-`patch_bounds` gives its cap, angular size and bounding radius.
+`patch_bounds` gives its cap centre, angular radius and angular size; `patch_cull_sphere` turns those
+and a height interval into the sphere the culling tests use.
 
 A tile is that patch's textures: `tile_side` (33) squared heights and `tile_colour_side` (65) squared
 albedo and slope texels. Texel (i, j) is the terrain sampled at cell coordinates `s0 + i * size / 32`
@@ -144,8 +145,26 @@ range is fully morphed wherever an unsplit neighbour meets it.
 measured from the tile it uploaded and padded by one `r16_unorm` quantum plus float decode roundoff.
 The asymmetry here is deliberate and easy to get backwards: **the split test keeps the global shell**,
 because a tile bounds its own bilinear surface and says nothing about relief its children will reveal.
-Only drawing and gating use the tight range, and frustum culling keeps `bound_radius` off the global
-shell and the skirt drop.
+Drawing, gating and culling use the tight range.
+
+### Culling
+
+Both tests take the resident tile's range, padded by `descendant_relief[level]` — how far a child's
+heights are measured to reach outside its parent's, twice the worst of 120 to 400 patches a level,
+0.0037 radii at level 1 and nothing by level 9. A patch with no tile keeps the global shell, so the
+bound stays sound while the relief is unknown.
+
+The horizon test allows only what stands above the reference surface, per patch, rather than a
+constant 17.75 degrees taken from the shell's `height_max`. The terrain's true relief is -0.029 to
++0.023 radii, so the constant let a patch 130 km past the limb survive.
+
+`patch_cull_sphere` centres the sphere on the patch's own shell rather than the reference surface.
+Centred on the surface, a tile lying 0.03 radii below it spends 0.03 of bound before reaching any of
+its own geometry, which is most of the bound for a patch whose cell is a few hundred metres across.
+
+All three were one defect seen three ways: culling a patch by a shell it does not occupy. Together
+they cut the drawn set by a fifth to a half, and the share of it provably off screen from two thirds
+to a third. `test_cull_waste` holds the line by re-deriving visibility from the patch's own samples.
 
 ### Generation and upload
 
@@ -284,7 +303,19 @@ A level `L` node splits against `range[L + 1]`, so it stays selected past its ow
 and morph bands want deriving together from the error of the geometry actually drawn; changing one
 comparison alone invalidates the seam relationships.
 
-### 6. Detail still stops at the depth cap, further in
+### 6. A sphere is a weak bound for a patch, and worthless near the ground
+
+A third of the drawn set is still provably off screen after the culling fix, and the bound's shape is
+why. Every frustum plane passes through the camera, so close to the surface any sphere of comparable
+size touches all of them: at 0.05 radii the test barely discriminates. Coarse parent patches covering
+out-of-range quadrants have caps of 0.1 to 0.4 radii and always pass whatever the camera does.
+
+A patch is a cap, not a ball, and testing its samples instead removes essentially all of the
+remainder — `test_cull_waste` measures precisely that difference. It wants the cap's bulge accounted
+for so it stays conservative at coarse levels, and costs about 40 dot products a node against 5. A
+change of bound rather than a bug fix, so it is recorded here rather than folded into one.
+
+### 7. Detail still stops at the depth cap, further in
 
 `patch_level_max` bounds how fine the geometry goes, and the error metric keeps asking past it. At 11
 the smallest quad is 24 urad, about 10 m on this body, and the metric wants finer from roughly 650 m
@@ -296,7 +327,7 @@ multiplies the near working set against a cache already short at bias 2. The che
 detail octaves below tile resolution listed under *Later*: what is missing up close is small relief,
 not accurate large shapes, and shader detail costs no tiles, no slots and no CPU generation.
 
-### 7. Leftovers
+### 8. Leftovers
 
 - Constants duplicated between C++ and the shaders: the Everitt constant, the face tables, `tile_side`.
 - `draw_body` leaves `ORBITAL_ROOT_PATCHES` and `root.patches` on the caller's `Root`; harmless only

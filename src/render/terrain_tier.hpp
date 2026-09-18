@@ -39,6 +39,16 @@ public:
     // so the whole cache is covered every slot_count / sweep_window frames.
     static constexpr unsigned pending_timeout = 240;
     static constexpr unsigned sweep_window = 64;
+    // Culling a patch against its own tile would drop relief only its children reveal, so the
+    // interval is padded by how far a child's heights reach outside its parent's: measured at
+    // twice the worst of 120 to 400 patches a level (`terrain_tests --calibrate`), which is
+    // 0.0037 radii at level 1 and nothing by level 9.
+    static constexpr float descendant_relief[] = {
+        .008f, .0075f, .0026f, .0023f, .0008f, .0004f, .00012f, .00009f, .00004f, .000012f, 4e-6f, 2e-6f, 2e-6f,
+    };
+    static constexpr float relief_margin(unsigned level) {
+        return level < std::size(descendant_relief) ? descendant_relief[level] : 0.f;
+    }
     static constexpr unsigned generate_per_frame = 8;
     // Sizes are in cull_bodies' units: a projected radius over the half height, twice the pixels.
     static constexpr float error_pixels = 3; // a patch's geometric error on screen: it splits above 1.5 px

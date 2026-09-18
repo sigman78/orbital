@@ -264,18 +264,25 @@ void test_tiles() {
                         const PatchKey k{std::uint8_t(face), std::uint8_t(level), std::uint16_t(cx), std::uint16_t(cy)};
                         const PatchBounds bounds = patch_bounds(k);
                         const double size = 2.0 / cells;
-                        double reach = 0;
-                        for (unsigned i = 0; i <= 16; i++)
-                            for (unsigned j = 0; j <= 16; j++) {
-                                const Vec3d d = cube_direction(face, -1 + cx * size + i * size / 16,
-                                                               -1 + cy * size + j * size / 16);
-                                for (double h : {double(MinorPlanetTerrain::height_max),
-                                                 double(MinorPlanetTerrain::height_min) - patch_skirt_drop})
-                                    reach = std::max(reach, length(d * (1 + h) - bounds.centre));
-                            }
-                        assert(reach <= bounds.bound_radius); // conservative, always
-                        worst_fill = std::max(worst_fill, bounds.bound_radius / reach);
-                        tightest = std::min(tightest, bounds.bound_radius / reach);
+                        // Both the global shell and a tight interval well off the reference
+                        // surface, which is where centring the sphere on it used to cost.
+                        for (Range<float> heights :
+                             {Range<float>{MinorPlanetTerrain::height_min, MinorPlanetTerrain::height_max},
+                              Range<float>{-.031f, -.029f}}) {
+                            const PatchSphere sphere = patch_cull_sphere(bounds, heights);
+                            const Vec3d centre = bounds.centre * sphere.offset;
+                            double reach = 0;
+                            for (unsigned i = 0; i <= 16; i++)
+                                for (unsigned j = 0; j <= 16; j++) {
+                                    const Vec3d d = cube_direction(face, -1 + cx * size + i * size / 16,
+                                                                   -1 + cy * size + j * size / 16);
+                                    for (double h : {double(heights.max), double(heights.min) - patch_skirt_drop})
+                                        reach = std::max(reach, length(d * (1 + h) - centre));
+                                }
+                            assert(reach <= sphere.radius * (1 + 1e-12)); // conservative, always
+                            worst_fill = std::max(worst_fill, sphere.radius / reach);
+                            tightest = std::min(tightest, sphere.radius / reach);
+                        }
                         sampled++;
                     }
         }
@@ -330,6 +337,30 @@ void calibrate_level_errors() {
             peak = best;
         }
         std::printf("  level %2u: %.6g (%u sampled: %.6g)\n", level, double(worst), trials, double(sampled));
+    }
+    // How far a child's heights reach outside its parent's, which is what the cull bound must
+    // be padded by before a patch may be culled against its own tile.
+    std::printf("descendant relief: worst child excess over the parent tile's range:\n");
+    for (unsigned level = 1; level < patch_level_max; level++) {
+        const unsigned cells = 1u << level, trials = level <= 6 ? 120 : 400;
+        const auto range_of = [&](PatchKey key) {
+            std::vector<float> h(tile_side * tile_side);
+            generate_height_tile(terrain, key, h);
+            return height_tile_range(h);
+        };
+        double worst = 0;
+        for (unsigned t = 0; t < trials; t++) {
+            const unsigned face = unsigned(uniform(rng) * 6) % 6;
+            const PatchKey parent{std::uint8_t(face), std::uint8_t(level),
+                                  std::uint16_t(unsigned(uniform(rng) * cells) % cells),
+                                  std::uint16_t(unsigned(uniform(rng) * cells) % cells)};
+            const Range<float> p = range_of(parent);
+            for (unsigned i = 0; i < 4; i++) {
+                const Range<float> c = range_of(parent.child(i));
+                worst = std::max({worst, double(c.max - p.max), double(p.min - c.min)});
+            }
+        }
+        std::printf("  level %2u: %.6g\n", level, worst);
     }
 }
 

@@ -8,8 +8,6 @@ namespace space::render {
 namespace {
 
 constexpr unsigned no_slot = TerrainTier::slot_count;
-// A peak at the terrain's top height shows past the limb by about this much.
-const double horizon_allowance = std::acos(1 / (1 + double(MinorPlanetTerrain::height_max)));
 
 Vec3d to_world(const TierView& view, Vec3d local) {
     return view.axes[0] * local.x + view.axes[1] * local.y + view.axes[2] * local.z;
@@ -32,19 +30,27 @@ void TerrainTier::ensure_roots() {
 
 TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView& view) const {
     const PatchBounds& b = node.bounds;
-    // Cull caps beyond the horizon only when the camera is outside the reference sphere.
+    // Cull against the patch's own heights once its tile is resident, padded for the relief a
+    // child may still reveal. Unknown tiles keep the global shell, so the bound stays sound.
+    const Range<float> heights = height_range(node.key);
+    const float margin = relief_margin(node.key.level);
+    const Range<float> reach{heights.min - margin, heights.max + margin};
+    // Cull caps beyond the horizon only when the camera is outside the reference sphere. Only
+    // ground standing above that surface shows past the limb, so a low patch allows nothing.
     const double d = length(view.camera_local);
     if (d > 1) {
+        const double allowance = std::acos(std::clamp(1 / (1 + std::max(double(reach.max), 0.0)), -1.0, 1.0));
         const double angle = std::acos(std::clamp(dot(b.centre, view.camera_local * (1 / d)), -1.0, 1.0));
-        if (angle > std::acos(1 / d) + b.angular_radius + horizon_allowance)
+        if (angle > std::acos(1 / d) + b.angular_radius + allowance)
             return {};
     }
+    const PatchSphere sphere = patch_cull_sphere(b, reach);
     const Vec3d normal = to_world(view, b.centre);
-    const Vec3d centre = view.body_centre + normal * view.radius;
-    if (!geometry::sphere_in_frustum(view.frustum, to_float(centre), float(view.radius * b.bound_radius)))
+    const Vec3d centre = view.body_centre + normal * (view.radius * sphere.offset);
+    if (!geometry::sphere_in_frustum(view.frustum, to_float(centre), float(view.radius * sphere.radius)))
         return {};
     // Prioritize nearby patch coverage; distances and sizes are both in radii.
-    const double near = nearest_distance(view.camera_local, b, height_range(node.key));
+    const double near = nearest_distance(view.camera_local, b, heights);
     const float scale = float(view.height_pixels / (std::max(near, 1e-4) * view.tan_y));
     return {.visible = true, .pixels = float(b.angular_size) * scale, .distance = near};
 }
