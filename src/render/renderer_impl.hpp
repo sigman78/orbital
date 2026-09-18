@@ -111,6 +111,7 @@ static_assert(TerrainTier::slot_count == ORBITAL_TERRAIN_SLOTS);
 static_assert(float(MinorPlanetTerrain::height_min) == float(MINOR_PLANET_HEIGHT_MIN) &&
               float(MinorPlanetTerrain::height_max) == float(MINOR_PLANET_HEIGHT_MAX));
 static_assert(tile_slope_scale == float(MINOR_PLANET_SLOPE_SCALE));
+static_assert(patch_skirt_drop == float(MINOR_PLANET_SKIRT_DROP));
 
 // Array-texture descriptor slots (shaders/scene/bindings.slang binding 2).
 enum class ArraySlot : unsigned {

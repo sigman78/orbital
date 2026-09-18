@@ -291,6 +291,41 @@ void test_tiles() {
         std::fprintf(stderr, "tiles: %u cube-corner face pairs compared, world normals within %.4f\n", compared, worst);
         assert(compared == 24 && worst < 5e-4); // three faces at each of the eight corners
     }
+    // The bounding sphere the cull tests the frustum against holds every point the
+    // patch can draw: its grid over the height shell and its skirt below that. A
+    // sphere short of it culls a patch that shows, and an invisible child is not
+    // drawn by its parent either, so the miss is a hole. It must not be far over
+    // it either: the cull is only as tight as this.
+    {
+        double worst_fill = 0, tightest = 1e9;
+        unsigned sampled = 0;
+        for (unsigned level = 0; level <= 6; level++) {
+            const unsigned cells = 1u << level, step = std::max(1u, cells / 4);
+            for (unsigned face = 0; face < 6; face++)
+                for (unsigned cx = 0; cx < cells; cx += step)
+                    for (unsigned cy = 0; cy < cells; cy += step) {
+                        const PatchKey k{std::uint8_t(face), std::uint8_t(level), std::uint16_t(cx), std::uint16_t(cy)};
+                        const PatchBounds bounds = patch_bounds(k);
+                        const double size = 2.0 / cells;
+                        double reach = 0;
+                        for (unsigned i = 0; i <= 16; i++)
+                            for (unsigned j = 0; j <= 16; j++) {
+                                const Vec3d d = cube_direction(face, -1 + cx * size + i * size / 16,
+                                                               -1 + cy * size + j * size / 16);
+                                for (double h : {double(MinorPlanetTerrain::height_max),
+                                                 double(MinorPlanetTerrain::height_min) - patch_skirt_drop})
+                                    reach = std::max(reach, length(d * (1 + h) - bounds.centre));
+                            }
+                        assert(reach <= bounds.bound_radius); // conservative, always
+                        worst_fill = std::max(worst_fill, bounds.bound_radius / reach);
+                        tightest = std::min(tightest, bounds.bound_radius / reach);
+                        sampled++;
+                    }
+        }
+        std::fprintf(stderr, "tiles: %u patch bounds, the sphere is %.3f to %.3f times the reach it must hold\n",
+                     sampled, tightest, worst_fill);
+        assert(sampled > 100 && worst_fill < 1.01); // the cap's corner is a sampled point, so it is nearly exact
+    }
     // Patch error positive and reasonable.
     const float error = patch_error(terrain, key);
     assert(error > 0 && error < .01f);

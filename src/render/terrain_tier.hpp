@@ -98,7 +98,8 @@ private:
     };
     struct Visibility {
         bool visible = false;
-        float pixels = 0; // the cell's edge on screen, the generation priority
+        float pixels = 0;    // the cell's edge on screen, the generation priority
+        double distance = 0; // the camera to the nearest point of the patch, radii
     };
 
     void ensure_roots();

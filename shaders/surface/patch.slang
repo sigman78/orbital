@@ -8,7 +8,7 @@ static const float EVERITT_K = 0.8687;
 static const float TAN_K = tan(EVERITT_K);
 static const float PATCH_QUADS = 64.0;
 static const float TILE_SIDE = 65.0;
-static const float SKIRT_DROP = 0.002;
+static const float SKIRT_DROP = MINOR_PLANET_SKIRT_DROP;
 
 static const float3 FACE_AXIS[6] = { float3(1,0,0), float3(-1,0,0), float3(0,1,0), float3(0,-1,0), float3(0,0,1), float3(0,0,-1) };
 static const float3 FACE_S[6] = { float3(0,0,-1), float3(0,0,1), float3(1,0,0), float3(1,0,0), float3(1,0,0), float3(-1,0,0) };
@@ -71,6 +71,20 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     uint face = patch.tile[0];
     uint slot = patch.tile[1];
 
+    // Nothing this vertex carries is read: its triangles are all discarded, so it
+    // leaves before the two warps and the two height fetches the rest of it costs.
+    if (dropped)
+    {
+        PatchResult dead = {};
+        dead.localPosition = float3(asfloat(0x7fc00000), 0, 0); // NaN: the triangle goes
+        dead.worldPosition = dead.localPosition;
+        dead.localNormal = float3(0, 0, 1);
+        dead.worldNormal = float3(0, 0, 1);
+        dead.slot = slot;
+        dead.face = face | patch.tile[2] << 8 | patch.tile[3] << 20;
+        return dead;
+    }
+
     float2 st = cell_origin + g / PATCH_QUADS * cell_size;
     float3 d = patchCubeDirection(face, st);
     float h = patchHeight(slot, g);
@@ -91,8 +105,6 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
         p = d * (1 + h - SKIRT_DROP);
 
     PatchResult r;
-    if (dropped)
-        p = float3(asfloat(0x7fc00000), 0, 0); // NaN: the triangle is discarded
     r.localPosition = p;
     r.worldPosition = inst.center_radius.xyz + mul(rotate, p) * radius;
     r.worldNormal = normalize(mul(rotate, d));

@@ -42,13 +42,14 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
     }
     const Vec3d normal = to_world(view, b.centre);
     const Vec3d centre = view.body_centre + normal * view.radius;
-    const double cap = view.radius * std::sin(std::min(b.angular_radius, pi<double> / 2));
-    const float bound = float(cap + view.radius * 2 * MinorPlanetTerrain::height_max);
-    if (!geometry::sphere_in_frustum(view.frustum, to_float(centre), bound))
+    if (!geometry::sphere_in_frustum(view.frustum, to_float(centre), float(view.radius * b.bound_radius)))
         return {};
-    const double distance = std::max(length(centre), cap);
-    const float scale = float(view.radius * view.height_pixels / (distance * view.tan_y));
-    return {.visible = true, .pixels = float(b.angular_size) * scale};
+    // The size is from the nearest point of the patch, not its centre: a cell the
+    // camera sits over spans the screen whatever its centre is doing, and it is the
+    // one to generate first. The body's radius cancels, both being in radii.
+    const double near = nearest_distance(view.camera_local, b);
+    const float scale = float(view.height_pixels / (std::max(near, 1e-4) * view.tan_y));
+    return {.visible = true, .pixels = float(b.angular_size) * scale, .distance = near};
 }
 
 std::uint32_t TerrainTier::allocate_children(const Node& parent) {
@@ -127,10 +128,10 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
     }
     const PatchKey key = nodes_[index].key;
     touch(key);
-    const double dist = nearest_distance(view.camera_local, nodes_[index].bounds);
     const bool split = key.level < patch_level_max && key.level + 1 < std::size(level_error) &&
                        (nodes_[index].children || nodes() < slot_count - 64) &&
-                       dist < double(range_[key.level + 1]) * (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0);
+                       seen.distance <
+                           double(range_[key.level + 1]) * (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0);
     if (split && !nodes_[index].children)
         nodes_[index].children = allocate_children(nodes_[index]);
     if (!split && nodes_[index].children)
@@ -153,7 +154,7 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
                 collapse(nodes_[children + i]);
                 continue;
             }
-            const bool in_range = nearest_distance(view.camera_local, child.bounds) < double(range_[key.level + 1]);
+            const bool in_range = child_seen.distance < double(range_[key.level + 1]);
             const unsigned child_slot = slot_of(child.key);
             if (in_range && child_slot != no_slot && slots_[child_slot].resident) {
                 descend |= 1u << i;

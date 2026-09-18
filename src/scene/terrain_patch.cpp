@@ -70,6 +70,18 @@ PatchBounds patch_bounds(PatchKey key) {
     }
     bounds.angular_size = 2 * std::atan(std::tan(everitt_k * cell.size / 2) / tan_k);
     bounds.angular_radius += 1e-6;
+    // The farthest the patch can reach from its centre point on the reference
+    // surface: a chord to the cap's edge at one end of the height shell. The chord
+    // over the radius is a parabola with its least value inside the shell, so the
+    // longer of the two ends is the answer; for a small cap that is the low end,
+    // for a whole face the high one. The cap's own circle radius, sin(angular
+    // radius), is not it: that measures from the cap's axis, not from its centre.
+    const double cosine = std::cos(bounds.angular_radius);
+    const auto chord = [cosine](double radius) {
+        return std::sqrt(std::max(0.0, radius * radius + 1 - 2 * radius * cosine));
+    };
+    bounds.bound_radius = std::max(chord(1 + MinorPlanetTerrain::height_max),
+                                   chord(1 + MinorPlanetTerrain::height_min - patch_skirt_drop));
     return bounds;
 }
 

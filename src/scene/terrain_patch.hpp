@@ -36,6 +36,9 @@ constexpr unsigned tile_colour_ratio = 1; // colour texels per height texel (1 f
 // clips nothing and leaves half again of headroom; sixteen bits over it resolve the
 // direction to 0.002 degrees, where the unit normal in eight bits resolved 0.38.
 constexpr float tile_slope_scale = 2.f;
+// How far a patch's skirt hangs below its edge, radii: the shader drops the ring
+// by it, and a patch's bounding sphere has to hold it.
+constexpr float patch_skirt_drop = .002f;
 
 // Direction of a face point, s and t in [-1, 1], warped by Everitt's mapping
 // (tan(k*s)/tan(k), k=0.8687) so texel areas stay within about 11 percent.
@@ -63,6 +66,10 @@ struct PatchBounds {
     Vec3d centre;              // unit direction
     double angular_radius = 0; // radians, the cap holding every vertex
     double angular_size = 0;   // radians, the cell's edge at its centre
+    // Radius of the sphere about `centre` on the reference surface that holds every
+    // point the patch can draw: its cap over the terrain's height shell, the skirt
+    // below it included, in radii. The cull tests the frustum against it.
+    double bound_radius = 0;
 };
 PatchBounds patch_bounds(PatchKey key);
 
