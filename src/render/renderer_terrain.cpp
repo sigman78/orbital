@@ -15,9 +15,7 @@ namespace {
 constexpr std::uint64_t align4(std::uint64_t bytes) {
     return (bytes + 3) & ~3ull;
 }
-// A buffer-to-image copy's offset must be a multiple of the texel size: the rgba8
-// and rg16 planes are both four bytes a texel, so they start at 4-byte offsets
-// within an entry, and entries are 4-byte strides.
+// Copy offsets and entry strides must align to the four-byte albedo/slope texels.
 constexpr std::uint64_t height_tile_bytes = tile_side * tile_side * 2;
 constexpr std::uint64_t colour_tile_bytes = tile_colour_side * tile_colour_side * 4;
 constexpr std::uint64_t albedo_offset = align4(height_tile_bytes);
@@ -73,9 +71,8 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     stats.frame.terrain.uploaded = 0;
     if (!minor_planet_terrain)
         return;
-    // Finished tiles are taken from the pool whether or not the tier is drawing, so a
-    // staging entry is never left to a worker that nothing will collect. Their copies
-    // and their residency are settled together, in record_terrain_uploads.
+    // Poll even while disabled to release workers' staging entries. Upload recording
+    // accepts the copies and establishes residency together.
     if (tile_pool)
         for (const TileResult& result : tile_pool->poll()) {
             ring_state[result.ring] = RingState::upload;
@@ -150,8 +147,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     ts.flat_far = p.flat_far;
     ts.graded = p.graded;
     ts.fade_mean = p.fade_mean;
-    // A line a flight can be read back from: every second or so while the tier draws,
-    // and straight away the first time a limit actually bites.
+    // Log periodically and on entry into resource pressure.
     if (terrain_tier.active()) {
         const bool pinched = p.splits_blocked || p.evicted_recent || p.requested > p.served;
         if (pinched && !tier_pinched) {
@@ -233,8 +229,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         const float morph_start = 0.7f * morph_end;
         const PatchKey parent{draw.key.face, std::uint8_t(draw.key.level ? draw.key.level - 1 : 0),
                               std::uint16_t(draw.key.x / 2), std::uint16_t(draw.key.y / 2)};
-        // The fade wants the parent's shape, and the fragment path blends toward the
-        // parent's tile: without it resident the two would disagree, so it is dropped.
+        // Arrival fading needs the parent tile for matching geometry and material transitions.
         const unsigned parent_slot = draw.key.level ? terrain_tier.resident_slot(parent) : TerrainTier::slot_count;
         records[i] = {
             .cell = cell,
@@ -259,9 +254,7 @@ void Renderer::Impl::record_terrain_uploads(gpu::CommandBuffer* cmd) {
                                     {.base_slice = layer, .slice_count = 1, .extent = {side, side, 1}});
     };
     for (const TileUpload& upload : tile_uploads) {
-        // The copy and the residency are one decision. A slot recycled since its worker
-        // finished must have neither: the copy would land on the tile now using it, and
-        // the residency would vouch for contents belonging to another patch.
+        // Reject stale assignments before either uploading or establishing residency.
         if (terrain_tier.mark_resident(upload.slot, upload.key, upload.stamp, upload.heights)) {
             const auto staging = reinterpret_cast<std::uint64_t>(buffers.tile_staging.range().gpu) +
                                  upload.ring * tile_total_bytes;

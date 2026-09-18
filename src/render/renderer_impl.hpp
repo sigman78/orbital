@@ -378,8 +378,7 @@ struct Renderer::Impl {
     unsigned rock_count = 0;
     unsigned belt_capacity = 0; // rocks the state heaps hold: the high tier or the override
     BeltMotion belt_motion;     // the rocks' seeds and states, stepped on the CPU
-    // The minor planet's near tier (renderer_terrain.cpp): its terrain, the patch
-    // quadtree and cache, and this frame's staging-to-pool copies.
+    // Near-terrain selection, tile arrays, and upload staging (renderer_terrain.cpp).
     std::optional<MinorPlanetTerrain> minor_planet_terrain;
     TerrainTier terrain_tier;
     GpuImage tile_height, tile_albedo, tile_slope; // the three tile arrays, 1024 layers each
@@ -402,9 +401,7 @@ struct Renderer::Impl {
         Range<float> heights;
         float ms; // the generation's time on its worker
     };
-    // A tile generated but not yet copied into the pool. It is held until a frame
-    // records it: a frame that gives up after preparing must not leave the slot
-    // marked resident over contents that were never uploaded.
+    // Retain completed tiles until upload recording, including across aborted frames.
     struct TileUpload {
         PatchKey key;
         unsigned slot, ring;
@@ -414,9 +411,7 @@ struct Renderer::Impl {
     static constexpr unsigned tile_ring_count = 32;
     std::unique_ptr<WorkerPool<TileResult>> tile_pool;
     std::vector<TileUpload> tile_uploads;
-    // A staging entry belongs to its worker until the result is polled and to the copy
-    // it feeds until that copy is recorded. A frame number cannot say "still working":
-    // a job that outlives the count hands its buffer to the next one mid-write.
+    // Keep worker/upload ownership explicit; frame numbers only guard GPU reuse.
     enum class RingState : std::uint8_t { free, worker, upload };
     RingState ring_state[tile_ring_count] = {};
     unsigned ring_used_frame[tile_ring_count] = {}; // the frame its copy was recorded in

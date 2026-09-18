@@ -31,9 +31,7 @@ std::optional<float> crater_x(const MinorPlanetTerrain::Crater& crater, Vec3d d)
 
 } // namespace
 
-// The population: sizes on the D^-2 law of a saturated surface (truncated, so
-// many small and a few large), ages uniform, deep bowls for the small ones and
-// shallower complex floors with a central peak for the large.
+// Saturated D^-2 size distribution, uniform ages, and shallower large craters with central peaks.
 MinorPlanetTerrain::MinorPlanetTerrain(std::uint64_t seed) : seed_(seed) {
     constexpr unsigned count = 420;
     constexpr double radius_min = .018, radius_max = .17;
@@ -94,8 +92,7 @@ float MinorPlanetTerrain::detail(Vec3d direction, double nyquist, float strength
     if (strength <= 0)
         return 0;
     const Vec3d d = normalized(direction);
-    // Measured against the tiles: the stack at full weight adds 0.082 of rms slope for
-    // a unit of detail_slope, so this makes detail_slope read as the tangent it adds.
+    // Calibrates the generated stack to detail_slope's RMS tangent at strength 1.
     constexpr double calibration = 1.85;
     double total = 0;
     for (unsigned octave = 0; octave < detail_octaves; octave++) {
@@ -103,8 +100,7 @@ float MinorPlanetTerrain::detail(Vec3d direction, double nyquist, float strength
         const double weight = std::clamp(std::log2(nyquist / frequency), 0.0, 1.0);
         if (weight <= 0)
             break; // and so is every octave above this one
-        // The direction scaled into the lattice: the sphere runs through a shell of
-        // cells, and only those it passes through can hold a crater it meets.
+        // Search the lattice shell intersecting the sphere at this octave.
         const Vec3d p = d * frequency;
         const Vec3d base{std::floor(p.x), std::floor(p.y), std::floor(p.z)};
         double sum = 0;
@@ -126,8 +122,7 @@ float MinorPlanetTerrain::detail(Vec3d direction, double nyquist, float strength
                     const double len = length(place);
                     if (len < 1e-9)
                         continue;
-                    // The crater's own size, and where the point falls across it: both
-                    // in cells, so the whole octave scales with the frequency.
+                    // Size and distance are in lattice cells, so octaves scale together.
                     const double radius = detail_radius * (.6 + .8 * uniform(state));
                     const double x = length(place * (1 / len) - d) * frequency / radius;
                     if (x > detail_reach)
@@ -145,16 +140,13 @@ float MinorPlanetTerrain::detail(Vec3d direction, double nyquist, float strength
 
 Vec3f MinorPlanetTerrain::albedo(Vec3d direction, float height, float slope) const {
     const Vec3d d = normalized(direction);
-    // Ceres's dark grey ground, with Pluto's warm dark maculae over parts of
-    // it and a lighter frost where the lowlands pool; steep faces shed their
-    // dust and read a little brighter.
+    // Dark ground, warm maculae, lowland frost, and brighter steep faces.
     const float lows = std::clamp((height - height_min) / (height_max - height_min), 0.f, 1.f);
     const float macula = smoothstep(.05f, .5f, fbm(d * 1.3 + Vec3d{3.1, 0, 0}, 3, seed_ + 5));
     const float frost = smoothstep(.3f, .7f, fbm(d * 2.1 + Vec3d{0, 7.7, 0}, 3, seed_ + 9)) * (1 - macula);
     Vec3f albedo = lerp(Vec3f{.13f, .122f, .112f}, Vec3f{.085f, .066f, .05f}, macula);
     albedo = albedo * (.9f + .25f * (1 - lows) + .6f * frost) * (1 + .5f * slope);
-    // Fresh craters: the excavated floor and walls dark, the ejecta blanket
-    // bright and patchy, worn ones neither; a few carry a bright facula at the centre.
+    // Fresh craters darken floors and brighten ejecta; some carry central faculae.
     const float patchy = .4f + .6f * (1 + fbm(d * 30.0, 2, seed_ + 13));
     for (const Crater& crater : craters_) {
         const auto x = crater_x(crater, d);
@@ -170,8 +162,7 @@ Vec3f MinorPlanetTerrain::albedo(Vec3d direction, float height, float slope) con
     return {std::min(albedo.x, 1.f), std::min(albedo.y, 1.f), std::min(albedo.z, 1.f)};
 }
 
-// The heights are sampled first so the normals come from finite differences of
-// the same values the alpha carries; rows go to the cores.
+// Bake heights first, then differentiate them for consistent tangent normals.
 TerrainMaps bake_terrain_maps(const MinorPlanetTerrain& terrain, unsigned width, unsigned height) {
     TerrainMaps maps{.width = width, .height = height, .albedo = {}, .normal = {}};
     const std::size_t count = std::size_t(width) * height;

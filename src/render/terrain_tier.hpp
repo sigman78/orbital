@@ -27,14 +27,9 @@ struct TierView {
     unsigned seam = 0;                                    // TerrainTier::Seam
 };
 
-// The near tier's CPU side: which patches of the cube sphere to draw this frame
-// and which to generate for the next, up to a per-frame budget, over a fixed
-// pool of tile slots kept as a cache by patch (least recently used resident
-// slot out; a pending one stays put until it lands). The quadtree splits by
-// per-level distance ranges derived from the error table, with hysteresis; a
-// patch whose visible children are not all resident draws itself. Slots start
-// non-resident and the caller marks a slot resident by slot and key, once the
-// tile upload for that key completes; a slot recycled meanwhile is left alone.
+// Cube-sphere selection and tile cache. Distance ranges select patches with hysteresis;
+// parents cover unavailable children. Pending and currently used slots cannot be evicted.
+// Upload completion establishes residency only for the matching generation stamp.
 class TerrainTier {
 public:
     static constexpr unsigned slot_count = 1024; // 11 MiB of vertices; a close view holds 400 of them
@@ -42,9 +37,7 @@ public:
     // Sizes are in cull_bodies' units: a projected radius over the half height, twice the pixels.
     static constexpr float error_pixels = 3; // a patch's geometric error on screen: it splits above 1.5 px
     static constexpr float hysteresis = .8f; // the fraction of either the way back
-    // A tile just arrived is drawn morphed to its parent's shape and relaxes to its
-    // own over this many frames, so detail fades in where it would otherwise pop.
-    // Counted in frames, not seconds, so a capture is the same every run.
+    // Fade new tiles from their parent's shape over a fixed frame count for deterministic captures.
     static constexpr unsigned fade_frames = 15;
     // Worst measured geometric error per level, radii, from 64 random patches per level
     // on the seed-1007 terrain with the Everitt warp, at 32 quads to a tile
@@ -59,13 +52,8 @@ public:
         unsigned slot;
         std::uint32_t stamp; // which assignment of this slot asked for it
     };
-    // What to do where a patch meets a finer one. A patch is drawn out to its own
-    // range and morphs over the outer part of it, and from a grazing view one patch
-    // spans distances from under the camera to the horizon, so a border with a finer
-    // neighbour can sit deep inside the coarse patch's morph band. The finer side is
-    // fully morphed to the coarse patch's own shape there, and the coarse patch is
-    // most of the way to its parent's: a seam, which a view from above never shows
-    // because the patch subtends too little distance for the two to part.
+    // At grazing angles, a patch can span several morph bands. These policies handle
+    // boundaries where the coarse side would otherwise morph away from the fine side.
     enum class Seam : unsigned {
         none,     // as it was: the band is trusted to have cleared the hand-over
         farthest, // a child is drawn only once its whole cap is in range, never part of it
@@ -81,17 +69,12 @@ public:
         // The sides of this patch that meet a finer surface, for Seam::clamp: bit 0
         // low x, 1 high x, 2 low y, 3 high y.
         unsigned finer = 0;
-        // A floor under the vertex shader's morph, 1 the moment the patch is drawn
-        // for the first time and 0 once it has settled. The four children of one
-        // split share it, so they agree with each other while they fade in.
+        // Morph floor shared by siblings: 1 on arrival, decreasing to 0 over fade_frames.
         float fade = 0;
     };
 
-    // Everything the tier can run out of in a frame, so a flight can be flown and the
-    // log read back afterwards. The two that change what is drawn are `starved`, a
-    // quadrant the parent covered because its child had no tile, and `splits_blocked`,
-    // a node that wanted to split and was refused by the node budget; `out_of_range`
-    // is the same cover for the ordinary reason and is not a limit at all.
+    // Selection/cache pressure. starved and splits_blocked indicate limits;
+    // out_of_range is ordinary parent coverage.
     struct Pressure {
         unsigned nodes = 0, node_budget = 0, splits_blocked = 0;
         unsigned requested = 0, served = 0;         // tiles asked for, and given a slot
@@ -100,11 +83,8 @@ public:
         unsigned deepest = 0;                       // finest level drawn
         unsigned behind_one = 0, behind_count = 0;  // patches over a level coarser than asked for
         float behind_mean = 0;                      // levels coarser than asked for, averaged
-        // Whether the morph is doing anything. A patch whose morph reads the same at
-        // both ends of it has every vertex moving together, so it switches where it
-        // should blend, which is what chunked LOD does; graded is the share carrying a
-        // gradient across itself. fade_mean is the temporal floor, which hides the rest
-        // of it while tiles are still arriving.
+        // Morph variation over each drawn patch's distance bounds; these are estimates.
+        // fade_mean is the average arrival morph floor.
         unsigned flat_near = 0, flat_far = 0, graded = 0;
         float fade_mean = 0;
     };
@@ -112,8 +92,7 @@ public:
 
     void update(const TierView& view, unsigned frame, unsigned budget = generate_per_frame);
     void disable(); // the switch off: the tree collapses, the cache stays
-    // Drops every tile: what a change to how they are generated needs. Tiles in
-    // flight land on a recycled slot and are refused, as they are after an eviction.
+    // Discard cached tiles; generation stamps reject results still in flight.
     void invalidate();
     // True once the tier covers the body: the sphere levels draw until then.
     bool active() const { return active_; }
@@ -136,9 +115,7 @@ public:
     // The other end of the same cap: what Seam::farthest gates a child on.
     static double farthest_distance(Vec3d camera_local, const PatchBounds& bounds,
                                     Range<float> heights = full_height_range);
-    // The fractional level the screen error asks for at a distance, and how far that
-    // varies across a patch. Seam::span splits while the spread is over seam_span,
-    // since the morph can only carry one level of it.
+    // Fractional desired level and its spread across a patch. Seam::span limits that spread.
     static constexpr double seam_span = 1.0;
     double level_at(double distance) const;
     double level_span(const TierView& view, const PatchBounds& bounds, Range<float> heights = full_height_range) const;
@@ -154,10 +131,7 @@ private:
     struct Slot {
         PatchKey key;
         unsigned used = 0, resident_frame = 0;
-        // Slot and key do not name a generation: a patch evicted and asked for again,
-        // or asked for again at another detail setting, gets both back. The stamp is
-        // issued once per assignment and never reissued, so a result that was in
-        // flight across the change is told apart from the one that replaced it.
+        // Distinguishes repeated assignments of the same key and slot, including detail changes.
         std::uint32_t stamp = 0;
         Range<float> heights = full_height_range;
         bool resident = false;

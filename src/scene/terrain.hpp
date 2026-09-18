@@ -7,13 +7,8 @@
 
 namespace space {
 
-// The minor planet's terrain, the one source of its shape and colour: the
-// start-up bake of its maps reads it, and the near tier's patches will.
-// Everything is a function of a direction from the centre, so any
-// parameterisation (the equirectangular maps today, cube-sphere patches later)
-// samples the same body. Heights are in radii, signed about the reference
-// sphere. The look is after Ceres and Pluto: a dark grey ground with warm
-// maculae, worn craters at every size, and a few bright faculae.
+// Shared procedural shape and colour for baked maps and cube-sphere tiles.
+// Inputs are body-local directions; heights are signed fractions of the reference radius.
 class MinorPlanetTerrain {
 public:
     struct Crater {
@@ -26,26 +21,16 @@ public:
     };
     static constexpr float height_min = -.05f, height_max = .05f; // the range a bake's alpha spans, radii
 
-    // The craters within reach of a cap of the sphere, so a patch's vertices test
-    // a handful instead of the whole population.
+    // Craters intersecting a spherical cap, to accelerate patch sampling.
     struct Region {
         std::vector<Crater> craters;
     };
 
     explicit MinorPlanetTerrain(std::uint64_t seed);
 
-    // Micro-relief past where the crater population stops, for the tiles' slope only.
-    // It continues the body's own construction rather than laying noise over it: a
-    // lattice of cells at each octave's frequency, at most one crater to a cell at a
-    // hashed place and size, with the flat floor, rising wall, raised rim and ejecta
-    // the big ones have. Everything scales with the frequency, so each octave adds
-    // the same slope and the stack is self-similar. The field is a function of the
-    // direction alone, so two tiles sharing a texel agree on it, and each octave is
-    // weighted in only once the sampling grid can carry it, so a tile never sees one
-    // it would alias and a level boundary fades it in through the morph rather than
-    // switching it on. `nyquist` is half the grid's texels per radian; `strength`
-    // scales the stack, 0 off. The geometry does not take it, so the quadtree's
-    // error table is untouched.
+    // Slope-only micro-craters; geometry and LOD error are unaffected.
+    // Octaves scale size/depth together and fade in as sampling resolution permits.
+    // nyquist is half the texels per radian; strength scales the result, with 0 disabling it.
     static constexpr float detail_frequency = 110; // lattice cells per radian of the first octave
     static constexpr unsigned detail_octaves = 3;
     static constexpr float detail_radius = .34f;  // a crater's, of a cell

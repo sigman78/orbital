@@ -22,11 +22,8 @@ float3 patchCubeDirection(uint face, float2 st)
     return normalize(FACE_AXIS[face] + FACE_S[face] * w.x + FACE_T[face] * w.y);
 }
 
-// The frame a slope tile is written against (scene/terrain_patch.hpp's
-// patch_tangent_frame): the face's s direction squared up against the sphere's own
-// normal at the point. The reference is the direction, never the face's axis, which
-// turns at a cube edge; the face only picks which way is x. FACE_S lies 45 degrees
-// off the nearest corner of the face, so the projection never runs short.
+// Match the CPU's patch_tangent_frame: project FACE_S onto the local tangent
+// plane so face-local slopes decode consistently across cube edges.
 void patchTangentFrame(uint face, float3 direction, out float3 tangent, out float3 bitangent)
 {
     tangent = normalize(FACE_S[face] - direction * dot(FACE_S[face], direction));
@@ -62,8 +59,7 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
 
     float2 g = grid.position.xy;
     float skirt = grid.position.z;
-    // A quadrant a child draws instead: its triangles go, by a vertex strictly
-    // inside it (the ones on the quadrant seams stay for the neighbouring quadrants).
+    // Mask replaced quadrants, retaining centre-line vertices for adjacent quadrants.
     uint quadrants = (patch.tile[3] >> 6) & 0xf;
     bool2 low = g < PATCH_QUADS * 0.5, high = g > PATCH_QUADS * 0.5;
     uint quadrant = (high.x ? 1 : 0) | (high.y ? 2 : 0);
@@ -73,8 +69,7 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     uint face = patch.tile[0];
     uint slot = patch.tile[1];
 
-    // Nothing this vertex carries is read: its triangles are all discarded, so it
-    // leaves before the two warps and the two height fetches the rest of it costs.
+    // Skip height fetches and warps for discarded vertices.
     if (dropped)
     {
         PatchResult dead = {};
@@ -92,15 +87,10 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     float h = patchHeight(slot, g);
     float3 world = inst.center_radius.xyz + mul(rotate, d) * radius * (1 + h);
     float dist = length(world) / radius;
-    // The distance morph, with a floor under it while the tile fades in: a tile
-    // just arrived is drawn as its parent's shape and relaxes to its own, so the
-    // detail it adds fades in where it would otherwise appear between two frames.
+    // Arrival fade is a floor under the distance morph, relaxing from the parent shape.
     float m = max(saturate((dist - patch.morph.x) / max(patch.morph.y - patch.morph.x, 1e-6)), patch.morph.z);
-    // Sides that meet a finer patch (TerrainTier::Seam::clamp). The finer one is
-    // fully morphed to this patch's own shape along them, so this patch has to be
-    // standing at that shape too: the morph falls to nothing at such a side and
-    // comes back over a quarter of the grid, which is smooth inside the patch and
-    // leaves the other three sides to meet their own neighbours as they did.
+    // Seam::clamp holds coarse edges at their own shape to meet finer neighbors,
+    // restoring the distance morph over a quarter-patch width from the edge.
     uint finer = uint(patch.morph.w);
     if (finer != 0)
     {

@@ -70,12 +70,8 @@ PatchBounds patch_bounds(PatchKey key) {
     }
     bounds.angular_size = 2 * std::atan(std::tan(everitt_k * cell.size / 2) / tan_k);
     bounds.angular_radius += 1e-6;
-    // The farthest the patch can reach from its centre point on the reference
-    // surface: a chord to the cap's edge at one end of the height shell. The chord
-    // over the radius is a parabola with its least value inside the shell, so the
-    // longer of the two ends is the answer; for a small cap that is the low end,
-    // for a whole face the high one. The cap's own circle radius, sin(angular
-    // radius), is not it: that measures from the cap's axis, not from its centre.
+    // Bound chords from the reference-surface centre to both height-shell ends.
+    // Include the skirt; sin(angular_radius) alone bounds the cap about a different centre.
     const double cosine = std::cos(bounds.angular_radius);
     const auto chord = [cosine](double radius) {
         return std::sqrt(std::max(0.0, radius * radius + 1 - 2 * radius * cosine));
@@ -162,10 +158,8 @@ std::vector<std::uint32_t> patch_indices() {
     return indices;
 }
 
-// A ring texel past a cube edge is the neighbouring face's texel one step inside
-// its edge: this face's warp extrapolated would land off that face's rows (its
-// lines of constant t are not the neighbour's), and the two faces' edge texels
-// would differentiate over different points and disagree. Ring corners are unused.
+// Sample border texels on the neighboring face's own grid for matching edge
+// derivatives. Extrapolating this face's warp would use a different stencil.
 namespace {
 Vec3d ring_direction(unsigned face, double s, double t) {
     const bool out_s = s < -1 || s > 1, out_t = t < -1 || t > 1;
@@ -179,11 +173,8 @@ Vec3d ring_direction(unsigned face, double s, double t) {
     const double d = dot(f.axis, edge);
     double sn = std::atan(dot(f.s, edge) / d * tan_k) / everitt_k;
     double tn = std::atan(dot(f.t, edge) / d * tan_k) / everitt_k;
-    // Step the neighbour's own coordinate that runs along the face we came from:
-    // exactly one of its s and t is parallel to that face's axis. Comparing |sn|
-    // against |tn| names the same coordinate everywhere but a cube corner, where
-    // both are 1 and the comparison picks arbitrarily, leaving the three faces
-    // meeting there differentiating over three different stencils.
+    // Select the neighbor axis parallel to this face's normal. Comparing coordinate
+    // magnitudes is ambiguous at cube corners and gives inconsistent stencils.
     if (std::abs(dot(f.s, faces[face].axis)) > .5)
         sn -= std::copysign(delta, sn);
     else
@@ -240,13 +231,11 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
     const auto direction = [&](int x, int y) {
         return ring_direction(key.face, cell.s0 + x * cell.size / quads, cell.t0 + y * cell.size / quads);
     };
-    // The tile's heights on the colour grid with a one-texel ring around them, so an
-    // edge texel's central difference is the one its neighbour tile computes.
+    // A one-texel border gives adjacent tiles matching central differences.
     const PatchBounds bounds = patch_bounds(key);
     const MinorPlanetTerrain::Region region = terrain.region(bounds.centre,
                                                              bounds.angular_radius + 2 * bounds.angular_size / quads);
-    // Half the grid's texels per radian: the finest the tile can carry, which is what
-    // decides how many detail octaves it takes.
+    // Nyquist frequency controls which detail octaves the colour grid can represent.
     const double nyquist = .5 * quads / bounds.angular_size;
     std::vector<float> h(bordered * bordered);
     const auto at = [&](int x, int y) -> float& { return h[(y + 1) * bordered + (x + 1)]; };
@@ -276,9 +265,7 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
             albedo[p + 1] = u8(a.y);
             albedo[p + 2] = u8(a.z);
             albedo[p + 3] = 255;
-            // The gradient along the face's frame, which the fragment shader rebuilds
-            // from the same direction: the frame is what turns at a cube edge, the
-            // normal it carries is not.
+            // Encode in the same local tangent frame the fragment shader reconstructs.
             const TangentFrame frame = patch_tangent_frame(key.face, d);
             const auto u16 = [](double s) {
                 return std::uint16_t(std::clamp(s / tile_slope_scale * .5 + .5, 0.0, 1.0) * 65535.0 + .5);

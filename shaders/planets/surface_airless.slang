@@ -9,16 +9,9 @@
 #include "../lib/noise.slang"
 #include "../lib/sampling.slang"
 
-// The airless bodies: the Moon and Mars, colour maps over NASA elevation
-// models baked into normal+height maps, and the minor planet, whose maps are
-// baked at start-up from its generated terrain (scene/terrain.hpp) in the same
-// layout; a short height trace gives the crater walls their self-shadowing.
-//
-// Draw tier (root.detail, set per draw from the projected size): the normal
-// map's tilt and the height trace fade out toward the smallest mesh level and
-// are skipped at zero, while the albedo and the lighting stay as they are at
-// every size; the regolith grain is scaled by the map's magnification, which
-// is zero out there, and its noise is skipped where that is.
+// Moon/Mars DEMs and procedural minor-planet maps share normal+height sampling.
+// root.detail fades normal tilt and terrain shadows with draw size; grain fades
+// with texture magnification.
 
 static const float2 DEM_TEXELS = float2(4096.0, 2048.0);     // Moon and Mars albedo and normal+height maps
 static const float2 MINOR_PLANET_TEXELS = float2(2048.0, 1024.0);  // the minor planet's, baked at start-up
@@ -27,10 +20,8 @@ static const float MOON_HEIGHT_RANGE = 19603.0 / 1737400.0;
 static const float MARS_HEIGHT_RANGE = 29334.0 / 3396200.0;
 static const float MINOR_PLANET_HEIGHT_RANGE = MINOR_PLANET_HEIGHT_MAX - MINOR_PLANET_HEIGHT_MIN;
 
-// Short shadow trace through the DEM height stored in the normal map's alpha:
-// marches up-sun in texture space and darkens where terrain rises above the
-// light ray. heightRange converts alpha to radii; cosLatitude widens the
-// longitude step where the equirectangular texels narrow toward the poles.
+// Trace toward the sun through DEM alpha. heightRange converts to radii;
+// cosLatitude corrects the longitude step near the poles.
 float terrainShadow(Texture2D<float4> normalMap, float2 texels, float2 uv, float3 L, float3 N, float3 T, float3 B,
                    float heightRange, float cosLatitude, float tier)
 {
@@ -51,19 +42,14 @@ float terrainShadow(Texture2D<float4> normalMap, float2 texels, float2 uv, float
     return 1.0 - saturate(shadow) * .55 * tier;
 }
 
-// The map normal's tilt against the sphere's, weighted by the draw tier: the
-// tangential part scaled by it and the upright part floored, so a steep texel
-// cannot lean the normal past the surface. Both paths blend through this, so a
-// draw that is half a tier shades the same whichever of them is drawing it.
+// Shared normal blend for sphere and patch paths; bound the upright component
+// so scaled tilt cannot turn the shading normal below the surface.
 float3 blendMapNormal(float3 axis, float3 tangential, float upright, float strength, float tier)
 {
     return normalize(axis * lerp(1.0, max(upright, .2), tier) + tangential * (strength * tier));
 }
 
-// The regolith grain: the albedo broken up where the maps are magnified past their
-// texels, so the ground does not read as a smooth wash close in. Both paths add it,
-// from the same sphere coordinate at the same frequency, so it neither appears nor
-// doubles when the near tier takes over.
+// Add grain under magnification, using the same sphere coordinates in both paths.
 float3 regolithGrain(float3 albedo, float2 sphere_uv, float magnified)
 {
     if (magnified <= 0.0)
@@ -113,18 +99,8 @@ Material marsMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L
     return m;
 }
 
-// The patch path: the tile's albedo and slope at the fragment's tile coordinate,
-// blended toward the parent tile's through the morph zone so a level boundary
-// shades as one surface, with the crater walls' shadow traced through the baked
-// equirect map as the sphere path traces it.
-//
-// The tile stores the terrain's gradient, not a normal: two channels of sixteen
-// bits over [-MINOR_PLANET_SLOPE_SCALE, MINOR_PLANET_SLOPE_SCALE] against the
-// face's tangent frame, which patchTangentFrame rebuilds here from the sphere's
-// own direction. The frame turns at a cube edge and the gradient's components turn
-// with it, so the two faces meeting there read back the same body-frame normal;
-// the parent tile's frame is this same one, so the morph is a lerp of gradients,
-// the blend that matches the vertex path's lerp of heights.
+// Blend tile albedo and tangent slopes toward the parent through the morph band.
+// Parent and child use the same tangent frame; cube faces decode into body space.
 Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility, float tier)
 {
     uint slot = input.tileSlot, face = input.tileFace & 7, parent = (input.tileFace >> 8) & 0xfff, quadrant = (input.tileFace >> 20) & 3;
@@ -143,8 +119,7 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     }
     float3 tangent, bitangent;
     patchTangentFrame(face, localN, tangent, bitangent);
-    // The gradient is already the tilt off the sphere's normal, so the blend takes it
-    // directly: no need to build the map normal first and take it apart again.
+    // Convert the blended tangent gradient to a shading normal.
     float3 tilt = (tangent * slope.x + bitangent * slope.y) * -MINOR_PLANET_SLOPE_SCALE;
     float upright = rsqrt(1.0 + dot(tilt, tilt));
     Material m;
@@ -152,17 +127,13 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     m.visibility = visibility;
     if (tier > 0.0)
     {
-        // The crater walls' shadow is traced through the baked equirect map, as the
-        // sphere path traces it: one continuous field over the body, where a trace
-        // through the tile's own heights would stop at the tile's edge and step
-        // along the face's skewed axes, and its cut would show along every border.
+        // Trace the continuous equirectangular map to avoid tile-boundary shadow seams.
         float3 T, B;
         tangentFrame(localN, rotate, N, T, B);
         m.visibility *= terrainShadow(textures[TEX_MINOR_PLANET_NORMAL], MINOR_PLANET_TEXELS, sphereUV(localN), L, N, T, B,
                                       MINOR_PLANET_HEIGHT_RANGE, length(localN.xz), tier);
     }
-    // The same grain the sphere path adds, from the same sphere coordinate: the tile's
-    // texels magnified past one per pixel is when the ground needs breaking up.
+    // Match the sphere path's grain when tile texels are magnified.
     float2 tileTexels = float2(TILE_COLOUR_SIDE, TILE_COLOUR_SIDE);
     m.albedo = regolithGrain(albedo, sphereUV(localN), magnificationGrad(ddx(uv), ddy(uv), tileTexels));
     m.rough = .95;
@@ -170,10 +141,8 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     return m;
 }
 
-// The near tier's review: the drawn triangles, from the barycentric coordinate
-// the unindexed wireframe grid carries (a pixel-wide line at each edge), and the
-// patch borders in a second colour from the tile coordinate. The lines take
-// their brightness from the sunlight so they read at any exposure.
+// Wireframe from triangle barycentrics, with separate patch and cube-edge colours.
+// Sunlight scales line brightness to follow exposure.
 float3 wireframe(float3 colour, SurfaceVaryings input, float3 irradiance)
 {
     float3 edge = input.bary / max(fwidth(input.bary), 1e-6);
@@ -205,8 +174,7 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
                : s.kind == KIND_MINOR_PLANET         ? minorPlanetMaterial(input, rotate, s.N, s.L, s.visibility, root.detail)
                                                     : moonMaterial(input, rotate, s.N, s.L, s.visibility, root.detail);
     float3 irradiance = sunlight(root.frame);
-    // The patch path's debug views (TerrainSettings::debug): one term at a time, so a
-    // seam is attributed to the term that carries it.
+    // Isolate patch attributes to diagnose seams (TerrainSettings::debug).
     uint debug = uint(root.frame->sequence.y + .5);
     if ((root.flags & ORBITAL_ROOT_PATCHES) && debug != 0)
     {

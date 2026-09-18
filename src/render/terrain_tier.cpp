@@ -32,8 +32,7 @@ void TerrainTier::ensure_roots() {
 
 TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView& view) const {
     const PatchBounds& b = node.bounds;
-    // Beyond the horizon seen from the camera nothing of the cap shows; inside
-    // the sphere everything can.
+    // Cull caps beyond the horizon only when the camera is outside the reference sphere.
     const double d = length(view.camera_local);
     if (d > 1) {
         const double angle = std::acos(std::clamp(dot(b.centre, view.camera_local * (1 / d)), -1.0, 1.0));
@@ -44,9 +43,8 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
     const Vec3d centre = view.body_centre + normal * view.radius;
     if (!geometry::sphere_in_frustum(view.frustum, to_float(centre), float(view.radius * b.bound_radius)))
         return {};
-    // The size is from the nearest point of the patch, not its centre: a cell the
-    // camera sits over spans the screen whatever its centre is doing, and it is the
-    // one to generate first. The body's radius cancels, both being in radii.
+    // Prioritize by nearest distance so patches under the camera receive detail first.
+    // Radius cancels because both distance and patch size are in radii.
     const double near = nearest_distance(view.camera_local, b, height_range(node.key));
     const float scale = float(view.height_pixels / (std::max(near, 1e-4) * view.tan_y));
     return {.visible = true, .pixels = float(b.angular_size) * scale, .distance = near};
@@ -93,8 +91,7 @@ double TerrainTier::nearest_distance(Vec3d camera_local, const PatchBounds& boun
     return std::sqrt(std::max(0.0, len * len + r * r - 2 * len * r * std::cos(t)));
 }
 
-// The fractional level whose range is this distance: the error table read in log
-// space, so what the screen error asks for at a point is a level rather than a test.
+// Interpolate the distance ranges in log space to estimate the desired level.
 double TerrainTier::level_at(double distance) const {
     if (distance >= double(range_[0]))
         return 0;
@@ -164,16 +161,11 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
     }
     const PatchKey key = nodes_[index].key;
     touch(key);
-    // A patch is one object answering a question whose answer varies across it: from a
-    // grazing view its near end can want a level several finer than its far end, and
-    // the morph reaches one level and no further. Seam::span splits while that spread
-    // is over a level, whatever the distance test says, so no drawn patch is asked for
-    // more than it has.
+    // Seam::span requests subdivision when a patch spans more than one level's morph.
     const bool wide = seam_ == Seam::span && level_span(view, nodes_[index].bounds, height_range(key)) >
                                                  seam_span * (nodes_[index].children ? double(hysteresis) : 1.0);
-    // A resident tile bounds its own bilinear surface, not the unsampled relief in
-    // its children. Keep the full shell when deciding to discover children; gate
-    // each resident child below against the height range it actually renders.
+    // Discover children using the full shell: resident heights do not bound unsampled
+    // descendants. Gate each resident child against its own height range below.
     const double descendant_distance = nearest_distance(view.camera_local, nodes_[index].bounds);
     const bool wants = key.level < patch_level_max && key.level + 1 < std::size(level_error) &&
                        (wide || descendant_distance < double(range_[key.level + 1]) *
@@ -185,16 +177,11 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
         nodes_[index].children = allocate_children(nodes_[index]);
     if (!split && nodes_[index].children)
         collapse(nodes_[index]);
-    // A child within its own range and resident is visited; any other visible
-    // quadrant the node draws itself, so nothing is ever drawn beyond its level's
-    // range: at the shared edge the child's vertices are past its range and fully
-    // morphed to this node's shape, and this node morphs as its own neighbours do.
+    // Visit resident children within range; cover the other visible quadrants here.
     unsigned quadrants = 0xf;
     if (const std::uint32_t children = nodes_[index].children) {
         quadrants = 0;
-        // The children that will be drawn, and the fade they share: the youngest of
-        // them governs, so siblings fading in from this node's shape agree with each
-        // other all the way. A child never fades less than this node does.
+        // The youngest resident sibling sets the shared fade, bounded below by the parent's.
         unsigned descend = 0, youngest = 0;
         for (unsigned i = 0; i < 4; i++) {
             const Node& child = nodes_[children + i];
@@ -206,8 +193,7 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
             const double gate = seam_ == Seam::farthest
                                     ? farthest_distance(view.camera_local, child.bounds, height_range(child.key))
                                     : child_seen.distance;
-            // Under Seam::span a child is also drawn where its parent's spread is what
-            // split it: the distance test alone would hand the quadrant back.
+            // Seam::span also admits children whose distance spread requires subdivision.
             const bool in_range = gate < double(range_[key.level + 1]) ||
                                   (seam_ == Seam::span &&
                                    level_span(view, child.bounds, height_range(child.key)) > seam_span);
@@ -238,11 +224,8 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
         }
         if (!quadrants)
             return;
-        // This node is the shape its children fade from, so it does not also take a
-        // fade of its own from above. It is not held still by this: the shader morphs
-        // by max(distance, fade), and dropping the floor leaves the distance term. Held
-        // still it would crack against its outer neighbours instead, which is the
-        // granularity limit: one node carries one level of transition, not two.
+        // Children fade from this node, so remove its inherited arrival fade.
+        // Distance morphing still applies; one node cannot represent two transitions.
         if (descend)
             fade = 0;
     }
@@ -253,11 +236,8 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
         request(key, seen.pixels);
 }
 
-// Which of a drawn patch's four sides meet a finer surface. A patch draws quadrants
-// rather than always its whole cell, so the question is asked of quadrants: every
-// drawn quadrant maps to a cell one level down, and what covers the cell across each
-// of its outer sides is that cell's own entry, the nearest ancestor with one, or,
-// when neither exists, something finer that has been split under it.
+// Find finer neighbors across drawn quadrants' outer sides. Coverage comes from
+// the adjacent cell or an ancestor; missing coverage is treated as finer.
 void TerrainTier::mark_finer_sides() {
     std::unordered_map<std::uint32_t, unsigned> cover;
     for (const Draw& draw : draws_)
@@ -265,8 +245,7 @@ void TerrainTier::mark_finer_sides() {
             if (draw.quadrants >> i & 1)
                 cover[draw.key.child(i).packed()] = draw.key.level;
     const auto covering = [&](PatchKey cell) {
-        // Up to the root: a counter that grows while the level shrinks meets it halfway
-        // and leaves the coarsest ancestors unchecked, which reads as finer than it is.
+        // Search every ancestor through the root.
         for (;;) {
             if (const auto found = cover.find(cell.packed()); found != cover.end())
                 return int(found->second);
@@ -306,10 +285,8 @@ void TerrainTier::mark_finer_sides() {
     }
 }
 
-// Coarse levels first, then the largest on screen; a slot comes from the free
-// list or from the resident patch longest unused, never one needed this frame
-// or one still in flight (it isn't touched once its node collapses, but it may
-// still land and get marked resident, so it stays until then).
+// Prioritize coarse levels, then screen size. Evict the least recently used resident
+// slot, protecting tiles used this frame and all pending generations.
 void TerrainTier::choose_generation(unsigned budget) {
     const unsigned cap = std::min(budget, generate_per_frame);
     std::sort(requests_.begin(), requests_.end(), [](const Request& a, const Request& b) {
@@ -395,8 +372,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         active_ = false;
         return;
     }
-    // The faces stay resident whether seen or not: they are the fallback for
-    // everything under them, and a turn must never find a hole.
+    // Pin all six roots as fallback coverage, including faces outside the current view.
     for (unsigned face = 0; face < 6; face++)
         touch(nodes_[face].key);
     for (unsigned face = 0; face < 6; face++)
@@ -426,14 +402,12 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         const PatchBounds bounds = patch_bounds(draw.key);
         const Range<float> heights = height_range(draw.key);
         const double near = nearest_distance(view.camera_local, bounds, heights);
-        // What the screen error asks for at its nearest point against what it is drawn
-        // at: a patch well over a level behind is one the selection left coarse.
+        // Difference between desired and drawn level at the patch's nearest bound.
         const double over = level_at(near) - double(draw.key.level);
         behind += over;
         pressure_.behind_one += over > 1;
         fade += double(draw.fade);
-        // The shader's morph at each end of the patch. Equal ends mean every vertex of
-        // it moves together, so the patch switches where it should blend.
+        // Estimate morph variation from the patch's distance bounds.
         const double end = double(range_[draw.key.level]), start = .7 * end;
         const auto morph = [&](double d) {
             return std::max(std::clamp((d - start) / std::max(end - start, 1e-9), 0.0, 1.0), double(draw.fade));
