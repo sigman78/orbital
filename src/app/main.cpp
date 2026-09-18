@@ -302,8 +302,8 @@ ShotReadings frame_loop(const Session& session, FrameHistory& history, Benchmark
         }
     }
     ShotReadings readings{.frames = frames,
-                          .patches_drawn = renderer.stats().frame.patches_drawn,
-                          .patches_resident = renderer.stats().frame.patches_resident,
+                          .patches_drawn = renderer.stats().frame.terrain.drawn,
+                          .patches_resident = renderer.stats().frame.terrain.resident,
                           .exposure = renderer.stats().exposure};
     // Medians over the frames after a warmup of the first half, at most 60 frames.
     const std::size_t warmup = std::min<std::size_t>(timings.size() / 2, 60);

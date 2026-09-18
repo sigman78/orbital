@@ -180,7 +180,8 @@ void memory_bar(const render::MemoryStats& memory) {
         Pool{.label = "Static records", .pool = &memory.static_data, .color = IM_COL32(240, 228, 66, 255)},
         Pool{.label = "Mapped heap", .pool = &memory.mapped, .color = IM_COL32(230, 159, 0, 255)},
         Pool{.label = "Device buffers", .pool = &memory.device_buffers, .color = IM_COL32(213, 94, 0, 255)},
-        Pool{.label = "Readback", .pool = &memory.readback, .color = IM_COL32(204, 121, 167, 255)}};
+        Pool{.label = "Readback", .pool = &memory.readback, .color = IM_COL32(204, 121, 167, 255)},
+        Pool{.label = "Tile arrays", .pool = &memory.tile_arrays, .color = IM_COL32(140, 200, 120, 255)}};
     const double total = double(memory.total());
     const auto mib = [](std::uint64_t bytes) { return double(bytes) / (1024.0 * 1024.0); };
     ImGui::Text("GPU memory %.1f MiB", mib(memory.total()));
@@ -246,8 +247,18 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Disable VSync for performance comparisons: a waiting GPU may clock down.");
     ImGui::Text("%u draws, %u bodies, %u rock groups", stats.draw_calls, stats.bodies_drawn, stats.rock_groups_drawn);
-    if (stats.patches_resident)
-        ImGui::Text("%u terrain patches drawn, %u cached", stats.patches_drawn, stats.patches_resident);
+    if (stats.terrain.slots) {
+        const auto& terrain = stats.terrain;
+        if (terrain.active)
+            ImGui::Text("Near tier on: %u patches, %u / %u tiles, %u pending", terrain.drawn, terrain.resident,
+                        terrain.slots, terrain.pending);
+        else
+            ImGui::TextDisabled("Near tier off: %u / %u tiles, %u pending", terrain.resident, terrain.slots,
+                                terrain.pending);
+        ImGui::Text("Tiles: %u queued on %u workers, %u uploaded, %.1f ms each", terrain.queued, terrain.workers,
+                    terrain.uploaded, terrain.generate_ms);
+        ImGui::Text("Ring %u / %u free, %u nodes", terrain.rings_free, terrain.rings, terrain.nodes);
+    }
     ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
 }
 void quality_controls(bool& high, render::TerrainSettings& terrain) {

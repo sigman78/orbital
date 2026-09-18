@@ -118,7 +118,7 @@ int main() {
             continue;
         const PatchKey parent{a.key.face, std::uint8_t(a.key.level - 1), std::uint16_t(a.key.x / 2),
                               std::uint16_t(a.key.y / 2)};
-        const double dist = length(close.camera_local - patch_bounds(parent).centre);
+        const double dist = TerrainTier::nearest_distance(close.camera_local, patch_bounds(parent));
         assert(dist < double(tier.range(a.key.level)) / TerrainTier::hysteresis);
     }
     // A still view stays converged; a turn away draws fewer and generates the newly seen side.

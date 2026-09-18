@@ -223,34 +223,38 @@ Fixed in the PR after review:
   0.95 radii) and the albedo as black. The placeholder now goes in first. Found because the near tier
   only activates above 960x540 at bookmark 10, so every low-resolution capture had shown the sphere.
 
-Open, in the order they matter:
+Open, in the order they matter (the numbering is kept from the review):
 
-1. **Selection by centre distance** (`TerrainTier::visit`), not the nearest distance to the node's cap as
-   designed. An unsplit node's near edge can be inside `range[level + 1]`, so the neighbouring child's edge
-   is only partly morphed there and a T-junction opens (the skirt hides it). Acceptance 1.
-2. **The tier and the shader measure different distances**: the tier to the unit sphere, the shader to
-   the displaced vertex. Heights reach ±0.02 radii and `range[8]` is about 0.01 radii at 900 px, so low
-   over raised ground the tier under-selects and the morph disagrees with the selection. The tier needs the
-   camera's height over the terrain, not the sphere.
-3. **The tile tangent frame is only nearly orthonormal.** The slopes are now per unit of arc (the chord
-   between the two neighbours) and the shader projects the face's S and T axes onto the sphere's tangent
-   plane, but off the face centre those projections are not orthogonal to each other, so the shading
-   normal tilts slightly. Acceptance 2 compares the tile path with the equirect path: with the seams gone
-   the mean brightness matches (19.3 against 19.2 at bookmark 10, 1600x900) and 23 percent of pixels still
-   differ by over eight codes, the tiles resolving finer relief than the 2048-texel map and the height
-   trace missing (item 6).
-4. Fixed after review: shading seams at tile edges. `generate_colour_tiles` samples a one-texel ring around
-   the tile so both sides of an edge take the same central difference; `terrain_tests` checks that
-   neighbours' edge texels match byte for byte.
-5. **`SKIRT_DROP` is a fixed 0.002 radii**, not a fraction of the cell size; at levels 0 and 1 the cracks
-   of item 1 exceed it.
-6. **The patch material drops the `root.detail` fade and the regolith grain.** The height-trace shadow is
-   also skipped, as the design allows for a first cut.
-7. **Acceptance 6 is not measured** (main-thread time under 0.5 ms with 32 jobs in flight), and acceptance
-   3 (one draw a pass) was not read off the panel.
+1. Fixed after review: selection by the patch centre. `TerrainTier::nearest_distance` is the closest the
+   camera can be to any point of the patch's cap over the shell between the terrain's lowest and highest
+   heights, and the tier splits on it; the vertex's own distance is never less, so an unsplit neighbour's
+   edge lies beyond the child's range and the child is fully morphed there. The tier test checks the
+   drawn children against it.
+2. Fixed with 1: the shell bound covers the displaced vertex.
+3. **The tile tangent frame is only nearly orthonormal.** The slopes are per unit of arc (the chord between
+   the two neighbours) and the shader projects the face's S and T axes onto the sphere's tangent plane, but
+   off the face centre those projections are not orthogonal to each other, so the shading normal tilts
+   slightly. Acceptance 2 compares the tile path with the equirect path: mean 18.2 against 19.2 and
+   contrast 17.7 against 19.2 (standard deviation of the frame) at bookmark 10, 1600x900, the tiles
+   resolving finer relief than the 2048-texel map.
+4. Fixed after review: shading seams. Same-level seams came from one-sided edge differences
+   (`generate_colour_tiles` now samples a one-texel ring; `terrain_tests` checks neighbours' edge texels
+   match byte for byte). Level-boundary seams came from the coarser tile's coarser-scale normal:
+   `patchMaterial` now blends the albedo and normal toward the parent tile's through the morph zone
+   (the parent's slot and the child's quadrant ride in `PatchInstance.tile`), so a fully morphed child
+   shades as its parent, which its unsplit neighbour matches at the shared edge.
+5. **`SKIRT_DROP` is a fixed 0.002 radii**, not a fraction of the cell size. With 1 fixed it only covers
+   the load transient; at levels 0 and 1 that transient's gap can exceed it.
+6. Mostly fixed: the patch path traces the crater-wall shadow through the tile's own heights
+   (`tileShadow`, clamped at the tile's edge, so a wall within six texels of an edge loses part of its
+   shadow), fades the tilt and the trace by `root.detail`, and passes the albedo's slope as `1 - n.z` as
+   the bake does (the raw gradient had brightened every slope). The regolith grain is still missing.
+7. **Acceptance 6 is not measured** (main-thread time under 0.5 ms with 32 jobs in flight); the panel now
+   shows the queue, the ring and the last tile's generation time, so it can be. Acceptance 3 (one draw a
+   pass) was not read off the panel.
 8. **Dead code from tasks 3 and 6**: `generate_patch`, `patch_indices`, `patch_vertex_count`, `patch_quads`
    remain in `terrain_patch.hpp` for the old tests only. Stale comments: `slot_count`'s "11 MiB of
-   vertices", "tangent warp" above `wireframe`, "staging-to-pool copies" in `renderer_impl.hpp`.
+   vertices", "staging-to-pool copies" in `renderer_impl.hpp`.
 9. **The calibration runs inside `terrain_tests`** (13.9 s; ctest went from 10 s to 25 s). Put it behind a
    flag. `patch_error` samples each corner once per quad and its comment claims the sphere's curvature is
    included; it compares radii only.
@@ -261,8 +265,9 @@ Open, in the order they matter:
 11. **`draw_body` leaves `ORBITAL_ROOT_PATCHES` and `root.patches` on the caller's `Root`**; the depth
     pre-pass and motion pass do not reset flags between bodies. Harmless only because the minor planet is
     the last body.
-12. **Constants duplicated between C++ and the shaders with no check**: the Everitt constant, the face
-    tables (in both `patch.slang` and `surface_airless.slang`), `tile_side`, the height range.
+12. **Constants duplicated between C++ and the shaders**: the Everitt constant, the face tables (in
+    `patch.slang` and `terrain_patch.cpp`), `tile_side`. The slot count and the height range are now
+    asserted equal in `renderer_impl.hpp`.
 13. **The effective tolerance is one level looser than `error_pixels` reads**: a node splits at
     `range[level + 1]`, as designed, so a level draws until its error is about 2.5 times the tolerance
     (about 3.75 px, not 1.5). Keep in mind when judging quality.

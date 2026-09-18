@@ -2,6 +2,7 @@
 #include "core/small_vec.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <condition_variable>
 #include <functional>
 #include <future>
@@ -34,12 +35,15 @@ public:
             std::lock_guard lock(job_mutex_);
             jobs_.push(std::move(job));
         }
+        in_flight_++;
         job_cv_.notify_one();
     }
+    unsigned in_flight() const { return in_flight_; } // submitted, not yet polled
     std::vector<T> poll() {
         std::lock_guard lock(finished_mutex_);
         std::vector<T> out;
         std::swap(out, finished_);
+        in_flight_ -= unsigned(out.size());
         return out;
     }
 
@@ -67,6 +71,7 @@ private:
     std::vector<T> finished_;
     std::mutex job_mutex_, finished_mutex_;
     std::condition_variable job_cv_;
+    std::atomic<unsigned> in_flight_{0};
     bool stop_ = false;
 };
 

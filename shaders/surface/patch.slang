@@ -36,6 +36,8 @@ struct PatchResult {
     uint slot;
     uint face;
     float3 bary; // one-hot per triangle corner on the unindexed wireframe grid, zero otherwise
+    float morph;     // 0 own shape, 1 the parent's
+    float texelArc;  // one tile texel's span on the sphere, radii
 };
 
 PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
@@ -76,7 +78,9 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     r.localNormal = d;
     r.tileUV = gm / PATCH_QUADS;
     r.slot = slot;
-    r.face = face;
+    r.face = face | patch.tile[2] << 8 | patch.tile[3] << 20; // the parent's slot and the quadrant packed beside the face
     r.bary = grid.normal.xyz;
+    r.morph = m;
+    r.texelArc = cell_size / PATCH_QUADS * EVERITT_K / TAN_K; // the warp's slope at the face centre
     return r;
 }

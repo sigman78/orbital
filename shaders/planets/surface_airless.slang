@@ -96,23 +96,53 @@ Material marsMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L
     return m;
 }
 
-Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility)
+// The patch path: the tile's albedo and normal at the fragment's tile
+// coordinate, blended toward the parent tile's through the morph zone so a
+// level boundary shades as one surface, with the crater walls' shadow traced
+// through the tile's own heights as the equirect path traces its map.
+float tileShadow(uint slot, float2 uv, float3 L, float3 N, float3 T, float3 B, float texelArc, float tier)
 {
+    float2 lightUV = float2(dot(L, T), dot(L, B));
+    float lightRise = max(dot(L, N), .02) / max(length(lightUV), 1e-4);
+    lightUV = normalize(lightUV + 1e-6);
+    float h0 = patchHeight(slot, uv * PATCH_QUADS);
+    float shadow = 0.0;
+    for (int s = 1; s <= 6; ++s)
+    {
+        float distance = float(s) * 1.5;
+        float h = patchHeight(slot, (uv + lightUV * distance / TILE_SIDE) * PATCH_QUADS);
+        float rise = h - h0 - lightRise * distance * texelArc;
+        shadow = max(shadow, rise / (distance * texelArc) * 6.0);
+    }
+    return 1.0 - saturate(shadow) * .55 * tier;
+}
+
+Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility, float tier)
+{
+    uint slot = input.tileSlot, face = input.tileFace & 0xff, parent = (input.tileFace >> 8) & 0xfff, quadrant = input.tileFace >> 20;
+    float morph = input.patchMorph.x;
     float2 uv = (input.tileUV * PATCH_QUADS + 0.5) / TILE_SIDE;
-    uint slot = input.tileSlot;
-    uint face = input.tileFace;
     float3 albedo = textureArrays[TEX_ARRAY_TERRAIN_ALBEDO].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0).rgb;
-    float4 nm = textureArrays[TEX_ARRAY_TERRAIN_NORMAL].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0);
-    float3 mapN = nm.xyz * 2.0 - 1.0;
+    float3 mapN = textureArrays[TEX_ARRAY_TERRAIN_NORMAL].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0).xyz * 2.0 - 1.0;
+    if (morph > 0.0 && parent < ORBITAL_TERRAIN_SLOTS)
+    {
+        float2 parentUV = ((float2(quadrant & 1, quadrant >> 1) + input.tileUV) * 0.5 * PATCH_QUADS + 0.5) / TILE_SIDE;
+        float3 parentAlbedo = textureArrays[TEX_ARRAY_TERRAIN_ALBEDO].SampleLevel(samplers[SAMPLER_CLAMP], float3(parentUV, float(parent)), 0).rgb;
+        float3 parentN = textureArrays[TEX_ARRAY_TERRAIN_NORMAL].SampleLevel(samplers[SAMPLER_CLAMP], float3(parentUV, float(parent)), 0).xyz * 2.0 - 1.0;
+        albedo = lerp(albedo, parentAlbedo, morph);
+        mapN = normalize(lerp(mapN, parentN, morph));
+    }
     // The tile's slopes run along the face's s and t on the sphere: the face axes
     // projected onto the tangent plane (not orthogonal off the face centre; small).
     float3 nl = normalize(input.localNormal);
     float3 T = normalize(mul(rotate, FACE_S[face] - nl * dot(nl, FACE_S[face])));
     float3 B = normalize(mul(rotate, FACE_T[face] - nl * dot(nl, FACE_T[face])));
     Material m;
-    m.N = normalize(T * mapN.x + B * mapN.y + N * max(mapN.z, .2));
-    m.albedo = albedo;
+    m.N = normalize(T * mapN.x * tier + B * mapN.y * tier + N * lerp(1.0, max(mapN.z, .2), tier));
     m.visibility = visibility;
+    if (tier > 0.0)
+        m.visibility *= tileShadow(slot, uv, L, N, T, B, input.patchMorph.y, tier);
+    m.albedo = albedo;
     m.rough = .95;
     m.water = 0.0;
     return m;
@@ -138,7 +168,7 @@ float4 fragmentMain(SurfaceVaryings input) : SV_Target0
 {
     Surface s = surfaceAt(root.frame, root.instances, input, true);
     float3x3 rotate = rotation(s.inst.rotation_kind.xyz);
-    Material m = (root.flags & ORBITAL_ROOT_PATCHES) ? patchMaterial(input, rotate, s.N, s.L, s.visibility)
+    Material m = (root.flags & ORBITAL_ROOT_PATCHES) ? patchMaterial(input, rotate, s.N, s.L, s.visibility, root.detail)
                : s.kind == KIND_MARS                ? marsMaterial(input, rotate, s.N, s.L, s.visibility, root.detail)
                : s.kind == KIND_MINOR_PLANET         ? minorPlanetMaterial(input, rotate, s.N, s.L, s.visibility, root.detail)
                                                     : moonMaterial(input, rotate, s.N, s.L, s.visibility, root.detail);

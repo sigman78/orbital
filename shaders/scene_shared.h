@@ -28,6 +28,8 @@ using ShaderMatrix4 = float[16];
 #define ORBITAL_ROOT_FOLD_CLOUDS 1 // the cloud shell is not drawn: the ground shader blends the clouds in
 #define ORBITAL_ROOT_WIREFRAME 2   // the near tier's triangles and patch borders drawn over it (with ORBITAL_ROOT_PATCHES)
 #define ORBITAL_ROOT_PATCHES 4     // this draw uses the CDLOD patch path: root.patches points to PatchInstance records
+// The near tier's tile slots (TerrainTier::slot_count): a PatchInstance without a parent tile carries this.
+#define ORBITAL_TERRAIN_SLOTS 1024
 // The minor planet's terrain height range in radii (MinorPlanetTerrain::height_min/max).
 #define MINOR_PLANET_HEIGHT_MIN (-.05)
 #define MINOR_PLANET_HEIGHT_MAX (.05)
@@ -64,7 +66,7 @@ struct Vertex { SHADER_FLOAT4 position; SHADER_FLOAT4 normal; };
 struct PatchInstance {
     SHADER_FLOAT4 cell;  // s0, t0, size, level
     SHADER_FLOAT4 morph; // start distance (radii), end distance, unused, unused
-    SHADER_UINT tile[4]; // face, slot, flags, unused
+    SHADER_UINT tile[4]; // face, slot, the parent's slot (or the slot count: none), the child's quadrant bits (x & 1, y & 1 << 1)
 };
 struct Frame {
     SHADER_MATRIX4 view_projection;

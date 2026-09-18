@@ -62,6 +62,13 @@ public:
     // Marks a slot resident if it still holds key; false if it was recycled meanwhile.
     bool mark_resident(unsigned slot, PatchKey key);
     float range(unsigned level) const { return level < std::size(range_) ? range_[level] : 0; }
+    unsigned resident_slot(PatchKey key) const; // the tile's slot, slot_count when absent or pending
+    unsigned pending() const;                   // slots handed out whose tile has not arrived
+    // The closest the camera (body frame, radii) can be to any point of the patch: its cap
+    // over the shell between the terrain's lowest and highest heights. The shader morphs by
+    // the vertex's own distance, which is never less, so an unsplit neighbour's edge is
+    // beyond the child's range and the child is fully morphed there.
+    static double nearest_distance(Vec3d camera_local, const PatchBounds& bounds);
     unsigned resident() const;
     unsigned nodes() const { return unsigned(nodes_.size() - free_blocks_.size() * 4); }
 

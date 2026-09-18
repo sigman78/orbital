@@ -107,6 +107,10 @@ enum class SamplerSlot : unsigned {
     count = ORBITAL_SAMPLER_COUNT
 };
 
+static_assert(TerrainTier::slot_count == ORBITAL_TERRAIN_SLOTS);
+static_assert(float(MinorPlanetTerrain::height_min) == float(MINOR_PLANET_HEIGHT_MIN) &&
+              float(MinorPlanetTerrain::height_max) == float(MINOR_PLANET_HEIGHT_MAX));
+
 // Array-texture descriptor slots (shaders/scene/bindings.slang binding 2).
 enum class ArraySlot : unsigned {
     terrain_height = TEX_ARRAY_TERRAIN_HEIGHT,
@@ -394,10 +398,12 @@ struct Renderer::Impl {
         PatchKey key;
         unsigned slot;
         unsigned ring;
+        float ms; // the generation's time on its worker
     };
     static constexpr unsigned tile_ring_count = 32;
     std::unique_ptr<WorkerPool<TileResult>> tile_pool;
     unsigned ring_used_frame[tile_ring_count] = {};
+    unsigned tile_workers = 0;
     unsigned ring_head = 0;
     // The staging heap has two slots, written by frame parity before the wait for the
     // previous frame, which may still be copying the other; the version each holds

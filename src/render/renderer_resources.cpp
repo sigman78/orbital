@@ -483,6 +483,13 @@ void Renderer::Impl::collect_memory_stats() {
     heap(memory.device_buffers, buffers.patch_records);
     heap(memory.device_buffers, buffers.meter_device);
     memory.device_buffers.used = memory.device_buffers.bytes;
+    memory.tile_arrays = {};
+    for (const GpuImage* image : {&tile_height, &tile_albedo, &tile_normal})
+        if (image->bytes()) {
+            memory.tile_arrays.bytes += image->bytes();
+            memory.tile_arrays.count++;
+        }
+    memory.tile_arrays.used = memory.tile_arrays.bytes * stats.frame.terrain.resident / TerrainTier::slot_count;
     memory.readback = {};
     heap(memory.readback, buffers.cull_readback);
     heap(memory.readback, buffers.meter_readback);

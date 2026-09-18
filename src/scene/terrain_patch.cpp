@@ -207,9 +207,8 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
             // Slopes per unit of arc: the height change over the chord between the two neighbours.
             const float dx = (at(x + 1, y) - at(x - 1, y)) / float(length(direction(x + 1, y) - direction(x - 1, y)));
             const float dy = (at(x, y + 1) - at(x, y - 1)) / float(length(direction(x, y + 1) - direction(x, y - 1)));
-            const float slope = std::sqrt(dx * dx + dy * dy);
             const Vec3f n = normalized(Vec3f{-dx, -dy, 1});
-            const Vec3f a = terrain.albedo(d, hc, std::min(slope, 1.0f));
+            const Vec3f a = terrain.albedo(d, hc, 1 - n.z); // the slope term as the bake passes it
             const auto u8 = [](float v) { return std::uint8_t(std::clamp(v * 255.0f + 0.5f, 0.0f, 255.0f)); };
             const std::size_t p = i * 4;
             albedo[p] = u8(a.x);

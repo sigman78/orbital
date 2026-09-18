@@ -5,6 +5,7 @@
 #include "render/frame_calculations.hpp"
 #include "scene/terrain_patch.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -59,21 +60,22 @@ void Renderer::Impl::create_terrain_tier() {
                  !buffers.tile_staging.range().cpu,
              "terrain tier allocation failed");
     const unsigned cores = std::thread::hardware_concurrency();
-    const unsigned workers = std::max(1u, cores > 2 ? cores - 2 : 1u);
-    tile_pool = std::make_unique<WorkerPool<TileResult>>(workers);
+    tile_workers = std::max(1u, cores > 2 ? cores - 2 : 1u);
+    tile_pool = std::make_unique<WorkerPool<TileResult>>(tile_workers);
     log::info("Near tier: {} tile slots, {} workers, {} KiB height + {} KiB albedo + {} KiB normal arrays",
-              TerrainTier::slot_count, workers, TerrainTier::slot_count * height_tile_bytes >> 10,
+              TerrainTier::slot_count, tile_workers, TerrainTier::slot_count * height_tile_bytes >> 10,
               TerrainTier::slot_count * colour_tile_bytes >> 10, TerrainTier::slot_count * colour_tile_bytes >> 10);
 }
 
 void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     patch_copies.clear();
     tile_copies.clear();
+    stats.frame.terrain.uploaded = 0;
     if (!minor_planet_terrain)
         return;
     if (!input.terrain.near_tier) {
         terrain_tier.disable();
-        stats.frame.patches_drawn = 0;
+        stats.frame.terrain = {.slots = TerrainTier::slot_count, .workers = tile_workers};
         return;
     }
     // Poll finished tiles from the worker pool and record their copies.
@@ -86,6 +88,8 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
             tile_copies.push_back({staging_gpu + albedo_offset, colour_tile_bytes, tile_albedo.texture(), result.slot});
             tile_copies.push_back({staging_gpu + normal_offset, colour_tile_bytes, tile_normal.texture(), result.slot});
             ring_used_frame[result.ring] = frame_index;
+            stats.frame.terrain.uploaded++;
+            stats.frame.terrain.generate_ms = result.ms;
         }
     }
     const unsigned body = showcase.minor_planet();
@@ -116,8 +120,17 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     if (terrain_tier.active() != was_active)
         log::info("Near tier {} at frame {}, {} patches resident", terrain_tier.active() ? "on" : "off", frame_index,
                   terrain_tier.resident());
-    stats.frame.patches_drawn = unsigned(terrain_tier.draws().size());
-    stats.frame.patches_resident = terrain_tier.resident();
+    auto& ts = stats.frame.terrain;
+    ts.active = terrain_tier.active();
+    ts.drawn = unsigned(terrain_tier.draws().size());
+    ts.resident = terrain_tier.resident();
+    ts.pending = terrain_tier.pending();
+    ts.queued = tile_pool ? tile_pool->in_flight() : 0;
+    ts.rings_free = free_rings;
+    ts.rings = tile_ring_count;
+    ts.slots = TerrainTier::slot_count;
+    ts.nodes = terrain_tier.nodes();
+    ts.workers = tile_workers;
     // Submit new generation requests to the worker pool.
     if (tile_pool) {
         const float height_range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
@@ -139,6 +152,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
             const PatchKey key = generation.key;
             const unsigned slot = generation.slot;
             tile_pool->submit([terrain, key, slot, ring, dst, height_range]() -> TileResult {
+                const auto start = std::chrono::steady_clock::now();
                 std::vector<float> heights(tile_side * tile_side);
                 std::vector<std::uint8_t> albedo(tile_side * tile_side * 4), normal(tile_side * tile_side * 4);
                 generate_height_tile(*terrain, key, heights);
@@ -151,7 +165,8 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                         .5f);
                 std::memcpy(dst + albedo_offset, albedo.data(), colour_tile_bytes);
                 std::memcpy(dst + normal_offset, normal.data(), colour_tile_bytes);
-                return {key, slot, ring};
+                return {key, slot, ring,
+                        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count()};
             });
         }
     }
@@ -168,7 +183,12 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         }();
         const float morph_end = terrain_tier.range(draw.key.level);
         const float morph_start = 0.7f * morph_end;
-        records[i] = {.cell = cell, .morph = {morph_start, morph_end, 0, 0}, .tile = {draw.key.face, draw.slot, 0, 0}};
+        const PatchKey parent{draw.key.face, std::uint8_t(draw.key.level ? draw.key.level - 1 : 0),
+                              std::uint16_t(draw.key.x / 2), std::uint16_t(draw.key.y / 2)};
+        const unsigned parent_slot = draw.key.level ? terrain_tier.resident_slot(parent) : TerrainTier::slot_count;
+        records[i] = {.cell = cell,
+                      .morph = {morph_start, morph_end, 0, 0},
+                      .tile = {draw.key.face, draw.slot, parent_slot, (draw.key.x & 1u) | (draw.key.y & 1u) << 1}};
     }
     patch_records_bytes = terrain_tier.draws().size() * sizeof(PatchInstance);
     if (patch_records_bytes)

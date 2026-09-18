@@ -82,6 +82,26 @@ unsigned TerrainTier::slot_of(PatchKey key) const {
     return found == slots_by_key_.end() ? no_slot : found->second;
 }
 
+double TerrainTier::nearest_distance(Vec3d camera_local, const PatchBounds& bounds) {
+    const double len = length(camera_local);
+    if (len < 1e-9)
+        return 0;
+    const double theta = std::acos(std::clamp(dot(camera_local, bounds.centre) / len, -1.0, 1.0));
+    const double t = std::max(0.0, theta - bounds.angular_radius);
+    const double r = std::clamp(len * std::cos(t), 1 + double(MinorPlanetTerrain::height_min),
+                                1 + double(MinorPlanetTerrain::height_max));
+    return std::sqrt(std::max(0.0, len * len + r * r - 2 * len * r * std::cos(t)));
+}
+
+unsigned TerrainTier::resident_slot(PatchKey key) const {
+    const unsigned slot = slot_of(key);
+    return slot != no_slot && slots_[slot].resident ? slot : no_slot;
+}
+
+unsigned TerrainTier::pending() const {
+    return unsigned(slots_by_key_.size()) - resident();
+}
+
 unsigned TerrainTier::resident() const {
     unsigned count = 0;
     for (const auto& [_, slot] : slots_by_key_)
@@ -107,7 +127,7 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view) {
     }
     const PatchKey key = nodes_[index].key;
     touch(key);
-    const double dist = length(view.camera_local - nodes_[index].bounds.centre);
+    const double dist = nearest_distance(view.camera_local, nodes_[index].bounds);
     const bool split = key.level < patch_level_max && key.level + 1 < std::size(level_error) &&
                        (nodes_[index].children || nodes() < slot_count - 64) &&
                        dist < double(range_[key.level + 1]) * (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0);
