@@ -45,7 +45,12 @@ must scale to a whole-planet tier later (the far tier as the same cube sphere at
 ## Decisions (agreed, do not reopen without asking)
 
 1. Tiles live in texture arrays, one layer per tile slot: heights (`r16_unorm`), albedo (`rgba8_unorm`,
-   linear light), normal+height (`rgba8_unorm`, the airless shader's layout). Not atlases.
+   linear light), slope (`rg16_unorm`). Not atlases. *Revised 17 September 2026*: the slope plane was
+   a body-frame normal with the height repeated in alpha, in `rgba8_unorm`. Eight bits resolved the
+   direction to 0.38 degrees, which is a one percent step in the diffuse term at 60 degrees of incidence
+   and 3.7 percent at 80; the third component was redundant over a known sphere and the alpha was dead.
+   Two channels of sixteen bits over the gradient are the same four bytes a texel and resolve 0.002
+   degrees. See `docs/IDEAS.md` for the measurements behind the scale.
 2. Selection is by distance ranges per level, one range per level derived from that level's worst error, so
    a patch's morph state at an edge is a function of distance alone and levels meet without cracks. Per-tile
    error is not used for selection.
@@ -68,14 +73,18 @@ must scale to a whole-planet tier later (the far tier as the same cube sphere at
 - A patch is a cell of a face's quadtree, `PatchKey`. Its bounds (`patch_bounds`) give the cap and the cell's
   angular size.
 - A tile is the patch's textures: `tile_side` (65) squared heights, and the same count of albedo and
-  normal+height texels. Texel (i, j) of a tile is the terrain sampled at the cell coordinates
+  slope texels. Texel (i, j) of a tile is the terrain sampled at the cell coordinates
   `s0 + i * size / 64`, `t0 + j * size / 64`, through the warp. So a child's even texels are its parent's
   texels at the same directions, and a fully morphed child edge lands on the parent's edge.
-- The height texel is the height over `[height_min, height_max]` in 16 bits. The normal texel is the
-  surface normal in the body frame (no tangent frame: see the review) with the height in alpha, from
-  central differences of the tile's heights with a one-texel ring around them (past a cube edge, the
-  neighbouring face's texel). The albedo texel is `MinorPlanetTerrain::albedo` at the texel's direction,
-  height and slope.
+- The height texel is the height over `[height_min, height_max]` in 16 bits. The slope texel is the
+  terrain's gradient, from central differences of the tile's heights with a one-texel ring around them
+  (past a cube edge, the neighbouring face's texel), in radii per radian over
+  `[-tile_slope_scale, tile_slope_scale]` against the face's tangent frame (`patch_tangent_frame`). The
+  albedo texel is `MinorPlanetTerrain::albedo` at the texel's direction, height and slope.
+- That frame is built from the sphere's own direction and the face's s axis, never the face's axis: the
+  frame turns at a cube edge and the gradient's two components turn with it, so the two faces meeting
+  there read the same body-frame normal back out. The frame does not depend on the level either, so a
+  parent tile's gradient is in the same frame as its child's and the morph is a plain lerp of the two.
 - A slot is one layer index shared by the three arrays. `TerrainTier` owns the slot cache; the renderer owns
   the arrays. Slot count 1024 (see the memory table).
 
@@ -153,9 +162,9 @@ crack (see selection).
 ### Fragment shading
 
 - The airless shader keeps the equirect path for the sphere. In the patch path (`ORBITAL_ROOT_PATCHES`) it
-  samples the albedo and normal arrays at the patch's slot by the cell's uv (from `cube_coordinates` of the
-  local normal, as the wireframe does today, or from a varying), builds the tangent frame from the face's s
-  and t directions, and runs the same lighting. The height trace for crater-wall shadows reads the tile's
+  samples the albedo and slope arrays at the patch's slot by the cell's uv (from `cube_coordinates` of the
+  local normal, as the wireframe does today, or from a varying), rebuilds the face's tangent frame
+  (`patchTangentFrame`) to read the normal out of the slope, and runs the same lighting. The height trace for crater-wall shadows reads the tile's
   height plane in the same layout as the equirect trace; if that proves fiddly, the trace can be skipped in
   the patch path for the first cut and noted.
 - The wireframe overlay reads the level from the `patchLevel` varying.
@@ -165,7 +174,7 @@ crack (see selection).
 | Item | Size |
 |---|---|
 | Height array, 1024 layers of 65x65 r16 | 8.6 MiB |
-| Albedo and normal arrays, 1024 layers of 65x65 rgba8 each | 17 MiB each |
+| Albedo array, 1024 layers of 65x65 rgba8, and slope, 1024 of 65x65 rg16 | 17 MiB each |
 | Patch records, 1024 x 48 B, two staging slots plus device | 150 KiB |
 | Job ring, 32 x (65x65 x (2 + 4 + 4) B) | 1.4 MiB host-visible |
 | Shared grid | 4485 vertices, 26112 indices, static |

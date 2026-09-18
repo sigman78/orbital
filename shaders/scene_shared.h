@@ -33,6 +33,8 @@ using ShaderMatrix4 = float[16];
 // The minor planet's terrain height range in radii (MinorPlanetTerrain::height_min/max).
 #define MINOR_PLANET_HEIGHT_MIN (-.05)
 #define MINOR_PLANET_HEIGHT_MAX (.05)
+// The span of the slope tile's two channels, radii per radian (tile_slope_scale).
+#define MINOR_PLANET_SLOPE_SCALE 2.0
 // The Earth's cloud shell above the surface, in radii (the mesh scale and the shadow geometry).
 #define ORBITAL_CLOUD_HEIGHT 0.009
 // Instance.rotation_kind.w (SurfaceKind on the C++ side); each kind has its own fragment shader.

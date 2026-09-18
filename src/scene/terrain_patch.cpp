@@ -37,6 +37,12 @@ Vec3d cube_direction(unsigned face, double s, double t) {
     return normalized(f.axis + f.s * (std::tan(everitt_k * s) / tan_k) + f.t * (std::tan(everitt_k * t) / tan_k));
 }
 
+TangentFrame patch_tangent_frame(unsigned face, Vec3d direction) {
+    const Vec3d d = normalized(direction);
+    const Vec3d tangent = normalized(faces[face].s - d * dot(faces[face].s, d));
+    return {tangent, cross(d, tangent)};
+}
+
 CubeCoord cube_coordinates(Vec3d direction) {
     const double ax = std::abs(direction.x), ay = std::abs(direction.y), az = std::abs(direction.z);
     unsigned face;
@@ -202,13 +208,12 @@ void generate_height_tile(const MinorPlanetTerrain& terrain, PatchKey key, std::
 }
 
 void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<const float> heights,
-                           std::span<std::uint8_t> albedo, std::span<std::uint8_t> normal) {
+                           std::span<std::uint8_t> albedo, std::span<std::uint16_t> slope) {
     ORBITAL_ASSERT(heights.size() == tile_side * tile_side);
     ORBITAL_ASSERT(albedo.size() == tile_side * tile_side * 4);
-    ORBITAL_ASSERT(normal.size() == tile_side * tile_side * 4);
+    ORBITAL_ASSERT(slope.size() == tile_side * tile_side * 2);
     const Cell cell = cell_of(key);
     constexpr unsigned quads = tile_side - 1, bordered = tile_side + 2;
-    const float range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
     const auto direction = [&](int x, int y) {
         return ring_direction(key.face, cell.s0 + x * cell.size / quads, cell.t0 + y * cell.size / quads);
     };
@@ -230,15 +235,13 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
             const Vec3d d = direction(x, y);
             const float hc = at(x, y);
             // The gradient from the height changes along the two grid directions (not
-            // orthogonal off the face centre, so solve rather than assume), and the
-            // normal in the body frame: no tangent frame, so faces cannot disagree.
+            // orthogonal off the face centre, so solve rather than assume).
             const Vec3d us = direction(x + 1, y) - direction(x - 1, y), vt = direction(x, y + 1) - direction(x, y - 1);
             const Vec3d u = normalized(us), v = normalized(vt);
             const double ds = (at(x + 1, y) - at(x - 1, y)) / length(us),
                          dt = (at(x, y + 1) - at(x, y - 1)) / length(vt);
             const double c = dot(u, v), det = std::max(1 - c * c, 1e-6);
             const Vec3d g = u * ((ds - c * dt) / det) + v * ((dt - c * ds) / det);
-            const Vec3f n = to_float(normalized(d - g));
             const Vec3f a = terrain.albedo(
                 d, hc, float(1 - dot(normalized(d - g), d))); // the slope term as the bake passes it
             const auto u8 = [](float v) { return std::uint8_t(std::clamp(v * 255.0f + 0.5f, 0.0f, 255.0f)); };
@@ -247,10 +250,15 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
             albedo[p + 1] = u8(a.y);
             albedo[p + 2] = u8(a.z);
             albedo[p + 3] = 255;
-            normal[p] = u8(n.x * .5f + .5f);
-            normal[p + 1] = u8(n.y * .5f + .5f);
-            normal[p + 2] = u8(n.z * .5f + .5f);
-            normal[p + 3] = u8((hc - MinorPlanetTerrain::height_min) / range);
+            // The gradient along the face's frame, which the fragment shader rebuilds
+            // from the same direction: the frame is what turns at a cube edge, the
+            // normal it carries is not.
+            const TangentFrame frame = patch_tangent_frame(key.face, d);
+            const auto u16 = [](double s) {
+                return std::uint16_t(std::clamp(s / tile_slope_scale * .5 + .5, 0.0, 1.0) * 65535.0 + .5);
+            };
+            slope[i * 2] = u16(dot(g, frame.tangent));
+            slope[i * 2 + 1] = u16(dot(g, frame.bitangent));
         }
 }
 

@@ -177,33 +177,46 @@ void test_tiles() {
         assert(lh[y * tile_side + (tile_side - 1)] == rh[y * tile_side]);
     // Colour tiles match expected layout, and neighbours agree on their shared
     // edge's texels byte for byte (the seam test).
-    std::vector<std::uint8_t> albedo(tile_side * tile_side * 4), norm(tile_side * tile_side * 4);
+    const auto tile_normal = [](const std::uint16_t* slope, unsigned face, Vec3d d) {
+        const TangentFrame frame = patch_tangent_frame(face, d);
+        const auto s = [&](unsigned c) { return (slope[c] / 65535.0 * 2 - 1) * tile_slope_scale; };
+        return normalized(d - frame.tangent * s(0) - frame.bitangent * s(1));
+    };
+    std::vector<std::uint8_t> albedo(tile_side * tile_side * 4);
+    std::vector<std::uint16_t> norm(tile_side * tile_side * 2);
     generate_colour_tiles(terrain, key, a, albedo, norm);
     for (unsigned i = 0; i < tile_side * tile_side; i++) {
         assert(albedo[i * 4 + 3] == 255);
-        const Vec3d n{norm[i * 4] / 127.5 - 1, norm[i * 4 + 1] / 127.5 - 1, norm[i * 4 + 2] / 127.5 - 1};
         const double size = 2.0 / double(1u << key.level);
         const Vec3d d = cube_direction(key.face, -1 + key.x * size + (i % tile_side) * size / 64,
                                        -1 + key.y * size + (i / tile_side) * size / 64);
-        assert(dot(n, d) > .7); // the body-frame normal points outward, within 45 degrees of the sphere's
+        // The normal the slope reads back points outward, within 45 degrees of the sphere's.
+        assert(dot(tile_normal(&norm[i * 2], key.face, d), d) > .7);
     }
-    std::vector<std::uint8_t> ra(tile_side * tile_side * 4), rn(tile_side * tile_side * 4);
+    std::vector<std::uint8_t> ra(tile_side * tile_side * 4);
+    std::vector<std::uint16_t> rn(tile_side * tile_side * 2);
     generate_colour_tiles(terrain, right_key, rh, ra, rn);
     generate_colour_tiles(terrain, left_key, lh, albedo, norm);
-    for (unsigned y = 0; y < tile_side; y++)
-        for (unsigned c = 0; c < 4; c++) {
-            const std::size_t l = (y * tile_side + tile_side - 1) * 4 + c, r = (y * tile_side) * 4 + c;
-            assert(albedo[l] == ra[r] && norm[l] == rn[r]);
-        }
-    // Across every cube edge the two faces agree on the albedo and on the normal
-    // (stored in the body frame) at every shared edge texel, corners excepted: three
-    // grids meet there and no one difference pair serves all three.
+    for (unsigned y = 0; y < tile_side; y++) {
+        for (unsigned c = 0; c < 4; c++)
+            assert(albedo[(y * tile_side + tile_side - 1) * 4 + c] == ra[(y * tile_side) * 4 + c]);
+        for (unsigned c = 0; c < 2; c++)
+            assert(norm[(y * tile_side + tile_side - 1) * 2 + c] == rn[(y * tile_side) * 2 + c]);
+    }
+    // Across every cube edge the two faces agree on the albedo and on the normal at
+    // every shared edge texel, corners excepted: three grids meet there and no one
+    // difference pair serves all three. The two faces hold the gradient in their own
+    // frames, so the bytes differ there and the normal read back does not.
     {
-        const auto world_normal = [&](unsigned, unsigned, unsigned, const std::uint8_t* n, PatchKey) {
-            return normalized(Vec3d{n[0] / 127.5 - 1, n[1] / 127.5 - 1, n[2] / 127.5 - 1});
+        const auto world_normal = [&](unsigned face, unsigned x, unsigned y, const std::uint16_t* slope, PatchKey key) {
+            const double size = 2.0 / double(1u << key.level);
+            const Vec3d d = cube_direction(face, -1 + key.x * size + x * size / (tile_side - 1),
+                                           -1 + key.y * size + y * size / (tile_side - 1));
+            return tile_normal(slope, face, d);
         };
         std::vector<float> h1(tile_side * tile_side), h2(tile_side * tile_side);
-        std::vector<std::uint8_t> a1(h1.size() * 4), n1(a1.size()), a2(a1.size()), n2(a1.size());
+        std::vector<std::uint8_t> a1(h1.size() * 4), a2(a1.size());
+        std::vector<std::uint16_t> n1(h1.size() * 2), n2(n1.size());
         unsigned compared = 0;
         double worst = 0;
         for (unsigned f1 = 0; f1 < 6; f1++)
@@ -229,16 +242,15 @@ void test_tiles() {
                                             continue;
                                         for (unsigned c = 0; c < 4; c++)
                                             assert(a1[j1 * 4 + c] == a2[j2 * 4 + c]);
-                                        assert(n1[j1 * 4 + 3] == n2[j2 * 4 + 3]);
-                                        const Vec3d w1 = world_normal(f1, x1, y1, &n1[j1 * 4], p1);
-                                        const Vec3d w2 = world_normal(f2, x2, y2, &n2[j2 * 4], p2);
+                                        const Vec3d w1 = world_normal(f1, x1, y1, &n1[j1 * 2], p1);
+                                        const Vec3d w2 = world_normal(f2, x2, y2, &n2[j2 * 2], p2);
                                         worst = std::max(worst, length(w1 - w2));
                                         compared++;
                                     }
                     }
             }
         std::fprintf(stderr, "tiles: %u cube-edge texel pairs compared, world normals within %.4f\n", compared, worst);
-        assert(compared > 100 && worst < .02); // a little over two 8-bit codes
+        assert(compared > 100 && worst < 5e-4); // measured 1e-4, about two 16-bit slope codes on each side
     }
     // Patch error positive and reasonable.
     const float error = patch_error(terrain, key);

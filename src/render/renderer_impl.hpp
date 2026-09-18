@@ -110,12 +110,13 @@ enum class SamplerSlot : unsigned {
 static_assert(TerrainTier::slot_count == ORBITAL_TERRAIN_SLOTS);
 static_assert(float(MinorPlanetTerrain::height_min) == float(MINOR_PLANET_HEIGHT_MIN) &&
               float(MinorPlanetTerrain::height_max) == float(MINOR_PLANET_HEIGHT_MAX));
+static_assert(tile_slope_scale == float(MINOR_PLANET_SLOPE_SCALE));
 
 // Array-texture descriptor slots (shaders/scene/bindings.slang binding 2).
 enum class ArraySlot : unsigned {
     terrain_height = TEX_ARRAY_TERRAIN_HEIGHT,
     terrain_albedo = TEX_ARRAY_TERRAIN_ALBEDO,
-    terrain_normal = TEX_ARRAY_TERRAIN_NORMAL,
+    terrain_slope = TEX_ARRAY_TERRAIN_SLOPE,
     count = ORBITAL_TEXTURE_ARRAY_COUNT,
 };
 
@@ -379,7 +380,7 @@ struct Renderer::Impl {
     // quadtree and cache, and this frame's staging-to-pool copies.
     std::optional<MinorPlanetTerrain> minor_planet_terrain;
     TerrainTier terrain_tier;
-    GpuImage tile_height, tile_albedo, tile_normal; // the three tile arrays, 1024 layers each
+    GpuImage tile_height, tile_albedo, tile_slope; // the three tile arrays, 1024 layers each
     std::uint64_t grid_vertices_address = 0, grid_indices_address = 0;
     std::uint64_t grid_wire_address = 0; // the grid unindexed, a one-hot barycentric per corner, for the wireframe
     unsigned grid_index_count = 0;

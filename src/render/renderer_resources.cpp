@@ -46,7 +46,7 @@ Renderer::Impl::~Impl() {
     tile_pool.reset();
     tile_height.reset();
     tile_albedo.reset();
-    tile_normal.reset();
+    tile_slope.reset();
     array_placeholder.reset();
     static_upload.staging.reset(); // empty after start-up; here for an init that stopped early
     buffers = {};
@@ -484,7 +484,7 @@ void Renderer::Impl::collect_memory_stats() {
     heap(memory.device_buffers, buffers.meter_device);
     memory.device_buffers.used = memory.device_buffers.bytes;
     memory.tile_arrays = {};
-    for (const GpuImage* image : {&tile_height, &tile_albedo, &tile_normal})
+    for (const GpuImage* image : {&tile_height, &tile_albedo, &tile_slope})
         if (image->bytes()) {
             memory.tile_arrays.bytes += image->bytes();
             memory.tile_arrays.count++;

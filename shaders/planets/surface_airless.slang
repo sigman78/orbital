@@ -96,28 +96,39 @@ Material marsMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L
     return m;
 }
 
-// The patch path: the tile's albedo and normal (in the body frame, so no
-// tangent frame is involved and faces cannot disagree at their edges) at the
-// fragment's tile coordinate, blended toward the parent tile's through the
-// morph zone so a level boundary shades as one surface, with the crater walls'
-// shadow traced through the baked equirect map as the sphere path traces it.
+// The patch path: the tile's albedo and slope at the fragment's tile coordinate,
+// blended toward the parent tile's through the morph zone so a level boundary
+// shades as one surface, with the crater walls' shadow traced through the baked
+// equirect map as the sphere path traces it.
+//
+// The tile stores the terrain's gradient, not a normal: two channels of sixteen
+// bits over [-MINOR_PLANET_SLOPE_SCALE, MINOR_PLANET_SLOPE_SCALE] against the
+// face's tangent frame, which patchTangentFrame rebuilds here from the sphere's
+// own direction. The frame turns at a cube edge and the gradient's components turn
+// with it, so the two faces meeting there read back the same body-frame normal;
+// the parent tile's frame is this same one, so the morph is a lerp of gradients,
+// the blend that matches the vertex path's lerp of heights.
 Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility, float tier)
 {
     uint slot = input.tileSlot, face = input.tileFace & 0xff, parent = (input.tileFace >> 8) & 0xfff, quadrant = (input.tileFace >> 20) & 3;
     float morph = input.patchMorph;
+    float3 localN = normalize(input.localNormal);
     float2 uv = (input.tileUV * PATCH_QUADS + 0.5) / TILE_SIDE;
     float3 albedo = textureArrays[TEX_ARRAY_TERRAIN_ALBEDO].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0).rgb;
-    float3 mapN = textureArrays[TEX_ARRAY_TERRAIN_NORMAL].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0).xyz * 2.0 - 1.0;
+    float2 slope = textureArrays[TEX_ARRAY_TERRAIN_SLOPE].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0).xy * 2.0 - 1.0;
     if (morph > 0.0 && parent < ORBITAL_TERRAIN_SLOTS)
     {
         float2 parentUV = ((float2(quadrant & 1, quadrant >> 1) + input.tileUV) * 0.5 * PATCH_QUADS + 0.5) / TILE_SIDE;
         float3 parentAlbedo = textureArrays[TEX_ARRAY_TERRAIN_ALBEDO].SampleLevel(samplers[SAMPLER_CLAMP], float3(parentUV, float(parent)), 0).rgb;
-        float3 parentN = textureArrays[TEX_ARRAY_TERRAIN_NORMAL].SampleLevel(samplers[SAMPLER_CLAMP], float3(parentUV, float(parent)), 0).xyz * 2.0 - 1.0;
+        float2 parentSlope = textureArrays[TEX_ARRAY_TERRAIN_SLOPE].SampleLevel(samplers[SAMPLER_CLAMP], float3(parentUV, float(parent)), 0).xy * 2.0 - 1.0;
         albedo = lerp(albedo, parentAlbedo, morph);
-        mapN = normalize(lerp(mapN, parentN, morph));
+        slope = lerp(slope, parentSlope, morph);
     }
+    float3 tangent, bitangent;
+    patchTangentFrame(face, localN, tangent, bitangent);
+    float3 mapN = normalize(localN - (tangent * slope.x + bitangent * slope.y) * MINOR_PLANET_SLOPE_SCALE);
     Material m;
-    m.N = normalize(lerp(N, mul(rotate, normalize(mapN)), tier));
+    m.N = normalize(lerp(N, mul(rotate, mapN), tier));
     m.visibility = visibility;
     if (tier > 0.0)
     {
@@ -125,7 +136,6 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
         // sphere path traces it: one continuous field over the body, where a trace
         // through the tile's own heights would stop at the tile's edge and step
         // along the face's skewed axes, and its cut would show along every border.
-        float3 localN = normalize(input.localNormal);
         float3 T, B;
         tangentFrame(localN, rotate, N, T, B);
         m.visibility *= terrainShadow(textures[TEX_MINOR_PLANET_NORMAL], MINOR_PLANET_TEXELS, sphereUV(localN), L, N, T, B,

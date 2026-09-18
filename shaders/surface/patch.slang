@@ -20,6 +20,17 @@ float3 patchCubeDirection(uint face, float2 st)
     return normalize(FACE_AXIS[face] + FACE_S[face] * w.x + FACE_T[face] * w.y);
 }
 
+// The frame a slope tile is written against (scene/terrain_patch.hpp's
+// patch_tangent_frame): the face's s direction squared up against the sphere's own
+// normal at the point. The reference is the direction, never the face's axis, which
+// turns at a cube edge; the face only picks which way is x. FACE_S lies 45 degrees
+// off the nearest corner of the face, so the projection never runs short.
+void patchTangentFrame(uint face, float3 direction, out float3 tangent, out float3 bitangent)
+{
+    tangent = normalize(FACE_S[face] - direction * dot(FACE_S[face], direction));
+    bitangent = cross(direction, tangent);
+}
+
 float patchHeight(uint slot, float2 g)
 {
     float2 uv = (g + 0.5) / TILE_SIDE;
