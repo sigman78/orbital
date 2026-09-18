@@ -1,348 +1,244 @@
-# Dynamic planet terrain: the minor planet's near tier as a CDLOD cube sphere
+# Dynamic planet terrain: the minor planet's near tier
 
-Design and task list for the next version of the minor planet's near tier. Written for handoff: a coding
-agent should be able to implement it from this document plus the code it names. It replaces the vertex-pool
-near tier merged in PR #59 and refined in PR #61; it keeps that tier's quadtree, culling, cache and switch.
+The minor planet draws close in as a CDLOD cube sphere whose shape and colour come from per-patch
+tiles of textures rather than CPU-built vertices. One shared grid mesh draws every patch; levels meet
+without cracks by vertex morphing. Tiles are generated on a CPU worker pool and appear as they are
+ready. The design is meant to scale to a whole-planet tier later, and to a compute generator that
+fills the same tile contract without a renderer change.
 
-Depends on: `docs/BACKEND_TEXTURE_ARRAYS.md` (texture array descriptors in the GPU layer), which must land first.
+Historical record of how this got here is in `docs/DECISIONS.md`. This document is what the code does
+now and what is still wrong with it.
 
-## Goal
+## Decisions that stand
 
-Close in, the minor planet draws as a cube sphere whose shape and colour come from per-patch tiles of
-textures, not from CPU-built vertices. One shared grid mesh draws every patch. Levels meet without cracks by
-vertex morphing (CDLOD). Tiles are generated on the CPU on a worker pool, lazily, and appear as they are
-ready; the same tile contract is later filled by a compute shader without changing the renderer. The design
-must scale to a whole-planet tier later (the far tier as the same cube sphere at coarse levels).
-
-## What exists today (read these first)
-
-- `src/scene/terrain.hpp`: `MinorPlanetTerrain`, height and albedo as functions of a direction, crater
-  regions. The one source of the terrain; every tile samples it.
-- `src/scene/terrain_patch.hpp`: `PatchKey` (face, level, x, y; packed to 32 bits), `cube_direction` (the
-  tangent warp), `patch_bounds`, `generate_patch` (vertices, to be removed), `patch_indices`.
-- `src/render/terrain_tier.hpp`: `TerrainTier`, the CPU quadtree: `update(TierView, frame)` returns the
-  patches to draw and the ones to generate; a 1024-slot cache keyed by patch with least-recently-used
-  eviction, the six root faces pinned; a node draws itself until all four visible children are resident.
-  Frustum and horizon culling per node. Tested alone in `tests/terrain_tier_tests.cpp`.
-- `src/render/renderer_terrain.cpp`: generation before the previous frame's GPU wait into a staging slot
-  chosen by frame parity, copies into a device pool at the start of the command buffer, one indexed
-  multi-draw per pass through the surface vertex shader (`draw_body`). Patches draw in the depth pre-pass,
-  the scene pass and the motion pass; the shadow map keeps the sphere.
-- `shaders/surface/surface.slang`: the shared surface vertex shader (reads `root.vertices[index]`, places
-  `centre + rotate(position) * radius`); `shaders/scene/motion.slang` has its own vertex shader that places
-  the same vertex at the previous pose. `shaders/planets/surface_airless.slang` shades the body from the
-  baked equirect maps by `input.localNormal` and draws the wireframe overlay from the face's cell
-  coordinates when `root.flags & ORBITAL_ROOT_WIREFRAME`.
-- `shaders/scene_shared.h`: `Root` (push constants, 40 bytes, asserted in `src/render/gpu_types.hpp`),
-  `Instance`, `Vertex`, `DrawArgs`, `ORBITAL_ROOT_*` flags.
-- Review aids: bookmark 10 (`--bookmark 9`) just above the surface, the `Near tier` and `Wireframe` switches
-  under Quality (`--near-tier`, `--wireframe`), Z for slow travel. Check shots `minor-planet-close`,
-  `minor-planet-sphere`, `minor-planet-wire` in the bodies group of `tools/check.py` (1600x900, 60 frames).
-- Measured: a patch's geometric error by level (the terrain at quad centres against the corner mean, radii):
-  0.017, 0.0063, 0.0019, 0.00086, 0.00033, 9.7e-5 for levels 1 to 6, about threefold a level. The terrain
-  test prints it.
-
-## Decisions (agreed, do not reopen without asking)
-
-1. Tiles live in texture arrays, one layer per tile slot: heights (`r16_unorm`), albedo (`rgba8_unorm`,
-   linear light), slope (`rg16_unorm`). Not atlases. *Revised 17 September 2026*: the slope plane was
-   a body-frame normal with the height repeated in alpha, in `rgba8_unorm`. Eight bits resolved the
-   direction to 0.38 degrees, which is a one percent step in the diffuse term at 60 degrees of incidence
-   and 3.7 percent at 80; the third component was redundant over a known sphere and the alpha was dead.
-   Two channels of sixteen bits over the gradient are the same four bytes a texel and resolve 0.002
-   degrees. See `docs/IDEAS.md` for the measurements behind the scale.
-2. Selection is by distance ranges per level, one range per level derived from that level's worst error, so
-   a patch's morph state at an edge is a function of distance alone and levels meet without cracks. Per-tile
-   error is not used for selection.
-3. Tiles are 1:1: a 64-quad grid, 65 height texels per side, and 65 colour texels per side, all at the same
-   resolution. The colour-to-height ratio is one named constant (`tile_colour_ratio = 1`), documented as the
-   knob for 2 later. Layer dimensions are one named constant too (65 today); block compression later needs
-   a multiple of four (68, the tile in the corner), a change to that constant and nothing else.
-4. The far tier stays the sphere levels with the equirect maps, switching to the cube sphere above a
-   projected radius as today. A cube-mapped far tier sharing this projection is a later step.
-5. The face warp is Everitt's: `w(s) = tan(0.8687 s) / tan(0.8687)`, inverse `atan(x tan(0.8687)) / 0.8687`.
-   Texel areas across a face stay within about 11 percent (the tangent warp today is 43 percent).
-6. Generation stays on the CPU on a persistent worker pool. A compute generator is a later step and must not
-   need a renderer change beyond where the tile bytes come from.
-7. Texture compression of tiles is not in scope. Heights stay 16-bit raw in any case.
+1. Tiles live in texture arrays, one layer per slot: heights `r16_unorm`, albedo `rgba8_unorm` in
+   linear light, slope `rg16_unorm`. Not atlases.
+2. Selection is by distance ranges per level, derived from that level's worst error, so a patch's
+   morph state at an edge is a function of distance alone. Per-tile error is not used for selection.
+3. The colour planes are finer than the height plane by `tile_colour_ratio` (2): 32 quads of geometry,
+   65 colour texels a side. Both sides are named constants; block compression later wants a multiple
+   of four.
+4. The far tier stays the sphere levels with the equirect maps, switching above a projected radius.
+5. The face warp is Everitt's, `w(s) = tan(0.8687 s) / tan(0.8687)`. Texel areas across a face stay
+   within about 11 percent, against 43 for a plain tangent warp.
+6. Generation stays on the CPU on a persistent worker pool.
+7. Texture compression of tiles is out of scope. Heights stay 16-bit raw in any case.
 
 ## Design
 
 ### Patches, tiles, slots
 
-- A patch is a cell of a face's quadtree, `PatchKey`. Its bounds (`patch_bounds`) give the cap and the cell's
-  angular size.
-- A tile is the patch's textures: `tile_side` (65) squared heights, and the same count of albedo and
-  slope texels. Texel (i, j) of a tile is the terrain sampled at the cell coordinates
-  `s0 + i * size / 64`, `t0 + j * size / 64`, through the warp. So a child's even texels are its parent's
-  texels at the same directions, and a fully morphed child edge lands on the parent's edge.
-- The height texel is the height over `[height_min, height_max]` in 16 bits. The slope texel is the
-  terrain's gradient, from central differences of the tile's heights with a one-texel ring around them
-  (past a cube edge, the neighbouring face's texel), in radii per radian over
-  `[-tile_slope_scale, tile_slope_scale]` against the face's tangent frame (`patch_tangent_frame`). The
-  albedo texel is `MinorPlanetTerrain::albedo` at the texel's direction, height and slope.
-- That frame is built from the sphere's own direction and the face's s axis, never the face's axis: the
-  frame turns at a cube edge and the gradient's two components turn with it, so the two faces meeting
-  there read the same body-frame normal back out. The frame does not depend on the level either, so a
-  parent tile's gradient is in the same frame as its child's and the morph is a plain lerp of the two.
-- A slot is one layer index shared by the three arrays. `TerrainTier` owns the slot cache; the renderer owns
-  the arrays. Slot count 1024 (see the memory table).
+A patch is a cell of a face's quadtree (`PatchKey`: face, level, x, y, packed to 32 bits).
+`patch_bounds` gives its cap, angular size and bounding radius.
+
+A tile is that patch's textures: `tile_side` (33) squared heights and `tile_colour_side` (65) squared
+albedo and slope texels. Texel (i, j) is the terrain sampled at cell coordinates `s0 + i * size / 32`
+through the warp, so a child's even texels are its parent's texels at the same directions and a fully
+morphed child edge lands on the parent's edge.
+
+The slope texel holds the terrain's gradient over `[-tile_slope_scale, tile_slope_scale]` (3 radii per
+radian; the terrain's steepest is 1.33), from central differences with a one-texel ring around the
+tile. Past a cube edge the ring takes the *neighbouring face's* own texel one step inside its edge, not
+this face's warp extrapolated, since the two faces' lines of constant t differ by up to six tenths of a
+texel along the edge.
+
+The tangent frame is built from the sphere's own direction and the face's s axis, never the face's
+axis: `T = normalize(FACE_S[f] - d * dot(FACE_S[f], d))`, `B = cross(d, T)`, decoding as
+`normalize(d - T * gx - B * gy)`. At a cube edge the two faces hold the same gradient in their own
+frames and read the same body-frame normal out. The frame does not depend on level either, so a parent
+tile's gradient is in the same frame as its child's and the morph zone lerps the two gradients.
+
+A slot is one layer index shared by the three arrays. `TerrainTier` owns the slot cache; the renderer
+owns the arrays.
 
 ### The shared grid
 
-- One static mesh, `patch_grid_mesh()`: 65 by 65 vertices whose position holds `(x, y, skirt)`, x and y in
-  0..64, skirt 0 on the grid and 1 on a ring of 4 * 65 vertices the shader drops below the surface. Indices
-  cover the grid quads then the skirt quads, wound outward. Uploaded once to the static heap.
-- The skirt is a fallback only: with correct morphing no crack exists between neighbours one level apart. It
-  hides the transient case where a neighbour is two levels coarser while children are still loading. A
-  named constant sets its drop (a fraction of the cell's angular size, as today).
+One static mesh, `patch_grid_mesh()`: 33 by 33 vertices holding `(x, y, skirt)` plus a ring of
+4 × 33 skirt vertices the shader drops by `patch_skirt_drop` (0.002 radii) along `-d`. Quads are
+triangulated on a uniform `(x,y)–(x+1,y+1)` diagonal — **this is load-bearing**, see the open defects.
 
-### Per-patch instance records
+The skirt is a fallback only: with correct morphing no crack exists between neighbours one level apart.
+It hides the transient where a neighbour is two levels coarser while children load.
 
-- `PatchInstance` in `scene_shared.h`, 48 bytes: `cell` (s0, t0, size, level), `morph` (start, end in
-  radii; unused; unused), `tile` (face, slot, flags, unused). One record per drawn patch, written by the CPU
-  each frame into a host-visible staging slot chosen by frame parity and copied into a device buffer beside
-  the tile uploads.
-- `Root` gains one field, `patches` (address of this frame's records); `sizeof(Root)` becomes 48 and the
-  assert in `gpu_types.hpp` follows. `ORBITAL_ROOT_PATCHES` (4) tells the vertex shaders to take the patch
-  path. `ORBITAL_ROOT_WIREFRAME` stays; the level for the overlay comes from the record, not from the flags.
+### Per-patch records
 
-### The vertex path (CDLOD)
+`PatchInstance` in `scene_shared.h`, 48 bytes: `cell` (s0, t0, size, level), `morph` (start and end
+distance in radii, the arrival fade floor under them, the finer-side mask), `tile` (face, slot, the
+parent's slot or the slot count for none, then the child's quadrant, which sides lie on a cube edge,
+and which grid quadrants to draw). One record per drawn patch, written each frame into a host-visible
+slot chosen by frame parity and copied beside the tile uploads. `ORBITAL_ROOT_PATCHES` puts the vertex
+shaders on the patch path.
 
-In `shaders/surface/patch.slang`, one function used by both `surface.slang` and `motion.slang`:
+### The vertex path
 
-1. Read the grid vertex: `g = position.xy` (0..64), `skirt = position.z`.
-2. Unmorphed cell coordinates `st = cell.xy + g / 64 * cell.z`, direction `d = cube_direction(face, st)`
-   with the Everitt warp, local position `p = d * (1 + h(g))`, world position through the body's rotation
-   and centre as today. The distance `dist = length(world) / radius` (positions are camera-relative).
-3. Morph factor `m = saturate((dist - morph.start) / (morph.end - morph.start))`. Morphed grid coordinate
-   `g' = g - frac(g * 0.5) * 2 * m` (odd vertices slide to the even neighbour along each axis). Recompute
-   `st`, `d`, and `h` at `g'`.
-4. `h(g)` is a bilinear read of the height array at layer `slot`, texel coordinates `g'` (`Load` of the four
-   neighbours, or `SampleLevel` with a clamping sampler since each layer is its own texture). The value maps
-   through `height_min + v * (height_max - height_min)`.
-5. Skirt vertices drop by the skirt constant along `-d`.
-6. Outputs as today: `worldPosition`, `worldNormal = rotate(d)`, `localNormal = d`, and a new
-   `patchLevel` varying for the wireframe overlay.
+`shaders/surface/patch.slang`, shared by `surface.slang` and `motion.slang`:
 
-Level 0 patches never morph (`morph.end` infinite). A patch drawn beyond its level's range end is fully
-morphed and therefore identical to its parent's shape: the tier may draw a child beyond its range without a
-crack (see selection).
+1. `g = position.xy` (0..32), `skirt = position.z`.
+2. `m = max(saturate((dist - morph.x) / (morph.y - morph.x)), morph.z)`, the second term the arrival
+   fade floor.
+3. `g' = g - frac(g * 0.5) * 2 * m` — odd vertices slide to the even neighbour along each axis.
+4. Height is a bilinear read of the height array at layer `slot`, coordinates `g'`.
+5. A quadrant the record does not list is dropped; `Seam::clamp` uses the finer-side mask to hold the
+   morph at the sides that meet a finer surface.
 
-### Selection by ranges
+The motion pass places the previous position through the same morph and skirt drop, or morphing patches
+carry false motion vectors into TAA.
 
-- `TerrainTier` holds `level_error[level]`, the worst measured geometric error per level in radii (task 2
-  calibrates it; extrapolate deeper levels by the measured ratio). Each frame it derives
-  `range[level] = level_error[level] * height_pixels / (tan_y * error_pixels)` in radii, the distance at
-  which that level's error projects to the tolerance (`error_pixels`, 3 in cull_bodies' units = 1.5 px).
-- Visit from the six roots: a node out of the frustum or past the horizon collapses and is skipped. A node
-  whose nearest distance (camera in the body's local frame, radii, to the node's cap) is under
-  `range[level + 1]` wants children; hysteresis 0.8 on the way back. Children are descended into only when
-  all visible ones are resident; otherwise the node draws itself and requests them, coarse levels first, up
-  to `generate_per_frame`. All four children of a split node are drawn (a child beyond its range is fully
-  morphed, so no crack).
-- `morph.start = 0.7 * range[level]`, `morph.end = range[level]` for the drawn patch's level.
-- Roots are requested and pinned as today; the tier is active only when all six are resident.
+### Selection
 
-### Generation on a worker pool
+`level_error[level]` is the worst measured geometric error per level in radii, calibrated over 64
+random patches a level. Each frame the tier derives
+`range[level] = level_error[level] * height_pixels / (tan_y * error_pixels)` with `error_pixels` 3 in
+`cull_bodies`' units, and `morph.start = 0.7 * range[level]`.
 
-- `core/parallel.hpp` gains a persistent `WorkerPool` (N threads, N = cores minus two, at least one): a job
-  queue with a mutex and condition variable, `submit(job)`, and `poll()` returning finished jobs on the
-  caller's thread. Jobs are whole tiles: heights, normal, albedo for one `PatchKey`, written into a job's
-  own buffer from a ring.
-- The job ring: R job buffers (R = 32), each holding one tile's three planes. A buffer is free once the frame
-  that copied it has completed; with one frame in flight that is the frame after the copy was recorded.
-- Per frame the renderer: submits the tier's requests (a request marks the slot "pending"), polls finished
-  jobs, records their copies (`copy_memory_to_texture` per plane into the slot's layer), marks the slots
-  resident in the tier, and writes this frame's `PatchInstance` records. The tier's residency rule then
-  gives lazy detail for free: a patch draws at its parent's level until its own tile arrives.
-- Priority: the tier's request order (coarse first, then largest on screen). A request for a patch that
-  collapses before its job finishes is not cancelled; the job completes into its slot and the cache keeps it.
+Visiting from the six roots: a node out of the frustum or past the horizon collapses. A node whose
+nearest distance is under `range[level + 1]` wants children, with 0.8 hysteresis on the way back.
+A child is drawn only within its own range and once resident; the node draws every other visible
+quadrant itself, so nothing is drawn beyond its level's range and neighbours at one level morph alike.
+Residency is therefore per quadrant: a patch refines as each child's tile arrives.
 
-### Fragment shading
+Distances come from `nearest_distance`, the closest the camera can be to any point of the patch's cap
+over its height shell. The shader tests each vertex, which is never nearer, so a child drawn within its
+range is fully morphed wherever an unsplit neighbour meets it.
 
-- The airless shader keeps the equirect path for the sphere. In the patch path (`ORBITAL_ROOT_PATCHES`) it
-  samples the albedo and slope arrays at the patch's slot by the cell's uv (from `cube_coordinates` of the
-  local normal, as the wireframe does today, or from a varying), rebuilds the face's tangent frame
-  (`patchTangentFrame`) to read the normal out of the slope, and runs the same lighting. The height trace for crater-wall shadows reads the tile's
-  height plane in the same layout as the equirect trace; if that proves fiddly, the trace can be skipped in
-  the patch path for the first cut and noted.
-- The wireframe overlay reads the level from the `patchLevel` varying.
+**A resident tile supplies its own height range** rather than the global `[-0.05, +0.05]` shell,
+measured from the tile it uploaded and padded by one `r16_unorm` quantum plus float decode roundoff.
+The asymmetry here is deliberate and easy to get backwards: **the split test keeps the global shell**,
+because a tile bounds its own bilinear surface and says nothing about relief its children will reveal.
+Only drawing and gating use the tight range, and frustum culling keeps `bound_radius` off the global
+shell and the skirt drop.
 
-### Memory and budgets
+`TerrainTier::Seam` selects what to do where a patch meets a finer one: `none`, `farthest` (a child is
+drawn only once its whole cap is in range), `clamp` (the coarse side holds its morph at that border) or
+`span` (split while a patch spans more than `seam_span` levels of screen error).
+
+### Generation and upload
+
+`WorkerPool` (cores minus two threads) takes whole tiles. A staging ring of 32 entries each holds one
+tile's three planes. Ownership is explicit — `free`, `worker`, `upload` — because a frame number cannot
+say "still working": a job outliving any frame count would otherwise hand its buffer to the next worker
+mid-write. Frame numbers only guard reuse after a copy has been recorded.
+
+Each slot assignment issues a **generation stamp**, once, never reissued. Slot and key cannot identify
+a generation: evict a patch and ask for it again, or change the detail setting and regenerate, and the
+same patch is handed back the same slot, so an older result would pass a check made of both. Stamps
+start at 1 and `invalidate()` clears slots to 0, so nothing in flight across an invalidation is
+accepted.
+
+The copy and the residency are one decision, taken together in `record_terrain_uploads` inside the
+command buffer. A tile counts as resident exactly when the upload that makes it so has been recorded;
+uploads no frame recorded are retained, not dropped. A frame abandoned after preparation therefore
+cannot leave a slot vouching for contents it never uploaded.
+
+### Fragment path
+
+The airless shader keeps the equirect path for the sphere. On the patch path it samples albedo and
+slope at the patch's slot, rebuilds the frame with `patchTangentFrame`, and blends albedo and normal
+toward the parent tile's through the morph zone, so a fully morphed child shades as its parent. The
+crater-wall shadow traces the baked equirect map, as the sphere path does, so the field is continuous
+across tile borders. `TerrainSettings::debug` (`--terrain-debug`, the panel's Patch view) draws the
+path one term at a time so a seam can be attributed.
+
+### Memory
 
 | Item | Size |
 |---|---|
-| Height array, 1024 layers of 65x65 r16 | 8.6 MiB |
-| Albedo array, 1024 layers of 65x65 rgba8, and slope, 1024 of 65x65 rg16 | 17 MiB each |
-| Patch records, 1024 x 48 B, two staging slots plus device | 150 KiB |
-| Job ring, 32 x (65x65 x (2 + 4 + 4) B) | 1.4 MiB host-visible |
-| Shared grid | 4485 vertices, 26112 indices, static |
+| Height array, 1024 layers of 33×33 r16 | 2.1 MiB |
+| Albedo and slope arrays, 1024 layers of 65×65 at 4 B | 16.5 MiB each |
+| Patch records, 1024 × 48 B, two staging slots plus device | 150 KiB |
+| Staging ring, 32 tiles | 1.1 MiB host-visible |
+| Shared grid | 1221 vertices, 6912 indices, static |
 
-The host-visible heaps count against the BAR aperture (`tools/check-bar1.py`); all of the above is small.
+Host-visible heaps count against the BAR aperture (`tools/check-bar1.py`).
 
-## Acceptance criteria
+## Open defects, in the order they matter
 
-1. From bookmark 10 (`--bookmark 9`) with the tier on, the terrain shows no cracks or holes at any level
-   boundary with the wireframe overlay on, still or while flying with Z slow travel, including across cube
-   face boundaries. Skirts may show only during a load transient.
-2. Turning the near tier off and on at the same view shows no visible change in the shading of the surface
-   (the tiles sample the same function the equirect maps were baked from). `tools/check.py --group bodies`:
-   the `minor-planet` (far) shot unchanged; the three near shots re-accepted with the new geometry.
-3. The scene pass draws all patches of a body with one draw call per pass (`draw_calls` in the panel).
-4. `terrain_tier_tests`: with a synthetic per-level error table, the tree converges, every drawn patch's
-   distance is under its level's range times the hysteresis, no drawn patch has a drawn ancestor, and a
-   requested slot is never drawn the same frame.
-5. `terrain_tests`: for a parent and each of its four children, the child's even texels equal the parent's
-   texels in the same directions within one 16-bit code; neighbours at the same level share their edge
-   exactly; `cube_coordinates(cube_direction(f, s, t))` round-trips within 1e-9; the height tile of a patch
-   generated twice is identical.
-6. Generation runs on the worker pool: the main thread's time in `prepare_terrain_tier` is under 0.5 ms
-   with 32 jobs in flight; tiles appear progressively (the panel's "patches drawn, cached" line rises over
-   frames after a cut).
-7. The near tier off (`--near-tier 0`) and every other body are unchanged: `tools/check.py --all` within
-   tolerance except the three near shots.
-8. Docs: `docs/ARCHITECTURE.md`'s minor planet section rewritten for this design; a `docs/DECISIONS.md` entry
-   with the measurements (per-level errors, patch counts, generation times, draw calls, memory).
+### 1. The range ratios are not a geometric series
 
-## Status after the first implementation (PR #64, 2026-09-18)
+CDLOD wants each level's range to be half the one above, because the morph band is defined as a
+fraction of a range whose neighbour is assumed to be half of it. Measured against the drawn triangles,
+the ratios between adjacent ranges run:
 
-Tasks 1 to 8 are implemented; the near tier draws from tile arrays with the worker pool. A review of that
-implementation found the following. The first group was fixed before the merge; the rest is open and is
-what acceptance 1, 2 and 4 to 6 still need.
+| levels | 0→1 | 1→2 | 2→3 | 3→4 | 4→5 | 5→6 | 6→7 | 7→8 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| from the table | 1.45 | 2.65 | 3.46 | 2.30 | 2.11 | 2.38 | 1.59 | 2.76 |
+| from the true geometric error | 1.62 | 2.41 | 1.81 | 3.52 | 2.10 | 3.04 | 1.24 | 4.28 |
 
-Fixed in the PR after review:
+No morph band spans steps between 1.24× and 4.28× consistently. This is the strongest candidate for the
+hard level edge seen from the ground, and it is the one open item that matches the reported symptom.
 
-- The patch draw set `instanceIndex` to `base + patchId`, so every patch but the first shaded with another
-  body's instance (its rotation, kind and self-shadow test).
-- Tile copies started at offsets that were not multiples of the texel size (an entry was 42,250 bytes):
-  `VUID-vkCmdCopyBufferToImage-dstImage-07975` on every upload. Planes and entries are now 4-byte aligned.
-- The tier went active when the roots had a slot, before their tiles arrived ("Near tier on at frame 24,
-  0 patches resident"): the sphere stopped and nothing drew. Activation now needs resident roots.
-- Requests the renderer could not submit (no free ring entry) kept their pending slot forever and their
-  subtree never refined. `update` takes a budget, the free ring count.
-- Eviction could take a pending slot; the old job then marked the new key resident with the old tile.
-  Pending slots are not evicted, and `mark_resident(slot, key)` checks the key.
-- The motion pass placed the previous position with the unmorphed height and no skirt drop, so morphing
-  patches carried false motion vectors into TAA.
-- The wireframe was an analytic grid in the face's cell coordinates, not the mesh. It now draws the
-  triangles from a barycentric each corner carries (an unindexed copy of the grid, drawn only with the
-  overlay on), with the patch borders from the tile coordinate; the sphere path has no overlay.
-- A split node drew all four children, the far ones fully morphed to its shape, as designed. That is
-  not crack-free: the far children stand at this node's level unmorphed, while an unsplit neighbour at
-  the same level, farther than 0.7 of its range there, is already morphing toward the level above, up to a
-  full level apart in geometry and shading along their shared border. On a face edge (a border at every
-  level) with the camera over the other face it read as one whole face shaded flatter. Now, as in the
-  original CDLOD, a child is drawn only within its own range and when resident; the node draws every other
-  visible quadrant itself (`Draw::quadrants`, the vertex shader dropping the rest of its grid), so nothing
-  is drawn beyond its level's range and neighbours at one level morph alike. This also makes residency
-  per quadrant: a patch refines as each child's tile arrives. The tier test checks that a drawn ancestor
-  covers no drawn descendant's quadrant.
-- Seams along the cube edges, plainly under a grazing sun. Two causes. The ring texel past a face edge
-  was this face's warp extrapolated, which lands off the neighbouring face's rows (their lines of
-  constant t differ, by up to six tenths of a texel along the edge), so the two faces' edge texels
-  differentiated over different points; `ring_direction` now takes the neighbour's own texel one step
-  inside its edge, and both sides use the same pair. Then the tangent frame: the tile's normal was stored
-  as (x along s, y along t) and rebuilt from the face axes projected onto the tangent plane, which are
-  orthogonal only at the face centre and skewed differently on the two faces along an edge, so the same
-  gradient rebuilt to different world normals (21 degrees apart on a steep slope in the test). The tile
-  now stores the normal in the body frame, from the gradient solved out of the two grid-direction
-  differences, and the shader rotates it: no frame, so no face can disagree. `terrain_tests` compares
-  the normals of every cube-edge texel pair (168 pairs; corners excepted, where three grids meet) and
-  finds them equal. Item 3 below is closed by the same change.
-- Seams still showed on crater slopes under a grazing sun after the normals were fixed: the crater-shadow
-  trace, which stepped through the tile's own heights along the face's skewed axes and stopped at the
-  tile's edge, so one side of a border found a wall's shadow and the other did not. The patch path now
-  traces through the baked equirect map exactly as the sphere path does, one continuous field over the
-  body (at the map's resolution, blocky close in; a tile trace that continues into the neighbouring
-  tiles would be the finer answer). `TerrainSettings::debug` (`--terrain-debug`, the panel's Patch view)
-  draws the patch path one term at a time (tile coordinate, normal, elevation, the shadow term, morph
-  and level) so a seam is attributed to the term that carries it.
-- `init` bound the 1x1 placeholder to every array slot after `create_terrain_tier` had bound the tile
-  arrays, so the shaders sampled the placeholder: every height read as `height_min` (a smooth sphere at
-  0.95 radii) and the albedo as black. The placeholder now goes in first. Found because the near tier
-  only activates above 960x540 at bookmark 10, so every low-resolution capture had shown the sphere.
+The fix is a design decision, not a bug fix: prescribe the ×2 series and use the measured errors to
+*place* it rather than to define each step.
 
-Open, in the order they matter (the numbering is kept from the review):
+Related: `patch_error` compares scalar radii using `length(d)` on a normalized direction, so sphere
+curvature is excluded despite the comment. Correcting that does not fix the ratios — it reshuffles
+them. The curvature term is 7 percent of the error at level 0 and under 0.1 percent from level 4 down,
+so it is not worth a change on its own. The table is also sampled, not a conservative bound.
 
-1. Fixed after review: selection by the patch centre. `TerrainTier::nearest_distance` is the closest the
-   camera can be to any point of the patch's cap over the shell between the terrain's lowest and highest
-   heights, and the tier splits on it; the vertex's own distance is never less, so an unsplit neighbour's
-   edge lies beyond the child's range and the child is fully morphed there. The tier test checks the
-   drawn children against it.
-2. Fixed with 1: the shell bound covers the displaced vertex.
-3. Fixed after review: the tangent frame (see the cube-edge item above). Acceptance 2 compares the tile
-   path with the equirect path: mean 19.8 against 20.2 and contrast 17.0 against 18.3 (standard deviation
-   of the frame) at bookmark 10, 1600x900, the tiles resolving finer relief than the 2048-texel map and
-   the regolith grain missing (item 6).
-4. Fixed after review: shading seams. Same-level seams came from one-sided edge differences
-   (`generate_colour_tiles` now samples a one-texel ring; `terrain_tests` checks neighbours' edge texels
-   match byte for byte). Level-boundary seams came from the coarser tile's coarser-scale normal:
-   `patchMaterial` now blends the albedo and normal toward the parent tile's through the morph zone
-   (the parent's slot and the child's quadrant ride in `PatchInstance.tile`), so a fully morphed child
-   shades as its parent, which its unsplit neighbour matches at the shared edge.
-5. **`SKIRT_DROP` is a fixed 0.002 radii**, not a fraction of the cell size. With 1 fixed it only covers
-   the load transient; at levels 0 and 1 that transient's gap can exceed it.
-6. Mostly fixed: the crater-wall shadow is the equirect trace (see above), the tilt and the trace fade by
-   `root.detail`, and the albedo's slope term is the bake's `1 - n.z` (the raw gradient had brightened
-   every slope). The regolith grain is still missing, and the shadow's resolution is the map's, not the
-   tile's.
-7. **Acceptance 6 is not measured** (main-thread time under 0.5 ms with 32 jobs in flight); the panel now
-   shows the queue, the ring and the last tile's generation time, so it can be. Acceptance 3 (one draw a
-   pass) was not read off the panel.
-8. **Dead code from tasks 3 and 6**: `generate_patch`, `patch_indices`, `patch_vertex_count`, `patch_quads`
-   remain in `terrain_patch.hpp` for the old tests only. Stale comments: `slot_count`'s "11 MiB of
-   vertices", "staging-to-pool copies" in `renderer_impl.hpp`.
-9. **The calibration runs inside `terrain_tests`** (13.9 s; ctest went from 10 s to 25 s). Put it behind a
-   flag. `patch_error` samples each corner once per quad and its comment claims the sphere's curvature is
-   included; it compares radii only.
-10. **Ring bookkeeping**: `ring_used_frame = frame + 100` marks an entry in flight and 0 marks it free.
-    With the near tier off the poll is skipped, results wait unpolled while their markers expire, and the
-    entries can be reused under them. An explicit state per entry is safer. `WorkerPool`'s destructor runs
-    every queued job before joining (up to 32 tiles at shutdown).
-11. **`draw_body` leaves `ORBITAL_ROOT_PATCHES` and `root.patches` on the caller's `Root`**; the depth
-    pre-pass and motion pass do not reset flags between bodies. Harmless only because the minor planet is
-    the last body.
-12. **Constants duplicated between C++ and the shaders**: the Everitt constant, the face tables (in
-    `patch.slang` and `terrain_patch.cpp`), `tile_side`. The slot count and the height range are now
-    asserted equal in `renderer_impl.hpp`.
-13. **The effective tolerance is one level looser than `error_pixels` reads**: a node splits at
-    `range[level + 1]`, as designed, so a level draws until its error is about 2.5 times the tolerance
-    (about 3.75 px, not 1.5). Keep in mind when judging quality.
+### 2. Quadrant removal leaves two parent triangles
 
-## Tasks
+Triangles whose three vertices all lie on the centre cross are never dropped: quadrant 1 leaves
+`(16,15)–(17,16)–(16,16)` and quadrant 2 leaves `(15,16)–(16,16)–(16,17)`, 16 across all 16 masks out
+of 2048 per patch. They overlap the child replacing that quadrant and can fight it in depth.
 
-1. **Backend texture arrays.** Per `docs/BACKEND_TEXTURE_ARRAYS.md`. Blocks everything below.
-2. **Calibrate level errors.** A small tool or test mode that samples 64 random patches per level 0..8 and
-   prints the maximum `patch_error` per level; put the table in `terrain_tier.hpp` with the seed and date
-   in a comment, extrapolating levels 9..12 by the measured ratio. Keep `patch_error` in the scene layer.
-3. **Scene layer.** Replace the tangent warp by Everitt's in `cube_direction`, add `cube_coordinates`.
-   Replace `generate_patch` by `generate_height_tile` and `generate_colour_tiles` (the latter deriving the
-   normal from the height plane and evaluating albedo per texel), both writing into caller-provided spans.
-   Add `patch_grid_mesh`. Remove `patch_indices`, `patch_vertex_count`. Update `tests/terrain_tests.cpp` to
-   the criteria in acceptance 5. Note `tile_colour_ratio`.
-4. **Shared ABI.** `PatchInstance`, `Root.patches`, `ORBITAL_ROOT_PATCHES`, three `TEX_TERRAIN_*` array
-   slots in `resource_slots.h` (the array table, not the 2D one), asserts in `gpu_types.hpp`.
-5. **Tier.** Replace the error test in `TerrainTier::visit` by the range test; `TierView` gains what the
-   ranges need (height pixels and tan already there). `Draw` carries key and slot; the renderer derives the
-   record. Drop `Generation.error`. Update `tests/terrain_tier_tests.cpp` to acceptance 4.
-6. **Renderer, synchronous first.** Create the three arrays and bind them; upload the grid; write patch
-   records per frame; the vertex path in `patch.slang` used by `surface.slang` and `motion.slang`; one
-   instanced draw per pass (`draw_indexed` with the patch count as instances; indirect later). Generate at
-   most two tiles a frame on the main thread for this step. Remove the vertex pool, the multi-draw args and
-   their heaps. Verify with the wireframe at bookmark 10.
-7. **Fragment path.** Tile sampling in `surface_airless.slang`, the tangent frame from the face, the
-   wireframe level from the varying. Verify acceptance 2.
-8. **Worker pool and job ring.** `WorkerPool` in `core/parallel.hpp` with a test in `tests/core_tests.cpp`;
-   the job ring in the renderer; lazy residency. Verify acceptance 6.
-9. **Checks and docs.** Re-accept the near shots on main after the merge; acceptance 7 and 8.
+**Do not fix this with a checkerboard diagonal.** It removes all 16 and breaks the collapse invariant:
+enumerated, a child at `m = 1` no longer has the parent's triangulation, so it would crack every level
+boundary to remove a sliver at one patch centre.
 
-Order matters only as written: 1 before all, 2 and 3 in parallel, 4 before 5 and 6, 6 before 7 and 8.
+The vertices survive because they are *shared* with the neighbouring quadrant, so no per-vertex rule can
+reach them. The cheapest correct fix keeping one draw per patch: duplicate the 65 centre-cross vertices
+once per adjacent quadrant (64 at two quadrants, the centre at four, so +67 of 1089, about 6 percent)
+and carry an explicit quadrant index per vertex. Duplicates hold identical positions, so the morph and
+the collapse invariant are untouched.
 
-## Later (not in scope, keep the door open)
+### 3. Existing splits can block more important new splits
 
-- Compute tile generation writing layers directly (port `core/noise` and the crater loop to Slang; the CPU
-  keeps the tree). Then GPU culling with an indirect count.
+Children already allocated bypass the node budget; new children need `nodes() < slot_count - 64`.
+Traversal is in fixed face and child order and there is no way to reclaim a low-priority split for a
+more demanding patch, so the selection can settle stable and inadequate — a patch requesting a split
+that is always refused issues no generation requests, so an idle queue does not prove convergence.
+
+Only bites above the default bias. At `--lod-bias 2` from the ground:
+`nodes 962/960, blocked 52, req 2/405, starved 433, behind 1.35`. At bias 0 a ground flight reads
+`blocked 0, nodes 370/960`.
+
+Wants budget redistribution by view importance with a controlled merge policy. More generation
+throughput cannot fix a selection that never admits the splits.
+
+### 4. The fade does not enforce continuity at partial boundaries
+
+A resident child can finish fading while a sibling is still missing, leaving the parent covering an
+unmatched boundary. `fade = 0` on the parent's remaining quadrants removes its inherited arrival fade
+but does **not** hold them still — the shader morphs by `max(distance, fade)`. Held still they would
+crack against the outer neighbours instead, which is CDLOD's granularity limit: one node carries one
+level of transition, not two.
+
+The real remedy is the streaming policy, never splitting until all four children are resident, which
+was measured and rejected once for its transient cost. The internal quadrant boundaries also have no
+skirts, so skirts do not cover every parent/child fallback seam.
+
+### 5. Selection uses the child's threshold to judge the parent
+
+A level `L` node splits against `range[L + 1]`, so it stays selected past its own tolerance — about
+5.2 px of table-predicted level-2 error against the stated 1.5 px near the child threshold. Thresholds
+and morph bands want deriving together from the error of the geometry actually drawn; changing one
+comparison alone invalidates the seam relationships.
+
+### 6. Leftovers
+
+- `generate_patch`, `patch_indices`, `patch_vertex_count`, `patch_quads` are the retired vertex-pool
+  path, alive only because `terrain_tests` still exercises them.
+- `slot_count`'s comment still says "11 MiB of vertices".
+- `calibrate_level_errors` runs inside `terrain_tests` (13.9 s of a 25 s ctest); it wants a flag.
+- Constants duplicated between C++ and the shaders: the Everitt constant, the face tables, `tile_side`.
+- `draw_body` leaves `ORBITAL_ROOT_PATCHES` and `root.patches` on the caller's `Root`; harmless only
+  because the minor planet is drawn last.
+- Acceptance never read off the panel: main-thread time in `prepare_terrain_tier` under 0.5 ms with 32
+  jobs in flight, and one draw call per pass.
+
+## Later, out of scope
+
+- Compute tile generation writing layers directly, then GPU culling with an indirect count.
 - Detail octaves and small craters rising with the level, past the baked maps' resolution.
 - The far tier as this cube sphere at levels 0..2, retiring the equirect maps for this body.
 - Block compression of colour tiles in the compute path; mips per layer.
