@@ -252,6 +252,45 @@ void test_tiles() {
         std::fprintf(stderr, "tiles: %u cube-edge texel pairs compared, world normals within %.4f\n", compared, worst);
         assert(compared > 100 && worst < 5e-4); // measured 1e-4, about two 16-bit slope codes on each side
     }
+    // The eight cube corners, where three faces meet and each writes a texel. The
+    // ring texel past an edge is the neighbour's texel one step in along the edge
+    // that was crossed; at a corner both of the neighbour's coordinates read 1, so
+    // naming it by the larger of them picked arbitrarily and the three faces
+    // differentiated over three stencils, up to 26 degrees apart at any level.
+    {
+        struct Corner {
+            Vec3d direction;
+            unsigned face, x, y;
+        };
+        constexpr unsigned level = 2, cells = 1u << level, last = tile_side - 1;
+        std::vector<Corner> corners;
+        for (unsigned face = 0; face < 6; face++)
+            for (unsigned i = 0; i < 4; i++) {
+                const double s = i & 1 ? 1 : -1, t = i >> 1 ? 1 : -1;
+                corners.push_back({cube_direction(face, s, t), face, s > 0 ? cells - 1 : 0, t > 0 ? cells - 1 : 0});
+            }
+        std::vector<float> ch(tile_side * tile_side);
+        std::vector<std::uint8_t> ca(ch.size() * 4);
+        std::vector<std::uint16_t> cs(ch.size() * 2);
+        const auto corner_normal = [&](const Corner& c) {
+            const PatchKey ck{std::uint8_t(c.face), level, std::uint16_t(c.x), std::uint16_t(c.y)};
+            generate_height_tile(terrain, ck, ch);
+            generate_colour_tiles(terrain, ck, ch, ca, cs);
+            const unsigned tx = c.x ? last : 0, ty = c.y ? last : 0;
+            return tile_normal(&cs[(ty * tile_side + tx) * 2], c.face, c.direction);
+        };
+        unsigned compared = 0;
+        double worst = 0;
+        for (std::size_t i = 0; i < corners.size(); i++)
+            for (std::size_t j = i + 1; j < corners.size(); j++) {
+                if (length(corners[i].direction - corners[j].direction) > 1e-9)
+                    continue;
+                worst = std::max(worst, length(corner_normal(corners[i]) - corner_normal(corners[j])));
+                compared++;
+            }
+        std::fprintf(stderr, "tiles: %u cube-corner face pairs compared, world normals within %.4f\n", compared, worst);
+        assert(compared == 24 && worst < 5e-4); // three faces at each of the eight corners
+    }
     // Patch error positive and reasonable.
     const float error = patch_error(terrain, key);
     assert(error > 0 && error < .01f);

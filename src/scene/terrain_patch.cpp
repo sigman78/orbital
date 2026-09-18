@@ -167,7 +167,12 @@ Vec3d ring_direction(unsigned face, double s, double t) {
     const double d = dot(f.axis, edge);
     double sn = std::atan(dot(f.s, edge) / d * tan_k) / everitt_k;
     double tn = std::atan(dot(f.t, edge) / d * tan_k) / everitt_k;
-    if (std::abs(sn) > std::abs(tn))
+    // Step the neighbour's own coordinate that runs along the face we came from:
+    // exactly one of its s and t is parallel to that face's axis. Comparing |sn|
+    // against |tn| names the same coordinate everywhere but a cube corner, where
+    // both are 1 and the comparison picks arbitrarily, leaving the three faces
+    // meeting there differentiating over three different stencils.
+    if (std::abs(dot(f.s, faces[face].axis)) > .5)
         sn -= std::copysign(delta, sn);
     else
         tn -= std::copysign(delta, tn);
