@@ -88,7 +88,7 @@ bool apply_arguments(Options& options, std::span<const std::string_view> args) {
         else if (arg == "--tier-activate")
             ok = parse_number(value(), options.tier_activate) && options.tier_activate > 0;
         else if (arg == "--lod-seam")
-            ok = parse_choice(value(), options.lod_seam, 3);
+            ok = parse_choice(value(), options.lod_seam, 4);
         else if (arg == "--terrain-detail")
             ok = parse_number(value(), options.terrain_detail) && options.terrain_detail >= 0;
         else if (arg == "--lod-bias")

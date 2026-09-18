@@ -94,6 +94,26 @@ double TerrainTier::nearest_distance(Vec3d camera_local, const PatchBounds& boun
     return std::sqrt(std::max(0.0, len * len + r * r - 2 * len * r * std::cos(t)));
 }
 
+// The fractional level whose range is this distance: the error table read in log
+// space, so what the screen error asks for at a point is a level rather than a test.
+double TerrainTier::level_at(double distance) const {
+    if (distance >= double(range_[0]))
+        return 0;
+    for (std::size_t i = 1; i < std::size(range_); i++)
+        if (range_[i] > 0 && distance >= double(range_[i])) {
+            const double t = std::log(distance / double(range_[i - 1])) /
+                             std::log(double(range_[i]) / double(range_[i - 1]));
+            return double(i - 1) + t;
+        }
+    return double(std::size(range_) - 1);
+}
+
+// The levels the screen error asks for across a patch, its near end against its far.
+double TerrainTier::level_span(const TierView& view, const PatchBounds& bounds) const {
+    return level_at(nearest_distance(view.camera_local, bounds)) -
+           level_at(farthest_distance(view.camera_local, bounds));
+}
+
 double TerrainTier::farthest_distance(Vec3d camera_local, const PatchBounds& bounds) {
     const double len = length(camera_local);
     if (len < 1e-9)
@@ -140,10 +160,17 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
     }
     const PatchKey key = nodes_[index].key;
     touch(key);
+    // A patch is one object answering a question whose answer varies across it: from a
+    // grazing view its near end can want a level several finer than its far end, and
+    // the morph reaches one level and no further. Seam::span splits while that spread
+    // is over a level, whatever the distance test says, so no drawn patch is asked for
+    // more than it has.
+    const bool wide = seam_ == Seam::span && level_span(view, nodes_[index].bounds) >
+                                                 seam_span * (nodes_[index].children ? double(hysteresis) : 1.0);
     const bool split = key.level < patch_level_max && key.level + 1 < std::size(level_error) &&
                        (nodes_[index].children || nodes() < slot_count - 64) &&
-                       seen.distance <
-                           double(range_[key.level + 1]) * (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0);
+                       (wide || seen.distance < double(range_[key.level + 1]) *
+                                                    (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0));
     if (split && !nodes_[index].children)
         nodes_[index].children = allocate_children(nodes_[index]);
     if (!split && nodes_[index].children)
@@ -168,7 +195,10 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
             }
             const double gate = seam_ == Seam::farthest ? farthest_distance(view.camera_local, child.bounds)
                                                         : child_seen.distance;
-            const bool in_range = gate < double(range_[key.level + 1]);
+            // Under Seam::span a child is also drawn where its parent's spread is what
+            // split it: the distance test alone would hand the quadrant back.
+            const bool in_range = gate < double(range_[key.level + 1]) ||
+                                  (seam_ == Seam::span && level_span(view, child.bounds) > seam_span);
             const unsigned child_slot = slot_of(child.key);
             if (in_range && child_slot != no_slot && slots_[child_slot].resident) {
                 descend |= 1u << i;

@@ -69,6 +69,7 @@ public:
         none,     // as it was: the band is trusted to have cleared the hand-over
         farthest, // a child is drawn only once its whole cap is in range, never part of it
         clamp,    // the coarse patch stops morphing along the sides that meet a finer one
+        span,     // a child is drawn only where it is at most one level finer than wanted
         count
     };
 
@@ -106,6 +107,12 @@ public:
     static double nearest_distance(Vec3d camera_local, const PatchBounds& bounds);
     // The other end of the same cap: what Seam::farthest gates a child on.
     static double farthest_distance(Vec3d camera_local, const PatchBounds& bounds);
+    // The fractional level the screen error asks for at a distance, and how far that
+    // varies across a patch. Seam::span splits while the spread is over seam_span,
+    // since the morph can only carry one level of it.
+    static constexpr double seam_span = 1.0;
+    double level_at(double distance) const;
+    double level_span(const TierView& view, const PatchBounds& bounds) const;
     unsigned resident() const;
     unsigned nodes() const { return unsigned(nodes_.size() - free_blocks_.size() * 4); }
 
