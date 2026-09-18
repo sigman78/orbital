@@ -156,8 +156,6 @@ struct TerrainSettings {
     float lod_bias = 0;
     // Slope detail strength; 0 disables it. Changes regenerate all tiles.
     float detail = 1;
-    // TerrainTier::Seam policy for boundaries between LOD levels.
-    unsigned seam = 0;
 };
 
 struct GasSettings {

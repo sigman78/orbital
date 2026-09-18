@@ -103,11 +103,6 @@ double TerrainTier::level_at(double distance) const {
     return double(std::size(range_) - 1);
 }
 
-double TerrainTier::level_span(const TierView& view, const PatchBounds& bounds, Range<float> heights) const {
-    return level_at(nearest_distance(view.camera_local, bounds, heights)) -
-           level_at(farthest_distance(view.camera_local, bounds, heights));
-}
-
 double TerrainTier::farthest_distance(Vec3d camera_local, const PatchBounds& bounds, Range<float> heights) {
     const double len = length(camera_local);
     if (len < 1e-9)
@@ -159,14 +154,11 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
     }
     const PatchKey key = nodes_[index].key;
     touch(key);
-    // Seam::span requests subdivision when a patch spans more than one level's morph.
-    const bool wide = seam_ == Seam::span && level_span(view, nodes_[index].bounds, height_range(key)) >
-                                                 seam_span * (nodes_[index].children ? double(hysteresis) : 1.0);
     // Use the full shell for undiscovered children; resident tile bounds cover only their own geometry.
     const double descendant_distance = nearest_distance(view.camera_local, nodes_[index].bounds);
     const bool wants = key.level < patch_level_max && key.level + 1 < std::size(level_error) &&
-                       (wide || descendant_distance < double(range_[key.level + 1]) *
-                                                          (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0));
+                       descendant_distance <
+                           double(range_[key.level + 1]) * (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0);
     const bool allowed = nodes_[index].children || nodes() < slot_count - 64;
     pressure_.splits_blocked += wants && !allowed;
     const bool split = wants && allowed;
@@ -187,13 +179,7 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
                 collapse(nodes_[children + i]);
                 continue;
             }
-            const double gate = seam_ == Seam::farthest
-                                    ? farthest_distance(view.camera_local, child.bounds, height_range(child.key))
-                                    : child_seen.distance;
-            // Seam::span also admits children whose distance spread requires subdivision.
-            const bool in_range = gate < double(range_[key.level + 1]) ||
-                                  (seam_ == Seam::span &&
-                                   level_span(view, child.bounds, height_range(child.key)) > seam_span);
+            const bool in_range = child_seen.distance < double(range_[key.level + 1]);
             const unsigned child_slot = slot_of(child.key);
             if (in_range && child_slot != no_slot && slots_[child_slot].resident) {
                 descend |= 1u << i;
@@ -230,53 +216,6 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
         draws_.push_back({.key = key, .slot = slot, .quadrants = quadrants, .fade = fade});
     else if (slot == no_slot)
         request(key, seen.pixels);
-}
-
-// Classify quadrant neighbors by covering ancestors; missing coverage is treated as finer.
-void TerrainTier::mark_finer_sides() {
-    std::unordered_map<std::uint32_t, unsigned> cover;
-    for (const Draw& draw : draws_)
-        for (unsigned i = 0; i < 4; i++)
-            if (draw.quadrants >> i & 1)
-                cover[draw.key.child(i).packed()] = draw.key.level;
-    const auto covering = [&](PatchKey cell) {
-        for (;;) {
-            if (const auto found = cover.find(cell.packed()); found != cover.end())
-                return int(found->second);
-            if (!cell.level)
-                return -1; // nothing covers it at or above its level: split under it
-            cell = {cell.face, std::uint8_t(cell.level - 1), std::uint16_t(cell.x / 2), std::uint16_t(cell.y / 2)};
-        }
-    };
-    for (Draw& draw : draws_) {
-        draw.finer = 0;
-        const unsigned level = draw.key.level + 1u, cells = 1u << level;
-        const double size = 2.0 / cells;
-        for (unsigned i = 0; i < 4; i++) {
-            if (!(draw.quadrants >> i & 1))
-                continue;
-            const PatchKey q = draw.key.child(i);
-            const unsigned qx = i & 1, qy = i >> 1;
-            // Test only sides on the patch perimeter.
-            for (unsigned axis = 0; axis < 2; axis++) {
-                const bool high = axis == 0 ? qx : qy;
-                const int dx = axis == 0 ? (high ? 1 : -1) : 0, dy = axis == 1 ? (high ? 1 : -1) : 0;
-                const int nx = int(q.x) + dx, ny = int(q.y) + dy;
-                PatchKey neighbour{q.face, std::uint8_t(level), std::uint16_t(nx), std::uint16_t(ny)};
-                if (nx < 0 || ny < 0 || nx >= int(cells) || ny >= int(cells)) {
-                    const CubeCoord c = cube_coordinates(
-                        cube_direction(q.face, -1 + (q.x + .5) * size + dx * size, -1 + (q.y + .5) * size + dy * size));
-                    const auto index = [&](double v) {
-                        return std::uint16_t(std::clamp(int((v + 1) / size), 0, int(cells) - 1));
-                    };
-                    neighbour = {std::uint8_t(c.face), std::uint8_t(level), index(c.s), index(c.t)};
-                }
-                const int found = covering(neighbour);
-                if (found < 0 || found > int(draw.key.level))
-                    draw.finer |= 1u << (axis == 0 ? (high ? 1 : 0) : (high ? 3 : 2));
-            }
-        }
-    }
 }
 
 // Serve coarse/large patches first; LRU eviction protects pending and currently used slots.
@@ -350,7 +289,6 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     requests_.clear();
     generate_.clear();
     pressure_ = {};
-    seam_ = view.seam < unsigned(Seam::count) ? Seam(view.seam) : Seam::none;
     const float bias = std::exp2(view.lod_bias);
     for (unsigned level = 0; level < std::size(level_error); level++)
         range_[level] = level_error[level] * view.height_pixels / (view.tan_y * error_pixels) * bias;
@@ -380,8 +318,6 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     }
     if (!active_)
         draws_.clear();
-    if (seam_ == Seam::clamp)
-        mark_finer_sides();
     choose_generation(budget);
     pressure_.nodes = nodes();
     pressure_.node_budget = slot_count - 64;

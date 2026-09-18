@@ -87,19 +87,6 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     float dist = length(world) / radius;
     // Arrival fade is a floor under the distance morph, relaxing from the parent shape.
     float m = max(saturate((dist - patch.morph.x) / max(patch.morph.y - patch.morph.x, 1e-6)), patch.morph.z);
-    // Clamp coarse edges to their own shape, blending back over a quarter-patch width.
-    uint finer = uint(patch.morph.w);
-    if (finer != 0)
-    {
-        float2 u = g / PATCH_QUADS;
-        float inward = 1.0;
-        if (finer & 1) inward = min(inward, u.x);
-        if (finer & 2) inward = min(inward, 1.0 - u.x);
-        if (finer & 4) inward = min(inward, u.y);
-        if (finer & 8) inward = min(inward, 1.0 - u.y);
-        m *= smoothstep(0.0, 0.25, inward);
-    }
-
     float2 gm = g - frac(g * 0.5) * 2.0 * m;
     st = cell_origin + gm / PATCH_QUADS * cell_size;
     d = patchCubeDirection(face, st);

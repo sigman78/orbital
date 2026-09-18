@@ -63,7 +63,7 @@ It hides the transient where a neighbour is two levels coarser while children lo
 ### Per-patch records
 
 `PatchInstance` in `scene_shared.h`, 48 bytes: `cell` (s0, t0, size, level), `morph` (start and end
-distance in radii, the arrival fade floor under them, the finer-side mask), `tile` (face, slot, the
+distance in radii, the arrival fade floor under them, and an unused fourth), `tile` (face, slot, the
 parent's slot or the slot count for none, then the child's quadrant, which sides lie on a cube edge,
 and which grid quadrants to draw). One record per drawn patch, written each frame into a host-visible
 slot chosen by frame parity and copied beside the tile uploads. `ORBITAL_ROOT_PATCHES` puts the vertex
@@ -78,8 +78,7 @@ shaders on the patch path.
    fade floor.
 3. `g' = g - frac(g * 0.5) * 2 * m` — odd vertices slide to the even neighbour along each axis.
 4. Height is a bilinear read of the height array at layer `slot`, coordinates `g'`.
-5. A quadrant the record does not list is dropped; `Seam::clamp` uses the finer-side mask to hold the
-   morph at the sides that meet a finer surface.
+5. A quadrant the record does not list is dropped.
 
 The motion pass places the previous position through the same morph and skirt drop, or morphing patches
 carry false motion vectors into TAA.
@@ -107,10 +106,6 @@ The asymmetry here is deliberate and easy to get backwards: **the split test kee
 because a tile bounds its own bilinear surface and says nothing about relief its children will reveal.
 Only drawing and gating use the tight range, and frustum culling keeps `bound_radius` off the global
 shell and the skirt drop.
-
-`TerrainTier::Seam` selects what to do where a patch meets a finer one: `none`, `farthest` (a child is
-drawn only once its whole cap is in range), `clamp` (the coarse side holds its morph at that border) or
-`span` (split while a patch spans more than `seam_span` levels of screen error).
 
 ### Generation and upload
 
@@ -226,9 +221,6 @@ comparison alone invalidates the seam relationships.
 
 ### 6. Leftovers
 
-- `generate_patch`, `patch_indices`, `patch_vertex_count`, `patch_quads` are the retired vertex-pool
-  path, alive only because `terrain_tests` still exercises them.
-- `slot_count`'s comment still says "11 MiB of vertices".
 - `calibrate_level_errors` runs inside `terrain_tests` (13.9 s of a 25 s ctest); it wants a flag.
 - Constants duplicated between C++ and the shaders: the Everitt constant, the face tables, `tile_side`.
 - `draw_body` leaves `ORBITAL_ROOT_PATCHES` and `root.patches` on the caller's `Root`; harmless only

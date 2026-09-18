@@ -20,9 +20,6 @@ struct PatchKey {
     }
 };
 
-constexpr unsigned patch_quads = 16, patch_side = patch_quads + 1;
-constexpr unsigned patch_vertex_count = patch_side * patch_side + 4 * patch_side; // the grid, then the skirt
-constexpr unsigned patch_index_count = (patch_quads * patch_quads + 4 * patch_quads) * 6;
 constexpr unsigned patch_level_max = 10; // a cell of 90 degrees over 1024, quads of 0.1 mrad
 constexpr unsigned tile_side = 33;       // texels per tile edge, covering 32 quads
 // Colour samples per height interval; memory scales with the square of this ratio.
@@ -56,11 +53,6 @@ struct PatchBounds {
     double bound_radius = 0;
 };
 PatchBounds patch_bounds(PatchKey key);
-
-// Legacy CPU grid/skirt; returns quad-centre error against the bilinear corner surface, in radii.
-float generate_patch(const MinorPlanetTerrain& terrain, PatchKey key, std::span<geometry::Vertex> out);
-// The index triples every patch shares, patch_index_count of them.
-std::vector<std::uint32_t> patch_indices();
 
 // Height-only error at quad centres against bilinear corner heights, in radii.
 float patch_error(const MinorPlanetTerrain& terrain, PatchKey key);

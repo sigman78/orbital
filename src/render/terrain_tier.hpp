@@ -23,13 +23,12 @@ struct TierView {
     float height_pixels = 0, tan_y = 0;
     float activate_pixels = TerrainTier_activate_default; // the switch from the sphere levels
     float lod_bias = 0;                                   // every level's range times 2^bias
-    unsigned seam = 0;                                    // TerrainTier::Seam
 };
 
 // Distance-based quadtree selection with parent fallback and a generation-checked tile cache.
 class TerrainTier {
 public:
-    static constexpr unsigned slot_count = 1024; // 11 MiB of vertices; a close view holds 400 of them
+    static constexpr unsigned slot_count = 1024; // 35 MiB of tiles; a close view holds 400 of them
     static constexpr unsigned generate_per_frame = 8;
     // Sizes are in cull_bodies' units: a projected radius over the half height, twice the pixels.
     static constexpr float error_pixels = 3; // a patch's geometric error on screen: it splits above 1.5 px
@@ -47,21 +46,10 @@ public:
         unsigned slot;
         std::uint32_t stamp; // which assignment of this slot asked for it
     };
-    // Policies for coarse/fine boundaries that span overlapping morph bands.
-    enum class Seam : unsigned {
-        none,     // as it was: the band is trusted to have cleared the hand-over
-        farthest, // a child is drawn only once its whole cap is in range, never part of it
-        clamp,    // the coarse patch stops morphing along the sides that meet a finer one
-        span,     // a child is drawn only where it is at most one level finer than wanted
-        count
-    };
-
     struct Draw {
         PatchKey key;
         unsigned slot;
         unsigned quadrants; // the grid quadrants to draw (bit i: x = i & 1, y = i >> 1); 0xf the whole patch
-        // Seam::clamp mask: low x, high x, low y, high y in bits 0..3.
-        unsigned finer = 0;
         // Morph floor shared by siblings: 1 on arrival, decreasing to 0 over fade_frames.
         float fade = 0;
     };
@@ -102,10 +90,8 @@ public:
                                    Range<float> heights = full_height_range);
     static double farthest_distance(Vec3d camera_local, const PatchBounds& bounds,
                                     Range<float> heights = full_height_range);
-    // Desired fractional LOD and its spread across a patch.
-    static constexpr double seam_span = 1.0;
+    // The fractional level the screen error asks for at a distance.
     double level_at(double distance) const;
-    double level_span(const TierView& view, const PatchBounds& bounds, Range<float> heights = full_height_range) const;
     unsigned resident() const;
     unsigned nodes() const { return unsigned(nodes_.size() - free_blocks_.size() * 4); }
 
@@ -142,7 +128,6 @@ private:
     void touch(PatchKey key);
     void request(PatchKey key, float pixels);
     void choose_generation(unsigned budget);
-    void mark_finer_sides(); // the post-pass Seam::clamp needs: who meets whom
 
     std::vector<Node> nodes_;
     std::vector<std::uint32_t> free_blocks_;
@@ -156,7 +141,6 @@ private:
     unsigned frame_ = 0;
     std::uint32_t stamp_ = 0; // the last generation stamp issued, never reused
     Pressure pressure_;
-    Seam seam_ = Seam::none;
     bool active_ = false, wanted_ = false;
 };
 

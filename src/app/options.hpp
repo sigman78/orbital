@@ -19,8 +19,7 @@ inline constexpr std::string_view usage =
     "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --disc 0|1 --near-tier 0|1 --wireframe 0|1 --terrain-debug "
     "0..5 (uv, normal, elevation, shadow, morph) --tier-activate px (lower switches to the patches further out, "
     "for the coarse levels) --lod-bias X (patch ranges times 2^X; positive is finer) --terrain-detail X "
-    "(the tiles' micro-relief, 0 off) --lod-seam 0|1|2 (none, the child waits for its cap, clamp at finer "
-    "sides) --lod-scale X "
+    "(the tiles' micro-relief, 0 off) --lod-scale X "
     "--vsync 0|1 "
     "--splat 0..3 --tone "
     "0|1|2 --hdr 0|1|2 (SDR, scRGB, HDR10; needs the OS in HDR) "
@@ -58,12 +57,11 @@ struct Options {
     unsigned disc = render::BeltSettings{}.disc;               // far-belt disc LOD
     unsigned near_tier = render::TerrainSettings{}.near_tier;  // the minor planet's patches close in
     unsigned terrain_debug = 0;                                // the patch path's debug view (TerrainSettings::debug)
-    float tier_activate = render::TerrainSettings{}.activate_pixels; // where the patches take the body over
-    float lod_bias = render::TerrainSettings{}.lod_bias;             // the patch split ranges, times 2^bias
-    float terrain_detail = render::TerrainSettings{}.detail;         // the tiles' micro-relief, 0 off
-    unsigned lod_seam = render::TerrainSettings{}.seam;              // what to do where a patch meets a finer one
-    unsigned wireframe = render::TerrainSettings{}.wireframe;        // their quad grid drawn over the surface
-    float lod_scale = render::BeltSettings{}.lod_scale;              // far-belt fade distance scale
+    float tier_activate = render::TerrainSettings{}.activate_pixels;        // where the patches take the body over
+    float lod_bias = render::TerrainSettings{}.lod_bias;                    // the patch split ranges, times 2^bias
+    float terrain_detail = render::TerrainSettings{}.detail;                // the tiles' micro-relief, 0 off
+    unsigned wireframe = render::TerrainSettings{}.wireframe;               // their quad grid drawn over the surface
+    float lod_scale = render::BeltSettings{}.lod_scale;                     // far-belt fade distance scale
     unsigned spatial = unsigned(render::AntiAliasingSettings{}.spatial_aa); // spatial pass: 0 off, 1 FXAA, 2 SMAA
     std::optional<double> galaxy_view;           // galactic longitude in degrees; absent means normal camera
     std::optional<std::array<double, 2>> sun_at; // frame position the camera turns to put the sun at

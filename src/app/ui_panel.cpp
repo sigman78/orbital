@@ -299,8 +299,6 @@ void quality_controls(bool& high, render::TerrainSettings& terrain) {
     ImGui::SliderFloat("LOD bias", &terrain.lod_bias, -3.f, 3.f, "%+.2f");
     // Changing detail regenerates all tiles.
     ImGui::SliderFloat("Surface detail", &terrain.detail, 0.f, 2.5f, "%.2f");
-    static constexpr const char* seams[] = {"None", "Child waits for its cap", "Clamp at finer sides"};
-    combo("LOD seam", terrain.seam, seams);
 }
 void anti_aliasing_controls(render::AntiAliasingSettings& settings) {
     ImGui::Checkbox("Temporal (F5)", &settings.temporal_aa);
