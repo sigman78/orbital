@@ -59,20 +59,22 @@ struct TangentFrame {
 TangentFrame patch_tangent_frame(unsigned face, Vec3d direction);
 
 struct PatchBounds {
-    Vec3d centre;              // unit direction
-    double angular_radius = 0; // radians, the cap holding every vertex
-    double angular_size = 0;   // radians, the cell's edge at its centre
+    Vec3d centre;                          // unit direction
+    double angular_radius = 0;             // radians, the cap holding every vertex
+    double angular_size = 0;               // radians, the cell's edge at its centre
+    double cos_radius = 1, sin_radius = 0; // of angular_radius, for patch_support
 };
 PatchBounds patch_bounds(PatchKey key);
 
-// The culling sphere over a height interval, the skirt drop included. Its centre sits on the
-// patch's own shell, not the reference surface: a tile lying 0.03 radii below that surface
-// would otherwise spend 0.03 of bound before reaching any of its own geometry.
-struct PatchSphere {
-    double offset = 1; // the centre is the cap's, scaled by this
-    double radius = 0; // radii
-};
-PatchSphere patch_cull_sphere(const PatchBounds& bounds, Range<float> heights);
+// Largest dot(normal, point) over the patch's shell: every direction of its cap at every radius
+// of the interval, the skirt drop included. A patch lies entirely outside a plane when its
+// support falls below the plane's own offset, which is the whole plane test.
+//
+// The shell is a cap, not a ball, and this is exact for the cap, so it rejects everything a
+// sphere around the same cap would and a great deal besides -- a sphere carries the empty space
+// behind the cap, which is most of its volume once the cap is wide, and near the camera that
+// space alone can reach every frustum plane. `normal` must be unit length.
+double patch_support(const PatchBounds& bounds, Vec3d normal, Range<float> heights);
 
 // Height-only error at quad centres against bilinear corner heights, in radii.
 float patch_error(const MinorPlanetTerrain& terrain, PatchKey key);

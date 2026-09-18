@@ -217,11 +217,13 @@ void test_cull_waste() {
             const double s0 = -1 + draw.key.x * size, t0 = -1 + draw.key.y * size;
             std::vector<Vec3f> points;
             bool any_visible_over_horizon = false;
-            const double len = length(view.camera_local);
             for (unsigned i = 0; i <= 4; i++)
                 for (unsigned j = 0; j <= 4; j++) {
                     const Vec3d d = cube_direction(draw.key.face, s0 + i * size / 4, t0 + j * size / 4);
-                    if (dot(d, view.camera_local * (1 / len)) * len >= 1 + double(h.max))
+                    // Near side of the occluding sphere: dot(point, camera) >= radius squared,
+                    // the occluder being the shell's floor as the tier takes it.
+                    constexpr double occluder = 1 + double(MinorPlanetTerrain::height_min);
+                    if (dot(d * (1 + double(h.max)), view.camera_local) >= occluder * occluder)
                         any_visible_over_horizon = true;
                     for (float e : {h.min, h.max})
                         points.push_back(to_float(view.body_centre + to_world(view, d * (1 + double(e))) * radius));
@@ -241,9 +243,9 @@ void test_cull_waste() {
         std::printf("terrain tier: cull at %.2f radii pitch %.2f: %u drawn, %u provably invisible\n", altitude, pitch,
                     drawn, wasted);
         assert(drawn > 0);
-        // The sphere is still looser than the patch, so allow a margin; the defect this guards
-        // put two thirds of the set here.
-        assert(wasted * 2 < drawn);
+        // What is left is the cell bowing inside its cap, so a margin stays; the defect this
+        // guards put two thirds of the set here, and a sphere bound a third.
+        assert(wasted * 3 < drawn);
     }
 }
 

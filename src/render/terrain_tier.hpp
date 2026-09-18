@@ -146,6 +146,12 @@ private:
         float pixels = 0;    // the cell's edge on screen, the generation priority
         double distance = 0; // the camera to the nearest point of the patch, radii
     };
+    // The frustum carried into the body's frame and scaled to radii, rebuilt each update:
+    // hundreds of nodes test against the same planes, and none of them should redo this.
+    struct LocalPlane {
+        Vec3d normal;
+        double offset = 0; // a patch is outside when its support falls below -offset
+    };
 
     void ensure_roots();
     Visibility visibility(const Node& node, const TierView& view) const;
@@ -166,6 +172,7 @@ private:
     std::vector<Request> requests_;
     std::vector<Generation> generate_;
     float range_[13] = {};
+    LocalPlane planes_[std::size(geometry::Frustum{}.planes)] = {};
     unsigned frame_ = 0;
     unsigned sweep_cursor_ = 0; // where the pending-slot reclaim sweep resumes
     std::uint32_t stamp_ = 0;   // the last generation stamp issued, never reused

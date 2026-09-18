@@ -252,10 +252,12 @@ void test_tiles() {
         std::fprintf(stderr, "tiles: %u cube-corner face pairs compared, world normals within %.4f\n", compared, worst);
         assert(compared == 24 && worst < 5e-4); // three faces at each of the eight corners
     }
-    // Culling bounds must contain the full height shell and skirts without excessive slack.
+    // The support must hold every point of the shell, from every direction, without slack the
+    // cap does not require. A sphere is the comparison: how much of it the cap test removes.
     {
-        double worst_fill = 0, tightest = 1e9;
+        double worst_fill = 0, tightest = 1e9, best_gain = 0, mean_gain = 0, worst_deep = 0;
         unsigned sampled = 0;
+        std::uint64_t rng = 3;
         for (unsigned level = 0; level <= 6; level++) {
             const unsigned cells = 1u << level, step = std::max(1u, cells / 4);
             for (unsigned face = 0; face < 6; face++)
@@ -269,26 +271,52 @@ void test_tiles() {
                         for (Range<float> heights :
                              {Range<float>{MinorPlanetTerrain::height_min, MinorPlanetTerrain::height_max},
                               Range<float>{-.031f, -.029f}}) {
-                            const PatchSphere sphere = patch_cull_sphere(bounds, heights);
-                            const Vec3d centre = bounds.centre * sphere.offset;
-                            double reach = 0;
-                            for (unsigned i = 0; i <= 16; i++)
-                                for (unsigned j = 0; j <= 16; j++) {
-                                    const Vec3d d = cube_direction(face, -1 + cx * size + i * size / 16,
-                                                                   -1 + cy * size + j * size / 16);
-                                    for (double h : {double(heights.max), double(heights.min) - patch_skirt_drop})
-                                        reach = std::max(reach, length(d * (1 + h) - centre));
-                                }
-                            assert(reach <= sphere.radius * (1 + 1e-12)); // conservative, always
-                            worst_fill = std::max(worst_fill, sphere.radius / reach);
-                            tightest = std::min(tightest, sphere.radius / reach);
+                            // A sphere over the same shell, to measure what the cap removes.
+                            const double top = 1 + double(heights.max);
+                            const double bottom = 1 + double(heights.min) - patch_skirt_drop;
+                            const double mid = (top + bottom) * .5;
+                            const auto chord = [&](double r) {
+                                return std::sqrt(std::max(0.0, r * r + mid * mid - 2 * r * mid * bounds.cos_radius));
+                            };
+                            const double ball = std::max(chord(top), chord(bottom));
+                            for (unsigned trial = 0; trial < 8; trial++) {
+                                const double z = uniform(rng) * 2 - 1, phi = uniform(rng) * 2 * pi<double>;
+                                const double s = std::sqrt(std::max(0.0, 1 - z * z));
+                                const Vec3d n{s * std::cos(phi), z, s * std::sin(phi)};
+                                const double support = patch_support(bounds, n, heights);
+                                double reach = -1e9;
+                                for (unsigned i = 0; i <= 16; i++)
+                                    for (unsigned j = 0; j <= 16; j++) {
+                                        const Vec3d d = cube_direction(face, -1 + cx * size + i * size / 16,
+                                                                       -1 + cy * size + j * size / 16);
+                                        for (double h : {top, bottom})
+                                            reach = std::max(reach, dot(n, d * h));
+                                    }
+                                assert(reach <= support + 1e-12); // conservative, from every side
+                                worst_fill = std::max(worst_fill, support - reach);
+                                tightest = std::min(tightest, support - reach);
+                                if (level >= 3)
+                                    worst_deep = std::max(worst_deep, support - reach);
+                                // The sphere's support from the same side, always the looser.
+                                const double ball_support = dot(n, bounds.centre * mid) + ball;
+                                assert(ball_support >= support - 1e-12);
+                                best_gain = std::max(best_gain, ball_support - support);
+                                mean_gain += ball_support - support;
+                            }
                         }
                         sampled++;
                     }
         }
-        std::fprintf(stderr, "tiles: %u patch bounds, the sphere is %.3f to %.3f times the reach it must hold\n",
-                     sampled, tightest, worst_fill);
-        assert(sampled > 100 && worst_fill < 1.01); // the cap's corner is a sampled point, so it is nearly exact
+        std::fprintf(stderr,
+                     "tiles: %u patch bounds, support over the shell by %.2e to %.2e radii (%.2e from level 3 "
+                     "down); a sphere would reach %.4f further, %.4f on average\n",
+                     sampled, tightest, worst_fill, worst_deep, best_gain, mean_gain / std::max(sampled * 16u, 1u));
+        // The slack left is the cell bowing inside its cap -- a whole face is 90 degrees across
+        // but its cap reaches 54.7 in every direction -- and it falls away with the cell.
+        // Ceilings, not targets: what the cap gives away is the cell's own shape, and the cull
+        // it buys is measured by test_cull_waste rather than here.
+        assert(sampled > 100 && tightest >= 0 && worst_fill < .25 && worst_deep < .1);
+        assert(best_gain > .1); // a sphere gives away this much reach at the coarse levels
     }
     const float error = patch_error(terrain, key);
     assert(error > 0 && error < .01f);

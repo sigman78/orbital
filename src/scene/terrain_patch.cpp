@@ -70,19 +70,23 @@ PatchBounds patch_bounds(PatchKey key) {
     }
     bounds.angular_size = 2 * std::atan(std::tan(everitt_k * cell.size / 2) / tan_k);
     bounds.angular_radius += 1e-6;
+    bounds.cos_radius = std::cos(bounds.angular_radius);
+    bounds.sin_radius = std::sin(bounds.angular_radius);
     return bounds;
 }
 
-PatchSphere patch_cull_sphere(const PatchBounds& bounds, Range<float> heights) {
+double patch_support(const PatchBounds& bounds, Vec3d normal, Range<float> heights) {
     const double top = 1 + double(heights.max);
     const double bottom = 1 + double(heights.min) - patch_skirt_drop;
-    const double mid = (top + bottom) * .5;
-    const double cosine = std::cos(bounds.angular_radius);
-    // Farthest point of either shell end from a centre out at mid, over the cap.
-    const auto chord = [cosine, mid](double radius) {
-        return std::sqrt(std::max(0.0, radius * radius + mid * mid - 2 * radius * mid * cosine));
-    };
-    return {.offset = mid, .radius = std::max(chord(top), chord(bottom))};
+    const double cosine = dot(normal, bounds.centre);
+    // The cap direction lying closest to the normal: the normal itself where it points inside
+    // the cap, otherwise the rim, at cos(angle to the centre minus the cap's own radius).
+    const double reach = cosine >= bounds.cos_radius
+                             ? 1.0
+                             : cosine * bounds.cos_radius +
+                                   std::sqrt(std::max(0.0, 1 - cosine * cosine)) * bounds.sin_radius;
+    // The far end of the interval when that reach is positive, the near end when it is not.
+    return reach >= 0 ? top * reach : bottom * reach;
 }
 
 // Use the neighbor's grid beyond cube edges so both faces share derivative stencils.
