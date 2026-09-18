@@ -83,7 +83,7 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
         dead.localNormal = float3(0, 0, 1);
         dead.worldNormal = float3(0, 0, 1);
         dead.slot = slot;
-        dead.face = face | patch.tile[2] << 8 | patch.tile[3] << 20;
+        dead.face = face | uint(patch.cell.w) << 3 | patch.tile[2] << 8 | patch.tile[3] << 20;
         return dead;
     }
 
@@ -113,7 +113,9 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     r.localNormal = d;
     r.tileUV = gm / PATCH_QUADS;
     r.slot = slot;
-    r.face = face | patch.tile[2] << 8 | patch.tile[3] << 20; // the parent's slot, the quadrant and the cube-edge sides packed beside the face
+    // The face in 0..2, the level in 3..6, the parent's slot in 8..19, then the
+    // quadrant and the cube-edge sides.
+    r.face = face | uint(patch.cell.w) << 3 | patch.tile[2] << 8 | patch.tile[3] << 20;
     r.bary = grid.normal.xyz;
     r.morph = m;
     return r;
