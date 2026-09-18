@@ -383,6 +383,7 @@ struct Renderer::Impl {
     std::optional<MinorPlanetTerrain> minor_planet_terrain;
     TerrainTier terrain_tier;
     GpuImage tile_height, tile_albedo, tile_slope; // the three tile arrays, 1024 layers each
+    float tile_detail = 1;                         // TerrainSettings::detail the resident tiles were built with
     std::uint64_t grid_vertices_address = 0, grid_indices_address = 0;
     std::uint64_t grid_wire_address = 0; // the grid unindexed, a one-hot barycentric per corner, for the wireframe
     unsigned grid_index_count = 0;

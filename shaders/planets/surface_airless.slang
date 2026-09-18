@@ -51,6 +51,26 @@ float terrainShadow(Texture2D<float4> normalMap, float2 texels, float2 uv, float
     return 1.0 - saturate(shadow) * .55 * tier;
 }
 
+// The map normal's tilt against the sphere's, weighted by the draw tier: the
+// tangential part scaled by it and the upright part floored, so a steep texel
+// cannot lean the normal past the surface. Both paths blend through this, so a
+// draw that is half a tier shades the same whichever of them is drawing it.
+float3 blendMapNormal(float3 axis, float3 tangential, float upright, float strength, float tier)
+{
+    return normalize(axis * lerp(1.0, max(upright, .2), tier) + tangential * (strength * tier));
+}
+
+// The regolith grain: the albedo broken up where the maps are magnified past their
+// texels, so the ground does not read as a smooth wash close in. Both paths add it,
+// from the same sphere coordinate at the same frequency, so it neither appears nor
+// doubles when the near tier takes over.
+float3 regolithGrain(float3 albedo, float2 sphere_uv, float magnified)
+{
+    if (magnified <= 0.0)
+        return albedo;
+    return albedo * (1.0 + (fbm2(sphere_uv * float2(3072, 1536), 3) - .5) * .10 * magnified);
+}
+
 Material terrainMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 L, float visibility,
                         Texture2D<float4> albedoMap, Texture2D<float4> normalMap, float2 texels, float heightRange,
                         float strength, float tier)
@@ -66,13 +86,10 @@ Material terrainMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float
     if (tier > 0.0)
     {
         float3 mapN = sampleSphere(normalMap, samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).xyz * 2.0 - 1.0;
-        float tilt = strength * tier;
-        m.N = normalize(T * mapN.x * tilt + B * mapN.y * tilt + N * lerp(1.0, max(mapN.z, .2), tier));
+        m.N = blendMapNormal(N, T * mapN.x + B * mapN.y, mapN.z, strength, tier);
         m.visibility *= terrainShadow(normalMap, texels, uv, L, N, T, B, heightRange, length(localN.xz), tier);
     }
-    m.albedo = sampleSphere(albedoMap, samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).rgb;
-    // Regolith grain where the 4K maps are magnified.
-    if (detail > 0.0) m.albedo *= 1.0 + (fbm2(uv * float2(3072, 1536), 3) - .5) * .10 * detail;
+    m.albedo = regolithGrain(sampleSphere(albedoMap, samplers[SAMPLER_WRAP_U_ANISOTROPIC], uv).rgb, uv, detail);
     m.rough = .95;
     m.water = 0.0;
     return m;
@@ -126,9 +143,12 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     }
     float3 tangent, bitangent;
     patchTangentFrame(face, localN, tangent, bitangent);
-    float3 mapN = normalize(localN - (tangent * slope.x + bitangent * slope.y) * MINOR_PLANET_SLOPE_SCALE);
+    // The gradient is already the tilt off the sphere's normal, so the blend takes it
+    // directly: no need to build the map normal first and take it apart again.
+    float3 tilt = (tangent * slope.x + bitangent * slope.y) * -MINOR_PLANET_SLOPE_SCALE;
+    float upright = rsqrt(1.0 + dot(tilt, tilt));
     Material m;
-    m.N = normalize(lerp(N, mul(rotate, mapN), tier));
+    m.N = normalize(mul(rotate, blendMapNormal(localN, tilt * upright, upright, 1.0, tier)));
     m.visibility = visibility;
     if (tier > 0.0)
     {
@@ -141,7 +161,10 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
         m.visibility *= terrainShadow(textures[TEX_MINOR_PLANET_NORMAL], MINOR_PLANET_TEXELS, sphereUV(localN), L, N, T, B,
                                       MINOR_PLANET_HEIGHT_RANGE, length(localN.xz), tier);
     }
-    m.albedo = albedo;
+    // The same grain the sphere path adds, from the same sphere coordinate: the tile's
+    // texels magnified past one per pixel is when the ground needs breaking up.
+    float2 tileTexels = float2(TILE_COLOUR_SIDE, TILE_COLOUR_SIDE);
+    m.albedo = regolithGrain(albedo, sphereUV(localN), magnificationGrad(ddx(uv), ddy(uv), tileTexels));
     m.rough = .95;
     m.water = 0.0;
     return m;

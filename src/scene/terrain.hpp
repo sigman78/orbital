@@ -34,6 +34,17 @@ public:
 
     explicit MinorPlanetTerrain(std::uint64_t seed);
 
+    // Micro-relief past where the terrain's own content stops, for the tiles' slope
+    // only: octaves at rising frequency, each weighted in once the sampling grid can
+    // carry it, so a tile never sees an octave it would only alias and a level
+    // boundary fades one in through the morph instead of switching it on. `nyquist`
+    // is half the grid's texels per radian; `strength` scales the whole stack, 0 off.
+    // The geometry does not take it, so the quadtree's error table is untouched.
+    static constexpr float detail_frequency = 150; // cycles per radian of the first octave
+    static constexpr unsigned detail_octaves = 5;
+    static constexpr float detail_slope = .15f; // rms tangent the full stack adds at strength 1
+    float detail(Vec3d direction, double nyquist, float strength) const;
+
     // Height above the reference sphere, radii, within [height_min, height_max].
     float height(Vec3d direction) const { return height(direction, craters_); }
     float height(Vec3d direction, const Region& region) const { return height(direction, region.craters); }

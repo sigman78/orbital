@@ -225,7 +225,7 @@ void generate_height_tile(const MinorPlanetTerrain& terrain, PatchKey key, std::
 }
 
 void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<std::uint8_t> albedo,
-                           std::span<std::uint16_t> slope) {
+                           std::span<std::uint16_t> slope, float detail) {
     ORBITAL_ASSERT(albedo.size() == tile_colour_side * tile_colour_side * 4);
     ORBITAL_ASSERT(slope.size() == tile_colour_side * tile_colour_side * 2);
     const Cell cell = cell_of(key);
@@ -238,11 +238,16 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
     const PatchBounds bounds = patch_bounds(key);
     const MinorPlanetTerrain::Region region = terrain.region(bounds.centre,
                                                              bounds.angular_radius + 2 * bounds.angular_size / quads);
+    // Half the grid's texels per radian: the finest the tile can carry, which is what
+    // decides how many detail octaves it takes.
+    const double nyquist = .5 * quads / bounds.angular_size;
     std::vector<float> h(bordered * bordered);
     const auto at = [&](int x, int y) -> float& { return h[(y + 1) * bordered + (x + 1)]; };
     for (int y = -1; y <= int(tile_colour_side); y++)
-        for (int x = -1; x <= int(tile_colour_side); x++)
-            at(x, y) = terrain.height(direction(x, y), region);
+        for (int x = -1; x <= int(tile_colour_side); x++) {
+            const Vec3d d = direction(x, y);
+            at(x, y) = terrain.height(d, region) + terrain.detail(d, nyquist, detail);
+        }
     for (int y = 0; y < int(tile_colour_side); y++)
         for (int x = 0; x < int(tile_colour_side); x++) {
             const unsigned i = y * tile_colour_side + x;

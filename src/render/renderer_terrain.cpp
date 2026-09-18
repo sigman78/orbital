@@ -120,6 +120,11 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     unsigned free_rings = 0;
     for (unsigned i = 0; i < tile_ring_count; i++)
         free_rings += frame_index >= ring_used_frame[i] + 2 || ring_used_frame[i] == 0;
+    // A change to how the tiles are generated makes the resident ones wrong.
+    if (input.terrain.detail != tile_detail) {
+        tile_detail = input.terrain.detail;
+        terrain_tier.invalidate();
+    }
     const bool was_active = terrain_tier.active();
     terrain_tier.update(view, frame_index, tile_pool ? free_rings : 0);
     if (terrain_tier.active() != was_active)
@@ -156,13 +161,14 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
             const MinorPlanetTerrain* terrain = &*minor_planet_terrain;
             const PatchKey key = generation.key;
             const unsigned slot = generation.slot;
-            tile_pool->submit([terrain, key, slot, ring, dst, height_range]() -> TileResult {
+            const float detail = tile_detail;
+            tile_pool->submit([terrain, key, slot, ring, dst, height_range, detail]() -> TileResult {
                 const auto start = std::chrono::steady_clock::now();
                 std::vector<float> heights(tile_side * tile_side);
                 std::vector<std::uint8_t> albedo(tile_colour_side * tile_colour_side * 4);
                 std::vector<std::uint16_t> slope(tile_colour_side * tile_colour_side * 2);
                 generate_height_tile(*terrain, key, heights);
-                generate_colour_tiles(*terrain, key, albedo, slope);
+                generate_colour_tiles(*terrain, key, albedo, slope, detail);
                 auto* h16 = reinterpret_cast<std::uint16_t*>(dst);
                 for (unsigned i = 0; i < tile_side * tile_side; i++)
                     h16[i] = std::uint16_t(

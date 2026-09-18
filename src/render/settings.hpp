@@ -160,6 +160,9 @@ struct TerrainSettings {
     // negative holds them coarser. Every range moves together, so the morph bands keep
     // their spacing against the level below and the level boundaries stay seamless.
     float lod_bias = 0;
+    // Micro-relief the tiles' slope carries past the terrain's own content, scaling
+    // MinorPlanetTerrain's detail octaves; 0 is off. Changing it rebuilds every tile.
+    float detail = 1;
 };
 
 struct GasSettings {

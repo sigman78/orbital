@@ -277,6 +277,8 @@ void quality_controls(bool& high, render::TerrainSettings& terrain) {
     ImGui::SliderFloat("Tier switch", &terrain.activate_pixels, 50.f, 2400.f, "%.0f px", ImGuiSliderFlags_Logarithmic);
     // Positive splits sooner: the patches carry more detail at the same distance.
     ImGui::SliderFloat("LOD bias", &terrain.lod_bias, -3.f, 3.f, "%+.2f");
+    // Rebuilds every tile, so it streams back in over a second or two.
+    ImGui::SliderFloat("Surface detail", &terrain.detail, 0.f, 2.5f, "%.2f");
 }
 void anti_aliasing_controls(render::AntiAliasingSettings& settings) {
     ImGui::Checkbox("Temporal (F5)", &settings.temporal_aa);

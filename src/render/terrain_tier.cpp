@@ -225,6 +225,18 @@ void TerrainTier::choose_generation(unsigned budget) {
     }
 }
 
+void TerrainTier::invalidate() {
+    for (Slot& slot : slots_)
+        slot = {};
+    slots_by_key_.clear();
+    free_slots_.clear();
+    for (unsigned slot = slot_count; slot-- > 0;)
+        free_slots_.push_back(slot);
+    draws_.clear();
+    generate_.clear();
+    active_ = false;
+}
+
 void TerrainTier::disable() {
     draws_.clear();
     generate_.clear();

@@ -90,6 +90,26 @@ float MinorPlanetTerrain::height(Vec3d direction, std::span<const Crater> crater
     return std::clamp(h, height_min, height_max);
 }
 
+float MinorPlanetTerrain::detail(Vec3d direction, double nyquist, float strength) const {
+    if (strength <= 0)
+        return 0;
+    const Vec3d d = normalized(direction);
+    double h = 0;
+    for (unsigned octave = 0; octave < detail_octaves; octave++) {
+        const double frequency = double(detail_frequency) * (1u << octave);
+        const double weight = std::clamp(std::log2(nyquist / frequency), 0.0, 1.0);
+        if (weight <= 0)
+            break; // and so is every octave above this one
+        // Equal slope from each octave, adding in quadrature, so the amplitude falls
+        // with the frequency. An octave of amplitude A at f cycles per radian has an
+        // RMS slope of about 1.1 * A * f on this noise, measured against the tiles.
+        const double amplitude = double(strength) * detail_slope /
+                                 (std::sqrt(double(detail_octaves)) * 1.1 * frequency);
+        h += weight * amplitude * gradient_noise(d * frequency, seed_ + 0xD1 + octave);
+    }
+    return float(h);
+}
+
 Vec3f MinorPlanetTerrain::albedo(Vec3d direction, float height, float slope) const {
     const Vec3d d = normalized(direction);
     // Ceres's dark grey ground, with Pluto's warm dark maculae over parts of

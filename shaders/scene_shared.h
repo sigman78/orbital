@@ -34,7 +34,7 @@ using ShaderMatrix4 = float[16];
 #define MINOR_PLANET_HEIGHT_MIN (-.05)
 #define MINOR_PLANET_HEIGHT_MAX (.05)
 // The span of the slope tile's two channels, radii per radian (tile_slope_scale).
-#define MINOR_PLANET_SLOPE_SCALE 2.0
+#define MINOR_PLANET_SLOPE_SCALE 3.0
 // How far a patch's skirt hangs below its edge, radii (patch_skirt_drop).
 #define MINOR_PLANET_SKIRT_DROP 0.002
 // Colour texels per height texel along a tile's edge (tile_colour_ratio).

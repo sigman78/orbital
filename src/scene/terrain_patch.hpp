@@ -36,11 +36,12 @@ constexpr unsigned tile_side = 65;       // texels per tile edge, covering 64 qu
 // the switch show. Two puts the crossover at level 2, at four times the tile memory.
 constexpr unsigned tile_colour_ratio = 2;
 constexpr unsigned tile_colour_side = (tile_side - 1) * tile_colour_ratio + 1;
-// The span of the slope tile's two channels, radii per radian. The gradient over the
-// body measures 1.33 at its steepest (53 degrees, levels 2 to 10, 2026-09-17), so two
-// clips nothing and leaves half again of headroom; sixteen bits over it resolve the
-// direction to 0.002 degrees, where the unit normal in eight bits resolved 0.38.
-constexpr float tile_slope_scale = 2.f;
+// The span of the slope tile's two channels, radii per radian. The terrain's own
+// gradient measures 1.33 at its steepest (53 degrees, levels 2 to 10, 2026-09-17) and
+// the detail octaves add to it, up to about 2 at the top of the detail slider, so
+// three clips nothing across the range; sixteen bits over it resolve the direction to
+// 0.005 degrees, where the unit normal in eight bits resolved 0.38.
+constexpr float tile_slope_scale = 3.f;
 // How far a patch's skirt hangs below its edge, radii: the shader drops the ring
 // by it, and a patch's bounding sphere has to hold it.
 constexpr float patch_skirt_drop = .002f;
@@ -100,7 +101,7 @@ float patch_error(const MinorPlanetTerrain& terrain, PatchKey key);
 // so past ratio 1 it sees relief the grid never carries.
 void generate_height_tile(const MinorPlanetTerrain& terrain, PatchKey key, std::span<float> out);
 void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<std::uint8_t> albedo,
-                           std::span<std::uint16_t> slope);
+                           std::span<std::uint16_t> slope, float detail = 1);
 
 // The shared grid mesh for all patches: 65×65 vertices whose position holds
 // (x, y, skirt), x and y in 0..64, skirt 0 on the grid and 1 on the drop ring.

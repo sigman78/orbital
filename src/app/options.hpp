@@ -18,7 +18,8 @@ inline constexpr std::string_view usage =
     "--rocks N --sun-at X Y (turn the camera so the sun projects there, 1 the frame edge; for lens review)\n"
     "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --disc 0|1 --near-tier 0|1 --wireframe 0|1 --terrain-debug "
     "0..5 (uv, normal, elevation, shadow, morph) --tier-activate px (lower switches to the patches further out, "
-    "for the coarse levels) --lod-bias X (patch ranges times 2^X; positive is finer) --lod-scale X "
+    "for the coarse levels) --lod-bias X (patch ranges times 2^X; positive is finer) --terrain-detail X "
+    "(the tiles' micro-relief, 0 off) --lod-scale X "
     "--vsync 0|1 "
     "--splat 0..3 --tone "
     "0|1|2 --hdr 0|1|2 (SDR, scRGB, HDR10; needs the OS in HDR) "
@@ -57,6 +58,7 @@ struct Options {
     unsigned terrain_debug = 0;                                // the patch path's debug view (TerrainSettings::debug)
     float tier_activate = render::TerrainSettings{}.activate_pixels;        // where the patches take the body over
     float lod_bias = render::TerrainSettings{}.lod_bias;                    // the patch split ranges, times 2^bias
+    float terrain_detail = render::TerrainSettings{}.detail;                // the tiles' micro-relief, 0 off
     unsigned wireframe = render::TerrainSettings{}.wireframe;               // their quad grid drawn over the surface
     float lod_scale = render::BeltSettings{}.lod_scale;                     // far-belt fade distance scale
     unsigned spatial = unsigned(render::AntiAliasingSettings{}.spatial_aa); // spatial pass: 0 off, 1 FXAA, 2 SMAA

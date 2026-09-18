@@ -69,6 +69,9 @@ public:
 
     void update(const TierView& view, unsigned frame, unsigned budget = generate_per_frame);
     void disable(); // the switch off: the tree collapses, the cache stays
+    // Drops every tile: what a change to how they are generated needs. Tiles in
+    // flight land on a recycled slot and are refused, as they are after an eviction.
+    void invalidate();
     // True once the tier covers the body: the sphere levels draw until then.
     bool active() const { return active_; }
     std::span<const Draw> draws() const { return draws_; } // this frame's patches
