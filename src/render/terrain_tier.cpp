@@ -119,7 +119,7 @@ void TerrainTier::request(PatchKey key, float pixels) {
     requests_.push_back({key, pixels});
 }
 
-void TerrainTier::visit(std::uint32_t index, const TierView& view) {
+void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
     const Visibility seen = visibility(nodes_[index], view);
     if (!seen.visible) {
         collapse(nodes_[index]);
@@ -142,6 +142,10 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view) {
     unsigned quadrants = 0xf;
     if (const std::uint32_t children = nodes_[index].children) {
         quadrants = 0;
+        // The children that will be drawn, and the fade they share: the youngest of
+        // them governs, so siblings fading in from this node's shape agree with each
+        // other all the way. A child never fades less than this node does.
+        unsigned descend = 0, youngest = 0;
         for (unsigned i = 0; i < 4; i++) {
             const Node& child = nodes_[children + i];
             const Visibility child_seen = visibility(child, view);
@@ -152,7 +156,8 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view) {
             const bool in_range = nearest_distance(view.camera_local, child.bounds) < double(range_[key.level + 1]);
             const unsigned child_slot = slot_of(child.key);
             if (in_range && child_slot != no_slot && slots_[child_slot].resident) {
-                visit(children + i, view);
+                descend |= 1u << i;
+                youngest = std::max(youngest, slots_[child_slot].resident_frame);
                 continue;
             }
             quadrants |= 1u << i;
@@ -163,12 +168,23 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view) {
             if (child_slot != no_slot)
                 touch(child.key);
         }
+        if (descend) {
+            const unsigned age = frame_ - std::min(youngest, frame_);
+            const float group = age >= fade_frames ? 0.f : 1.f - float(age) / float(fade_frames);
+            for (unsigned i = 0; i < 4; i++)
+                if (descend >> i & 1)
+                    visit(children + i, view, std::max(fade, group));
+        }
         if (!quadrants)
             return;
+        // This node is the shape its children fade from, so its own quadrants must
+        // stand still while they do: a morphing reference would crack against them.
+        if (descend)
+            fade = 0;
     }
     const unsigned slot = slot_of(key);
     if (slot != no_slot && slots_[slot].resident)
-        draws_.push_back({.key = key, .slot = slot, .quadrants = quadrants});
+        draws_.push_back({.key = key, .slot = slot, .quadrants = quadrants, .fade = fade});
     else if (slot == no_slot)
         request(key, seen.pixels);
 }
@@ -220,6 +236,8 @@ bool TerrainTier::mark_resident(unsigned slot, PatchKey key) {
     if (slots_[slot].key != key)
         return false; // recycled since the request went out
     slots_[slot].resident = true;
+    // The frame it can first be drawn in: residency is marked between updates.
+    slots_[slot].resident_frame = frame_ + 1;
     return true;
 }
 
@@ -245,7 +263,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     for (unsigned face = 0; face < 6; face++)
         touch(nodes_[face].key);
     for (unsigned face = 0; face < 6; face++)
-        visit(face, view);
+        visit(face, view, 0); // a face has no parent to fade from
     // The tier takes over once every face is resident; the sphere levels draw until then.
     active_ = true;
     for (unsigned face = 0; face < 6; face++) {

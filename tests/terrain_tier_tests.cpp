@@ -1,10 +1,12 @@
 #include "render/terrain_tier.hpp"
 #include "render/frame_calculations.hpp"
+#include "scene/terrain.hpp"
 
 #include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <unordered_map>
 #include <vector>
 
 using namespace space;
@@ -23,6 +25,25 @@ TierView view_at(double distance, double radius, Vec3d forward = {0, 0, -1}) {
                   .height_pixels = 900,
                   .tan_y = tan_y};
     return view;
+}
+
+// A camera hovering over a given point of the body, aimed at its centre: the
+// morph check needs the camera over a cube edge or a corner, where the levels
+// meeting there are not the mirror image of each other.
+TierView view_over(Vec3d over, double altitude, double radius) {
+    const Vec3d local = normalized(over) * (1 + altitude);
+    CameraView camera;
+    camera.forward = local * -1;
+    camera.right = normalized(cross(camera.forward, std::abs(camera.forward.y) < .9 ? Vec3d{0, 1, 0} : Vec3d{1, 0, 0}));
+    camera.up = cross(camera.right, camera.forward);
+    const float tan_y = float(std::tan(camera.vertical_fov / 2));
+    return {.body_centre = local * -radius,
+            .radius = radius,
+            .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
+            .camera_local = local,
+            .frustum = view_frustum(camera, tan_y * 16 / 9, tan_y),
+            .height_pixels = 900,
+            .tan_y = tan_y};
 }
 
 // Models asynchronous generation, like the renderer's worker threads: a slot
@@ -64,7 +85,173 @@ bool is_ancestor(PatchKey a, PatchKey b) {
     return (a.x >> shift) == b.x && (a.y >> shift) == b.y;
 }
 
+// The cross-level morph, checked the way the vertex shader computes it. A drawn
+// patch's grid is morphed by the vertex's own distance to the camera, so two
+// drawn surfaces of different level meet without a crack only where the finer
+// one is fully morphed to the coarser one's shape (m == 1) and the coarser one
+// has not begun morphing toward its own parent (m == 0). This walks every such
+// boundary and counts the vertices that break it.
+struct MorphCheck {
+    const MinorPlanetTerrain& terrain;
+    std::unordered_map<std::uint32_t, std::vector<float>> heights; // by patch, kept across frames
+
+    struct Surface {
+        PatchKey key;
+        float start = 0, end = 0, floor = 0;
+        const std::vector<float>* height = nullptr;
+    };
+
+    // shaders/surface/patch.slang: saturate((dist - morph.x) / (morph.y - morph.x)).
+    float morph_at(const Surface& s, unsigned x, unsigned y, Vec3d camera_local) {
+        constexpr unsigned quads = tile_side - 1;
+        const double size = 2.0 / double(1u << s.key.level);
+        const Vec3d d = cube_direction(s.key.face, -1 + s.key.x * size + double(x) * size / quads,
+                                       -1 + s.key.y * size + double(y) * size / quads);
+        const double dist = length(d * (1 + (*s.height)[y * tile_side + x]) - camera_local);
+        return std::max(float(std::clamp((dist - s.start) / std::max(double(s.end) - s.start, 1e-6), 0.0, 1.0)),
+                        s.floor);
+    }
+
+    // Violating boundary vertices over the tier's current draws.
+    unsigned violations(const TerrainTier& tier, const TierView& view, unsigned* checked = nullptr,
+                        bool use_fade = true) {
+        constexpr unsigned quads = tile_side - 1;
+        std::vector<Surface> surfaces;
+        std::unordered_map<std::uint32_t, unsigned> cover; // a drawn quadrant's cell -> its surface
+        for (const auto& draw : tier.draws()) {
+            auto& height = heights[draw.key.packed()];
+            if (height.empty()) {
+                height.resize(tile_side * tile_side);
+                generate_height_tile(terrain, draw.key, height);
+            }
+            const float end = tier.range(draw.key.level);
+            for (unsigned i = 0; i < 4; i++)
+                if (draw.quadrants >> i & 1)
+                    cover[draw.key.child(i).packed()] = unsigned(surfaces.size());
+            surfaces.push_back({draw.key, .7f * end, end, use_fade ? draw.fade : 0.f, &height});
+        }
+        // The surface covering a cell: itself, or the nearest ancestor drawn as a
+        // quadrant. None means finer cells cover it, and they run the check instead.
+        const auto coverer = [&](PatchKey cell) -> const Surface* {
+            for (int up = 0; up <= int(cell.level); up++) {
+                if (const auto found = cover.find(cell.packed()); found != cover.end())
+                    return &surfaces[found->second];
+                cell = {cell.face, std::uint8_t(cell.level - 1), std::uint16_t(cell.x / 2), std::uint16_t(cell.y / 2)};
+            }
+            return nullptr;
+        };
+        unsigned bad = 0;
+        for (const auto& [packed, index] : cover) {
+            const Surface& s = surfaces[index];
+            const PatchKey cell{std::uint8_t(packed & 7), std::uint8_t(packed >> 3 & 0x1f),
+                                std::uint16_t(packed >> 8 & 0xfff), std::uint16_t(packed >> 20 & 0xfff)};
+            const unsigned cells = 1u << cell.level, qx = cell.x & 1, qy = cell.y & 1;
+            for (int side = 0; side < 4; side++) {
+                const int dx = side == 0 ? -1 : side == 1 ? 1 : 0, dy = side == 2 ? -1 : side == 3 ? 1 : 0;
+                const int nx = int(cell.x) + dx, ny = int(cell.y) + dy;
+                PatchKey neighbour{cell.face, cell.level, std::uint16_t(nx), std::uint16_t(ny)};
+                if (nx < 0 || ny < 0 || nx >= int(cells) || ny >= int(cells)) {
+                    // Over a cube edge: step past it and ask which face and cell that is.
+                    const double size = 2.0 / cells;
+                    const CubeCoord c = cube_coordinates(cube_direction(
+                        cell.face, -1 + (cell.x + .5) * size + dx * size, -1 + (cell.y + .5) * size + dy * size));
+                    const auto index_of = [&](double v) {
+                        return std::uint16_t(std::clamp(int((v + 1) / size), 0, int(cells) - 1));
+                    };
+                    neighbour = {std::uint8_t(c.face), cell.level, index_of(c.s), index_of(c.t)};
+                }
+                const Surface* other = coverer(neighbour);
+                if (!other || other->key.level == s.key.level)
+                    continue;
+                const bool finer = s.key.level > other->key.level, vertical = side < 2;
+                const unsigned fixed = vertical ? qx * (quads / 2) + (side == 1) * quads / 2
+                                                : qy * (quads / 2) + (side == 3) * quads / 2;
+                const unsigned from = vertical ? qy * (quads / 2) : qx * (quads / 2);
+                for (unsigned i = 0; i <= quads / 2; i++) {
+                    const unsigned x = vertical ? fixed : from + i, y = vertical ? from + i : fixed;
+                    const float m = morph_at(s, x, y, view.camera_local);
+                    if (checked)
+                        (*checked)++;
+                    bad += finer ? m < .999f : m > .001f;
+                }
+            }
+        }
+        return bad;
+    }
+};
+
+// A level's morph band must not reach below where its child hands over, or the
+// coarser side is already morphing where the finer one meets it.
+void test_morph_bands() {
+    double worst = 1e9;
+    for (unsigned level = 0; level + 1 < std::size(TerrainTier::level_error); level++)
+        worst = std::min(worst, .7 * TerrainTier::level_error[level] / TerrainTier::level_error[level + 1]);
+    std::printf("terrain tier: worst morph-band headroom over the child's hand-over %.3fx\n", worst);
+    assert(worst > 1);
+}
+
+void test_morph_continuity() {
+    constexpr double radius = 2.5 / 15;
+    const MinorPlanetTerrain terrain(1007);
+    MorphCheck check{terrain};
+    // Settled, over a face centre, a cube edge, a corner and off-axis: the levels
+    // that meet must meet cleanly wherever the camera stands.
+    const Vec3d spots[] = {{0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {.9, .1, 1}, {.3, .2, 1}};
+    unsigned checked = 0, bad = 0, partial = 0, drawn = 0;
+    for (const Vec3d& spot : spots)
+        for (double altitude : {.03, .08, .2, .5}) {
+            TerrainTier tier;
+            const TierView view = view_over(spot, altitude, radius);
+            for (unsigned frame = 1; frame <= 96; frame++) {
+                tier.update(view, frame, TerrainTier::slot_count);
+                for (const auto& g : tier.generate())
+                    tier.mark_resident(g.slot, g.key);
+            }
+            tier.update(view, 200, TerrainTier::slot_count);
+            bad += check.violations(tier, view, &checked);
+            for (const auto& draw : tier.draws())
+                drawn++, partial += draw.quadrants != 0xf;
+        }
+    std::printf("terrain tier: %u boundary vertices at settled level boundaries, %u break the morph, "
+                "%u of %u draws partial\n",
+                checked, bad, partial, drawn);
+    assert(checked > 20000 && bad == 0);
+}
+
+// While tiles stream in, a node draws the quadrants whose children have not
+// arrived. A resident child beside one of those is inside its own range, so it is
+// not fully morphed, and the two do not meet: the transient crack the skirt
+// covers. The fade closes it by holding a newly drawn child at its parent's shape.
+void test_morph_streaming() {
+    constexpr double radius = 2.5 / 15;
+    const MinorPlanetTerrain terrain(1007);
+    MorphCheck check{terrain};
+    const TierView view = view_over({.6, .3, 1}, .05, radius);
+    struct Count {
+        unsigned frames = 0, worst = 0, total = 0;
+    };
+    Count faded, plain;
+    TerrainTier tier;
+    AsyncTiles async;
+    for (unsigned frame = 1; frame <= 80; frame++) {
+        async.update(tier, view, frame);
+        if (tier.draws().empty())
+            continue;
+        const unsigned with = check.violations(tier, view, nullptr, true);
+        const unsigned without = check.violations(tier, view, nullptr, false);
+        faded.frames += with > 0, faded.worst = std::max(faded.worst, with), faded.total += with;
+        plain.frames += without > 0, plain.worst = std::max(plain.worst, without), plain.total += without;
+    }
+    std::printf("terrain tier: streaming, boundary vertices breaking the morph: without the fade %u over %u frames "
+                "(worst %u), with it %u over %u frames (worst %u)\n",
+                plain.total, plain.frames, plain.worst, faded.total, faded.frames, faded.worst);
+    assert(faded.total <= plain.total);
+}
+
 int main() {
+    test_morph_bands();
+    test_morph_continuity();
+    test_morph_streaming();
     constexpr double radius = 2.5 / 15;
     TerrainTier tier;
     AsyncTiles async;

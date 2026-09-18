@@ -187,9 +187,11 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         const float morph_start = 0.7f * morph_end;
         const PatchKey parent{draw.key.face, std::uint8_t(draw.key.level ? draw.key.level - 1 : 0),
                               std::uint16_t(draw.key.x / 2), std::uint16_t(draw.key.y / 2)};
+        // The fade wants the parent's shape, and the fragment path blends toward the
+        // parent's tile: without it resident the two would disagree, so it is dropped.
         const unsigned parent_slot = draw.key.level ? terrain_tier.resident_slot(parent) : TerrainTier::slot_count;
         records[i] = {.cell = cell,
-                      .morph = {morph_start, morph_end, 0, 0},
+                      .morph = {morph_start, morph_end, parent_slot < TerrainTier::slot_count ? draw.fade : 0, 0},
                       .tile = {draw.key.face, draw.slot, parent_slot,
                                (draw.key.x & 1u) | (draw.key.y & 1u) << 1 | (draw.key.x == 0) << 2 |
                                    (draw.key.x + 1 == 1u << draw.key.level) << 3 | (draw.key.y == 0) << 4 |

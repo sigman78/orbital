@@ -76,7 +76,10 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     float h = patchHeight(slot, g);
     float3 world = inst.center_radius.xyz + mul(rotate, d) * radius * (1 + h);
     float dist = length(world) / radius;
-    float m = saturate((dist - patch.morph.x) / max(patch.morph.y - patch.morph.x, 1e-6));
+    // The distance morph, with a floor under it while the tile fades in: a tile
+    // just arrived is drawn as its parent's shape and relaxes to its own, so the
+    // detail it adds fades in where it would otherwise appear between two frames.
+    float m = max(saturate((dist - patch.morph.x) / max(patch.morph.y - patch.morph.x, 1e-6)), patch.morph.z);
 
     float2 gm = g - frac(g * 0.5) * 2.0 * m;
     st = cell_origin + gm / PATCH_QUADS * cell_size;

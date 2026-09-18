@@ -36,6 +36,10 @@ public:
     static constexpr float activate_pixels = 1200; // the body's, where the finest sphere level runs out
     static constexpr float error_pixels = 3;       // a patch's geometric error on screen: it splits above 1.5 px
     static constexpr float hysteresis = .8f;       // the fraction of either the way back
+    // A tile just arrived is drawn morphed to its parent's shape and relaxes to its
+    // own over this many frames, so detail fades in where it would otherwise pop.
+    // Counted in frames, not seconds, so a capture is the same every run.
+    static constexpr unsigned fade_frames = 15;
     // Worst measured geometric error per level, radii, from 64 random patches per level
     // on the seed-1007 terrain with the Everitt warp (2026-09-18). Levels 9..12
     // extrapolated by the measured ratio of 2.5 per level.
@@ -52,6 +56,10 @@ public:
         PatchKey key;
         unsigned slot;
         unsigned quadrants; // the grid quadrants to draw (bit i: x = i & 1, y = i >> 1); 0xf the whole patch
+        // A floor under the vertex shader's morph, 1 the moment the patch is drawn
+        // for the first time and 0 once it has settled. The four children of one
+        // split share it, so they agree with each other while they fade in.
+        float fade = 0;
     };
 
     void update(const TierView& view, unsigned frame, unsigned budget = generate_per_frame);
@@ -81,7 +89,7 @@ private:
     };
     struct Slot {
         PatchKey key;
-        unsigned used = 0;
+        unsigned used = 0, resident_frame = 0;
         bool resident = false;
     };
     struct Request {
@@ -95,7 +103,7 @@ private:
 
     void ensure_roots();
     Visibility visibility(const Node& node, const TierView& view) const;
-    void visit(std::uint32_t index, const TierView& view);
+    void visit(std::uint32_t index, const TierView& view, float fade);
     void collapse(Node& node);
     std::uint32_t allocate_children(const Node& node);
     unsigned slot_of(PatchKey key) const; // slot_count when not in the cache
