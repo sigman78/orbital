@@ -1,6 +1,6 @@
 # ORBITAL
 
-Native Windows and Linux C++20 space demo on a compatibility fork of [NoGraphicsAPI](https://github.com/sebbbi/NoGraphicsAPI): an Earth-like world, a gas giant with an asteroid belt, a rocky moon, a desert world with two small moons, and a minor planet whose surface is generated as you approach it.
+C++20 space demo on a compatibility fork of [NoGraphicsAPI](https://github.com/sebbbi/NoGraphicsAPI): an Earth-like world, a gas giant with an asteroid belt, a rocky moon, a desert world with two small moons, and a minor planet whose surface is generated as you approach it.
 
 ![Earth with the gas giant and its belt behind it](docs/images/earth.jpg)
 
@@ -10,15 +10,13 @@ Native Windows and Linux C++20 space demo on a compatibility fork of [NoGraphics
 
 ## Details
 
-Sourced material maps, atmospheric scattering, shadows, HDR with exposure adaptation and bloom, temporal plus SMAA anti-aliasing, three tone curves and a Dear ImGui control panel.
+Sourced material maps, atmospheric scattering, shadows, HDR with exposure adaptation and bloom, temporal plus SMAA anti-aliasing, CDLOD and a Dear ImGui control panel.
 
 The asteroid belt is a deterministic rock population drawn as meshes near the camera and splats further out, with its own transmittance and extinction maps, forward-scattering dust and a lit disc. The sky is the Milky Way fitted as splats over a star catalogue.
 
-The minor planet carries a second terrain tier. Close in it stops being a textured sphere and becomes a CDLOD cube sphere: one shared grid mesh instanced per patch, shape and colour read from per-patch tiles that a CPU worker pool generates and streams into texture arrays, levels meeting without cracks by vertex morphing. How it works and what is still wrong with it is in [docs/DYNAMIC_TERRAIN.md](docs/DYNAMIC_TERRAIN.md).
+The minor planet carries a second terrain tier. Close in it stops being a textured sphere and becomes a CDLOD cube sphere: one shared grid mesh instanced per patch, shape and colour read from per-patch tiles that a CPU worker pool generates and streams into texture arrays, levels meeting without cracks by vertex morphing.
 
 ![The near tier's patch grid over the minor planet's surface, with Earth and the sun beyond it](docs/images/minor-planet.jpg)
-
-Above is that tier with its wireframe on (`--wireframe 1`, or the panel), from low over the surface: green for the shared grid mesh's triangles, orange for the patch borders, red where a patch lies on a cube-face edge. The triangles coarsen with distance as the selector gives each patch the level its screen error asks for. Earth hangs off to the left. With the wireframe off it is a cratered surface and nothing else.
 
 ## Build
 
@@ -51,11 +49,7 @@ Tab opens the control panel (`--ui` opens it at start), which holds frame statis
 ./build/release/orbital.exe --bookmark 9 --time 1200 --back 0.05 --frames 120 --no-hud --high --capture captures/minor-planet.png
 ```
 
-`--help` lists every option. `--time` freezes the simulation and exposure adaptation for reproducible captures; `--benchmark` writes per-frame CPU and GPU pass timings and runs with vsync off (`--vsync 0|1` overrides, and the panel has a switch), because a vsynced GPU idles between frames and clocks down, which inflates its timestamps on a fast card; `--pan` strafes the camera at a fixed rate to compare anti-aliasing modes in motion; `--rocks N` overrides the belt size.
-
-`--back units` moves along the bookmarked body's line and keeps aiming at it, negative coming in until it reaches the terrain, and `--fov-div` zooms like a telescope; together they frame a body without hand-flying to it. `--shots file` runs a list of `key=value` views in one process and `--report file.json` writes their readings, `--headless` hiding the window throughout.
-
-The near tier has its own switches: `--near-tier 0|1` falls back to the textured sphere, `--wireframe 1` draws the patch grid, `--terrain-debug 0..5` isolates one shading term at a time, `--lod-bias X` scales every patch range by `2^X`, and `--terrain-detail X` sets the micro-relief in the tiles.
+`--help` lists every option.
 
 `python tools/check.py` is the quick render check: every view in one process, diffed against an accepted reference. For repeatable scene/window/fullscreen measurements and comparisons against saved milestones, use [the performance suite](docs/PERFORMANCE.md).
 
