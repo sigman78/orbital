@@ -222,7 +222,13 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
     }
     const unsigned slot = slot_of(key);
     if (slot != no_slot && slots_[slot].resident)
-        draws_.push_back({.key = key, .slot = slot, .quadrants = quadrants, .fade = fade});
+        draws_.push_back(
+            {.key = key,
+             .slot = slot,
+             .quadrants = quadrants,
+             .fade = fade,
+             .near_distance = float(seen.distance),
+             .far_distance = float(farthest_distance(view.camera_local, nodes_[index].bounds, height_range(key)))});
     else if (slot == no_slot)
         request(key, seen.pixels);
 }
@@ -365,9 +371,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     double behind = 0, fade = 0;
     for (const Draw& draw : draws_) {
         pressure_.deepest = std::max(pressure_.deepest, unsigned(draw.key.level));
-        const PatchBounds bounds = patch_bounds(draw.key);
-        const Range<float> heights = height_range(draw.key);
-        const double near = nearest_distance(view.camera_local, bounds, heights);
+        const double near = double(draw.near_distance);
         const double over = level_at(near) - double(draw.key.level);
         behind += over;
         pressure_.behind_one += over > 1;
@@ -377,7 +381,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         const auto morph = [&](double d) {
             return std::max(std::clamp((d - start) / std::max(end - start, 1e-9), 0.0, 1.0), double(draw.fade));
         };
-        const double lo = morph(near), hi = morph(farthest_distance(view.camera_local, bounds, heights));
+        const double lo = morph(near), hi = morph(double(draw.far_distance));
         if (hi - lo > .02)
             pressure_.graded++;
         else if (lo > .5)

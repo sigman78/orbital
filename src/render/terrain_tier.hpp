@@ -78,6 +78,10 @@ public:
         unsigned quadrants; // the grid quadrants to draw (bit i: x = i & 1, y = i >> 1); 0xf the whole patch
         // Morph floor shared by siblings: 1 on arrival, decreasing to 0 over fade_frames.
         float fade = 0;
+        // Kept from the visit that selected this patch, where its bounds were already at hand:
+        // the pressure diagnostics want both distances and would otherwise rebuild the bounds
+        // of every drawn patch every frame, which is the dearer half of what they cost.
+        float near_distance = 0, far_distance = 0;
     };
 
     // Per-frame limits and coverage diagnostics; out_of_range is normal coverage.
