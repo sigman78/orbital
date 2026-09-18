@@ -279,6 +279,9 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
               terrain.out_of_range);
         pinch(terrain.behind_mean > 1.f, "Finest level %u, drawn %.2f levels coarser than asked (%u over one)",
               terrain.deepest, double(terrain.behind_mean), terrain.behind_one);
+        // A patch whose morph reads the same at both ends is switched, not blended.
+        pinch(terrain.graded * 2 < terrain.drawn, "Morph grades %u, switches %u near + %u far, fade %.2f",
+              terrain.graded, terrain.flat_near, terrain.flat_far, double(terrain.fade_mean));
     }
     ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
 }

@@ -404,16 +404,32 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     pressure_.node_budget = slot_count - 64;
     pressure_.requested = unsigned(requests_.size());
     pressure_.served = unsigned(generate_.size());
-    double behind = 0;
+    double behind = 0, fade = 0;
     for (const Draw& draw : draws_) {
         pressure_.deepest = std::max(pressure_.deepest, unsigned(draw.key.level));
+        const PatchBounds bounds = patch_bounds(draw.key);
+        const double near = nearest_distance(view.camera_local, bounds);
         // What the screen error asks for at its nearest point against what it is drawn
         // at: a patch well over a level behind is one the selection left coarse.
-        const double want = level_at(nearest_distance(view.camera_local, patch_bounds(draw.key)));
-        const double over = want - double(draw.key.level);
+        const double over = level_at(near) - double(draw.key.level);
         behind += over;
         pressure_.behind_one += over > 1;
+        fade += double(draw.fade);
+        // The shader's morph at each end of the patch. Equal ends mean every vertex of
+        // it moves together, so the patch switches where it should blend.
+        const double end = double(range_[draw.key.level]), start = .7 * end;
+        const auto morph = [&](double d) {
+            return std::max(std::clamp((d - start) / std::max(end - start, 1e-9), 0.0, 1.0), double(draw.fade));
+        };
+        const double lo = morph(near), hi = morph(farthest_distance(view.camera_local, bounds));
+        if (hi - lo > .02)
+            pressure_.graded++;
+        else if (lo > .5)
+            pressure_.flat_far++; // standing at its parent's shape
+        else
+            pressure_.flat_near++; // standing at its own
     }
+    pressure_.fade_mean = draws_.empty() ? 0 : float(fade / double(draws_.size()));
     pressure_.behind_count = unsigned(draws_.size());
     pressure_.behind_mean = draws_.empty() ? 0 : float(behind / double(draws_.size()));
 }

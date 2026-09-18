@@ -99,6 +99,13 @@ public:
         unsigned deepest = 0;                       // finest level drawn
         unsigned behind_one = 0, behind_count = 0;  // patches over a level coarser than asked for
         float behind_mean = 0;                      // levels coarser than asked for, averaged
+        // Whether the morph is doing anything. A patch whose morph reads the same at
+        // both ends of it has every vertex moving together, so it switches where it
+        // should blend, which is what chunked LOD does; graded is the share carrying a
+        // gradient across itself. fade_mean is the temporal floor, which hides the rest
+        // of it while tiles are still arriving.
+        unsigned flat_near = 0, flat_far = 0, graded = 0;
+        float fade_mean = 0;
     };
     const Pressure& pressure() const { return pressure_; }
 

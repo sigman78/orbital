@@ -154,6 +154,10 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     ts.deepest = p.deepest;
     ts.behind_one = p.behind_one;
     ts.behind_mean = p.behind_mean;
+    ts.flat_near = p.flat_near;
+    ts.flat_far = p.flat_far;
+    ts.graded = p.graded;
+    ts.fade_mean = p.fade_mean;
     // A line a flight can be read back from: every second or so while the tier draws,
     // and straight away the first time a limit actually bites.
     if (terrain_tier.active()) {
@@ -170,10 +174,10 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
             tier_log_frame = frame_index;
             log::info("Near tier f{}: {} drawn to level {}, {}/{} tiles ({} pending), nodes {}/{}, "
                       "blocked {}, req {}/{}, evict {} ({} warm), cover starved {} range {}, behind {:.2f} "
-                      "({} over a level)",
+                      "({} over a level), morph graded {} switched {}+{}, fade {:.2f}",
                       frame_index, ts.drawn, p.deepest, ts.resident, ts.slots, ts.pending, p.nodes, p.node_budget,
                       p.splits_blocked, p.served, p.requested, p.evictions, p.evicted_recent, p.starved, p.out_of_range,
-                      p.behind_mean, p.behind_one);
+                      p.behind_mean, p.behind_one, p.graded, p.flat_near, p.flat_far, p.fade_mean);
         }
     }
     // Submit new generation requests to the worker pool.
