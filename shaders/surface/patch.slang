@@ -8,6 +8,8 @@ static const float EVERITT_K = 0.8687;
 static const float TAN_K = tan(EVERITT_K);
 static const float PATCH_QUADS = 64.0;
 static const float TILE_SIDE = 65.0;
+static const float TILE_COLOUR_RATIO = MINOR_PLANET_COLOUR_RATIO;
+static const float TILE_COLOUR_SIDE = PATCH_QUADS * TILE_COLOUR_RATIO + 1.0;
 static const float SKIRT_DROP = MINOR_PLANET_SKIRT_DROP;
 
 static const float3 FACE_AXIS[6] = { float3(1,0,0), float3(-1,0,0), float3(0,1,0), float3(0,-1,0), float3(0,0,1), float3(0,0,-1) };

@@ -19,7 +19,7 @@ constexpr std::uint64_t align4(std::uint64_t bytes) {
 // and rg16 planes are both four bytes a texel, so they start at 4-byte offsets
 // within an entry, and entries are 4-byte strides.
 constexpr std::uint64_t height_tile_bytes = tile_side * tile_side * 2;
-constexpr std::uint64_t colour_tile_bytes = tile_side * tile_side * 4;
+constexpr std::uint64_t colour_tile_bytes = tile_colour_side * tile_colour_side * 4;
 constexpr std::uint64_t albedo_offset = align4(height_tile_bytes);
 constexpr std::uint64_t slope_offset = albedo_offset + colour_tile_bytes;
 constexpr std::uint64_t tile_total_bytes = align4(slope_offset + colour_tile_bytes);
@@ -31,9 +31,9 @@ void Renderer::Impl::create_terrain_tier() {
     minor_planet_terrain.emplace(system.bodies[showcase.minor_planet()].material_seed);
     tile_height = GpuImage::create_array(device, {tile_side, tile_side}, TerrainTier::slot_count,
                                          gpu::Format::r16_unorm);
-    tile_albedo = GpuImage::create_array(device, {tile_side, tile_side}, TerrainTier::slot_count,
+    tile_albedo = GpuImage::create_array(device, {tile_colour_side, tile_colour_side}, TerrainTier::slot_count,
                                          gpu::Format::rgba8_unorm);
-    tile_slope = GpuImage::create_array(device, {tile_side, tile_side}, TerrainTier::slot_count,
+    tile_slope = GpuImage::create_array(device, {tile_colour_side, tile_colour_side}, TerrainTier::slot_count,
                                         gpu::Format::rg16_unorm);
     bind(ArraySlot::terrain_height, tile_height);
     bind(ArraySlot::terrain_albedo, tile_albedo);
@@ -85,9 +85,11 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
             terrain_tier.mark_resident(result.slot, result.key);
             const auto staging_gpu = reinterpret_cast<std::uint64_t>(buffers.tile_staging.range().gpu) +
                                      result.ring * tile_total_bytes;
-            tile_copies.push_back({staging_gpu, height_tile_bytes, tile_height.texture(), result.slot});
-            tile_copies.push_back({staging_gpu + albedo_offset, colour_tile_bytes, tile_albedo.texture(), result.slot});
-            tile_copies.push_back({staging_gpu + slope_offset, colour_tile_bytes, tile_slope.texture(), result.slot});
+            tile_copies.push_back({staging_gpu, height_tile_bytes, tile_height.texture(), result.slot, tile_side});
+            tile_copies.push_back(
+                {staging_gpu + albedo_offset, colour_tile_bytes, tile_albedo.texture(), result.slot, tile_colour_side});
+            tile_copies.push_back(
+                {staging_gpu + slope_offset, colour_tile_bytes, tile_slope.texture(), result.slot, tile_colour_side});
             ring_used_frame[result.ring] = frame_index;
             stats.frame.terrain.uploaded++;
             stats.frame.terrain.generate_ms = result.ms;
@@ -103,7 +105,8 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                   .frustum = view_frustum(camera, tan_x, tan_y),
                   .height_pixels = float(extent.height),
                   .tan_y = tan_y,
-                  .activate_pixels = input.terrain.activate_pixels};
+                  .activate_pixels = input.terrain.activate_pixels,
+                  .lod_bias = input.terrain.lod_bias};
     const double tilt = system.bodies[body].axial_tilt;
     for (unsigned axis = 0; axis < 3; axis++) {
         const Vec3d e{axis == 0 ? 1. : 0., axis == 1 ? 1. : 0., axis == 2 ? 1. : 0.};
@@ -156,10 +159,10 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
             tile_pool->submit([terrain, key, slot, ring, dst, height_range]() -> TileResult {
                 const auto start = std::chrono::steady_clock::now();
                 std::vector<float> heights(tile_side * tile_side);
-                std::vector<std::uint8_t> albedo(tile_side * tile_side * 4);
-                std::vector<std::uint16_t> slope(tile_side * tile_side * 2);
+                std::vector<std::uint8_t> albedo(tile_colour_side * tile_colour_side * 4);
+                std::vector<std::uint16_t> slope(tile_colour_side * tile_colour_side * 2);
                 generate_height_tile(*terrain, key, heights);
-                generate_colour_tiles(*terrain, key, heights, albedo, slope);
+                generate_colour_tiles(*terrain, key, albedo, slope);
                 auto* h16 = reinterpret_cast<std::uint16_t*>(dst);
                 for (unsigned i = 0; i < tile_side * tile_side; i++)
                     h16[i] = std::uint16_t(
@@ -209,7 +212,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
 void Renderer::Impl::record_terrain_uploads(gpu::CommandBuffer* cmd) {
     for (const TileCopy& copy : tile_copies)
         gpu::copy_memory_to_texture(cmd, {reinterpret_cast<void*>(copy.source), copy.bytes}, copy.texture,
-                                    {.base_slice = copy.layer, .slice_count = 1, .extent = {tile_side, tile_side, 1}});
+                                    {.base_slice = copy.layer, .slice_count = 1, .extent = {copy.side, copy.side, 1}});
     for (const PatchCopy& copy : patch_copies)
         gpu::copy_memory(cmd, {reinterpret_cast<void*>(copy.source), copy.bytes},
                          {reinterpret_cast<void*>(copy.destination), copy.bytes});

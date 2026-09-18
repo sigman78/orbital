@@ -247,8 +247,9 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     draws_.clear();
     requests_.clear();
     generate_.clear();
+    const float bias = std::exp2(view.lod_bias);
     for (unsigned level = 0; level < std::size(level_error); level++)
-        range_[level] = level_error[level] * view.height_pixels / (view.tan_y * error_pixels);
+        range_[level] = level_error[level] * view.height_pixels / (view.tan_y * error_pixels) * bias;
     ensure_roots();
     const double distance = std::max(length(view.body_centre), view.radius);
     const float projected = float(view.radius * view.height_pixels / (distance * view.tan_y));

@@ -113,12 +113,12 @@ Material patchMaterial(SurfaceVaryings input, float3x3 rotate, float3 N, float3 
     uint slot = input.tileSlot, face = input.tileFace & 0xff, parent = (input.tileFace >> 8) & 0xfff, quadrant = (input.tileFace >> 20) & 3;
     float morph = input.patchMorph;
     float3 localN = normalize(input.localNormal);
-    float2 uv = (input.tileUV * PATCH_QUADS + 0.5) / TILE_SIDE;
+    float2 uv = (input.tileUV * PATCH_QUADS * TILE_COLOUR_RATIO + 0.5) / TILE_COLOUR_SIDE;
     float3 albedo = textureArrays[TEX_ARRAY_TERRAIN_ALBEDO].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0).rgb;
     float2 slope = textureArrays[TEX_ARRAY_TERRAIN_SLOPE].SampleLevel(samplers[SAMPLER_CLAMP], float3(uv, float(slot)), 0).xy * 2.0 - 1.0;
     if (morph > 0.0 && parent < ORBITAL_TERRAIN_SLOTS)
     {
-        float2 parentUV = ((float2(quadrant & 1, quadrant >> 1) + input.tileUV) * 0.5 * PATCH_QUADS + 0.5) / TILE_SIDE;
+        float2 parentUV = ((float2(quadrant & 1, quadrant >> 1) + input.tileUV) * 0.5 * PATCH_QUADS * TILE_COLOUR_RATIO + 0.5) / TILE_COLOUR_SIDE;
         float3 parentAlbedo = textureArrays[TEX_ARRAY_TERRAIN_ALBEDO].SampleLevel(samplers[SAMPLER_CLAMP], float3(parentUV, float(parent)), 0).rgb;
         float2 parentSlope = textureArrays[TEX_ARRAY_TERRAIN_SLOPE].SampleLevel(samplers[SAMPLER_CLAMP], float3(parentUV, float(parent)), 0).xy * 2.0 - 1.0;
         albedo = lerp(albedo, parentAlbedo, morph);

@@ -182,26 +182,27 @@ void test_tiles() {
         const auto s = [&](unsigned c) { return (slope[c] / 65535.0 * 2 - 1) * tile_slope_scale; };
         return normalized(d - frame.tangent * s(0) - frame.bitangent * s(1));
     };
-    std::vector<std::uint8_t> albedo(tile_side * tile_side * 4);
-    std::vector<std::uint16_t> norm(tile_side * tile_side * 2);
-    generate_colour_tiles(terrain, key, a, albedo, norm);
-    for (unsigned i = 0; i < tile_side * tile_side; i++) {
+    constexpr unsigned colour_quads = tile_colour_side - 1;
+    std::vector<std::uint8_t> albedo(tile_colour_side * tile_colour_side * 4);
+    std::vector<std::uint16_t> norm(tile_colour_side * tile_colour_side * 2);
+    generate_colour_tiles(terrain, key, albedo, norm);
+    for (unsigned i = 0; i < tile_colour_side * tile_colour_side; i++) {
         assert(albedo[i * 4 + 3] == 255);
         const double size = 2.0 / double(1u << key.level);
-        const Vec3d d = cube_direction(key.face, -1 + key.x * size + (i % tile_side) * size / 64,
-                                       -1 + key.y * size + (i / tile_side) * size / 64);
+        const Vec3d d = cube_direction(key.face, -1 + key.x * size + (i % tile_colour_side) * size / colour_quads,
+                                       -1 + key.y * size + (i / tile_colour_side) * size / colour_quads);
         // The normal the slope reads back points outward, within 45 degrees of the sphere's.
         assert(dot(tile_normal(&norm[i * 2], key.face, d), d) > .7);
     }
-    std::vector<std::uint8_t> ra(tile_side * tile_side * 4);
-    std::vector<std::uint16_t> rn(tile_side * tile_side * 2);
-    generate_colour_tiles(terrain, right_key, rh, ra, rn);
-    generate_colour_tiles(terrain, left_key, lh, albedo, norm);
-    for (unsigned y = 0; y < tile_side; y++) {
+    std::vector<std::uint8_t> ra(albedo.size());
+    std::vector<std::uint16_t> rn(norm.size());
+    generate_colour_tiles(terrain, right_key, ra, rn);
+    generate_colour_tiles(terrain, left_key, albedo, norm);
+    for (unsigned y = 0; y < tile_colour_side; y++) {
         for (unsigned c = 0; c < 4; c++)
-            assert(albedo[(y * tile_side + tile_side - 1) * 4 + c] == ra[(y * tile_side) * 4 + c]);
+            assert(albedo[(y * tile_colour_side + tile_colour_side - 1) * 4 + c] == ra[(y * tile_colour_side) * 4 + c]);
         for (unsigned c = 0; c < 2; c++)
-            assert(norm[(y * tile_side + tile_side - 1) * 2 + c] == rn[(y * tile_side) * 2 + c]);
+            assert(norm[(y * tile_colour_side + tile_colour_side - 1) * 2 + c] == rn[(y * tile_colour_side) * 2 + c]);
     }
     // Across every cube edge the two faces agree on the albedo and on the normal at
     // every shared edge texel, corners excepted: three grids meet there and no one
@@ -210,13 +211,20 @@ void test_tiles() {
     {
         const auto world_normal = [&](unsigned face, unsigned x, unsigned y, const std::uint16_t* slope, PatchKey key) {
             const double size = 2.0 / double(1u << key.level);
-            const Vec3d d = cube_direction(face, -1 + key.x * size + x * size / (tile_side - 1),
-                                           -1 + key.y * size + y * size / (tile_side - 1));
+            const Vec3d d = cube_direction(face, -1 + key.x * size + x * size / (tile_colour_side - 1),
+                                           -1 + key.y * size + y * size / (tile_colour_side - 1));
             return tile_normal(slope, face, d);
         };
-        std::vector<float> h1(tile_side * tile_side), h2(tile_side * tile_side);
-        std::vector<std::uint8_t> a1(h1.size() * 4), a2(a1.size());
-        std::vector<std::uint16_t> n1(h1.size() * 2), n2(n1.size());
+        // The colour grid is finer than the height grid, so a shared texel is found by
+        // its direction rather than by its height.
+        const auto colour_direction = [](PatchKey k, unsigned x, unsigned y) {
+            constexpr unsigned q = tile_colour_side - 1;
+            const double size = 2.0 / double(1u << k.level);
+            return cube_direction(k.face, -1 + k.x * size + x * size / q, -1 + k.y * size + y * size / q);
+        };
+        constexpr std::size_t colour = tile_colour_side * tile_colour_side;
+        std::vector<std::uint8_t> a1(colour * 4), a2(colour * 4);
+        std::vector<std::uint16_t> n1(colour * 2), n2(colour * 2);
         unsigned compared = 0;
         double worst = 0;
         for (unsigned f1 = 0; f1 < 6; f1++)
@@ -227,18 +235,18 @@ void test_tiles() {
                     for (unsigned i2 = 0; i2 < 4; i2++) {
                         const PatchKey p1{std::uint8_t(f1), 1, std::uint16_t(i1 & 1), std::uint16_t(i1 >> 1)};
                         const PatchKey p2{std::uint8_t(f2), 1, std::uint16_t(i2 & 1), std::uint16_t(i2 >> 1)};
-                        generate_height_tile(terrain, p1, h1);
-                        generate_height_tile(terrain, p2, h2);
-                        generate_colour_tiles(terrain, p1, h1, a1, n1);
-                        generate_colour_tiles(terrain, p2, h2, a2, n2);
-                        for (unsigned y1 = 0; y1 < tile_side; y1 += 8)
-                            for (unsigned x1 = 0; x1 < tile_side; x1 += 8)
-                                for (unsigned y2 = 0; y2 < tile_side; y2 += 8)
-                                    for (unsigned x2 = 0; x2 < tile_side; x2 += 8) {
-                                        const unsigned j1 = y1 * tile_side + x1, j2 = y2 * tile_side + x2;
-                                        const bool edge_x = x1 == 0 || x1 == tile_side - 1,
-                                                   edge_y = y1 == 0 || y1 == tile_side - 1;
-                                        if (h1[j1] != h2[j2] || !(edge_x ^ edge_y))
+                        generate_colour_tiles(terrain, p1, a1, n1);
+                        generate_colour_tiles(terrain, p2, a2, n2);
+                        for (unsigned y1 = 0; y1 < tile_colour_side; y1 += 8)
+                            for (unsigned x1 = 0; x1 < tile_colour_side; x1 += 8)
+                                for (unsigned y2 = 0; y2 < tile_colour_side; y2 += 8)
+                                    for (unsigned x2 = 0; x2 < tile_colour_side; x2 += 8) {
+                                        const unsigned j1 = y1 * tile_colour_side + x1, j2 = y2 * tile_colour_side + x2;
+                                        const bool edge_x = x1 == 0 || x1 == tile_colour_side - 1,
+                                                   edge_y = y1 == 0 || y1 == tile_colour_side - 1;
+                                        if (length(colour_direction(p1, x1, y1) - colour_direction(p2, x2, y2)) >
+                                                1e-12 ||
+                                            !(edge_x ^ edge_y))
                                             continue;
                                         for (unsigned c = 0; c < 4; c++)
                                             assert(a1[j1 * 4 + c] == a2[j2 * 4 + c]);
@@ -262,22 +270,20 @@ void test_tiles() {
             Vec3d direction;
             unsigned face, x, y;
         };
-        constexpr unsigned level = 2, cells = 1u << level, last = tile_side - 1;
+        constexpr unsigned level = 2, cells = 1u << level, last = tile_colour_side - 1;
         std::vector<Corner> corners;
         for (unsigned face = 0; face < 6; face++)
             for (unsigned i = 0; i < 4; i++) {
                 const double s = i & 1 ? 1 : -1, t = i >> 1 ? 1 : -1;
                 corners.push_back({cube_direction(face, s, t), face, s > 0 ? cells - 1 : 0, t > 0 ? cells - 1 : 0});
             }
-        std::vector<float> ch(tile_side * tile_side);
-        std::vector<std::uint8_t> ca(ch.size() * 4);
-        std::vector<std::uint16_t> cs(ch.size() * 2);
+        std::vector<std::uint8_t> ca(tile_colour_side * tile_colour_side * 4);
+        std::vector<std::uint16_t> cs(tile_colour_side * tile_colour_side * 2);
         const auto corner_normal = [&](const Corner& c) {
             const PatchKey ck{std::uint8_t(c.face), level, std::uint16_t(c.x), std::uint16_t(c.y)};
-            generate_height_tile(terrain, ck, ch);
-            generate_colour_tiles(terrain, ck, ch, ca, cs);
+            generate_colour_tiles(terrain, ck, ca, cs);
             const unsigned tx = c.x ? last : 0, ty = c.y ? last : 0;
-            return tile_normal(&cs[(ty * tile_side + tx) * 2], c.face, c.direction);
+            return tile_normal(&cs[(ty * tile_colour_side + tx) * 2], c.face, c.direction);
         };
         unsigned compared = 0;
         double worst = 0;

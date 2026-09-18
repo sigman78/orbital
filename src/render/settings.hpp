@@ -156,6 +156,10 @@ struct TerrainSettings {
     // where the tier draws its coarse levels: the way to review those without flying to
     // the ground. The default is where the finest sphere level runs out.
     float activate_pixels = 1200;
+    // Shifts every level's range by 2^bias, so positive draws finer patches sooner and
+    // negative holds them coarser. Every range moves together, so the morph bands keep
+    // their spacing against the level below and the level boundaries stay seamless.
+    float lod_bias = 0;
 };
 
 struct GasSettings {

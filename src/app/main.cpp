@@ -137,6 +137,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.terrain.wireframe = options.wireframe != 0;
     app.terrain.debug = options.terrain_debug;
     app.terrain.activate_pixels = options.tier_activate;
+    app.terrain.lod_bias = options.lod_bias;
     app.belt.lod_scale = options.lod_scale;
     app.vsync = options.vsync < 0 ? options.benchmark.empty() : options.vsync != 0;
     app.tone.exposure = options.exposure;

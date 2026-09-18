@@ -112,6 +112,7 @@ static_assert(float(MinorPlanetTerrain::height_min) == float(MINOR_PLANET_HEIGHT
               float(MinorPlanetTerrain::height_max) == float(MINOR_PLANET_HEIGHT_MAX));
 static_assert(tile_slope_scale == float(MINOR_PLANET_SLOPE_SCALE));
 static_assert(patch_skirt_drop == float(MINOR_PLANET_SKIRT_DROP));
+static_assert(tile_colour_ratio == MINOR_PLANET_COLOUR_RATIO);
 
 // Array-texture descriptor slots (shaders/scene/bindings.slang binding 2).
 enum class ArraySlot : unsigned {
@@ -391,7 +392,7 @@ struct Renderer::Impl {
     struct TileCopy {
         std::uint64_t source, bytes;
         gpu::Texture* texture;
-        unsigned layer;
+        unsigned layer, side; // the colour planes are a finer grid than the height plane
     };
     std::vector<PatchCopy> patch_copies;
     std::vector<TileCopy> tile_copies;

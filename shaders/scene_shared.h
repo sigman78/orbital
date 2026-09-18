@@ -37,6 +37,8 @@ using ShaderMatrix4 = float[16];
 #define MINOR_PLANET_SLOPE_SCALE 2.0
 // How far a patch's skirt hangs below its edge, radii (patch_skirt_drop).
 #define MINOR_PLANET_SKIRT_DROP 0.002
+// Colour texels per height texel along a tile's edge (tile_colour_ratio).
+#define MINOR_PLANET_COLOUR_RATIO 2
 // The Earth's cloud shell above the surface, in radii (the mesh scale and the shadow geometry).
 #define ORBITAL_CLOUD_HEIGHT 0.009
 // Instance.rotation_kind.w (SurfaceKind on the C++ side); each kind has its own fragment shader.

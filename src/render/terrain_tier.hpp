@@ -23,6 +23,7 @@ struct TierView {
     geometry::Frustum frustum;
     float height_pixels = 0, tan_y = 0;
     float activate_pixels = TerrainTier_activate_default; // the switch from the sphere levels
+    float lod_bias = 0;                                   // every level's range times 2^bias
 };
 
 // The near tier's CPU side: which patches of the cube sphere to draw this frame

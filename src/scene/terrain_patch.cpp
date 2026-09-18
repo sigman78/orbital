@@ -224,31 +224,28 @@ void generate_height_tile(const MinorPlanetTerrain& terrain, PatchKey key, std::
         }
 }
 
-void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<const float> heights,
-                           std::span<std::uint8_t> albedo, std::span<std::uint16_t> slope) {
-    ORBITAL_ASSERT(heights.size() == tile_side * tile_side);
-    ORBITAL_ASSERT(albedo.size() == tile_side * tile_side * 4);
-    ORBITAL_ASSERT(slope.size() == tile_side * tile_side * 2);
+void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<std::uint8_t> albedo,
+                           std::span<std::uint16_t> slope) {
+    ORBITAL_ASSERT(albedo.size() == tile_colour_side * tile_colour_side * 4);
+    ORBITAL_ASSERT(slope.size() == tile_colour_side * tile_colour_side * 2);
     const Cell cell = cell_of(key);
-    constexpr unsigned quads = tile_side - 1, bordered = tile_side + 2;
+    constexpr unsigned quads = tile_colour_side - 1, bordered = tile_colour_side + 2;
     const auto direction = [&](int x, int y) {
         return ring_direction(key.face, cell.s0 + x * cell.size / quads, cell.t0 + y * cell.size / quads);
     };
-    // The tile's heights with a one-texel ring around them, sampled here, so an
+    // The tile's heights on the colour grid with a one-texel ring around them, so an
     // edge texel's central difference is the one its neighbour tile computes.
     const PatchBounds bounds = patch_bounds(key);
     const MinorPlanetTerrain::Region region = terrain.region(bounds.centre,
                                                              bounds.angular_radius + 2 * bounds.angular_size / quads);
     std::vector<float> h(bordered * bordered);
     const auto at = [&](int x, int y) -> float& { return h[(y + 1) * bordered + (x + 1)]; };
-    for (int y = -1; y <= int(tile_side); y++)
-        for (int x = -1; x <= int(tile_side); x++)
-            at(x, y) = x >= 0 && y >= 0 && x < int(tile_side) && y < int(tile_side)
-                           ? heights[y * tile_side + x]
-                           : terrain.height(direction(x, y), region);
-    for (int y = 0; y < int(tile_side); y++)
-        for (int x = 0; x < int(tile_side); x++) {
-            const unsigned i = y * tile_side + x;
+    for (int y = -1; y <= int(tile_colour_side); y++)
+        for (int x = -1; x <= int(tile_colour_side); x++)
+            at(x, y) = terrain.height(direction(x, y), region);
+    for (int y = 0; y < int(tile_colour_side); y++)
+        for (int x = 0; x < int(tile_colour_side); x++) {
+            const unsigned i = y * tile_colour_side + x;
             const Vec3d d = direction(x, y);
             const float hc = at(x, y);
             // The gradient from the height changes along the two grid directions (not

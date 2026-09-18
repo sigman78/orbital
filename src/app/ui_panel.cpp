@@ -275,6 +275,8 @@ void quality_controls(bool& high, render::TerrainSettings& terrain) {
         terrain.debug = unsigned(debug);
     // Lower switches to the patches further out, where their coarse levels draw.
     ImGui::SliderFloat("Tier switch", &terrain.activate_pixels, 50.f, 2400.f, "%.0f px", ImGuiSliderFlags_Logarithmic);
+    // Positive splits sooner: the patches carry more detail at the same distance.
+    ImGui::SliderFloat("LOD bias", &terrain.lod_bias, -3.f, 3.f, "%+.2f");
 }
 void anti_aliasing_controls(render::AntiAliasingSettings& settings) {
     ImGui::Checkbox("Temporal (F5)", &settings.temporal_aa);

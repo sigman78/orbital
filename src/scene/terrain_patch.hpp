@@ -28,9 +28,14 @@ struct PatchKey {
 constexpr unsigned patch_quads = 16, patch_side = patch_quads + 1;
 constexpr unsigned patch_vertex_count = patch_side * patch_side + 4 * patch_side; // the grid, then the skirt
 constexpr unsigned patch_index_count = (patch_quads * patch_quads + 4 * patch_quads) * 6;
-constexpr unsigned patch_level_max = 10;  // a cell of 90 degrees over 1024, quads of 0.1 mrad
-constexpr unsigned tile_side = 65;        // texels per tile edge, covering 64 quads
-constexpr unsigned tile_colour_ratio = 1; // colour texels per height texel (1 for now; 2 later for extra detail)
+constexpr unsigned patch_level_max = 10; // a cell of 90 degrees over 1024, quads of 0.1 mrad
+constexpr unsigned tile_side = 65;       // texels per tile edge, covering 64 quads
+// Colour texels per height texel along an edge. The albedo and the slope carry
+// detail the grid does not: at 1 the near tier's texels are four times coarser than
+// the equirect maps it takes over from until it reaches level 3, which is what makes
+// the switch show. Two puts the crossover at level 2, at four times the tile memory.
+constexpr unsigned tile_colour_ratio = 2;
+constexpr unsigned tile_colour_side = (tile_side - 1) * tile_colour_ratio + 1;
 // The span of the slope tile's two channels, radii per radian. The gradient over the
 // body measures 1.33 at its steepest (53 degrees, levels 2 to 10, 2026-09-17), so two
 // clips nothing and leaves half again of headroom; sixteen bits over it resolve the
@@ -86,14 +91,16 @@ std::vector<std::uint32_t> patch_indices();
 // the bilinear surface of the tile's corner heights, the sphere's curvature included.
 float patch_error(const MinorPlanetTerrain& terrain, PatchKey key);
 
-// Tile generation: heights in radii (tile_side² floats), then the colour tiles,
-// albedo as tile_side² RGBA8 and the surface slope as tile_side² pairs of 16-bit
-// unorm. The slope is the terrain's gradient along the face's tangent frame at the
-// texel, over [-tile_slope_scale, tile_slope_scale]; the shader rebuilds the frame
-// from the sphere's direction and reads the normal back out of it.
+// Tile generation: heights in radii (tile_side² floats), then the colour tiles on
+// their own finer grid, albedo as tile_colour_side² RGBA8 and the surface slope as
+// tile_colour_side² pairs of 16-bit unorm. The slope is the terrain's gradient along
+// the face's tangent frame at the texel, over [-tile_slope_scale, tile_slope_scale];
+// the shader rebuilds the frame from the sphere's direction and reads the normal back
+// out of it. The colour pass samples the terrain itself rather than the height tile,
+// so past ratio 1 it sees relief the grid never carries.
 void generate_height_tile(const MinorPlanetTerrain& terrain, PatchKey key, std::span<float> out);
-void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<const float> heights,
-                           std::span<std::uint8_t> albedo, std::span<std::uint16_t> slope);
+void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<std::uint8_t> albedo,
+                           std::span<std::uint16_t> slope);
 
 // The shared grid mesh for all patches: 65×65 vertices whose position holds
 // (x, y, skirt), x and y in 0..64, skirt 0 on the grid and 1 on the drop ring.
