@@ -13,6 +13,7 @@
 #include "platform/process.hpp"
 #include "platform/window.hpp"
 #include "render/renderer.hpp"
+#include "scene/terrain.hpp"
 
 #include <algorithm>
 #include <array>
@@ -54,7 +55,7 @@ void handle_key(AppState& app, Key key) {
     case Key::f8: cycle_choice(app.tone.tone_curve); break;
     case Key::f10: request_capture(app); break;
     case Key::f11: app.belt_dust.enabled = !app.belt_dust.enabled; break;
-    case Key::f12: app.show_ui = !app.show_ui; break;
+    case Key::tab: app.show_ui = !app.show_ui; break;
     case Key::plus: app.tone.exposure = exposure_keys::range.clamp(app.tone.exposure * exposure_keys::step); break;
     case Key::minus: app.tone.exposure = exposure_keys::range.clamp(app.tone.exposure / exposure_keys::step); break;
     default: break;
@@ -135,6 +136,10 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.belt.disc = options.disc != 0;
     app.terrain.near_tier = options.near_tier != 0;
     app.terrain.wireframe = options.wireframe != 0;
+    app.terrain.debug = options.terrain_debug;
+    app.terrain.activate_pixels = options.tier_activate;
+    app.terrain.lod_bias = options.lod_bias;
+    app.terrain.detail = options.terrain_detail;
     app.belt.lod_scale = options.lod_scale;
     app.vsync = options.vsync < 0 ? options.benchmark.empty() : options.vsync != 0;
     app.tone.exposure = options.exposure;
@@ -143,12 +148,13 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.bodies = evaluate_system(system, std::max(0.0, options.fixed_time));
     if (options.bookmark >= 0)
         select_bookmark(app, unsigned(options.bookmark));
-    // Away from the bookmark's body along its line, aimed at its centre: the far
-    // and zoomed views the size-dependent checks need, without a bookmark each.
+    // Offset the bookmark along its body radius; clamp inward moves above the height ceiling.
     if (const auto body = Camera::bookmark_body(options.bookmark >= 0 ? std::size_t(options.bookmark) : 0);
-        options.back > 0 && body < app.bodies.size()) {
+        options.back != 0 && body < app.bodies.size()) {
         const Vec3d centre = app.bodies[body].position, away = normalized(app.camera.position - centre);
-        app.camera.look_at(centre + away * (length(app.camera.position - centre) + options.back), centre);
+        const double floor = app.bodies[body].radius * (1 + double(MinorPlanetTerrain::height_max) + .002);
+        const double distance = std::max(length(app.camera.position - centre) + options.back, floor);
+        app.camera.look_at(centre + away * distance, centre);
         free_camera(app);
     }
     if (options.fov_div > 1)
@@ -302,8 +308,8 @@ ShotReadings frame_loop(const Session& session, FrameHistory& history, Benchmark
         }
     }
     ShotReadings readings{.frames = frames,
-                          .patches_drawn = renderer.stats().frame.patches_drawn,
-                          .patches_resident = renderer.stats().frame.patches_resident,
+                          .patches_drawn = renderer.stats().frame.terrain.drawn,
+                          .patches_resident = renderer.stats().frame.terrain.resident,
                           .exposure = renderer.stats().exposure};
     // Medians over the frames after a warmup of the first half, at most 60 frames.
     const std::size_t warmup = std::min<std::size_t>(timings.size() / 2, 60);
@@ -392,7 +398,7 @@ int run(const Options& options) {
     renderer.set_ui_font({{atlas.width, atlas.height},
                           assets::PixelLayout::Rgba8,
                           {atlas.rgba, std::size_t(atlas.width) * atlas.height * 4}});
-    log::info("Ready at {} ms. RMB + WASD: fly | 1-9: views | T: tour | F12: control panel | F10: capture | --help "
+    log::info("Ready at {} ms. RMB + WASD: fly | 1-9: views | T: tour | Tab: control panel | F10: capture | --help "
               "for all controls",
               since_start());
     std::string report;

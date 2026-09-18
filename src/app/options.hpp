@@ -16,7 +16,10 @@ inline constexpr std::string_view usage =
     "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..9\n"
     "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --pan-stop-frame N "
     "--rocks N --sun-at X Y (turn the camera so the sun projects there, 1 the frame edge; for lens review)\n"
-    "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --disc 0|1 --near-tier 0|1 --wireframe 0|1 --lod-scale X "
+    "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --disc 0|1 --near-tier 0|1 --wireframe 0|1 --terrain-debug "
+    "0..5 (uv, normal, elevation, shadow, morph) --tier-activate px (lower switches to the patches further out, "
+    "for the coarse levels) --lod-bias X (patch ranges times 2^X; positive is finer) --terrain-detail X "
+    "(the tiles' micro-relief, 0 off) --lod-scale X "
     "--vsync 0|1 "
     "--splat 0..3 --tone "
     "0|1|2 --hdr 0|1|2 (SDR, scRGB, HDR10; needs the OS in HDR) "
@@ -26,7 +29,8 @@ inline constexpr std::string_view usage =
     "--galaxy 0|1|2 (splats, texture layers, original full resolution) --galaxy-view -180..180 (longitude, sky-only "
     "view)\n"
     "--belt-sun-view (sun through the gas giant's belt, for bloom/occlusion checks)\n"
-    "--back units (move away from the bookmark's body along its line, aimed at it) --fov-div X (telescope-like zoom)\n"
+    "--back units (along the bookmark's body's line, aimed at it; negative comes in, down to the terrain) "
+    "--fov-div X (telescope-like zoom)\n"
     "--shots file (one shot per line: key=value tokens named as the options above, e.g. bookmark=3 frames=80 "
     "capture=mars.png; the command line sets the defaults) --report file.json (per-shot readings) --headless "
     "(hidden window)\n"
@@ -36,7 +40,7 @@ inline constexpr std::string_view usage =
     "extinction;\n"
     "F5 temporal AA; F6 rock splat cut-off; F7 splat lighting in both cull passes; F8 tone curve;\n"
     "F9 spatial AA (off, FXAA, SMAA); Alt+Enter borderless fullscreen;\n"
-    "F10 capture; F11 belt dust; F12 control panel (--ui shows it at start); Esc exit.";
+    "F10 capture; F11 belt dust; Tab control panel (--ui shows it at start); Esc exit.";
 
 struct Options {
     std::uint64_t seed = showcase_seed;
@@ -48,10 +52,14 @@ struct Options {
     float exposure = render::ToneSettings{}.exposure;
     unsigned rocks = 0; // belt override for benchmarks; 0 keeps the quality tiers
     int vsync = -1;     // -1 default: on, except off for benchmarks
-    unsigned taa = render::AntiAliasingSettings{}.temporal_aa;              // temporal anti-aliasing on
-    unsigned dust = render::BeltDustSettings{}.enabled;                     // volumetric belt dust
-    unsigned disc = render::BeltSettings{}.disc;                            // far-belt disc LOD
-    unsigned near_tier = render::TerrainSettings{}.near_tier;               // the minor planet's patches close in
+    unsigned taa = render::AntiAliasingSettings{}.temporal_aa; // temporal anti-aliasing on
+    unsigned dust = render::BeltDustSettings{}.enabled;        // volumetric belt dust
+    unsigned disc = render::BeltSettings{}.disc;               // far-belt disc LOD
+    unsigned near_tier = render::TerrainSettings{}.near_tier;  // the minor planet's patches close in
+    unsigned terrain_debug = 0;                                // the patch path's debug view (TerrainSettings::debug)
+    float tier_activate = render::TerrainSettings{}.activate_pixels;        // where the patches take the body over
+    float lod_bias = render::TerrainSettings{}.lod_bias;                    // the patch split ranges, times 2^bias
+    float terrain_detail = render::TerrainSettings{}.detail;                // the tiles' micro-relief, 0 off
     unsigned wireframe = render::TerrainSettings{}.wireframe;               // their quad grid drawn over the surface
     float lod_scale = render::BeltSettings{}.lod_scale;                     // far-belt fade distance scale
     unsigned spatial = unsigned(render::AntiAliasingSettings{}.spatial_aa); // spatial pass: 0 off, 1 FXAA, 2 SMAA

@@ -21,6 +21,7 @@ Key key_from_sdl(SDL_Keycode code) {
         return Key(unsigned(Key::f1) + unsigned(code - SDLK_F1));
     switch (code) {
     case SDLK_ESCAPE: return Key::escape;
+    case SDLK_TAB: return Key::tab;
     case SDLK_SPACE: return Key::space;
     case SDLK_LSHIFT:
     case SDLK_RSHIFT: return Key::shift;
@@ -116,11 +117,12 @@ bool Window::pump_events() {
             }
             break;
         case SDL_KEYDOWN:
-            if (!event.key.repeat && !capture_keyboard) {
+            if (!event.key.repeat) {
                 const Key key = event.key.keysym.sym == SDLK_RETURN && (event.key.keysym.mod & KMOD_ALT)
                                     ? Key::alt_enter
                                     : key_from_sdl(event.key.keysym.sym);
-                if (key != Key::none)
+                // Let Tab close the panel even when a UI field has keyboard focus.
+                if (key != Key::none && (!capture_keyboard || key == Key::tab))
                     state.presses.try_push_back(key);
             }
             break;

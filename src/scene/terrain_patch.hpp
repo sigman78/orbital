@@ -8,12 +8,7 @@
 
 namespace space {
 
-// The minor planet's near tier is a cube sphere: six faces, each a quadtree of
-// square patches, every patch the same grid of quads over its cell of the face
-// with a skirt hanging from its edges to hide the cracks between levels. A
-// patch's vertices are in the body's local frame, in radii, so they draw
-// through the surface vertex shader like the sphere levels; their normals are
-// the sphere's, so the maps shade them exactly as they shade the far tier.
+// Cube-sphere quadtree patches in body-local radii, with skirts for seam fallback.
 
 struct PatchKey {
     std::uint8_t face = 0, level = 0;
@@ -25,29 +20,51 @@ struct PatchKey {
     }
 };
 
-constexpr unsigned patch_quads = 16, patch_side = patch_quads + 1;
-constexpr unsigned patch_vertex_count = patch_side * patch_side + 4 * patch_side; // the grid, then the skirt
-constexpr unsigned patch_index_count = (patch_quads * patch_quads + 4 * patch_quads) * 6;
 constexpr unsigned patch_level_max = 10; // a cell of 90 degrees over 1024, quads of 0.1 mrad
+constexpr unsigned tile_side = 33;       // texels per tile edge, covering 32 quads
+// Colour samples per height interval; memory scales with the square of this ratio.
+constexpr unsigned tile_colour_ratio = 2;
+constexpr unsigned tile_colour_side = (tile_side - 1) * tile_colour_ratio + 1;
+// Slope encoding range in radii/radian, including terrain and micro-relief.
+constexpr float tile_slope_scale = 3.f;
+// Radial skirt drop, also included in culling bounds.
+constexpr float patch_skirt_drop = .002f;
 
-// Direction of a face point, s and t in [-1, 1], the square warped by the
-// tangent so cells are near-uniform on the sphere.
+// Everitt cube mapping: s/t in [-1,1], warp tan(0.8687*s)/tan(0.8687).
 Vec3d cube_direction(unsigned face, double s, double t);
+
+struct CubeCoord {
+    unsigned face;
+    double s, t; // in [-1, 1]
+};
+CubeCoord cube_coordinates(Vec3d direction);
+
+// CPU/shader tangent frame: project the face s-axis onto the sphere tangent plane.
+struct TangentFrame {
+    Vec3d tangent, bitangent;
+};
+TangentFrame patch_tangent_frame(unsigned face, Vec3d direction);
 
 struct PatchBounds {
     Vec3d centre;              // unit direction
     double angular_radius = 0; // radians, the cap holding every vertex
     double angular_size = 0;   // radians, the cell's edge at its centre
+    // Culling sphere radius about the reference-surface centre; includes height and skirts.
+    double bound_radius = 0;
 };
 PatchBounds patch_bounds(PatchKey key);
 
-// The patch's vertices, patch_vertex_count of them: the grid row by row from
-// the cell's low corner, then the skirt around it. Returns the patch's
-// geometric error: the farthest the terrain at a quad's centre lies from the
-// quad's bilinear surface, in radii, the sphere's own curvature included; the
-// tier splits a patch while that error projects larger than its tolerance.
-float generate_patch(const MinorPlanetTerrain& terrain, PatchKey key, std::span<geometry::Vertex> out);
-// The index triples every patch shares, patch_index_count of them.
-std::vector<std::uint32_t> patch_indices();
+// Height-only error at quad centres against bilinear corner heights, in radii.
+float patch_error(const MinorPlanetTerrain& terrain, PatchKey key);
+
+// Outputs: tile_side squared heights; colour-side RGBA8 albedo and RG16_UNORM tangent slopes.
+void generate_height_tile(const MinorPlanetTerrain& terrain, PatchKey key, std::span<float> out);
+// Bounds bilinear tile heights including quantization, but not unsampled descendants.
+Range<float> height_tile_range(std::span<const float> heights);
+void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<std::uint8_t> albedo,
+                           std::span<std::uint16_t> slope, float detail = 1);
+
+// Shared grid positions: (x, y, skirt), x/y in 0..tile_side-1; skirt=1 on the drop ring.
+geometry::Mesh patch_grid_mesh();
 
 } // namespace space

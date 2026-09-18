@@ -29,7 +29,8 @@ int main() {
     assert(!parse({"orbital", "--capture", ""}));
     assert(parse({"orbital", "--bookmark", "9"}));
     assert(!parse({"orbital", "--bookmark", "10"}));
-    assert(!parse({"orbital", "--back", "-1"}));
+    assert(parse({"orbital", "--back", "-1"})); // negative comes in toward the body, for a view from the ground
+    assert(!parse({"orbital", "--back", "nan"}));
     assert(!parse({"orbital", "--fov-div", ".5"}));
     // Shot lines: keys as the options without dashes over the base, flags bare, commas for several values.
     const auto base = parse(

@@ -29,7 +29,9 @@ bool message_hook(void*, void* handle, unsigned message, std::uintptr_t w, std::
                        message == WM_RBUTTONDBLCLK || message == WM_MBUTTONDOWN || message == WM_MBUTTONDBLCLK ||
                        message == WM_MOUSEWHEEL || message == WM_MOUSEHWHEEL;
     const bool key = message == WM_KEYDOWN || message == WM_SYSKEYDOWN || message == WM_CHAR;
-    if ((press && io.WantCaptureMouse) || (key && io.WantCaptureKeyboard)) {
+    // Let Tab close the panel even when a UI field has keyboard focus.
+    const bool toggle = key && w == WPARAM(VK_TAB);
+    if (((press && io.WantCaptureMouse) || (key && io.WantCaptureKeyboard)) && !toggle) {
         *result = 0;
         return true;
     }

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <vector>
 
@@ -180,7 +181,8 @@ void memory_bar(const render::MemoryStats& memory) {
         Pool{.label = "Static records", .pool = &memory.static_data, .color = IM_COL32(240, 228, 66, 255)},
         Pool{.label = "Mapped heap", .pool = &memory.mapped, .color = IM_COL32(230, 159, 0, 255)},
         Pool{.label = "Device buffers", .pool = &memory.device_buffers, .color = IM_COL32(213, 94, 0, 255)},
-        Pool{.label = "Readback", .pool = &memory.readback, .color = IM_COL32(204, 121, 167, 255)}};
+        Pool{.label = "Readback", .pool = &memory.readback, .color = IM_COL32(204, 121, 167, 255)},
+        Pool{.label = "Tile arrays", .pool = &memory.tile_arrays, .color = IM_COL32(140, 200, 120, 255)}};
     const double total = double(memory.total());
     const auto mib = [](std::uint64_t bytes) { return double(bytes) / (1024.0 * 1024.0); };
     ImGui::Text("GPU memory %.1f MiB", mib(memory.total()));
@@ -246,8 +248,39 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Disable VSync for performance comparisons: a waiting GPU may clock down.");
     ImGui::Text("%u draws, %u bodies, %u rock groups", stats.draw_calls, stats.bodies_drawn, stats.rock_groups_drawn);
-    if (stats.patches_resident)
-        ImGui::Text("%u terrain patches drawn, %u cached", stats.patches_drawn, stats.patches_resident);
+    if (stats.terrain.slots) {
+        const auto& terrain = stats.terrain;
+        if (terrain.active)
+            ImGui::Text("Near tier on: %u patches, %u / %u tiles, %u pending", terrain.drawn, terrain.resident,
+                        terrain.slots, terrain.pending);
+        else
+            ImGui::TextDisabled("Near tier off: %u / %u tiles, %u pending", terrain.resident, terrain.slots,
+                                terrain.pending);
+        ImGui::Text("Tiles: %u queued on %u workers, %u uploaded, %.1f ms each", terrain.queued, terrain.workers,
+                    terrain.uploaded, terrain.generate_ms);
+        ImGui::Text("Ring %u / %u free, nodes %u / %u", terrain.rings_free, terrain.rings, terrain.nodes,
+                    terrain.node_budget);
+        const auto pinch = [](bool bad, const char* text, ...) {
+            va_list args;
+            va_start(args, text);
+            if (bad)
+                ImGui::TextColoredV(ImVec4(1.f, .45f, .35f, 1.f), text, args);
+            else
+                ImGui::TextV(text, args);
+            va_end(args);
+        };
+        pinch(terrain.splits_blocked > 0, "Splits blocked by the node budget: %u", terrain.splits_blocked);
+        pinch(terrain.requested > terrain.served, "Tiles asked for %u, given a slot %u", terrain.requested,
+              terrain.served);
+        pinch(terrain.evicted_recent > 0, "Evictions %u, of them still warm %u", terrain.evictions,
+              terrain.evicted_recent);
+        pinch(terrain.starved > 0, "Quadrants covered: %u for want of a tile, %u out of range", terrain.starved,
+              terrain.out_of_range);
+        pinch(terrain.behind_mean > 1.f, "Finest level %u, drawn %.2f levels coarser than asked (%u over one)",
+              terrain.deepest, double(terrain.behind_mean), terrain.behind_one);
+        pinch(terrain.graded * 2 < terrain.drawn, "Morph grades %u, switches %u near + %u far, fade %.2f",
+              terrain.graded, terrain.flat_near, terrain.flat_far, double(terrain.fade_mean));
+    }
     ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
 }
 void quality_controls(bool& high, render::TerrainSettings& terrain) {
@@ -256,7 +289,16 @@ void quality_controls(bool& high, render::TerrainSettings& terrain) {
     ImGui::TextDisabled(high ? "520k rocks" : "280k rocks");
     ImGui::Checkbox("Near tier", &terrain.near_tier); // the minor planet's patches close in; off keeps its sphere
     ImGui::SameLine();
-    ImGui::Checkbox("Wireframe", &terrain.wireframe); // the patches' quad grid over the surface
+    ImGui::Checkbox("Wireframe", &terrain.wireframe); // the patches' triangles over the surface
+    const char* debug_views[] = {"Shaded",    "Tile coordinate", "Normal",
+                                 "Elevation", "Crater shadow",   "Morph and level"};
+    int debug = int(terrain.debug);
+    if (ImGui::Combo("Patch view", &debug, debug_views, 6))
+        terrain.debug = unsigned(debug);
+    ImGui::SliderFloat("Tier switch", &terrain.activate_pixels, 50.f, 2400.f, "%.0f px", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("LOD bias", &terrain.lod_bias, -3.f, 3.f, "%+.2f");
+    // Changing detail regenerates all tiles.
+    ImGui::SliderFloat("Surface detail", &terrain.detail, 0.f, 2.5f, "%.2f");
 }
 void anti_aliasing_controls(render::AntiAliasingSettings& settings) {
     ImGui::Checkbox("Temporal (F5)", &settings.temporal_aa);
@@ -569,7 +611,7 @@ void overlay_controls(AppState& app) {
     ImGui::SameLine();
     if (ImGui::Button("Capture (F10)"))
         request_capture(app);
-    ImGui::TextDisabled("F12 hides this panel");
+    ImGui::TextDisabled("Tab hides this panel");
 }
 
 } // namespace

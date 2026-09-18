@@ -27,11 +27,36 @@ Cell cell_of(PatchKey key) {
     return {-1 + key.x * size, -1 + key.y * size, size};
 }
 
+constexpr double everitt_k = 0.8687;
+const double tan_k = std::tan(everitt_k);
+
 } // namespace
 
 Vec3d cube_direction(unsigned face, double s, double t) {
     const Face& f = faces[face];
-    return normalized(f.axis + f.s * std::tan(s * pi<double> / 4) + f.t * std::tan(t * pi<double> / 4));
+    return normalized(f.axis + f.s * (std::tan(everitt_k * s) / tan_k) + f.t * (std::tan(everitt_k * t) / tan_k));
+}
+
+TangentFrame patch_tangent_frame(unsigned face, Vec3d direction) {
+    const Vec3d d = normalized(direction);
+    const Vec3d tangent = normalized(faces[face].s - d * dot(faces[face].s, d));
+    return {tangent, cross(d, tangent)};
+}
+
+CubeCoord cube_coordinates(Vec3d direction) {
+    const double ax = std::abs(direction.x), ay = std::abs(direction.y), az = std::abs(direction.z);
+    unsigned face;
+    if (ax >= ay && ax >= az)
+        face = direction.x > 0 ? 0 : 1;
+    else if (ay >= az)
+        face = direction.y > 0 ? 2 : 3;
+    else
+        face = direction.z > 0 ? 4 : 5;
+    const Face& f = faces[face];
+    const double d = dot(f.axis, direction);
+    const double u = dot(f.s, direction) / d;
+    const double v = dot(f.t, direction) / d;
+    return {face, std::atan(u * tan_k) / everitt_k, std::atan(v * tan_k) / everitt_k};
 }
 
 PatchBounds patch_bounds(PatchKey key) {
@@ -43,86 +68,173 @@ PatchBounds patch_bounds(PatchKey key) {
         bounds.angular_radius = std::max(bounds.angular_radius,
                                          std::acos(std::clamp(dot(d, bounds.centre), -1.0, 1.0)));
     }
-    bounds.angular_size = cell.size * pi<double> / 4; // the warp's slope at the face centre
+    bounds.angular_size = 2 * std::atan(std::tan(everitt_k * cell.size / 2) / tan_k);
     bounds.angular_radius += 1e-6;
+    // Bound both height-shell ends about the reference-surface centre, including the skirt.
+    const double cosine = std::cos(bounds.angular_radius);
+    const auto chord = [cosine](double radius) {
+        return std::sqrt(std::max(0.0, radius * radius + 1 - 2 * radius * cosine));
+    };
+    bounds.bound_radius = std::max(chord(1 + MinorPlanetTerrain::height_max),
+                                   chord(1 + MinorPlanetTerrain::height_min - patch_skirt_drop));
     return bounds;
 }
 
-float generate_patch(const MinorPlanetTerrain& terrain, PatchKey key, std::span<geometry::Vertex> out) {
-    ORBITAL_ASSERT(out.size() == patch_vertex_count);
+// Use the neighbor's grid beyond cube edges so both faces share derivative stencils.
+namespace {
+Vec3d ring_direction(unsigned face, double s, double t) {
+    const bool out_s = s < -1 || s > 1, out_t = t < -1 || t > 1;
+    if (!out_s && !out_t)
+        return cube_direction(face, s, t);
+    const double sc = std::clamp(s, -1.0, 1.0), tc = std::clamp(t, -1.0, 1.0);
+    const Vec3d edge = cube_direction(face, sc, tc);
+    const double delta = out_s ? std::abs(s - sc) : std::abs(t - tc);
+    const unsigned neighbour = cube_coordinates(cube_direction(face, s, t)).face;
+    const Face& f = faces[neighbour];
+    const double d = dot(f.axis, edge);
+    double sn = std::atan(dot(f.s, edge) / d * tan_k) / everitt_k;
+    double tn = std::atan(dot(f.t, edge) / d * tan_k) / everitt_k;
+    // Axis alignment avoids the coordinate-magnitude tie at cube corners.
+    if (std::abs(dot(f.s, faces[face].axis)) > .5)
+        sn -= std::copysign(delta, sn);
+    else
+        tn -= std::copysign(delta, tn);
+    return cube_direction(neighbour, sn, tn);
+}
+} // namespace
+
+float patch_error(const MinorPlanetTerrain& terrain, PatchKey key) {
     const Cell cell = cell_of(key);
     const PatchBounds bounds = patch_bounds(key);
     const MinorPlanetTerrain::Region region = terrain.region(bounds.centre, bounds.angular_radius);
-    // The skirt drops by the gap a coarser neighbour can leave: its chord's
-    // sagitta and the terrain's change over one of its quads.
-    const float skirt = float(std::clamp(bounds.angular_size * .5, .001, .1));
-    const auto surface = [&](double x, double y) {
-        const Vec3d d = cube_direction(key.face, cell.s0 + x * cell.size / patch_quads,
-                                       cell.t0 + y * cell.size / patch_quads);
-        return d * double(1 + terrain.height(d, region));
+    constexpr unsigned quads = tile_side - 1;
+    const auto h = [&](double x, double y) {
+        const Vec3d d = cube_direction(key.face, cell.s0 + x * cell.size / quads, cell.t0 + y * cell.size / quads);
+        return length(d) * (1 + terrain.height(d, region));
     };
-    const auto vertex = [&](unsigned x, unsigned y, float drop) {
-        const Vec3d p = surface(x, y);
-        return geometry::Vertex{.position = to_float(p * (1 - double(drop) / length(p))),
-                                .normal = to_float(normalized(p))};
-    };
-    unsigned n = 0;
-    for (unsigned y = 0; y < patch_side; y++)
-        for (unsigned x = 0; x < patch_side; x++)
-            out[n++] = vertex(x, y, 0);
-    // The skirt's edges in the order the indices expect: along the bottom,
-    // up the right, back along the top, down the left.
-    for (unsigned i = 0; i < patch_side; i++)
-        out[n++] = vertex(i, 0, skirt);
-    for (unsigned i = 0; i < patch_side; i++)
-        out[n++] = vertex(patch_quads, i, skirt);
-    for (unsigned i = 0; i < patch_side; i++)
-        out[n++] = vertex(patch_quads - i, patch_quads, skirt);
-    for (unsigned i = 0; i < patch_side; i++)
-        out[n++] = vertex(0, patch_quads - i, skirt);
-    ORBITAL_ASSERT(n == patch_vertex_count);
-    // The error: the terrain at each quad's centre against the mean of its corners.
     double error = 0;
-    for (unsigned y = 0; y < patch_quads; y++)
-        for (unsigned x = 0; x < patch_quads; x++) {
-            const auto corner = [&](unsigned dx, unsigned dy) {
-                return to_double(out[(y + dy) * patch_side + x + dx].position);
-            };
-            const Vec3d mean = (corner(0, 0) + corner(1, 0) + corner(0, 1) + corner(1, 1)) * .25;
-            error = std::max(error, length(surface(x + .5, y + .5) - mean));
+    for (unsigned y = 0; y < quads; y++)
+        for (unsigned x = 0; x < quads; x++) {
+            const double mean = (h(x, y) + h(x + 1, y) + h(x, y + 1) + h(x + 1, y + 1)) * .25;
+            error = std::max(error, std::abs(h(x + .5, y + .5) - mean));
         }
     return float(error);
 }
 
-std::vector<std::uint32_t> patch_indices() {
-    std::vector<std::uint32_t> indices;
-    indices.reserve(patch_index_count);
-    const auto grid = [](unsigned x, unsigned y) { return y * patch_side + x; };
-    for (unsigned y = 0; y < patch_quads; y++)
-        for (unsigned x = 0; x < patch_quads; x++) {
-            const std::uint32_t a = grid(x, y), b = grid(x + 1, y), c = grid(x + 1, y + 1), d = grid(x, y + 1);
-            indices.insert(indices.end(), {a, b, c, a, c, d});
+void generate_height_tile(const MinorPlanetTerrain& terrain, PatchKey key, std::span<float> out) {
+    ORBITAL_ASSERT(out.size() == tile_side * tile_side);
+    const Cell cell = cell_of(key);
+    const PatchBounds bounds = patch_bounds(key);
+    const MinorPlanetTerrain::Region region = terrain.region(bounds.centre, bounds.angular_radius);
+    constexpr unsigned quads = tile_side - 1;
+    for (unsigned y = 0; y < tile_side; y++)
+        for (unsigned x = 0; x < tile_side; x++) {
+            const Vec3d d = cube_direction(key.face, cell.s0 + double(x) * cell.size / quads,
+                                           cell.t0 + double(y) * cell.size / quads);
+            out[y * tile_side + x] = terrain.height(d, region);
         }
-    // Each skirt quad joins two edge vertices to their dropped copies, wound
-    // to face away from the patch.
+}
+
+Range<float> height_tile_range(std::span<const float> heights) {
+    ORBITAL_ASSERT(!heights.empty());
+    const auto [low, high] = std::minmax_element(heights.begin(), heights.end());
+    constexpr float padding = (MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min) / 65535.f + 1e-6f;
+    return {*low - padding, *high + padding};
+}
+
+void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<std::uint8_t> albedo,
+                           std::span<std::uint16_t> slope, float detail) {
+    ORBITAL_ASSERT(albedo.size() == tile_colour_side * tile_colour_side * 4);
+    ORBITAL_ASSERT(slope.size() == tile_colour_side * tile_colour_side * 2);
+    const Cell cell = cell_of(key);
+    constexpr unsigned quads = tile_colour_side - 1, bordered = tile_colour_side + 2;
+    const auto direction = [&](int x, int y) {
+        return ring_direction(key.face, cell.s0 + x * cell.size / quads, cell.t0 + y * cell.size / quads);
+    };
+    // A one-texel border gives adjacent tiles matching central differences.
+    const PatchBounds bounds = patch_bounds(key);
+    const MinorPlanetTerrain::Region region = terrain.region(bounds.centre,
+                                                             bounds.angular_radius + 2 * bounds.angular_size / quads);
+    const double nyquist = .5 * quads / bounds.angular_size;
+    std::vector<float> h(bordered * bordered);
+    const auto at = [&](int x, int y) -> float& { return h[(y + 1) * bordered + (x + 1)]; };
+    for (int y = -1; y <= int(tile_colour_side); y++)
+        for (int x = -1; x <= int(tile_colour_side); x++) {
+            const Vec3d d = direction(x, y);
+            at(x, y) = terrain.height(d, region) + terrain.detail(d, nyquist, detail);
+        }
+    for (int y = 0; y < int(tile_colour_side); y++)
+        for (int x = 0; x < int(tile_colour_side); x++) {
+            const unsigned i = y * tile_colour_side + x;
+            const Vec3d d = direction(x, y);
+            const float hc = at(x, y);
+            // Solve the gradient in the skewed grid basis.
+            const Vec3d us = direction(x + 1, y) - direction(x - 1, y), vt = direction(x, y + 1) - direction(x, y - 1);
+            const Vec3d u = normalized(us), v = normalized(vt);
+            const double ds = (at(x + 1, y) - at(x - 1, y)) / length(us),
+                         dt = (at(x, y + 1) - at(x, y - 1)) / length(vt);
+            const double c = dot(u, v), det = std::max(1 - c * c, 1e-6);
+            const Vec3d g = u * ((ds - c * dt) / det) + v * ((dt - c * ds) / det);
+            const Vec3f a = terrain.albedo(
+                d, hc, float(1 - dot(normalized(d - g), d))); // the slope term as the bake passes it
+            const auto u8 = [](float v) { return std::uint8_t(std::clamp(v * 255.0f + 0.5f, 0.0f, 255.0f)); };
+            const std::size_t p = i * 4;
+            albedo[p] = u8(a.x);
+            albedo[p + 1] = u8(a.y);
+            albedo[p + 2] = u8(a.z);
+            albedo[p + 3] = 255;
+            const TangentFrame frame = patch_tangent_frame(key.face, d);
+            const auto u16 = [](double s) {
+                return std::uint16_t(std::clamp(s / tile_slope_scale * .5 + .5, 0.0, 1.0) * 65535.0 + .5);
+            };
+            slope[i * 2] = u16(dot(g, frame.tangent));
+            slope[i * 2 + 1] = u16(dot(g, frame.bitangent));
+        }
+}
+
+geometry::Mesh patch_grid_mesh() {
+    constexpr unsigned quads = tile_side - 1;
+    constexpr unsigned grid_count = tile_side * tile_side;
+    constexpr unsigned skirt_count = 4 * tile_side;
+    geometry::Mesh mesh;
+    mesh.vertices.resize(grid_count + skirt_count);
+    for (unsigned y = 0; y < tile_side; y++)
+        for (unsigned x = 0; x < tile_side; x++)
+            mesh.vertices[y * tile_side + x] = {.position = {float(x), float(y), 0}};
+    unsigned n = grid_count;
+    for (unsigned i = 0; i < tile_side; i++)
+        mesh.vertices[n++] = {.position = {float(i), 0, 1}};
+    for (unsigned i = 0; i < tile_side; i++)
+        mesh.vertices[n++] = {.position = {float(quads), float(i), 1}};
+    for (unsigned i = 0; i < tile_side; i++)
+        mesh.vertices[n++] = {.position = {float(quads - i), float(quads), 1}};
+    for (unsigned i = 0; i < tile_side; i++)
+        mesh.vertices[n++] = {.position = {0, float(quads - i), 1}};
+    ORBITAL_ASSERT(n == grid_count + skirt_count);
+    const auto grid = [](unsigned x, unsigned y) -> std::uint32_t { return y * tile_side + x; };
+    mesh.indices.reserve((quads * quads + 4 * quads) * 6);
+    for (unsigned y = 0; y < quads; y++)
+        for (unsigned x = 0; x < quads; x++) {
+            const std::uint32_t a = grid(x, y), b = grid(x + 1, y), c = grid(x + 1, y + 1), d = grid(x, y + 1);
+            mesh.indices.insert(mesh.indices.end(), {a, b, c, a, c, d});
+        }
     const auto edge = [&](unsigned i) -> std::uint32_t {
-        const unsigned side = i / patch_side, along = i % patch_side;
+        const unsigned side = i / tile_side, along = i % tile_side;
         switch (side) {
         case 0: return grid(along, 0);
-        case 1: return grid(patch_quads, along);
-        case 2: return grid(patch_quads - along, patch_quads);
-        default: return grid(0, patch_quads - along);
+        case 1: return grid(quads, along);
+        case 2: return grid(quads - along, quads);
+        default: return grid(0, quads - along);
         }
     };
     for (unsigned side = 0; side < 4; side++)
-        for (unsigned along = 0; along < patch_quads; along++) {
-            const unsigned i = side * patch_side + along;
+        for (unsigned along = 0; along < quads; along++) {
+            const unsigned i = side * tile_side + along;
             const std::uint32_t a = edge(i), b = edge(i + 1);
-            const std::uint32_t a2 = patch_side * patch_side + i, b2 = a2 + 1;
-            indices.insert(indices.end(), {a, a2, b, b, a2, b2});
+            const std::uint32_t a2 = grid_count + i, b2 = a2 + 1;
+            mesh.indices.insert(mesh.indices.end(), {a, a2, b, b, a2, b2});
         }
-    ORBITAL_ASSERT(indices.size() == patch_index_count);
-    return indices;
+    return mesh;
 }
 
 } // namespace space

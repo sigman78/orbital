@@ -147,7 +147,15 @@ struct SkySettings {
 
 struct TerrainSettings {
     bool near_tier = true;  // the minor planet's cube-sphere patches close in; off keeps its sphere levels
-    bool wireframe = false; // the patches' quad grid drawn over the surface, the quadtree's review
+    bool wireframe = false; // the patches' triangles drawn over the surface, the quadtree's review
+    // Debug: 0 shaded, 1 UV, 2 normal, 3 height, 4 shadow, 5 morph/level.
+    unsigned debug = 0;
+    // Near-tier activation threshold, in twice the projected pixel radius.
+    float activate_pixels = 1200;
+    // Multiply all LOD ranges by 2^bias; positive selects finer detail.
+    float lod_bias = 0;
+    // Slope detail strength; 0 disables it. Changes regenerate all tiles.
+    float detail = 1;
 };
 
 struct GasSettings {

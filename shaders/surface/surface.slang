@@ -4,6 +4,7 @@
 #include "../scene/instances.slang"
 #include "../planets/cloud_geometry.slang"
 #include "../lib/math.slang"
+#include "patch.slang"
 
 // The vertex stage every surface pipeline shares: bodies, the pooled rock
 // draws, the Earth's cloud shell, the shadow pass and the rock billboards.
@@ -30,6 +31,26 @@ SurfaceVaryings vertexMain(uint vertexIndex : SV_VertexID, uint firstVertex : SV
         output.position = mul(viewProjection(root.frame), float4(output.worldPosition,1));
         return output;
     }
+    if (root.flags & ORBITAL_ROOT_PATCHES)
+    {
+        PatchResult pr = evaluatePatch(vertexIndex, instanceId, root);
+        output.instanceIndex = root.base; // instanceId is the patch, not the body
+        output.worldPosition = pr.worldPosition;
+        output.worldNormal = pr.worldNormal;
+        output.localNormal = pr.localNormal;
+        output.tileUV = pr.tileUV;
+        output.tileSlot = pr.slot;
+        output.tileFace = pr.face;
+        output.bary = pr.bary;
+        output.patchMorph = pr.morph;
+        output.position = mul(root.mode == MODE_SHADOW ? shadowProjection(root.frame) : viewProjection(root.frame), float4(output.worldPosition, 1.0));
+        return output;
+    }
+    output.tileUV = float2(0, 0);
+    output.tileSlot = 0;
+    output.tileFace = 0;
+    output.bary = float3(0, 0, 0);
+    output.patchMorph = 0;
     Vertex vertex = root.vertices[vertexIndex];
     float3x3 rotate = rotation(inst.rotation_kind.xyz);
     float scale = inst.center_radius.w * (root.mode == MODE_CLOUD ? 1.0 + CLOUD_HEIGHT : 1.0);

@@ -24,6 +24,7 @@ enum class Key : std::uint16_t {
     digit_0 = '0',
     a = 'A',
     escape = 0x100,
+    tab,
     shift,
     plus,
     minus,

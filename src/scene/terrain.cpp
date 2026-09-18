@@ -31,9 +31,7 @@ std::optional<float> crater_x(const MinorPlanetTerrain::Crater& crater, Vec3d d)
 
 } // namespace
 
-// The population: sizes on the D^-2 law of a saturated surface (truncated, so
-// many small and a few large), ages uniform, deep bowls for the small ones and
-// shallower complex floors with a central peak for the large.
+// Saturated D^-2 size distribution, uniform ages, and shallower large craters with central peaks.
 MinorPlanetTerrain::MinorPlanetTerrain(std::uint64_t seed) : seed_(seed) {
     constexpr unsigned count = 420;
     constexpr double radius_min = .018, radius_max = .17;
@@ -90,18 +88,64 @@ float MinorPlanetTerrain::height(Vec3d direction, std::span<const Crater> crater
     return std::clamp(h, height_min, height_max);
 }
 
+float MinorPlanetTerrain::detail(Vec3d direction, double nyquist, float strength) const {
+    if (strength <= 0)
+        return 0;
+    const Vec3d d = normalized(direction);
+    // Calibrates the generated stack to detail_slope's RMS tangent at strength 1.
+    constexpr double calibration = 1.85;
+    double total = 0;
+    for (unsigned octave = 0; octave < detail_octaves; octave++) {
+        const double frequency = double(detail_frequency) * (1u << octave);
+        const double weight = std::clamp(std::log2(nyquist / frequency), 0.0, 1.0);
+        if (weight <= 0)
+            break; // and so is every octave above this one
+        const Vec3d p = d * frequency;
+        const Vec3d base{std::floor(p.x), std::floor(p.y), std::floor(p.z)};
+        double sum = 0;
+        for (int dz = -1; dz <= 1; dz++)
+            for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++) {
+                    const Vec3d cell{base.x + dx, base.y + dy, base.z + dz};
+                    const Vec3d centre = cell + Vec3d{.5, .5, .5};
+                    const double radial = length(centre) - frequency;
+                    if (std::abs(radial) > 1.4)
+                        continue; // off the shell: cheap, and most cells go here
+                    std::uint64_t state = mix64(std::uint64_t(std::int64_t(cell.x) * 73856093) ^
+                                                std::uint64_t(std::int64_t(cell.y) * 19349663) ^
+                                                std::uint64_t(std::int64_t(cell.z) * 83492791) ^
+                                                (seed_ + 0xD1 + octave));
+                    if (uniform(state) > detail_density)
+                        continue; // not every cell carries one
+                    const Vec3d place = cell + Vec3d{uniform(state), uniform(state), uniform(state)};
+                    const double len = length(place);
+                    if (len < 1e-9)
+                        continue;
+                    // Crater dimensions are in lattice cells.
+                    const double radius = detail_radius * (.6 + .8 * uniform(state));
+                    const double x = length(place * (1 / len) - d) * frequency / radius;
+                    if (x > detail_reach)
+                        continue;
+                    const double depth = radius * detail_depth * (.5 + .5 * uniform(state));
+                    const double rim = .25 * depth;
+                    sum += x < 1 ? -depth + (depth + rim) * smoothstep(crater_floor, 1, float(x))
+                                 : rim * std::exp(-(x - 1) * 4);
+                }
+        // Convert lattice-cell depth to radii.
+        total += weight * sum / frequency;
+    }
+    return float(total * double(strength) * detail_slope * calibration);
+}
+
 Vec3f MinorPlanetTerrain::albedo(Vec3d direction, float height, float slope) const {
     const Vec3d d = normalized(direction);
-    // Ceres's dark grey ground, with Pluto's warm dark maculae over parts of
-    // it and a lighter frost where the lowlands pool; steep faces shed their
-    // dust and read a little brighter.
+    // Dark ground, warm maculae, lowland frost, and brighter steep faces.
     const float lows = std::clamp((height - height_min) / (height_max - height_min), 0.f, 1.f);
     const float macula = smoothstep(.05f, .5f, fbm(d * 1.3 + Vec3d{3.1, 0, 0}, 3, seed_ + 5));
     const float frost = smoothstep(.3f, .7f, fbm(d * 2.1 + Vec3d{0, 7.7, 0}, 3, seed_ + 9)) * (1 - macula);
     Vec3f albedo = lerp(Vec3f{.13f, .122f, .112f}, Vec3f{.085f, .066f, .05f}, macula);
     albedo = albedo * (.9f + .25f * (1 - lows) + .6f * frost) * (1 + .5f * slope);
-    // Fresh craters: the excavated floor and walls dark, the ejecta blanket
-    // bright and patchy, worn ones neither; a few carry a bright facula at the centre.
+    // Fresh craters darken floors and brighten ejecta; some carry central faculae.
     const float patchy = .4f + .6f * (1 + fbm(d * 30.0, 2, seed_ + 13));
     for (const Crater& crater : craters_) {
         const auto x = crater_x(crater, d);
@@ -117,8 +161,7 @@ Vec3f MinorPlanetTerrain::albedo(Vec3d direction, float height, float slope) con
     return {std::min(albedo.x, 1.f), std::min(albedo.y, 1.f), std::min(albedo.z, 1.f)};
 }
 
-// The heights are sampled first so the normals come from finite differences of
-// the same values the alpha carries; rows go to the cores.
+// Bake heights first, then differentiate them for consistent tangent normals.
 TerrainMaps bake_terrain_maps(const MinorPlanetTerrain& terrain, unsigned width, unsigned height) {
     TerrainMaps maps{.width = width, .height = height, .albedo = {}, .normal = {}};
     const std::size_t count = std::size_t(width) * height;

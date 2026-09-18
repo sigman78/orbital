@@ -43,6 +43,10 @@ Renderer::Impl::~Impl() {
     material_images.clear();
     frame_targets = {};
     fixed_targets = {};
+    tile_pool.reset();
+    tile_height.reset();
+    tile_albedo.reset();
+    tile_slope.reset();
     array_placeholder.reset();
     static_upload.staging.reset(); // empty after start-up; here for an init that stopped early
     buffers = {};
@@ -281,6 +285,10 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     create_device(window);
     phase("device");
     create_samplers();
+    // Initialize every array descriptor before drawing; terrain replaces its slots below.
+    array_placeholder = GpuImage::create_array(device, {1, 1}, 1, gpu::Format::rgba8_unorm);
+    for (unsigned i = 0; i < unsigned(ArraySlot::count); i++)
+        bind(ArraySlot(i), array_placeholder);
     create_meshes();
     create_terrain_tier();
     phase("meshes");
@@ -307,9 +315,6 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
                    {.data = assets::texture_from_image(widen(assets::smaa_search(), assets::smaa_search_width,
                                                              assets::smaa_search_height, assets::smaa_search_channels)),
                     .slot = Slot::smaa_search}});
-    array_placeholder = GpuImage::create_array(device, {1, 1}, 1, gpu::Format::rgba8_unorm);
-    for (unsigned i = 0; i < unsigned(ArraySlot::count); i++)
-        bind(ArraySlot(i), array_placeholder);
     phase("tables");
     create_pipelines();
     phase("pipelines");
@@ -468,16 +473,22 @@ void Renderer::Impl::collect_memory_stats() {
     memory.mapped = {};
     heap(memory.mapped, buffers.data);
     heap(memory.mapped, buffers.belt_state_staging);
-    heap(memory.mapped, buffers.patch_staging);
-    heap(memory.mapped, buffers.patch_args_staging);
+    heap(memory.mapped, buffers.patch_records_staging);
+    heap(memory.mapped, buffers.tile_staging);
     memory.mapped.used = memory.mapped.bytes;
     memory.device_buffers = {};
     heap(memory.device_buffers, buffers.cull_device);
     heap(memory.device_buffers, buffers.belt_state);
-    heap(memory.device_buffers, buffers.patch_pool);
-    heap(memory.device_buffers, buffers.patch_args);
+    heap(memory.device_buffers, buffers.patch_records);
     heap(memory.device_buffers, buffers.meter_device);
     memory.device_buffers.used = memory.device_buffers.bytes;
+    memory.tile_arrays = {};
+    for (const GpuImage* image : {&tile_height, &tile_albedo, &tile_slope})
+        if (image->bytes()) {
+            memory.tile_arrays.bytes += image->bytes();
+            memory.tile_arrays.count++;
+        }
+    memory.tile_arrays.used = memory.tile_arrays.bytes * stats.frame.terrain.resident / TerrainTier::slot_count;
     memory.readback = {};
     heap(memory.readback, buffers.cull_readback);
     heap(memory.readback, buffers.meter_readback);

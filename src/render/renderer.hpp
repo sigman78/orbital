@@ -45,9 +45,10 @@ struct MemoryStats {
     MemoryPool mapped;         // the host-visible data heap: the per-frame region and the UI
     MemoryPool device_buffers; // culling scratch and the exposure histogram
     MemoryPool readback;       // CPU-visible copies and the descriptor heaps
+    MemoryPool tile_arrays; // the near tier's height, albedo and normal tile arrays; used is the resident tiles' share
     std::uint64_t total() const {
         return frame_targets.bytes + fixed_targets.bytes + materials.bytes + static_data.bytes + mapped.bytes +
-               device_buffers.bytes + readback.bytes;
+               device_buffers.bytes + readback.bytes + tile_arrays.bytes;
     }
 };
 
@@ -60,7 +61,26 @@ struct FrameStats {
              rock_triangles = 0; // rock figures are from the previous frame's culling
     unsigned draw_calls = 0;     // API draw calls submitted this frame (an indirect multi-draw counts once)
     unsigned bodies_drawn = 0;   // bodies inside the view frustum this frame
-    unsigned patches_drawn = 0, patches_resident = 0; // the minor planet's near tier: drawn this frame, cached
+    struct Terrain {             // the minor planet's near tier
+        bool active = false;     // the tier draws the body; its sphere levels otherwise
+        unsigned drawn = 0;      // patches drawn this frame
+        unsigned resident = 0;   // tiles in the cache, arrived
+        unsigned pending = 0;    // slots handed out whose tile has not arrived (queued, generating or uploading)
+        unsigned queued = 0;     // generation jobs on the workers, submitted and not yet finished
+        unsigned uploaded = 0;   // tiles copied into the arrays this frame
+        unsigned rings_free = 0, rings = 0; // upload ring entries free, and the ring's size
+        unsigned slots = 0;                 // the cache's capacity
+        unsigned nodes = 0;                 // quadtree nodes alive
+        unsigned workers = 0;
+        float generate_ms = 0; // the last finished tile's time on its worker
+        // TerrainTier::Pressure counters.
+        unsigned node_budget = 0, splits_blocked = 0;
+        unsigned requested = 0, served = 0;
+        unsigned evictions = 0, evicted_recent = 0;
+        unsigned starved = 0, out_of_range = 0, deepest = 0, behind_one = 0;
+        unsigned flat_near = 0, flat_far = 0, graded = 0; // patches the morph grades against ones it switches
+        float behind_mean = 0, fade_mean = 0;
+    } terrain;
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
     float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc
 };

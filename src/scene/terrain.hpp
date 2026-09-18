@@ -7,13 +7,7 @@
 
 namespace space {
 
-// The minor planet's terrain, the one source of its shape and colour: the
-// start-up bake of its maps reads it, and the near tier's patches will.
-// Everything is a function of a direction from the centre, so any
-// parameterisation (the equirectangular maps today, cube-sphere patches later)
-// samples the same body. Heights are in radii, signed about the reference
-// sphere. The look is after Ceres and Pluto: a dark grey ground with warm
-// maculae, worn craters at every size, and a few bright faculae.
+// Shared map/tile terrain: body-local directions, heights in reference radii.
 class MinorPlanetTerrain {
 public:
     struct Crater {
@@ -26,13 +20,22 @@ public:
     };
     static constexpr float height_min = -.05f, height_max = .05f; // the range a bake's alpha spans, radii
 
-    // The craters within reach of a cap of the sphere, so a patch's vertices test
-    // a handful instead of the whole population.
+    // Craters intersecting a spherical cap, to accelerate patch sampling.
     struct Region {
         std::vector<Crater> craters;
     };
 
     explicit MinorPlanetTerrain(std::uint64_t seed);
+
+    // Slope-only micro-craters; nyquist = half texels/radian, strength = amplitude (0 disables).
+    static constexpr float detail_frequency = 110; // lattice cells per radian of the first octave
+    static constexpr unsigned detail_octaves = 3;
+    static constexpr float detail_radius = .34f;  // a crater's, of a cell
+    static constexpr float detail_reach = 2.2f;   // ejecta out to this many radii
+    static constexpr float detail_depth = .3f;    // of the crater's radius, as the population's are
+    static constexpr float detail_density = .55f; // the share of cells carrying one
+    static constexpr float detail_slope = .15f;   // rms tangent the full stack adds at strength 1
+    float detail(Vec3d direction, double nyquist, float strength) const;
 
     // Height above the reference sphere, radii, within [height_min, height_max].
     float height(Vec3d direction) const { return height(direction, craters_); }

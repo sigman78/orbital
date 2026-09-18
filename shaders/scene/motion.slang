@@ -4,6 +4,7 @@
 #include "instances.slang"
 #include "../lib/math.slang"
 #include "view.slang"
+#include "../surface/patch.slang"
 
 // Motion vectors for the opaque meshes, the rocks and the bodies: a pass after
 // the scene pass at equal depth, so only the visible surface writes. Each vertex
@@ -32,12 +33,23 @@ MotionVaryings vertexMain(uint vertexIndex : SV_VertexID, uint firstVertex : SV_
         return sky;
     }
     vertexIndex += firstVertex;
+    if (root.flags & ORBITAL_ROOT_PATCHES)
+    {
+        PatchResult pr = evaluatePatch(vertexIndex, instanceId, root);
+        Instance inst = loadInstance(root.frame, root.instances, root.base, false);
+        float radius = inst.center_radius.w;
+        float3x3 prevRotate = rotation(inst.rotation_kind.xyz + inst.previous_rotation.xyz);
+        float3 previousCentre = inst.center_radius.xyz + inst.previous_center.xyz + temporalParams(root.frame).cameraDelta;
+        float3 previous = previousCentre + mul(prevRotate, pr.localPosition) * radius;
+        MotionVaryings output;
+        output.position = mul(viewProjection(root.frame), float4(pr.worldPosition, 1.0));
+        output.previousClip = mul(previousProjection(root.frame), float4(previous, 1.0));
+        return output;
+    }
     Instance inst = loadInstance(root.frame, root.instances, root.base + firstInstance + instanceId, false);
     Vertex vertex = root.vertices[vertexIndex];
     float scale = inst.center_radius.w;
     float3 world = inst.center_radius.xyz + mul(rotation(inst.rotation_kind.xyz), vertex.position.xyz) * scale;
-    // Relative to the previous camera: the current centre, the instance's own step back
-    // and the camera's, then the previous rotation.
     float3 previousCentre = inst.center_radius.xyz + inst.previous_center.xyz + temporalParams(root.frame).cameraDelta;
     float3 previous = previousCentre
                     + mul(rotation(inst.rotation_kind.xyz + inst.previous_rotation.xyz), vertex.position.xyz) * scale;

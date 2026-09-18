@@ -41,8 +41,7 @@ bool options_valid(const Options& options) {
                          std::isfinite(options.duration) && options.duration >= 0;
     const bool exposure_ok = std::isfinite(options.exposure) && options.exposure > 0;
     const bool bookmark_ok = options.bookmark >= -1 && options.bookmark < int(bookmark_count);
-    const bool view_ok = std::isfinite(options.back) && options.back >= 0 && std::isfinite(options.fov_div) &&
-                         options.fov_div >= 1;
+    const bool view_ok = std::isfinite(options.back) && std::isfinite(options.fov_div) && options.fov_div >= 1;
     return size_ok && time_ok && exposure_ok && bookmark_ok && view_ok;
 }
 
@@ -84,6 +83,14 @@ bool apply_arguments(Options& options, std::span<const std::string_view> args) {
             ok = parse_choice(value(), options.near_tier, 2);
         else if (arg == "--wireframe")
             ok = parse_choice(value(), options.wireframe, 2);
+        else if (arg == "--terrain-debug")
+            ok = parse_choice(value(), options.terrain_debug, 6);
+        else if (arg == "--tier-activate")
+            ok = parse_number(value(), options.tier_activate) && options.tier_activate > 0;
+        else if (arg == "--terrain-detail")
+            ok = parse_number(value(), options.terrain_detail) && options.terrain_detail >= 0;
+        else if (arg == "--lod-bias")
+            ok = parse_number(value(), options.lod_bias) && options.lod_bias >= -4 && options.lod_bias <= 4;
         else if (arg == "--dust")
             ok = parse_choice(value(), options.dust, 2);
         else if (arg == "--vsync")

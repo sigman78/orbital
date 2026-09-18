@@ -26,7 +26,19 @@ using ShaderMatrix4 = float[16];
 #define ORBITAL_SURFACE_SPLAT_MASK 4
 // Root.flags for a body draw.
 #define ORBITAL_ROOT_FOLD_CLOUDS 1 // the cloud shell is not drawn: the ground shader blends the clouds in
-#define ORBITAL_ROOT_WIREFRAME 2   // a terrain patch's quad grid drawn over it; its level in bits 8 to 15
+#define ORBITAL_ROOT_WIREFRAME 2   // the near tier's triangles and patch borders drawn over it (with ORBITAL_ROOT_PATCHES)
+#define ORBITAL_ROOT_PATCHES 4     // this draw uses the CDLOD patch path: root.patches points to PatchInstance records
+// Must match TerrainTier::slot_count; also the missing-parent sentinel.
+#define ORBITAL_TERRAIN_SLOTS 1024
+// Height range in radii; must match MinorPlanetTerrain::height_min/max.
+#define MINOR_PLANET_HEIGHT_MIN (-.05)
+#define MINOR_PLANET_HEIGHT_MAX (.05)
+// Slope range in radii/radian; must match tile_slope_scale.
+#define MINOR_PLANET_SLOPE_SCALE 3.0
+// Skirt drop in radii; must match patch_skirt_drop.
+#define MINOR_PLANET_SKIRT_DROP 0.002
+// Colour samples per height interval; must match tile_colour_ratio.
+#define MINOR_PLANET_COLOUR_RATIO 2
 // The Earth's cloud shell above the surface, in radii (the mesh scale and the shadow geometry).
 #define ORBITAL_CLOUD_HEIGHT 0.009
 // Instance.rotation_kind.w (SurfaceKind on the C++ side); each kind has its own fragment shader.
@@ -57,6 +69,11 @@ struct AsteroidInstance {
     SHADER_UINT previous[4];
 };
 struct Vertex { SHADER_FLOAT4 position; SHADER_FLOAT4 normal; };
+struct PatchInstance {
+    SHADER_FLOAT4 cell;  // s0, t0, size, level
+    SHADER_FLOAT4 morph; // start distance (radii), end distance, the fade floor under it, w unused
+    SHADER_UINT tile[4]; // face, slot, the parent's slot (or the slot count: none), the child's quadrant bits (x & 1, y & 1 << 1) and, bits 2 to 5, which sides lie on a cube edge (s low, s high, t low, t high), bits 6 to 9 the grid quadrants drawn
+};
 struct Frame {
     SHADER_MATRIX4 view_projection;
     SHADER_FLOAT4 camera_time, right_tan, up_aspect, forward_exposure, sun;
@@ -96,15 +113,16 @@ struct Frame {
     SHADER_FLOAT4 galaxy_layers;         // low-frequency, cloud and filament gains, unused
     SHADER_FLOAT4 galaxy_more;           // dust fBm lacunarity, gain, the galaxy pass's resolution divisor, band contrast exponent
     SHADER_FLOAT4 display;               // HDR output (0 off, 1 scRGB, 2 HDR10), paper white in nits, headroom (peak over paper white), the auto exposure's multiplier
-    SHADER_FLOAT4 sequence;              // frames since the last camera cut, the seed of the per-frame jitters (marches, grain); unused x3
+    SHADER_FLOAT4 sequence;              // frames since the last camera cut, the seed of the per-frame jitters (marches, grain); the patch path's debug view; unused x2
 };
 struct Root {
 #ifdef __cplusplus
-    SHADER_ADDRESS frame, vertices, instances;
+    SHADER_ADDRESS frame, vertices, instances, patches;
 #else
     SHADER_ADDRESS(Frame) frame;
     SHADER_ADDRESS(Vertex) vertices;
     SHADER_ADDRESS(Instance) instances;
+    SHADER_ADDRESS(PatchInstance) patches;
 #endif
     SHADER_UINT base, mode;
     // Per body draw: the detail weight (0 at the smallest mesh level, 1 from the third)

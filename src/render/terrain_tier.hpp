@@ -9,6 +9,9 @@
 
 namespace space::render {
 
+// Default near-tier activation threshold in cull_bodies' units; overridable per frame.
+inline constexpr float TerrainTier_activate_default = 1200;
+
 // The tier's view of one frame: the body relative to the camera, its spin, and
 // the projection, in the units cull_bodies uses.
 struct TierView {
@@ -18,41 +21,78 @@ struct TierView {
     Vec3d camera_local; // the camera in the body's local frame, radii
     geometry::Frustum frustum;
     float height_pixels = 0, tan_y = 0;
+    float activate_pixels = TerrainTier_activate_default; // the switch from the sphere levels
+    float lod_bias = 0;                                   // every level's range times 2^bias
 };
 
-// The near tier's CPU side: which patches of the cube sphere to draw this frame
-// and which to generate for the next, over a fixed pool of vertex slots kept as
-// a cache by patch (least recently used out). The quadtree splits a patch while
-// its geometric error (measured at its generation) projects larger than a
-// tolerance on screen, with hysteresis, and collapses it out of view; a patch whose visible children are not all
-// resident draws itself, so the surface is always complete. Nothing here touches the GPU: the caller generates the
-// requested patches into the slots and draws the listed ones.
+// Distance-based quadtree selection with parent fallback and a generation-checked tile cache.
 class TerrainTier {
 public:
-    static constexpr unsigned slot_count = 1024; // 11 MiB of vertices; a close view holds 400 of them
+    static constexpr unsigned slot_count = 1024; // 35 MiB of tiles; a close view holds 400 of them
     static constexpr unsigned generate_per_frame = 8;
     // Sizes are in cull_bodies' units: a projected radius over the half height, twice the pixels.
-    static constexpr float activate_pixels = 1200; // the body's, where the finest sphere level runs out
-    static constexpr float error_pixels = 3;       // a patch's geometric error on screen: it splits above 1.5 px
-    static constexpr float hysteresis = .8f;       // the fraction of either the way back
+    static constexpr float error_pixels = 3; // a patch's geometric error on screen: it splits above 1.5 px
+    static constexpr float hysteresis = .8f; // the fraction of either the way back
+    // Fade new tiles from their parent's shape over a fixed frame count for deterministic captures.
+    static constexpr unsigned fade_frames = 15;
+    // Seed-1007 calibration: 64 patches/level, 32 quads, Everitt warp; levels 9..12 extrapolate by 2.3x.
+    static constexpr float level_error[] = {
+        .018342f,  .0126785f, .00478311f, .00138083f, .000601649f, .000284836f, .000119656f,
+        .0000752f, .0000272f, 1.18e-5f,   5.1e-6f,    2.2e-6f,     9.6e-7f,
+    };
 
     struct Generation {
         PatchKey key;
         unsigned slot;
-        float error = 0; // filled by the caller from generate_patch, read at the next update
+        std::uint32_t stamp; // which assignment of this slot asked for it
     };
     struct Draw {
+        PatchKey key;
         unsigned slot;
-        unsigned level;
+        unsigned quadrants; // the grid quadrants to draw (bit i: x = i & 1, y = i >> 1); 0xf the whole patch
+        // Morph floor shared by siblings: 1 on arrival, decreasing to 0 over fade_frames.
+        float fade = 0;
     };
 
-    void update(const TierView& view, unsigned frame);
+    // Per-frame limits and coverage diagnostics; out_of_range is normal coverage.
+    struct Pressure {
+        unsigned nodes = 0, node_budget = 0, splits_blocked = 0;
+        unsigned requested = 0, served = 0;         // tiles asked for, and given a slot
+        unsigned evictions = 0, evicted_recent = 0; // resident slots recycled, and those still warm
+        unsigned starved = 0, out_of_range = 0;     // quadrants the parent covered, by reason
+        unsigned deepest = 0;                       // finest level drawn
+        unsigned behind_one = 0, behind_count = 0;  // patches over a level coarser than asked for
+        float behind_mean = 0;                      // levels coarser than asked for, averaged
+        // Estimated spatial morph variation and mean arrival fade.
+        unsigned flat_near = 0, flat_far = 0, graded = 0;
+        float fade_mean = 0;
+    };
+    const Pressure& pressure() const { return pressure_; }
+
+    void update(const TierView& view, unsigned frame, unsigned budget = generate_per_frame);
     void disable(); // the switch off: the tree collapses, the cache stays
+    // Discard cached tiles; generation stamps reject results still in flight.
+    void invalidate();
     // True once the tier covers the body: the sphere levels draw until then.
     bool active() const { return active_; }
     std::span<const Draw> draws() const { return draws_; } // this frame's patches
-    std::span<Generation> generate() { return generate_; }
-    unsigned resident() const { return unsigned(slots_by_key_.size()); }
+    std::span<const Generation> generate() const { return generate_; }
+    static constexpr Range<float> full_height_range{MinorPlanetTerrain::height_min, MinorPlanetTerrain::height_max};
+    // Accept uploaded contents and height bounds only for the current slot assignment.
+    bool mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights = full_height_range);
+    // Only resident tiles supply a tighter range. Unknown tiles retain the full shell.
+    Range<float> height_range(PatchKey key) const;
+    float range(unsigned level) const { return level < std::size(range_) ? range_[level] : 0; }
+    unsigned resident_slot(PatchKey key) const; // the tile's slot, slot_count when absent or pending
+    unsigned pending() const;                   // slots handed out whose tile has not arrived
+    // Cap distance over the supplied height interval, excluding skirts as in the shader.
+    static double nearest_distance(Vec3d camera_local, const PatchBounds& bounds,
+                                   Range<float> heights = full_height_range);
+    static double farthest_distance(Vec3d camera_local, const PatchBounds& bounds,
+                                    Range<float> heights = full_height_range);
+    // The fractional level the screen error asks for at a distance.
+    double level_at(double distance) const;
+    unsigned resident() const;
     unsigned nodes() const { return unsigned(nodes_.size() - free_blocks_.size() * 4); }
 
 private:
@@ -63,8 +103,10 @@ private:
     };
     struct Slot {
         PatchKey key;
-        unsigned used = 0; // the frame it was last needed
-        float error = 0;   // the patch's geometric error, radii, from its generation
+        unsigned used = 0, resident_frame = 0;
+        // Distinguishes repeated assignments of the same key and slot, including detail changes.
+        std::uint32_t stamp = 0;
+        Range<float> heights = full_height_range;
         bool resident = false;
     };
     struct Request {
@@ -73,21 +115,19 @@ private:
     };
     struct Visibility {
         bool visible = false;
-        float scale = 0;     // screen size per radius of extent, for the error test
         float pixels = 0;    // the cell's edge on screen, the generation priority
-        float tolerance = 1; // the error tolerance's factor: 1 edge-on, 2 facing
+        double distance = 0; // the camera to the nearest point of the patch, radii
     };
 
     void ensure_roots();
     Visibility visibility(const Node& node, const TierView& view) const;
-    void visit(std::uint32_t index, const TierView& view);
+    void visit(std::uint32_t index, const TierView& view, float fade);
     void collapse(Node& node);
     std::uint32_t allocate_children(const Node& node);
-    unsigned slot_of(PatchKey key) const; // slot_count when not resident
-    float error_of(PatchKey key) const;   // 0 when not resident
+    unsigned slot_of(PatchKey key) const; // slot_count when not in the cache
     void touch(PatchKey key);
     void request(PatchKey key, float pixels);
-    void choose_generation();
+    void choose_generation(unsigned budget);
 
     std::vector<Node> nodes_;
     std::vector<std::uint32_t> free_blocks_;
@@ -97,7 +137,10 @@ private:
     std::vector<Draw> draws_;
     std::vector<Request> requests_;
     std::vector<Generation> generate_;
+    float range_[13] = {};
     unsigned frame_ = 0;
+    std::uint32_t stamp_ = 0; // the last generation stamp issued, never reused
+    Pressure pressure_;
     bool active_ = false, wanted_ = false;
 };
 

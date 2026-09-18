@@ -47,6 +47,7 @@ Key key_from_virtual(WPARAM code) {
     case VK_F10: return Key::f10;
     case VK_F11: return Key::f11;
     case VK_F12: return Key::f12;
+    case VK_TAB: return Key::tab;
     default:
         if ((code >= 'A' && code <= 'Z') || (code >= '0' && code <= '9'))
             return Key(code); // virtual-key codes for letters and digits equal ASCII
@@ -73,6 +74,7 @@ int virtual_from_key(Key key) {
     case Key::f10: return VK_F10;
     case Key::f11: return VK_F11;
     case Key::f12: return VK_F12;
+    case Key::tab: return VK_TAB;
     default: return int(key); // letters and digits
     }
 }

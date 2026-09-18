@@ -6,6 +6,7 @@
 #include "assets/image.hpp"
 #include "assets/texture.hpp"
 #include "belt/beltblur_shared.h"
+#include "core/parallel.hpp"
 #include "core/types.hpp"
 #include "post/bloom_shared.h"
 #include "render/gpu_commands.hpp"
@@ -106,11 +107,18 @@ enum class SamplerSlot : unsigned {
     count = ORBITAL_SAMPLER_COUNT
 };
 
+static_assert(TerrainTier::slot_count == ORBITAL_TERRAIN_SLOTS);
+static_assert(float(MinorPlanetTerrain::height_min) == float(MINOR_PLANET_HEIGHT_MIN) &&
+              float(MinorPlanetTerrain::height_max) == float(MINOR_PLANET_HEIGHT_MAX));
+static_assert(tile_slope_scale == float(MINOR_PLANET_SLOPE_SCALE));
+static_assert(patch_skirt_drop == float(MINOR_PLANET_SKIRT_DROP));
+static_assert(tile_colour_ratio == MINOR_PLANET_COLOUR_RATIO);
+
 // Array-texture descriptor slots (shaders/scene/bindings.slang binding 2).
 enum class ArraySlot : unsigned {
     terrain_height = TEX_ARRAY_TERRAIN_HEIGHT,
     terrain_albedo = TEX_ARRAY_TERRAIN_ALBEDO,
-    terrain_normal = TEX_ARRAY_TERRAIN_NORMAL,
+    terrain_slope = TEX_ARRAY_TERRAIN_SLOPE,
     count = ORBITAL_TEXTURE_ARRAY_COUNT,
 };
 
@@ -268,12 +276,11 @@ struct Renderer::Impl {
         UniqueGpuHeap meter_device, meter_zero,
             meter_readback;                       // the exposure histogram, its zero source and its readback
         UniqueGpuHeap cull_device, cull_readback; // GPU output and completed scratch for CPU statistics
-        UniqueGpuHeap belt_state;         // device-only: two slices of per-rock state, this frame's and the last
-        UniqueGpuHeap belt_state_staging; // host-visible: the CPU writes this frame's slice here for the copy
-        UniqueGpuHeap patch_pool;         // device-only: the near tier's patch vertices, a slot per patch
-        UniqueGpuHeap patch_staging;      // host-visible: this frame's new patches, two slots by frame parity
-        UniqueGpuHeap patch_args;         // device-only: the drawn patches' indirect commands, one multi-draw a pass
-        UniqueGpuHeap patch_args_staging; // host-visible: the CPU writes them here, two slots by frame parity
+        UniqueGpuHeap belt_state;            // device-only: two slices of per-rock state, this frame's and the last
+        UniqueGpuHeap belt_state_staging;    // host-visible: the CPU writes this frame's slice here for the copy
+        UniqueGpuHeap patch_records;         // device-only: PatchInstance records for the drawn patches
+        UniqueGpuHeap patch_records_staging; // host-visible: two slots by frame parity
+        UniqueGpuHeap tile_staging;          // host-visible: this frame's tile planes, two slots by frame parity
     } buffers;
     std::uint64_t static_cursor = 0;
     struct StaticUpload { // the staging path of upload_static, open until finish_static_uploads
@@ -371,17 +378,46 @@ struct Renderer::Impl {
     unsigned rock_count = 0;
     unsigned belt_capacity = 0; // rocks the state heaps hold: the high tier or the override
     BeltMotion belt_motion;     // the rocks' seeds and states, stepped on the CPU
-    // The minor planet's near tier (renderer_terrain.cpp): its terrain, the patch
-    // quadtree and cache, and this frame's staging-to-pool copies.
+    // Near-terrain selection, tile arrays, and upload staging (renderer_terrain.cpp).
     std::optional<MinorPlanetTerrain> minor_planet_terrain;
     TerrainTier terrain_tier;
-    std::uint64_t patch_indices_address = 0; // static heap: the index triples every patch shares
-    std::vector<geometry::Vertex> patch_scratch;
+    GpuImage tile_height, tile_albedo, tile_slope; // the three tile arrays, 1024 layers each
+    float tile_detail = 1;                         // TerrainSettings::detail the resident tiles were built with
+    std::uint64_t grid_vertices_address = 0, grid_indices_address = 0;
+    std::uint64_t grid_wire_address = 0; // the grid unindexed, a one-hot barycentric per corner, for the wireframe
+    unsigned grid_index_count = 0;
     struct PatchCopy {
         std::uint64_t source, destination, bytes;
     };
     std::vector<PatchCopy> patch_copies;
-    std::uint64_t patch_args_bytes = 0; // this frame's commands to copy, and the multi-draw's extent
+    std::uint64_t patch_records_bytes = 0;
+    struct TileResult {
+        PatchKey key;
+        unsigned slot;
+        unsigned ring;
+        std::uint32_t stamp; // the tier's name for this generation of this slot
+        Range<float> heights;
+        float ms; // the generation's time on its worker
+    };
+    // Retain completed tiles until upload recording, including across aborted frames.
+    struct TileUpload {
+        PatchKey key;
+        unsigned slot, ring;
+        std::uint32_t stamp;
+        Range<float> heights;
+    };
+    static constexpr unsigned tile_ring_count = 32;
+    std::unique_ptr<WorkerPool<TileResult>> tile_pool;
+    std::vector<TileUpload> tile_uploads;
+    // Keep worker/upload ownership explicit; frame numbers only guard GPU reuse.
+    enum class RingState : std::uint8_t { free, worker, upload };
+    RingState ring_state[tile_ring_count] = {};
+    unsigned ring_used_frame[tile_ring_count] = {}; // the frame its copy was recorded in
+    bool ring_available(unsigned i) const {
+        return ring_state[i] == RingState::free && (!ring_used_frame[i] || frame_index >= ring_used_frame[i] + 2);
+    }
+    unsigned tile_workers = 0;
+    unsigned ring_head = 0;
     // The staging heap has two slots, written by frame parity before the wait for the
     // previous frame, which may still be copying the other; the version each holds
     // says whether a standing state must be written again into a stale slot.
