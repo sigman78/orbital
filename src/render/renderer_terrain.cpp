@@ -44,8 +44,10 @@ void Renderer::Impl::create_terrain_tier() {
     const auto grid = patch_grid_mesh();
     std::vector<Vertex> gpu_vertices(grid.vertices.size());
     for (std::size_t i = 0; i < grid.vertices.size(); i++)
-        gpu_vertices[i] = {{grid.vertices[i].position.x, grid.vertices[i].position.y, grid.vertices[i].position.z, 0},
-                           {0, 0, 0, 0}};
+        // w is the quadrant that owns the vertex; the shader drops it with that quadrant.
+        gpu_vertices[i] = {
+            {grid.vertices[i].position.x, grid.vertices[i].position.y, grid.vertices[i].position.z, grid.vertices[i].u},
+            {0, 0, 0, 0}};
     grid_vertices_address = upload_static(bytes_of(gpu_vertices));
     grid_indices_address = upload_static(bytes_of(grid.indices));
     std::vector<Vertex> wire(grid.indices.size());

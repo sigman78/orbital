@@ -415,28 +415,24 @@ void test_height_tile_range() {
 }
 
 // A quadrant a patch does not draw must contribute no triangle at all. The vertex shader can
-// only drop vertices, and one on the centre row or column belongs to the quadrants either side
-// of it, so the rule has to be "keep it while any quadrant it touches is drawn". Keeping the
-// whole centre cross regardless, as it once did, left a flap: the quad diagonally across the
-// centre has three corners on the cross, and one of its two triangles outlived the mask. This
-// models shaders/surface/patch.slang -- the two have to say the same thing.
+// only drop whole vertices, so the grid gives each quadrant its own copy of the row and column
+// it shares and names the owner in `u`. Sharing them, as it once did, left a flap: the quad
+// diagonally across the centre had three corners nothing could drop, and one of its two
+// triangles outlived the mask -- degenerate at full morph, a flap at every phase before. This
+// models shaders/surface/patch.slang; the two have to say the same thing.
 void test_quadrant_mask() {
     const auto mesh = patch_grid_mesh();
     constexpr float centre = (tile_side - 1) * .5f;
     for (unsigned mask = 1; mask <= 0xf; mask++) {
-        const auto dropped = [&](const Vec3f& p) {
-            const bool low_x = p.x<centre, high_x = p.x> centre;
-            const bool low_y = p.y<centre, high_y = p.y> centre;
-            const unsigned touched = (!high_x && !high_y ? 1u : 0u) | (!low_x && !high_y ? 2u : 0u) |
-                                     (!high_x && !low_y ? 4u : 0u) | (!low_x && !low_y ? 8u : 0u);
-            return (mask & touched) == 0;
+        const auto dropped = [&](std::uint32_t index) { // as the shader does, from the owner in u
+            return (mask >> unsigned(mesh.vertices[index].u) & 1) == 0;
         };
         unsigned alive = 0;
         for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
             const Vec3f a = mesh.vertices[mesh.indices[i]].position;
             const Vec3f b = mesh.vertices[mesh.indices[i + 1]].position;
             const Vec3f c = mesh.vertices[mesh.indices[i + 2]].position;
-            if (dropped(a) || dropped(b) || dropped(c))
+            if (dropped(mesh.indices[i]) || dropped(mesh.indices[i + 1]) || dropped(mesh.indices[i + 2]))
                 continue;
             alive++;
             // Where its body lies, not where its corners do: a triangle of the drawn set must
@@ -455,13 +451,23 @@ void test_quadrant_mask() {
 
 void test_grid_mesh() {
     const auto mesh = patch_grid_mesh();
-    constexpr unsigned expected_vertices = tile_side * tile_side + 4 * tile_side;
+    // Four quadrants of their own, each carrying the row and column it shares, and the skirt
+    // ring split the same way: see patch_grid_mesh.
+    constexpr unsigned span = (tile_side - 1) / 2 + 1;
+    constexpr unsigned expected_vertices = 4 * span * span + 8 * span;
     constexpr unsigned expected_indices = ((tile_side - 1) * (tile_side - 1) + 4 * (tile_side - 1)) * 6;
     assert(mesh.vertices.size() == expected_vertices);
     assert(mesh.indices.size() == expected_indices);
-    for (const auto& v : mesh.vertices)
+    constexpr float half = (tile_side - 1) * .5f;
+    for (const auto& v : mesh.vertices) {
         assert(v.position.x >= 0 && v.position.x <= tile_side - 1 && v.position.y >= 0 &&
                v.position.y <= tile_side - 1 && (v.position.z == 0 || v.position.z == 1));
+        // A quadrant's copy lies in its own half, the row and column it shares included.
+        const unsigned quadrant = unsigned(v.u);
+        assert(quadrant < 4 && v.u == float(quadrant));
+        assert(quadrant & 1 ? v.position.x >= half : v.position.x <= half);
+        assert(quadrant >> 1 ? v.position.y >= half : v.position.y <= half);
+    }
     for (const auto index : mesh.indices)
         assert(index < expected_vertices);
     std::printf("grid mesh: %zu vertices, %zu indices\n", mesh.vertices.size(), mesh.indices.size());

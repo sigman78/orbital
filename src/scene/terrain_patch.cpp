@@ -226,59 +226,64 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
 }
 
 geometry::Mesh patch_grid_mesh() {
-    constexpr unsigned quads = tile_side - 1;
-    constexpr unsigned grid_count = tile_side * tile_side;
-    constexpr unsigned skirt_count = 4 * tile_side;
+    constexpr unsigned quads = tile_side - 1; // 32
+    constexpr unsigned half = quads / 2;
+    constexpr unsigned span = half + 1; // vertices along one quadrant's edge
+    // Every quadrant owns each vertex it uses, the row and column it shares with its neighbours
+    // included. A patch draws only the quadrants its children do not, and the shader masks one
+    // away by dropping its vertices -- but a shared vertex is needed by the quadrant across it,
+    // and the one at the centre by all four. With a single copy the quad diagonally across the
+    // centre has three corners nothing may drop, and one of its two triangles outlives a
+    // quadrant that is not drawn. Owning them costs 71 vertices of 1292 and keeps the same
+    // triangulation everywhere; `u` carries the owner, which the renderer hands the shader.
     geometry::Mesh mesh;
-    mesh.vertices.resize(grid_count + skirt_count);
-    for (unsigned y = 0; y < tile_side; y++)
-        for (unsigned x = 0; x < tile_side; x++)
-            mesh.vertices[y * tile_side + x] = {.position = {float(x), float(y), 0}};
-    unsigned n = grid_count;
-    for (unsigned i = 0; i < tile_side; i++)
-        mesh.vertices[n++] = {.position = {float(i), 0, 1}};
-    for (unsigned i = 0; i < tile_side; i++)
-        mesh.vertices[n++] = {.position = {float(quads), float(i), 1}};
-    for (unsigned i = 0; i < tile_side; i++)
-        mesh.vertices[n++] = {.position = {float(quads - i), float(quads), 1}};
-    for (unsigned i = 0; i < tile_side; i++)
-        mesh.vertices[n++] = {.position = {0, float(quads - i), 1}};
-    ORBITAL_ASSERT(n == grid_count + skirt_count);
-    const auto grid = [](unsigned x, unsigned y) -> std::uint32_t { return y * tile_side + x; };
+    mesh.vertices.reserve(4 * span * span + 8 * span);
+    for (unsigned quadrant = 0; quadrant < 4; quadrant++)
+        for (unsigned y = 0; y < span; y++)
+            for (unsigned x = 0; x < span; x++)
+                mesh.vertices.push_back(
+                    {.position = {float((quadrant & 1) * half + x), float((quadrant >> 1) * half + y), 0},
+                     .u = float(quadrant)});
+    // A grid point as the given quadrant holds it, and the quadrant a cell belongs to, taken
+    // from a point inside the cell so the centre row and column never decide it.
+    const auto grid = [](unsigned quadrant, unsigned x, unsigned y) {
+        return std::uint32_t(quadrant * span * span + (y - (quadrant >> 1) * half) * span +
+                             (x - (quadrant & 1) * half));
+    };
+    const auto quadrant_at = [](float x, float y) { return (x > half ? 1u : 0u) | (y > half ? 2u : 0u); };
     mesh.indices.reserve((quads * quads + 4 * quads) * 6);
     for (unsigned y = 0; y < quads; y++)
         for (unsigned x = 0; x < quads; x++) {
-            const std::uint32_t a = grid(x, y), b = grid(x + 1, y), c = grid(x + 1, y + 1), d = grid(x, y + 1);
-            // The two quads that meet the grid's centre corner to corner take the other
-            // diagonal. A patch draws only the quadrants its children do not, and the shader can
-            // mask a quadrant away only by dropping vertices -- but a vertex on the centre row
-            // or column is needed by the quadrant across it, and the centre itself by all four.
-            // Split these two the usual way and one triangle of each has all three corners on
-            // that cross, so nothing can drop it and it outlives a quadrant that is not drawn:
-            // a flap over the gap, degenerate at full morph and visible at every phase before.
-            // The other diagonal puts the quad's own outer corner in both triangles, and that
-            // corner belongs to this quadrant alone. See terrain_tests' test_quadrant_mask.
-            const unsigned half = quads / 2;
-            if ((x == half && y == half - 1) || (x == half - 1 && y == half))
-                mesh.indices.insert(mesh.indices.end(), {a, b, d, b, c, d});
-            else
-                mesh.indices.insert(mesh.indices.end(), {a, b, c, a, c, d});
+            const unsigned q = quadrant_at(x + .5f, y + .5f);
+            const std::uint32_t a = grid(q, x, y), b = grid(q, x + 1, y), c = grid(q, x + 1, y + 1),
+                                d = grid(q, x, y + 1);
+            mesh.indices.insert(mesh.indices.end(), {a, b, c, a, c, d});
         }
-    const auto edge = [&](unsigned i) -> std::uint32_t {
-        const unsigned side = i / tile_side, along = i % tile_side;
+    // The skirt ribbon, split at the middle of each side so every half belongs to one quadrant.
+    const auto edge = [](unsigned side, unsigned along) {
         switch (side) {
-        case 0: return grid(along, 0);
-        case 1: return grid(quads, along);
-        case 2: return grid(quads - along, quads);
-        default: return grid(0, quads - along);
+        case 0: return std::pair{along, 0u};
+        case 1: return std::pair{quads, along};
+        case 2: return std::pair{quads - along, quads};
+        default: return std::pair{0u, quads - along};
         }
     };
     for (unsigned side = 0; side < 4; side++)
-        for (unsigned along = 0; along < quads; along++) {
-            const unsigned i = side * tile_side + along;
-            const std::uint32_t a = edge(i), b = edge(i + 1);
-            const std::uint32_t a2 = grid_count + i, b2 = a2 + 1;
-            mesh.indices.insert(mesh.indices.end(), {a, a2, b, b, a2, b2});
+        for (unsigned part = 0; part < 2; part++) {
+            const auto [x0, y0] = edge(side, part * half);
+            const auto [x1, y1] = edge(side, part * half + 1);
+            const unsigned q = quadrant_at((x0 + x1) * .5f, (y0 + y1) * .5f);
+            const std::uint32_t base = std::uint32_t(mesh.vertices.size());
+            for (unsigned i = 0; i <= half; i++) {
+                const auto [x, y] = edge(side, part * half + i);
+                mesh.vertices.push_back({.position = {float(x), float(y), 1}, .u = float(q)});
+            }
+            for (unsigned i = 0; i < half; i++) {
+                const auto [x, y] = edge(side, part * half + i);
+                const auto [nx, ny] = edge(side, part * half + i + 1);
+                const std::uint32_t a = grid(q, x, y), b = grid(q, nx, ny), a2 = base + i, b2 = a2 + 1;
+                mesh.indices.insert(mesh.indices.end(), {a, a2, b, b, a2, b2});
+            }
         }
     return mesh;
 }
