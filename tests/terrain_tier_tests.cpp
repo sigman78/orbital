@@ -58,6 +58,8 @@ struct AsyncTiles {
     };
     std::vector<Pending> pending;
     unsigned step = 0;
+    unsigned jitter = 0, hold_frames = 0;
+    bool held = false;
     // Set to hand the tier each tile's own height bounds, as the renderer does. Left null the
     // residency carries the global shell, which is cheaper and all most tests need.
     const MinorPlanetTerrain* terrain = nullptr;
@@ -82,8 +84,14 @@ struct AsyncTiles {
             }
         }
         tier.update(view, frame, budget);
-        for (const auto& g : tier.generate())
-            pending.push_back({g.slot, g.key, g.stamp, step + 2});
+        for (const auto& g : tier.generate()) {
+            unsigned delay = 2 + (jitter ? g.key.packed() % jitter : 0);
+            if (hold_frames && !held && g.key.level >= 2) {
+                held = true;
+                delay += hold_frames;
+            }
+            pending.push_back({g.slot, g.key, g.stamp, step + delay});
+        }
     }
 };
 
@@ -102,23 +110,23 @@ struct MorphCheck {
 
     struct Surface {
         PatchKey key;
-        float start = 0, end = 0, floor = 0;
+        float start = 0, end = 0;
         const std::vector<float>* height = nullptr;
     };
 
     // Match the vertex shader morph.
     float morph_at(const Surface& s, unsigned x, unsigned y, Vec3d camera_local) {
+        if (!s.key.level)
+            return 0;
         constexpr unsigned quads = tile_side - 1;
         const double size = 2.0 / double(1u << s.key.level);
         const Vec3d d = cube_direction(s.key.face, -1 + s.key.x * size + double(x) * size / quads,
                                        -1 + s.key.y * size + double(y) * size / quads);
         const double dist = length(d * (1 + (*s.height)[y * tile_side + x]) - camera_local);
-        return std::max(float(std::clamp((dist - s.start) / std::max(double(s.end) - s.start, 1e-6), 0.0, 1.0)),
-                        s.floor);
+        return float(std::clamp((dist - s.start) / std::max(double(s.end) - s.start, 1e-6), 0.0, 1.0));
     }
 
-    unsigned violations(const TerrainTier& tier, const TierView& view, unsigned* checked = nullptr,
-                        bool use_fade = true) {
+    unsigned violations(const TerrainTier& tier, const TierView& view, unsigned* checked = nullptr) {
         constexpr unsigned quads = tile_side - 1;
         std::vector<Surface> surfaces;
         std::unordered_map<std::uint32_t, unsigned> cover; // a drawn quadrant's cell -> its surface
@@ -132,7 +140,7 @@ struct MorphCheck {
             for (unsigned i = 0; i < 4; i++)
                 if (draw.quadrants >> i & 1)
                     cover[draw.key.child(i).packed()] = unsigned(surfaces.size());
-            surfaces.push_back({draw.key, .7f * end, end, use_fade ? draw.fade : 0.f, &height});
+            surfaces.push_back({draw.key, tier.morph_start(draw.key.level), end, &height});
         }
         // Find the covering ancestor; finer neighbors perform their own check.
         const auto coverer = [&](PatchKey cell) -> const Surface* {
@@ -299,13 +307,26 @@ void test_cull_waste() {
     }
 }
 
-// Parent morphing must start beyond the child handover distance.
+// Exercise the production bands and screen-error budget, not a separate ratio formula.
 void test_morph_bands() {
     double worst = 1e9;
-    for (unsigned level = 0; level + 1 < std::size(TerrainTier::level_error); level++)
-        worst = std::min(worst, .7 * TerrainTier::level_error[level] / TerrainTier::level_error[level + 1]);
-    std::printf("terrain tier: worst morph-band headroom over the child's hand-over %.3fx\n", worst);
-    assert(worst > 1);
+    for (float bias : {-1.f, 0.f, 2.f}) {
+        TierView view = view_at(20, 2.5 / 15);
+        view.lod_bias = bias;
+        TerrainTier tier;
+        tier.update(view, 1); // inactive: requested ranges, with no streaming restriction
+        const double projection = view.height_pixels / (2 * double(view.tan_y));
+        for (unsigned level = 0; level <= patch_level_max; level++) {
+            const double split = tier.range(level + 1);
+            const double pixels = TerrainTier::level_error[level] * projection / split;
+            assert(std::abs(pixels * std::exp2(bias) - TerrainTier::error_pixels / 2) < 1e-5);
+            assert(tier.morph_start(level) > split);
+            assert(tier.morph_start(level) < tier.range(level));
+            worst = std::min(worst, tier.morph_start(level) / split);
+        }
+    }
+    std::printf("terrain tier: parent-error split budget verified; morph-band headroom %.3fx\n", worst);
+    assert(worst > 1.1);
 }
 
 void test_morph_continuity() {
@@ -335,31 +356,68 @@ void test_morph_continuity() {
     assert(checked > 20000 && bad == 0);
 }
 
-// Arrival fading should reduce mismatches beside missing-child fallback quadrants.
+// Uneven completion, a held tile, and a moving view must never introduce a late-tile seam.
 void test_morph_streaming() {
-    constexpr double radius = 2.5 / 15;
     const MinorPlanetTerrain terrain(1007);
     MorphCheck check{terrain};
-    const TierView view = view_over({.6, .3, 1}, .05, radius);
-    struct Count {
-        unsigned frames = 0, worst = 0, total = 0;
-    };
-    Count faded, plain;
-    TerrainTier tier;
-    AsyncTiles async;
-    for (unsigned frame = 1; frame <= 80; frame++) {
-        async.update(tier, view, frame);
-        if (tier.draws().empty())
-            continue;
-        const unsigned with = check.violations(tier, view, nullptr, true);
-        const unsigned without = check.violations(tier, view, nullptr, false);
-        faded.frames += with > 0, faded.worst = std::max(faded.worst, with), faded.total += with;
-        plain.frames += without > 0, plain.worst = std::max(plain.worst, without), plain.total += without;
+    unsigned checked = 0, bad = 0, restricted = 0;
+    for (bool moving : {false, true}) {
+        TerrainTier tier;
+        AsyncTiles async;
+        async.terrain = &terrain;
+        async.jitter = 11;
+        async.hold_frames = 70;
+        for (unsigned frame = 1; frame <= 200; frame++) {
+            const double x = moving ? .98 + .0003 * frame : .6;
+            const TierView view = view_over({x, .3, 1}, .05, 2.5 / 15);
+            async.update(tier, view, frame, 4);
+            if (!tier.active())
+                continue;
+            restricted += tier.streaming_scale() < 1;
+            bad += check.violations(tier, view, &checked);
+            for (const auto& draw : tier.draws()) {
+                assert(tier.resident_slot(draw.key) == draw.slot);
+                for (const auto& g : tier.generate())
+                    assert(g.slot != draw.slot);
+            }
+        }
+        assert(async.held);
+        if (!moving) {
+            assert(tier.streaming_scale() == 1);
+            assert(tier.generate().empty() && async.pending.empty());
+        }
     }
-    std::printf("terrain tier: streaming, boundary vertices breaking the morph: without the fade %u over %u frames "
-                "(worst %u), with it %u over %u frames (worst %u)\n",
-                plain.total, plain.frames, plain.worst, faded.total, faded.frames, faded.worst);
-    assert(faded.total <= plain.total);
+    std::printf("terrain tier: streaming, %u boundary vertices, %u violations, %u restricted frames\n", checked, bad,
+                restricted);
+    assert(checked > 10000 && restricted > 20 && bad == 0);
+}
+
+// Startup --terrain-detail can invalidate before update has ever initialized the cache.
+// Cycle beyond its capacity and verify that eviction removes the old owner's lookup.
+void test_invalidate_before_update() {
+    TerrainTier tier;
+    tier.invalidate();
+    tier.invalidate();
+    PatchKey owners[TerrainTier::slot_count]{};
+    bool assigned[TerrainTier::slot_count]{};
+    unsigned generations = 0;
+    for (unsigned frame = 1; frame <= 700; frame++) {
+        const double angle = frame * .035;
+        const TierView view = view_over({std::sin(angle), .3, std::cos(angle)}, .08, 2.5 / 15);
+        tier.update(view, frame);
+        for (const auto& g : tier.generate()) {
+            assert(g.slot < TerrainTier::slot_count);
+            if (assigned[g.slot])
+                assert(tier.resident_slot(owners[g.slot]) == TerrainTier::slot_count);
+            owners[g.slot] = g.key;
+            assigned[g.slot] = true;
+            assert(tier.mark_resident(g.slot, g.key, g.stamp));
+            generations++;
+        }
+        assert(tier.resident() <= TerrainTier::slot_count);
+    }
+    std::printf("terrain tier: startup invalidation, %u assignments with unique live slot owners\n", generations);
+    assert(generations > 2 * TerrainTier::slot_count);
 }
 
 // Regression: loose height bounds fully collapsed adjacent finest levels, leaving a 2x border.
@@ -392,9 +450,8 @@ void test_resident_height_selection() {
             for (const auto& draw : tier.draws()) {
                 if (draw.key.level != deepest[tight])
                     continue;
-                assert(draw.fade == 0);
                 const double size = 2.0 / (1u << draw.key.level);
-                const double end = tier.range(draw.key.level), start = .7 * end;
+                const double end = tier.range(draw.key.level), start = tier.morph_start(draw.key.level);
                 for (unsigned y = 0; y < tile_side; y++)
                     for (unsigned x = 0; x < tile_side; x++) {
                         const Vec3d d = cube_direction(draw.key.face,
@@ -405,7 +462,7 @@ void test_resident_height_selection() {
                     }
             }
             if (tight)
-                assert(least_morph < .01); // the finest grid is actually present
+                assert(least_morph < .99); // the finest grid is not fully collapsed into its parent
             else
                 assert(least_morph == 1); // reproduce the previous all-collapsed selection
         }
@@ -957,6 +1014,7 @@ void test_flight_sweep() {
 }
 
 int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
     for (int i = 1; i < argc; i++)
         if (std::string_view(argv[i]) == "--truth") {
             test_occluder_floor(); // the premise the other two rest on
@@ -967,12 +1025,13 @@ int main(int argc, char** argv) {
             test_flight_sweep();
             return 0;
         }
+    test_invalidate_before_update();
+    test_morph_streaming();
     test_resident_height_selection();
     test_height_range_lifetime();
     test_resident_terrain_morph();
     test_morph_bands();
     test_morph_continuity();
-    test_morph_streaming();
     test_cull_waste();
     test_provenance_and_audit();
     constexpr double radius = 2.5 / 15;

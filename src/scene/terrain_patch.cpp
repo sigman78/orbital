@@ -154,15 +154,24 @@ float patch_error(const MinorPlanetTerrain& terrain, PatchKey key) {
     const PatchBounds bounds = patch_bounds(key);
     const MinorPlanetTerrain::Region region = terrain.region(bounds.centre, bounds.angular_radius);
     constexpr unsigned quads = tile_side - 1;
-    const auto h = [&](double x, double y) {
+    const auto point = [&](double x, double y) {
         const Vec3d d = cube_direction(key.face, cell.s0 + x * cell.size / quads, cell.t0 + y * cell.size / quads);
-        return length(d) * (1 + terrain.height(d, region));
+        return d * (1 + double(terrain.height(d, region)));
     };
+    Vec3d vertices[tile_side * tile_side];
+    for (unsigned y = 0; y < tile_side; y++)
+        for (unsigned x = 0; x < tile_side; x++)
+            vertices[y * tile_side + x] = point(x, y);
     double error = 0;
     for (unsigned y = 0; y < quads; y++)
         for (unsigned x = 0; x < quads; x++) {
-            const double mean = (h(x, y) + h(x + 1, y) + h(x, y + 1) + h(x + 1, y + 1)) * .25;
-            error = std::max(error, std::abs(h(x + .5, y + .5) - mean));
+            const Vec3d a = vertices[y * tile_side + x], b = vertices[y * tile_side + x + 1],
+                        c = vertices[(y + 1) * tile_side + x + 1], d = vertices[(y + 1) * tile_side + x];
+            // The mesh diagonal is a--c, not the four-corner bilinear interpolant. Sample
+            // that diagonal and both triangle interiors in 3D, including sphere curvature.
+            error = std::max({error, length(point(x + .5, y + .5) - (a + c) * .5),
+                              length(point(x + 2. / 3, y + 1. / 3) - (a + b + c) * (1. / 3)),
+                              length(point(x + 1. / 3, y + 2. / 3) - (a + c + d) * (1. / 3))});
         }
     return float(error);
 }

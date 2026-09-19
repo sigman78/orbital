@@ -150,15 +150,17 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     patch_views.clear();
     patch_views.reserve(terrain_tier.draws().size());
     for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
-        const float end = terrain_tier.range(draw.key.level), start = .7f * end;
-        const float morph = end > start ? std::clamp((draw.near_distance - start) / (end - start), 0.f, 1.f) : 0.f;
+        const float end = terrain_tier.range(draw.key.level), start = terrain_tier.morph_start(draw.key.level);
+        const float morph = draw.key.level && end > start
+                                ? std::clamp((draw.near_distance - start) / (end - start), 0.f, 1.f)
+                                : 0.f;
         patch_views.push_back({.face = draw.key.face,
                                .level = draw.key.level,
                                .quadrants = std::uint8_t(draw.quadrants),
                                .x = draw.key.x,
                                .y = draw.key.y,
-                               .morph = std::max(morph, draw.fade),
-                               .fade = draw.fade});
+                               .morph = morph,
+                               .recovery = 1 - terrain_tier.streaming_scale()});
     }
     const CubeCoord under = cube_coordinates(view.camera_local);
     stats.patch_map = {.patches = patch_views,
@@ -192,7 +194,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     ts.flat_near = p.flat_near;
     ts.flat_far = p.flat_far;
     ts.graded = p.graded;
-    ts.fade_mean = p.fade_mean;
+    ts.streaming_scale = p.streaming_scale;
     if (tile_pool) {
         const float height_range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
         for (const TerrainTier::Generation& generation : terrain_tier.generate()) {
@@ -256,13 +258,13 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                                 float(draw.key.level)};
         }();
         const float morph_end = terrain_tier.range(draw.key.level);
-        const float morph_start = 0.7f * morph_end;
+        const float morph_start = terrain_tier.morph_start(draw.key.level);
         const PatchKey parent{draw.key.face, std::uint8_t(draw.key.level ? draw.key.level - 1 : 0),
                               std::uint16_t(draw.key.x / 2), std::uint16_t(draw.key.y / 2)};
-        // Arrival fading needs the parent tile for matching geometry and material transitions.
+        // The parent tile supplies material at the coarse end of the distance band.
         const unsigned parent_slot = draw.key.level ? terrain_tier.resident_slot(parent) : TerrainTier::slot_count;
         records[i] = {.cell = cell,
-                      .morph = {morph_start, morph_end, parent_slot < TerrainTier::slot_count ? draw.fade : 0, 0},
+                      .morph = {morph_start, morph_end, 0, 0},
                       .tile = {draw.key.face, draw.slot, parent_slot,
                                (draw.key.x & 1u) | (draw.key.y & 1u) << 1 | (draw.key.x == 0) << 2 |
                                    (unsigned(draw.key.x) + 1 == 1u << draw.key.level) << 3 | (draw.key.y == 0) << 4 |

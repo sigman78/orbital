@@ -83,7 +83,7 @@ struct FrameStats {
         unsigned evictions = 0, evicted_recent = 0;
         unsigned starved = 0, out_of_range = 0, deepest = 0, behind_one = 0;
         unsigned flat_near = 0, flat_far = 0, graded = 0; // patches the morph grades against ones it switches
-        float behind_mean = 0, fade_mean = 0;
+        float behind_mean = 0, streaming_scale = 0;
     } terrain;
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
     float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc
@@ -106,7 +106,7 @@ struct PatchView {
     std::uint8_t quadrants = 0; // the grid quadrants drawn, bit i: x = i & 1, y = i >> 1
     std::uint16_t x = 0, y = 0; // the cell within the face at this level
     float morph = 0;            // 0 its own shape, 1 its parent's, at its nearest corner
-    float fade = 0;             // the arrival floor under that, 1 the frame the tile appears
+    float recovery = 0;         // 1 minus the shared streaming range scale
 };
 
 struct Stats {

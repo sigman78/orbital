@@ -29,12 +29,11 @@ struct TierView {
 class TerrainTier {
 public:
     static constexpr unsigned slot_count = 1024; // 35 MiB of tiles; a close view holds 400 of them
-    // Tree size, deliberately not the slot count: a node is 64 bytes and only drawn patches
-    // need slots, so the tile cache's LRU is the real limit. Demand peaks near 1400 at bias 2,
-    // and a node blocked here never recovers, since a split already made is grandfathered.
+    // Tree bookkeeping is independent of the tile cache. Both capacity limits can reduce
+    // the shared streaming range scale; existing splits retain priority at the node ceiling.
     static constexpr unsigned node_budget = 4096;
     // A generation whose slot is never served would hold its key forever: nothing evicts a
-    // pending slot and visit() only re-requests keys without one. Reclaim it well past any
+    // pending slot and prepare() only re-requests keys without one. Reclaim it well past any
     // real generation, which takes milliseconds. The sweep walks a window of slots per frame,
     // so the whole cache is covered every slot_count / sweep_window frames.
     static constexpr unsigned pending_timeout = 240;
@@ -55,16 +54,14 @@ public:
     // Sizes are in cull_bodies' units: a projected radius over the half height, twice the pixels.
     static constexpr float error_pixels = 3; // a patch's geometric error on screen: it splits above 1.5 px
     static constexpr float hysteresis = .8f; // the fraction of either the way back
-    // Fade new tiles from their parent's shape over a fixed frame count for deterministic captures.
-    static constexpr unsigned fade_frames = 15;
-    // Seed-1007 calibration, 32 quads, Everitt warp (`terrain_tests --calibrate`): a uniform
-    // sample per level, then a hill climb around its worst patch, since relief clusters and a
-    // uniform sample misses it. Levels 9..12 previously extrapolated at about half the true
-    // error. One method for the whole table: test_morph_bands constrains adjacent ratios, so a
-    // level measured more thoroughly than its neighbour breaks the band it hands over in.
+    // Relax a residency-limited range scale back to its requested value over at least this many updates.
+    static constexpr unsigned recovery_frames = 15;
+    // Seed-1007 calibration against 3D triangles, 32 quads, Everitt warp
+    // (`terrain_tests --calibrate`): uniform samples followed by a hill climb.
+    // These are estimates, not certified bounds on every patch or intermediate morph.
     static constexpr float level_error[] = {
-        .018342f,     .0126785f,    .00478311f,   .00225514f,  .000698864f, .000284836f, .000153035f,
-        .0000752807f, .0000374019f, .0000214279f, 9.11951e-6f, 4.02331e-6f, 1.99676e-6f,
+        .0304741f,   .0192836f, .00591285f,  .00245085f,  .00100089f,  .000457055f, .000173189f,
+        8.54412e-5f, 4.493e-5f, 2.27982e-5f, 1.25439e-5f, 4.57292e-6f, 3.38214e-6f,
     };
 
     struct Generation {
@@ -76,8 +73,6 @@ public:
         PatchKey key;
         unsigned slot;
         unsigned quadrants; // the grid quadrants to draw (bit i: x = i & 1, y = i >> 1); 0xf the whole patch
-        // Morph floor shared by siblings: 1 on arrival, decreasing to 0 over fade_frames.
-        float fade = 0;
         // Kept from the visit that selected this patch, where its bounds were already at hand:
         // the pressure diagnostics want both distances and would otherwise rebuild the bounds
         // of every drawn patch every frame, which is the dearer half of what they cost.
@@ -115,7 +110,7 @@ public:
         unsigned oldest_age = 0; // frames since the least recently used tile was last touched
         // Slots handed out whose tile never came back, and how long the oldest has waited. This
         // is the one part of the tier that clears over many frames rather than at once: nothing
-        // evicts a pending slot and visit() re-requests only keys that have none, so the patch
+        // evicts a pending slot and prepare() re-requests only keys that have none, so the patch
         // is drawn by its parent, coarse, until the reclaim sweep takes the slot back -- up to
         // pending_timeout plus a sweep cycle, four seconds at 60 Hz. It looks stuck because it
         // is, briefly. A pending_age that keeps climbing past that is a real leak.
@@ -128,13 +123,13 @@ public:
         unsigned nodes = 0, node_budget = 0, splits_blocked = 0;
         unsigned requested = 0, served = 0;         // tiles asked for, and given a slot
         unsigned evictions = 0, evicted_recent = 0; // resident slots recycled, and those still warm
-        unsigned starved = 0, out_of_range = 0;     // quadrants the parent covered, by reason
+        unsigned starved = 0, out_of_range = 0;     // requested tiles missing; quadrants covered by range
         unsigned deepest = 0;                       // finest level drawn
         unsigned behind_one = 0, behind_count = 0;  // patches over a level coarser than asked for
         float behind_mean = 0;                      // levels coarser than asked for, averaged
-        // Estimated spatial morph variation and mean arrival fade.
+        // Estimated spatial morph variation and residency-limited range scale.
         unsigned flat_near = 0, flat_far = 0, graded = 0;
-        float fade_mean = 0;
+        float streaming_scale = 0;
     };
     const Pressure& pressure() const { return pressure_; }
 
@@ -162,6 +157,13 @@ public:
     // from the nearest resident ancestor while a node has no tile of its own.
     Range<float> reach_of(PatchKey key) const;
     float range(unsigned level) const { return level < std::size(range_) ? range_[level] : 0; }
+    float morph_start(unsigned level) const {
+        // Reserve 40% of the interval after this level's own split threshold before it
+        // begins collapsing toward its parent. No fixed ratio between levels is assumed.
+        const float end = range(level), next = range(level + 1);
+        return next + .4f * (end - next);
+    }
+    float streaming_scale() const { return streaming_scale_; }
     unsigned resident_slot(PatchKey key) const; // the tile's slot, slot_count when absent or pending
     unsigned pending() const;                   // slots handed out whose tile has not arrived
     unsigned pending_age() const;               // frames the oldest of those has waited, 0 when there are none
@@ -183,7 +185,7 @@ private:
     };
     struct Slot {
         PatchKey key;
-        unsigned used = 0, resident_frame = 0;
+        unsigned used = 0;
         unsigned assigned_frame = 0; // when the generation went out; `used` tracks visits instead
         // Distinguishes repeated assignments of the same key and slot, including detail changes.
         std::uint32_t stamp = 0;
@@ -212,7 +214,8 @@ private:
     // rather than the reach, which pads for descendants that will not be drawn in its place.
     bool drawn_over_horizon(const PatchBounds& bounds, Range<float> heights) const;
     Visibility visibility(const Node& node, const TierView& view) const;
-    void visit(std::uint32_t index, const TierView& view, const Visibility& seen, float fade);
+    double prepare(std::uint32_t index, const TierView& view, const Visibility& seen);
+    void visit(std::uint32_t index, const TierView& view, const Visibility& seen);
     void collapse(Node& node);
     std::uint32_t allocate_children(const Node& node);
     unsigned slot_of(PatchKey key) const; // slot_count when not in the cache
@@ -228,7 +231,9 @@ private:
     std::vector<Draw> draws_;
     std::vector<Request> requests_;
     std::vector<Generation> generate_;
-    float range_[13] = {};
+    float range_[std::size(level_error) + 1] = {};
+    float requested_range_[std::size(level_error) + 1] = {};
+    float streaming_scale_ = 0;
     LocalPlane planes_[5] = {}; // near and the four sides; the frustum's sixth is the far plane, not tested
     // The camera in the body's frame, resolved once an update: every node tested the horizon
     // against it, and every one of them was taking the same square root to do so.

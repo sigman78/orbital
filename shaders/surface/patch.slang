@@ -86,8 +86,9 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     float h = patchHeight(slot, g);
     float3 world = inst.center_radius.xyz + mul(rotate, d) * radius * (1 + h);
     float dist = length(world) / radius;
-    // Arrival fade is a floor under the distance morph, relaxing from the parent shape.
-    float m = max(saturate((dist - patch.morph.x) / max(patch.morph.y - patch.morph.x, 1e-6)), patch.morph.z);
+    // Streaming adjusts the shared distance bands; independent arrival floors would split edges.
+    // A root has no parent lattice to collapse into.
+    float m = patch.cell.w > 0 ? saturate((dist - patch.morph.x) / max(patch.morph.y - patch.morph.x, 1e-6)) : 0;
     float2 gm = g - frac(g * 0.5) * 2.0 * m;
     st = cell_origin + gm / PATCH_QUADS * cell_size;
     d = patchCubeDirection(face, st);
