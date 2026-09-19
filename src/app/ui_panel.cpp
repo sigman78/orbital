@@ -295,33 +295,27 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
 // own, dark is its parent's, and a tile still fading in reads white.
 void patch_map(const render::Stats::PatchMap& map) {
     const std::span<const render::PatchView> patches = map.patches;
-    // +y over +z, the equatorial band beside it, -y under: the unwrap a cube map is stored in.
-    struct Place {
-        unsigned face, column, row;
-    };
-    static constexpr Place places[] = {{2, 1, 0}, {1, 0, 1}, {4, 1, 1}, {0, 2, 1}, {5, 3, 1}, {3, 1, 2}};
+    // The six faces in index order, three by two. A cross reads as a cube but spends half the
+    // panel on squares that hold nothing, and a face here is worth more than the adjacency: the
+    // same width gives 118 pixels a face against 85, and the labels say which is which.
     static constexpr const char* labels[] = {"+x", "-x", "+y", "-y", "+z", "-z"};
-    constexpr float gap = 2;
+    constexpr float gap = 1;
     const float avail = ImGui::GetContentRegionAvail().x;
-    const float side = std::floor((avail - 3 * gap) / 4);
+    const float side = std::floor((avail - 2 * gap) / 3);
     const ImVec2 origin = ImGui::GetCursorScreenPos();
-    ImGui::InvisibleButton("##patch-map", {avail, 3 * side + 2 * gap});
+    ImGui::InvisibleButton("##patch-map", {3 * side + 2 * gap, 2 * side + gap});
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Hue is the patch level, dark is morphed to the parent's shape, washed out is a\n"
                           "tile still fading in. A gap inside a patch is a quadrant its child draws, or\n"
                           "one nothing draws. The cross is the camera.");
     auto* draw = ImGui::GetWindowDrawList();
     const auto corner = [&](unsigned face) {
-        for (const Place& place : places)
-            if (place.face == face)
-                return ImVec2{origin.x + place.column * (side + gap), origin.y + place.row * (side + gap)};
-        return origin;
+        return ImVec2{origin.x + (face % 3) * (side + gap), origin.y + (face / 3) * (side + gap)};
     };
-    for (const Place& place : places) {
-        const ImVec2 at = corner(place.face);
+    for (unsigned face = 0; face < 6; face++) {
+        const ImVec2 at = corner(face);
         draw->AddRectFilled(at, {at.x + side, at.y + side}, IM_COL32(18, 20, 24, 255));
-        draw->AddRect(at, {at.x + side, at.y + side}, IM_COL32(70, 76, 86, 255));
-        draw->AddText({at.x + 3, at.y + 2}, IM_COL32(120, 128, 140, 255), labels[place.face]);
+        draw->AddText({at.x + 2, at.y + 1}, IM_COL32(96, 104, 116, 255), labels[face]);
     }
     unsigned drawn_quadrants = 0, deepest = 0;
     for (const render::PatchView& patch : patches) {
