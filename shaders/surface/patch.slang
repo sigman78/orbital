@@ -58,11 +58,18 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
 
     float2 g = grid.position.xy;
     float skirt = grid.position.z;
-    // Mask replaced quadrants, retaining centre-line vertices for adjacent quadrants.
+    // Mask replaced quadrants. A vertex on the centre row or column belongs to the quadrants on
+    // both sides of it, and the one at the centre to all four, so it survives while any of them
+    // is drawn. Testing the strict quadrant instead kept every centre-cross vertex whatever the
+    // mask, and the quad diagonally across the centre then had three corners on the cross and
+    // one outside: one of its two triangles lived on, a flap over a quadrant nothing draws. It
+    // was invisible at full morph, where those corners meet, and there at every phase before.
+    // terrain_tests' test_quadrant_mask models this rule; keep the two in step.
     uint quadrants = (patch.tile[3] >> 6) & 0xf;
     bool2 low = g < PATCH_QUADS * 0.5, high = g > PATCH_QUADS * 0.5;
-    uint quadrant = (high.x ? 1 : 0) | (high.y ? 2 : 0);
-    bool dropped = (low.x || high.x) && (low.y || high.y) && !((quadrants >> quadrant) & 1);
+    uint touched = (!high.x && !high.y ? 1u : 0u) | (!low.x && !high.y ? 2u : 0u) |
+                   (!high.x && !low.y ? 4u : 0u) | (!low.x && !low.y ? 8u : 0u);
+    bool dropped = (quadrants & touched) == 0;
     float2 cell_origin = patch.cell.xy;
     float cell_size = patch.cell.z;
     uint face = patch.tile[0];

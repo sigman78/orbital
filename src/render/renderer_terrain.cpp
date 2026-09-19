@@ -296,6 +296,24 @@ void Renderer::Impl::trace_far_patches(const TierView& view, float min_arc) {
     const auto arc_of = [&](Vec3d direction) {
         return std::acos(std::clamp(dot(direction, view.camera_local) / d, -1.0, 1.0)) * 180 / pi<double>;
     };
+    // Coverage, while we are walking the set anyway: a cell drawn twice, or one drawn by an
+    // ancestor that also draws it as a quadrant, is real overlap and would crack at the seam.
+    // The tier's tests assert this every step of a flight; this says it in a live session.
+    std::unordered_set<std::uint32_t> cells;
+    unsigned doubled = 0;
+    for (const TerrainTier::Draw& draw : terrain_tier.draws())
+        for (unsigned q = 0; q < 4; q++)
+            if (draw.quadrants >> q & 1)
+                doubled += !cells.insert(draw.key.child(q).packed()).second;
+    for (std::uint32_t packed : cells)
+        for (PatchKey cell{std::uint8_t(packed & 7), std::uint8_t(packed >> 3 & 0x1f),
+                           std::uint16_t(packed >> 8 & 0xfff), std::uint16_t(packed >> 20 & 0xfff)};
+             cell.level;) {
+            cell = cell.parent();
+            doubled += cells.count(cell.packed());
+        }
+    if (doubled && frame_index % 120 == 0)
+        log::error("Near tier: {} drawn cells overlap another at frame {}", doubled, frame_index);
     unsigned standing = 0;
     double worst = 0;
     for (const TerrainTier::Draw& draw : terrain_tier.draws()) {

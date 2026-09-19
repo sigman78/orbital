@@ -249,7 +249,20 @@ geometry::Mesh patch_grid_mesh() {
     for (unsigned y = 0; y < quads; y++)
         for (unsigned x = 0; x < quads; x++) {
             const std::uint32_t a = grid(x, y), b = grid(x + 1, y), c = grid(x + 1, y + 1), d = grid(x, y + 1);
-            mesh.indices.insert(mesh.indices.end(), {a, b, c, a, c, d});
+            // The two quads that meet the grid's centre corner to corner take the other
+            // diagonal. A patch draws only the quadrants its children do not, and the shader can
+            // mask a quadrant away only by dropping vertices -- but a vertex on the centre row
+            // or column is needed by the quadrant across it, and the centre itself by all four.
+            // Split these two the usual way and one triangle of each has all three corners on
+            // that cross, so nothing can drop it and it outlives a quadrant that is not drawn:
+            // a flap over the gap, degenerate at full morph and visible at every phase before.
+            // The other diagonal puts the quad's own outer corner in both triangles, and that
+            // corner belongs to this quadrant alone. See terrain_tests' test_quadrant_mask.
+            const unsigned half = quads / 2;
+            if ((x == half && y == half - 1) || (x == half - 1 && y == half))
+                mesh.indices.insert(mesh.indices.end(), {a, b, d, b, c, d});
+            else
+                mesh.indices.insert(mesh.indices.end(), {a, b, c, a, c, d});
         }
     const auto edge = [&](unsigned i) -> std::uint32_t {
         const unsigned side = i / tile_side, along = i % tile_side;

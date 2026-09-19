@@ -3,6 +3,7 @@
 #include "scene/terrain_patch.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -413,6 +414,45 @@ void test_height_tile_range() {
     }
 }
 
+// A quadrant a patch does not draw must contribute no triangle at all. The vertex shader can
+// only drop vertices, and one on the centre row or column belongs to the quadrants either side
+// of it, so the rule has to be "keep it while any quadrant it touches is drawn". Keeping the
+// whole centre cross regardless, as it once did, left a flap: the quad diagonally across the
+// centre has three corners on the cross, and one of its two triangles outlived the mask. This
+// models shaders/surface/patch.slang -- the two have to say the same thing.
+void test_quadrant_mask() {
+    const auto mesh = patch_grid_mesh();
+    constexpr float centre = (tile_side - 1) * .5f;
+    for (unsigned mask = 1; mask <= 0xf; mask++) {
+        const auto dropped = [&](const Vec3f& p) {
+            const bool low_x = p.x<centre, high_x = p.x> centre;
+            const bool low_y = p.y<centre, high_y = p.y> centre;
+            const unsigned touched = (!high_x && !high_y ? 1u : 0u) | (!low_x && !high_y ? 2u : 0u) |
+                                     (!high_x && !low_y ? 4u : 0u) | (!low_x && !low_y ? 8u : 0u);
+            return (mask & touched) == 0;
+        };
+        unsigned alive = 0;
+        for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+            const Vec3f a = mesh.vertices[mesh.indices[i]].position;
+            const Vec3f b = mesh.vertices[mesh.indices[i + 1]].position;
+            const Vec3f c = mesh.vertices[mesh.indices[i + 2]].position;
+            if (dropped(a) || dropped(b) || dropped(c))
+                continue;
+            alive++;
+            // Where its body lies, not where its corners do: a triangle of the drawn set must
+            // sit in a drawn quadrant.
+            const float x = (a.x + b.x + c.x) / 3, y = (a.y + b.y + c.y) / 3;
+            const unsigned quadrant = (x > centre ? 1u : 0u) | (y > centre ? 2u : 0u);
+            assert(mask >> quadrant & 1);
+        }
+        assert(alive > 0);
+        // Whole quadrants, skirt included: a quarter of the grid and a quarter of the ring each.
+        const unsigned quarters = unsigned(std::popcount(mask));
+        assert(alive == quarters * unsigned(mesh.indices.size() / 3) / 4);
+    }
+    std::printf("grid mesh: every triangle of all 15 quadrant masks lies in a drawn quadrant\n");
+}
+
 void test_grid_mesh() {
     const auto mesh = patch_grid_mesh();
     constexpr unsigned expected_vertices = tile_side * tile_side + 4 * tile_side;
@@ -440,6 +480,7 @@ int main(int argc, char** argv) {
     test_cube_coordinates();
     test_tiles();
     test_grid_mesh();
+    test_quadrant_mask();
     test_height_tile_range();
 
     return 0;
