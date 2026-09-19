@@ -30,6 +30,13 @@ struct PatchKey {
 
 constexpr unsigned patch_level_max = 11; // a cell of 90 degrees over 2048, quads of 24 urad
 
+// Same-level neighbour across s-low, s-high, t-low, t-high; also works across cube faces.
+struct PatchNeighbour {
+    PatchKey key;
+    unsigned side; // the neighbour's side facing this cell
+};
+PatchNeighbour patch_neighbour(PatchKey key, unsigned side);
+
 // The deepest level decides every field that carries a cell index, so raising it silently
 // truncates rather than failing. Each of these is the real ceiling, not a restatement of it.
 constexpr unsigned patch_cells_max = 1u << patch_level_max; // cells per face edge at the deepest level

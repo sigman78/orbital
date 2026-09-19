@@ -283,8 +283,8 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
               terrain.out_of_range);
         pinch(terrain.behind_mean > 1.f, "Finest level %u, drawn %.2f levels coarser than asked (%u over one)",
               terrain.deepest, double(terrain.behind_mean), terrain.behind_one);
-        pinch(terrain.graded * 2 < terrain.drawn, "Morph grades %u, switches %u near + %u far, streaming range %.2f",
-              terrain.graded, terrain.flat_near, terrain.flat_far, double(terrain.streaming_scale));
+        pinch(terrain.graded * 2 < terrain.drawn, "Morph grades %u, switches %u near + %u far, local balance %u",
+              terrain.graded, terrain.flat_near, terrain.flat_far, terrain.balanced);
     }
     ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
 }
@@ -292,7 +292,7 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
 // cell it occupies on its face, each drawn quadrant a square of that cell. A quadrant missing
 // from a patch is a quadrant its child draws, or one nothing does -- which is what the map is
 // for. Hue is the level, brightness how far the patch stands from its own shape: bright is its
-// own, dark is its parent's, and a residency-limited selection reads white.
+// own, dark is its parent's, and a new patch reads white.
 void patch_map(const render::Stats::PatchMap& map) {
     const std::span<const render::PatchView> patches = map.patches;
     // The six faces in index order, three by two. A cross reads as a cube but spends half the

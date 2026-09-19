@@ -30,7 +30,7 @@ class TerrainTier {
 public:
     static constexpr unsigned slot_count = 1024; // 35 MiB of tiles; a close view holds 400 of them
     // Tree bookkeeping is independent of the tile cache. Both capacity limits can reduce
-    // the shared streaming range scale; existing splits retain priority at the node ceiling.
+    // local refinement; existing splits retain priority at the node ceiling.
     static constexpr unsigned node_budget = 4096;
     // A generation whose slot is never served would hold its key forever: nothing evicts a
     // pending slot and prepare() only re-requests keys without one. Reclaim it well past any
@@ -52,9 +52,9 @@ public:
     }
     static constexpr unsigned generate_per_frame = 8;
     // Sizes are in cull_bodies' units: a projected radius over the half height, twice the pixels.
-    static constexpr float error_pixels = 3; // a patch's geometric error on screen: it splits above 1.5 px
-    static constexpr float hysteresis = .8f; // the fraction of either the way back
-    // Relax a residency-limited range scale back to its requested value over at least this many updates.
+    static constexpr float error_pixels = 10; // 5 screen pixels: preserves the former default workload
+    static constexpr float hysteresis = .8f;  // the fraction of either the way back
+    // Local arrival transition; it never changes another patch's distance ranges.
     static constexpr unsigned recovery_frames = 15;
     // Seed-1007 calibration against 3D triangles, 32 quads, Everitt warp
     // (`terrain_tests --calibrate`): uniform samples followed by a hill climb.
@@ -72,7 +72,10 @@ public:
     struct Draw {
         PatchKey key;
         unsigned slot;
-        unsigned quadrants; // the grid quadrants to draw (bit i: x = i & 1, y = i >> 1); 0xf the whole patch
+        unsigned quadrants;        // the grid quadrants to draw (bit i: x = i & 1, y = i >> 1); 0xf the whole patch
+        unsigned coarse_edges = 0; // four side bits per quadrant: collapse this edge to a coarser neighbour
+        unsigned fine_edges = 0;   // keep this edge unmorphed beside a finer neighbour or another cube face
+        float fade = 0;
         // Kept from the visit that selected this patch, where its bounds were already at hand:
         // the pressure diagnostics want both distances and would otherwise rebuild the bounds
         // of every drawn patch every frame, which is the dearer half of what they cost.
@@ -127,9 +130,9 @@ public:
         unsigned deepest = 0;                       // finest level drawn
         unsigned behind_one = 0, behind_count = 0;  // patches over a level coarser than asked for
         float behind_mean = 0;                      // levels coarser than asked for, averaged
-        // Estimated spatial morph variation and residency-limited range scale.
+        // Estimated interior morph variation and local balancing work.
         unsigned flat_near = 0, flat_far = 0, graded = 0;
-        float streaming_scale = 0;
+        unsigned balanced = 0;
     };
     const Pressure& pressure() const { return pressure_; }
 
@@ -163,7 +166,6 @@ public:
         const float end = range(level), next = range(level + 1);
         return next + .4f * (end - next);
     }
-    float streaming_scale() const { return streaming_scale_; }
     unsigned resident_slot(PatchKey key) const; // the tile's slot, slot_count when absent or pending
     unsigned pending() const;                   // slots handed out whose tile has not arrived
     unsigned pending_age() const;               // frames the oldest of those has waited, 0 when there are none
@@ -186,6 +188,7 @@ private:
     struct Slot {
         PatchKey key;
         unsigned used = 0;
+        unsigned shown_update = 0, fade_update = 0;
         unsigned assigned_frame = 0; // when the generation went out; `used` tracks visits instead
         // Distinguishes repeated assignments of the same key and slot, including detail changes.
         std::uint32_t stamp = 0;
@@ -214,8 +217,9 @@ private:
     // rather than the reach, which pads for descendants that will not be drawn in its place.
     bool drawn_over_horizon(const PatchBounds& bounds, Range<float> heights) const;
     Visibility visibility(const Node& node, const TierView& view) const;
-    double prepare(std::uint32_t index, const TierView& view, const Visibility& seen);
+    void prepare(std::uint32_t index, const TierView& view, const Visibility& seen);
     void visit(std::uint32_t index, const TierView& view, const Visibility& seen);
+    void stitch(const TierView& view);
     void collapse(Node& node);
     std::uint32_t allocate_children(const Node& node);
     unsigned slot_of(PatchKey key) const; // slot_count when not in the cache
@@ -232,14 +236,13 @@ private:
     std::vector<Request> requests_;
     std::vector<Generation> generate_;
     float range_[std::size(level_error) + 1] = {};
-    float requested_range_[std::size(level_error) + 1] = {};
-    float streaming_scale_ = 0;
     LocalPlane planes_[5] = {}; // near and the four sides; the frustum's sixth is the far plane, not tested
     // The camera in the body's frame, resolved once an update: every node tested the horizon
     // against it, and every one of them was taking the same square root to do so.
     Vec3d eye_{0, 0, 1};
     double camera_distance_ = 0;
     unsigned frame_ = 0;
+    unsigned update_ = 0;
     unsigned sweep_cursor_ = 0; // where the pending-slot reclaim sweep resumes
     std::uint32_t stamp_ = 0;   // the last generation stamp issued, never reused
     Pressure pressure_;

@@ -22,7 +22,8 @@ constexpr std::uint64_t colour_tile_bytes = tile_colour_side * tile_colour_side 
 constexpr std::uint64_t albedo_offset = align4(height_tile_bytes);
 constexpr std::uint64_t slope_offset = albedo_offset + colour_tile_bytes;
 constexpr std::uint64_t tile_total_bytes = align4(slope_offset + colour_tile_bytes);
-// PatchInstance::tile[3] carries six edge/quadrant flags plus the four quadrant bits, and the
+// The low bits of PatchInstance::tile[3] carry six edge/quadrant flags plus four quadrant bits;
+// its upper 16 bits carry the unmorphed-edge mask. Only the low flags enter debug packing, and the
 // shaders' debug packing reads tile[2] and tile[3] through 12-bit fields (see patch.slang).
 constexpr unsigned patch_tile_flag_bits = 10;
 static_assert(patch_tile_flag_bits <= 12, "tile[3] is unpacked from a 12-bit field");
@@ -160,7 +161,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                                .x = draw.key.x,
                                .y = draw.key.y,
                                .morph = morph,
-                               .recovery = 1 - terrain_tier.streaming_scale()});
+                               .recovery = draw.fade});
     }
     const CubeCoord under = cube_coordinates(view.camera_local);
     stats.patch_map = {.patches = patch_views,
@@ -194,7 +195,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     ts.flat_near = p.flat_near;
     ts.flat_far = p.flat_far;
     ts.graded = p.graded;
-    ts.streaming_scale = p.streaming_scale;
+    ts.balanced = p.balanced;
     if (tile_pool) {
         const float height_range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
         for (const TerrainTier::Generation& generation : terrain_tier.generate()) {
@@ -264,11 +265,12 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         // The parent tile supplies material at the coarse end of the distance band.
         const unsigned parent_slot = draw.key.level ? terrain_tier.resident_slot(parent) : TerrainTier::slot_count;
         records[i] = {.cell = cell,
-                      .morph = {morph_start, morph_end, 0, 0},
+                      .morph = {morph_start, morph_end, draw.fade, float(draw.coarse_edges)},
                       .tile = {draw.key.face, draw.slot, parent_slot,
                                (draw.key.x & 1u) | (draw.key.y & 1u) << 1 | (draw.key.x == 0) << 2 |
                                    (unsigned(draw.key.x) + 1 == 1u << draw.key.level) << 3 | (draw.key.y == 0) << 4 |
-                                   (unsigned(draw.key.y) + 1 == 1u << draw.key.level) << 5 | draw.quadrants << 6}};
+                                   (unsigned(draw.key.y) + 1 == 1u << draw.key.level) << 5 | draw.quadrants << 6 |
+                                   draw.fine_edges << 16}};
     }
     patch_records_bytes = terrain_tier.draws().size() * sizeof(PatchInstance);
     if (patch_records_bytes)

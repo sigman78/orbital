@@ -45,6 +45,29 @@ const double tan_k = std::tan(everitt_k);
 
 } // namespace
 
+PatchNeighbour patch_neighbour(PatchKey key, unsigned side) {
+    ORBITAL_ASSERT(side < 4 && key.face < 6);
+    const int cells = 1 << key.level;
+    const int x = int(key.x) + (side == 0 ? -1 : side == 1 ? 1 : 0);
+    const int y = int(key.y) + (side == 2 ? -1 : side == 3 ? 1 : 0);
+    if (x >= 0 && x < cells && y >= 0 && y < cells)
+        return {{key.face, key.level, std::uint16_t(x), std::uint16_t(y)}, side ^ 1};
+    const Face& from = faces[key.face];
+    const Vec3d axis = (side < 2 ? from.s : from.t) * (side & 1 ? 1. : -1.);
+    unsigned face = 0;
+    while (dot(faces[face].axis, axis) < .5)
+        face++;
+    const Face& to = faces[face];
+    const double s = dot(from.axis, to.s), t = dot(from.axis, to.t);
+    const unsigned back = std::abs(s) > .5 ? (s > 0 ? 1u : 0u) : (t > 0 ? 3u : 2u);
+    unsigned along = side < 2 ? key.y : key.x;
+    if (dot(side < 2 ? from.t : from.s, back < 2 ? to.t : to.s) < 0)
+        along = unsigned(cells - 1) - along;
+    return {{std::uint8_t(face), key.level, std::uint16_t(back < 2 ? (back == 0 ? 0 : cells - 1) : int(along)),
+             std::uint16_t(back >= 2 ? (back == 2 ? 0 : cells - 1) : int(along))},
+            back};
+}
+
 Vec3d cube_direction(unsigned face, double s, double t) {
     const Face& f = faces[face];
     return normalized(f.axis + f.s * (std::tan(everitt_k * s) / tan_k) + f.t * (std::tan(everitt_k * t) / tan_k));

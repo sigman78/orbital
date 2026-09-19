@@ -111,19 +111,31 @@ struct MorphCheck {
     struct Surface {
         PatchKey key;
         float start = 0, end = 0;
+        unsigned coarse_edges = 0, fine_edges = 0;
+        float fade = 0;
         const std::vector<float>* height = nullptr;
     };
 
     // Match the vertex shader morph.
-    float morph_at(const Surface& s, unsigned x, unsigned y, Vec3d camera_local) {
+    float morph_at(const Surface& s, unsigned x, unsigned y, unsigned quadrant, Vec3d camera_local) {
+        constexpr unsigned quads = tile_side - 1;
+        const unsigned qx = x - (quadrant & 1) * quads / 2, qy = y - (quadrant >> 1) * quads / 2;
+        const unsigned edges = s.coarse_edges >> (4 * quadrant) & 15;
+        const unsigned pinned = s.fine_edges >> (4 * quadrant) & 15;
+        const unsigned sides = (qx == 0 ? 1u : 0u) | (qx == quads / 2 ? 2u : 0u) | (qy == 0 ? 4u : 0u) |
+                               (qy == quads / 2 ? 8u : 0u);
+        if (edges & sides)
+            return 1;
+        if (pinned & sides)
+            return 0;
         if (!s.key.level)
             return 0;
-        constexpr unsigned quads = tile_side - 1;
         const double size = 2.0 / double(1u << s.key.level);
         const Vec3d d = cube_direction(s.key.face, -1 + s.key.x * size + double(x) * size / quads,
                                        -1 + s.key.y * size + double(y) * size / quads);
         const double dist = length(d * (1 + (*s.height)[y * tile_side + x]) - camera_local);
-        return float(std::clamp((dist - s.start) / std::max(double(s.end) - s.start, 1e-6), 0.0, 1.0));
+        return std::max(sides ? 0.f : s.fade,
+                        float(std::clamp((dist - s.start) / std::max(double(s.end) - s.start, 1e-6), 0.0, 1.0)));
     }
 
     unsigned violations(const TerrainTier& tier, const TierView& view, unsigned* checked = nullptr) {
@@ -140,7 +152,8 @@ struct MorphCheck {
             for (unsigned i = 0; i < 4; i++)
                 if (draw.quadrants >> i & 1)
                     cover[draw.key.child(i).packed()] = unsigned(surfaces.size());
-            surfaces.push_back({draw.key, tier.morph_start(draw.key.level), end, &height});
+            surfaces.push_back({draw.key, tier.morph_start(draw.key.level), end, draw.coarse_edges, draw.fine_edges,
+                                draw.fade, &height});
         }
         // Find the covering ancestor; finer neighbors perform their own check.
         const auto coverer = [&](PatchKey cell) -> const Surface* {
@@ -157,23 +170,11 @@ struct MorphCheck {
             const Surface& s = surfaces[index];
             const PatchKey cell{std::uint8_t(packed & 7), std::uint8_t(packed >> 3 & 0x1f),
                                 std::uint16_t(packed >> 8 & 0xfff), std::uint16_t(packed >> 20 & 0xfff)};
-            const unsigned cells = 1u << cell.level, qx = cell.x & 1, qy = cell.y & 1;
-            for (int side = 0; side < 4; side++) {
-                const int dx = side == 0 ? -1 : side == 1 ? 1 : 0, dy = side == 2 ? -1 : side == 3 ? 1 : 0;
-                const int nx = int(cell.x) + dx, ny = int(cell.y) + dy;
-                PatchKey neighbour{cell.face, cell.level, std::uint16_t(nx), std::uint16_t(ny)};
-                if (nx < 0 || ny < 0 || nx >= int(cells) || ny >= int(cells)) {
-                    // Map the adjacent cell onto its cube face.
-                    const double size = 2.0 / cells;
-                    const CubeCoord c = cube_coordinates(cube_direction(
-                        cell.face, -1 + (cell.x + .5) * size + dx * size, -1 + (cell.y + .5) * size + dy * size));
-                    const auto index_of = [&](double v) {
-                        return std::uint16_t(std::clamp(int((v + 1) / size), 0, int(cells) - 1));
-                    };
-                    neighbour = {std::uint8_t(c.face), cell.level, index_of(c.s), index_of(c.t)};
-                }
+            const unsigned qx = cell.x & 1, qy = cell.y & 1;
+            for (unsigned side = 0; side < 4; side++) {
+                const PatchKey neighbour = patch_neighbour(cell, side).key;
                 const Surface* other = coverer(neighbour);
-                if (!other || other->key.level == s.key.level)
+                if (!other || (other->key.level == s.key.level && other->key.face == s.key.face))
                     continue;
                 const bool finer = s.key.level > other->key.level, vertical = side < 2;
                 const unsigned fixed = vertical ? qx * (quads / 2) + (side == 1) * quads / 2
@@ -181,7 +182,11 @@ struct MorphCheck {
                 const unsigned from = vertical ? qy * (quads / 2) : qx * (quads / 2);
                 for (unsigned i = 0; i <= quads / 2; i++) {
                     const unsigned x = vertical ? fixed : from + i, y = vertical ? from + i : fixed;
-                    const float m = morph_at(s, x, y, view.camera_local);
+                    // Even/even vertices never move under any morph weight.
+                    if (!(x & 1) && !(y & 1))
+                        continue;
+                    const float m = morph_at(s, x, y, qx | (qy << 1), view.camera_local);
+                    bad += finer && s.key.level > other->key.level + 1;
                     if (checked)
                         (*checked)++;
                     bad += finer ? m < .999f : m > .001f;
@@ -353,14 +358,14 @@ void test_morph_continuity() {
     std::printf("terrain tier: %u boundary vertices at settled level boundaries, %u break the morph, "
                 "%u of %u draws partial\n",
                 checked, bad, partial, drawn);
-    assert(checked > 20000 && bad == 0);
+    assert(checked > 1000 && bad == 0);
 }
 
 // Uneven completion, a held tile, and a moving view must never introduce a late-tile seam.
 void test_morph_streaming() {
     const MinorPlanetTerrain terrain(1007);
     MorphCheck check{terrain};
-    unsigned checked = 0, bad = 0, restricted = 0;
+    unsigned checked = 0, bad = 0, waiting = 0;
     for (bool moving : {false, true}) {
         TerrainTier tier;
         AsyncTiles async;
@@ -373,7 +378,11 @@ void test_morph_streaming() {
             async.update(tier, view, frame, 4);
             if (!tier.active())
                 continue;
-            restricted += tier.streaming_scale() < 1;
+            waiting += tier.pressure().starved > 0;
+            const double projection = view.height_pixels / (view.tan_y * TerrainTier::error_pixels);
+            for (unsigned level = 1; level <= patch_level_max; level++)
+                assert(std::abs(tier.range(level) - TerrainTier::level_error[level - 1] * projection) <
+                       1e-6 * tier.range(level));
             bad += check.violations(tier, view, &checked);
             for (const auto& draw : tier.draws()) {
                 assert(tier.resident_slot(draw.key) == draw.slot);
@@ -383,13 +392,46 @@ void test_morph_streaming() {
         }
         assert(async.held);
         if (!moving) {
-            assert(tier.streaming_scale() == 1);
             assert(tier.generate().empty() && async.pending.empty());
         }
     }
-    std::printf("terrain tier: streaming, %u boundary vertices, %u violations, %u restricted frames\n", checked, bad,
-                restricted);
-    assert(checked > 10000 && restricted > 20 && bad == 0);
+    std::printf("terrain tier: streaming, %u boundary vertices, %u violations, %u frames waiting for tiles\n", checked,
+                bad, waiting);
+    assert(checked > 1000 && waiting > 20 && bad == 0);
+}
+
+// Tiny camera steps while uploads lag must not demote the established view as a whole.
+void test_motion_stability() {
+    const MinorPlanetTerrain terrain(1007);
+    TerrainTier tier;
+    AsyncTiles async;
+    async.terrain = &terrain;
+    for (unsigned frame = 1; frame <= 150; frame++)
+        async.update(tier, view_over({.6, .3, 1}, .05, 2.5 / 15), frame);
+    assert(tier.active() && async.pending.empty());
+    async.jitter = 23;
+    std::unordered_set<std::uint32_t> previous;
+    for (const auto& draw : tier.draws())
+        previous.insert(draw.key.packed());
+    double worst_loss = 0;
+    unsigned waiting = 0, peak = 0;
+    for (unsigned frame = 151; frame <= 350; frame++) {
+        const double x = .6 + .0001 * (frame - 150);
+        async.update(tier, view_over({x, .3, 1}, .05, 2.5 / 15), frame, 4);
+        std::unordered_set<std::uint32_t> current;
+        for (const auto& draw : tier.draws())
+            current.insert(draw.key.packed());
+        unsigned lost = 0;
+        for (auto key : previous)
+            lost += !current.contains(key);
+        worst_loss = std::max(worst_loss, double(lost) / std::max(previous.size(), std::size_t(1)));
+        waiting += tier.pressure().starved > 0;
+        peak = std::max(peak, unsigned(current.size()));
+        previous = std::move(current);
+    }
+    std::printf("terrain tier: small-step flight, worst draw replacement %.1f%%, %u waiting frames, peak %u patches\n",
+                100 * worst_loss, waiting, peak);
+    assert(waiting > 0 && worst_loss < .2);
 }
 
 // Startup --terrain-detail can invalidate before update has ever initialized the cache.
@@ -1025,6 +1067,7 @@ int main(int argc, char** argv) {
             test_flight_sweep();
             return 0;
         }
+    test_motion_stability();
     test_invalidate_before_update();
     test_morph_streaming();
     test_resident_height_selection();
@@ -1066,7 +1109,7 @@ int main(int argc, char** argv) {
     assert(converged_at && tier.active() && !tier.draws().empty());
     std::printf("terrain tier: converged at frame %u with %zu patches drawn, %u resident, %u nodes\n", converged_at,
                 tier.draws().size(), tier.resident(), tier.nodes());
-    assert(tier.draws().size() > 6 && tier.draws().size() < 400);
+    assert(tier.draws().size() > 6 && tier.draws().size() <= 58); // former default workload was 52
     // Every drawn slot is drawn once, and no slot is both drawn and regenerated in one frame.
     std::vector<unsigned> drawn;
     for (const auto& draw : tier.draws())

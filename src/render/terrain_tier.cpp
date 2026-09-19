@@ -111,12 +111,12 @@ double TerrainTier::nearest_distance(Vec3d camera_local, const PatchBounds& boun
 
 // Interpolate the distance ranges in log space to estimate the desired level.
 double TerrainTier::level_at(double distance) const {
-    if (distance >= double(requested_range_[1]))
+    if (distance >= double(range_[1]))
         return 0;
-    for (std::size_t i = 2; i < std::size(requested_range_); i++)
-        if (requested_range_[i] > 0 && distance >= double(requested_range_[i])) {
-            const double t = std::log(distance / double(requested_range_[i - 1])) /
-                             std::log(double(requested_range_[i]) / double(requested_range_[i - 1]));
+    for (std::size_t i = 2; i < std::size(range_); i++)
+        if (range_[i] > 0 && distance >= double(range_[i])) {
+            const double t = std::log(distance / double(range_[i - 1])) /
+                             std::log(double(range_[i]) / double(range_[i - 1]));
             return double(i - 2) + t;
         }
     return double(std::size(level_error) - 1);
@@ -289,13 +289,12 @@ void TerrainTier::request(PatchKey key, float pixels) {
     requests_.push_back({key, pixels});
 }
 
-// Discover requested refinement separately from the draw selection. A missing tile limits the
-// common range scale to the distance at which it would hand over to its parent. The second
-// walk therefore encounters only residency-backed, distance-controlled boundaries.
-double TerrainTier::prepare(std::uint32_t index, const TierView& view, const Visibility& seen) {
+// Discover requested tiles independently of local resident fallback. Missing tiles never change
+// the distance ranges used by other patches.
+void TerrainTier::prepare(std::uint32_t index, const TierView& view, const Visibility& seen) {
     if (!seen.visible) {
         collapse(nodes_[index]);
-        return 1;
+        return;
     }
     const PatchKey key = nodes_[index].key;
     const unsigned slot = slot_of(key);
@@ -303,32 +302,30 @@ double TerrainTier::prepare(std::uint32_t index, const TierView& view, const Vis
         if (slot == no_slot)
             request(key, seen.pixels);
         pressure_.starved++;
-        return key.level ? std::min(1.0, seen.distance / double(requested_range_[key.level])) : 0;
+        return;
     }
     const bool wants = key.level < patch_level_max &&
-                       seen.distance < double(requested_range_[key.level + 1]) *
-                                           (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0);
+                       seen.distance <
+                           double(range_[key.level + 1]) * (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0);
     if (!wants) {
         collapse(nodes_[index]);
-        return 1;
+        return;
     }
     if (!nodes_[index].children) {
         if (nodes() + 4 > node_budget) {
             pressure_.splits_blocked++;
-            return std::min(1.0, seen.distance / double(requested_range_[key.level + 1]));
+            return;
         }
         nodes_[index].children = allocate_children(nodes_[index]);
     }
-    double ready = 1;
     const unsigned children = nodes_[index].children;
     for (unsigned i = 0; i < 4; i++) {
         const Visibility child_seen = visibility(nodes_[children + i], view);
-        if (child_seen.visible && child_seen.distance < double(requested_range_[key.level + 1]))
-            ready = std::min(ready, prepare(children + i, view, child_seen));
+        if (child_seen.visible && child_seen.distance < double(range_[key.level + 1]))
+            prepare(children + i, view, child_seen);
         else
             collapse(nodes_[children + i]);
     }
-    return ready;
 }
 
 void TerrainTier::visit(std::uint32_t index, const TierView& view, const Visibility& seen) {
@@ -347,7 +344,7 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, const Visibil
             const Visibility child_seen = visibility(child, view);
             if (!child_seen.visible)
                 continue;
-            if (child_seen.distance < double(range_[key.level + 1])) {
+            if (child_seen.distance < double(range_[key.level + 1]) && resident_slot(child.key) != no_slot) {
                 visit(children + i, view, child_seen);
                 continue;
             }
@@ -365,6 +362,112 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, const Visibil
              .quadrants = quadrants,
              .near_distance = float(seen.distance),
              .far_distance = float(farthest_distance(view.camera_local, nodes_[index].bounds, height_range(key)))});
+}
+
+// Balance only the neighbourhood of a late tile. A fine quadrant may meet a patch at most
+// one level coarser, so collapsing its odd boundary vertices reproduces that neighbour's edge.
+void TerrainTier::stitch(const TierView& view) {
+    std::unordered_map<std::uint32_t, unsigned> cover;
+    const auto rebuild = [&] {
+        cover.clear();
+        for (unsigned i = 0; i < draws_.size(); i++)
+            for (unsigned q = 0; q < 4; q++)
+                if (draws_[i].quadrants >> q & 1)
+                    cover[draws_[i].key.child(q).packed()] = i;
+    };
+    const auto covering = [&](PatchKey key) {
+        for (;;) {
+            if (const auto it = cover.find(key.packed()); it != cover.end())
+                return it->second;
+            if (!key.level)
+                return unsigned(draws_.size());
+            key = key.parent();
+        }
+    };
+    const auto contains = [](PatchKey parent, PatchKey child) {
+        return parent.face == child.face && parent.level <= child.level &&
+               (unsigned(child.x) >> (child.level - parent.level)) == parent.x &&
+               (unsigned(child.y) >> (child.level - parent.level)) == parent.y;
+    };
+    for (;;) {
+        rebuild();
+        std::vector<PatchKey> coarsen;
+        for (const Draw& draw : draws_)
+            for (unsigned q = 0; q < 4; q++) {
+                if (!(draw.quadrants >> q & 1))
+                    continue;
+                for (unsigned side = 0; side < 4; side++) {
+                    const unsigned other = covering(patch_neighbour(draw.key.child(q), side).key);
+                    if (other == draws_.size() || draw.key.level <= draws_[other].key.level + 1)
+                        continue;
+                    PatchKey parent = draw.key.parent();
+                    while (parent.level > draws_[other].key.level + 1)
+                        parent = parent.parent();
+                    coarsen.push_back(parent);
+                }
+            }
+        if (coarsen.empty())
+            break;
+        std::sort(coarsen.begin(), coarsen.end(), [](PatchKey a, PatchKey b) {
+            return a.level != b.level ? a.level < b.level : a.packed() < b.packed();
+        });
+        std::vector<PatchKey> replaced;
+        for (PatchKey key : coarsen) {
+            if (std::any_of(replaced.begin(), replaced.end(), [&](PatchKey parent) { return contains(parent, key); }))
+                continue;
+            replaced.push_back(key);
+            unsigned quadrants = 0;
+            std::erase_if(draws_, [&](const Draw& draw) {
+                if (!contains(key, draw.key))
+                    return false;
+                if (key == draw.key) {
+                    quadrants |= draw.quadrants;
+                } else {
+                    const unsigned shift = draw.key.level - key.level - 1;
+                    const unsigned q = ((draw.key.x >> shift) & 1) | (((draw.key.y >> shift) & 1) << 1);
+                    quadrants |= 1u << q;
+                }
+                return true;
+            });
+            const Node* node = find(key);
+            const unsigned slot = resident_slot(key);
+            ORBITAL_ASSERT(node && slot != no_slot);
+            touch(key);
+            draws_.push_back(
+                {.key = key,
+                 .slot = slot,
+                 .quadrants = quadrants,
+                 .near_distance = float(nearest_distance(view.camera_local, node->bounds, reach_of(key))),
+                 .far_distance = float(farthest_distance(view.camera_local, node->bounds, height_range(key)))});
+            pressure_.balanced++;
+        }
+    }
+    // Stitch both sides of every unequal-level boundary, including internal mask boundaries.
+    // Same-face peers retain their common distance morph; cube peers pin their shared edge
+    // because their lattice axes may run in opposite directions.
+    for (Draw& draw : draws_) {
+        for (unsigned q = 0; q < 4; q++)
+            if (draw.quadrants >> q & 1)
+                for (unsigned side = 0; side < 4; side++) {
+                    const auto neighbour = patch_neighbour(draw.key.child(q), side);
+                    const unsigned other = covering(neighbour.key);
+                    if (other < draws_.size() && draws_[other].key.level < draw.key.level) {
+                        draw.coarse_edges |= 1u << (4 * q + side);
+                        const unsigned shift = neighbour.key.level - draws_[other].key.level - 1;
+                        const unsigned other_q = ((neighbour.key.x >> shift) & 1) |
+                                                 (((neighbour.key.y >> shift) & 1) << 1);
+                        draws_[other].fine_edges |= 1u << (4 * other_q + neighbour.side);
+                    } else if (other < draws_.size() && draws_[other].key.face != draw.key.face) {
+                        draw.fine_edges |= 1u << (4 * q + side);
+                    }
+                }
+        Slot& slot = slots_[draw.slot];
+        if (slot.shown_update + 1 != update_)
+            slot.fade_update = update_;
+        slot.shown_update = update_;
+        const unsigned age = update_ - slot.fade_update;
+        draw.fade = draw.key.level && age < recovery_frames ? 1.f - float(age) / recovery_frames : 0;
+    }
 }
 
 // Serve coarse/large patches first; LRU eviction protects pending and currently used slots.
@@ -425,7 +528,6 @@ void TerrainTier::invalidate() {
     draws_.clear();
     generate_.clear();
     active_ = false;
-    streaming_scale_ = 0;
 }
 
 void TerrainTier::disable() {
@@ -434,7 +536,6 @@ void TerrainTier::disable() {
     for (unsigned face = 0; face < std::min<std::size_t>(6, nodes_.size()); face++)
         collapse(nodes_[face]);
     active_ = wanted_ = false;
-    streaming_scale_ = 0;
 }
 
 void TerrainTier::release(unsigned slot, PatchKey key, std::uint32_t stamp) {
@@ -457,6 +558,7 @@ bool TerrainTier::mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp
 
 void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) {
     frame_ = frame;
+    update_++;
     draws_.clear();
     requests_.clear();
     generate_.clear();
@@ -464,9 +566,9 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     const float bias = std::exp2(view.lod_bias);
     // A child replaces its parent when the parent's projected error reaches the budget.
     // range[L] is both L's handover/morph end and (L-1)'s split distance.
-    for (unsigned level = 0; level < std::size(requested_range_); level++)
-        requested_range_[level] = (level ? level_error[level - 1] : 2 * level_error[0]) * view.height_pixels /
-                                  (view.tan_y * error_pixels) * bias;
+    for (unsigned level = 0; level < std::size(range_); level++)
+        range_[level] = (level ? level_error[level - 1] : 2 * level_error[0]) * view.height_pixels /
+                        (view.tan_y * error_pixels) * bias;
     ensure_roots();
     // Carry the frustum into the body's frame and into radii, once: the axes are orthonormal,
     // so a plane normal transposes by three dots and a patch test becomes one more.
@@ -485,25 +587,15 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         for (unsigned face = 0; face < 6; face++)
             collapse(nodes_[face]);
         active_ = false;
-        streaming_scale_ = 0;
-        std::copy(std::begin(requested_range_), std::end(requested_range_), std::begin(range_));
         return;
     }
     // Pin all six roots as fallback coverage, including faces outside the current view.
     for (unsigned face = 0; face < 6; face++)
         touch(nodes_[face].key);
-    double ready = 1;
     Visibility roots[6];
     for (unsigned face = 0; face < 6; face++) {
         roots[face] = visibility(nodes_[face], view);
-        ready = std::min(ready, prepare(face, view, roots[face]));
-    }
-    // Round toward the coarse side: no missing child's threshold may be crossed by float rounding.
-    const float available = ready < 1 ? std::max(0.f, std::nextafter(float(ready), 0.f)) : 1.f;
-    streaming_scale_ = std::min(available, streaming_scale_ + 1.f / float(recovery_frames));
-    for (unsigned level = 0; level < std::size(range_); level++) {
-        const float scaled = requested_range_[level] * streaming_scale_;
-        range_[level] = streaming_scale_ < 1 ? std::nextafter(scaled, 0.f) : scaled;
+        prepare(face, view, roots[face]);
     }
     // The tier takes over once every face is resident; the sphere levels draw until then.
     active_ = true;
@@ -517,6 +609,8 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     if (active_)
         for (unsigned face = 0; face < 6; face++)
             visit(face, view, roots[face]);
+    if (active_)
+        stitch(view);
     choose_generation(budget);
     pressure_.nodes = nodes();
     pressure_.node_budget = node_budget;
@@ -542,7 +636,6 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         else
             pressure_.flat_near++; // standing at its own
     }
-    pressure_.streaming_scale = streaming_scale_;
     pressure_.behind_count = unsigned(draws_.size());
     pressure_.behind_mean = draws_.empty() ? 0 : float(behind / double(draws_.size()));
 }
