@@ -40,9 +40,12 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
     // hidden when its support along the eye falls short of that. The occluder is the shell's
     // floor, never the reference surface: ground below that surface sets the horizon further
     // out, and assuming the surface itself would hide terrain that can be seen over it.
-    const double d = length(view.camera_local);
     constexpr double occluder = 1 + double(MinorPlanetTerrain::height_min);
-    if (d > 1 && patch_cell_support(b, view.camera_local * (1 / d), reach) * d < occluder * occluder)
+    const double d = length(view.camera_local);
+    // The test is valid from anywhere outside the occluder, which is anywhere above ground.
+    // Comparing with the reference surface instead switched the horizon off over every lowland,
+    // half the body, and left the frustum alone to keep whatever it crossed on the far side.
+    if (d > occluder && patch_cell_support(b, view.camera_local * (1 / d), reach) * d < occluder * occluder)
         return {};
     // The patch is a cell, not a ball and not the cap around it. The cap is conservative, so it
     // settles any plane it already rejects on one dot; the cell's own support decides the rest.

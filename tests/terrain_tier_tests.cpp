@@ -180,6 +180,20 @@ struct MorphCheck {
     }
 };
 
+// The deepest lowland of a seed, by a spiral sample of the whole body.
+Vec3d lowest_ground(const MinorPlanetTerrain& terrain, float& height) {
+    constexpr unsigned samples = 4000;
+    Vec3d lowest{0, 0, 1};
+    height = MinorPlanetTerrain::height_max;
+    for (unsigned i = 0; i < samples; i++) {
+        const double y = 1 - 2 * (i + .5) / samples, a = i * 2.399963, r = std::sqrt(1 - y * y);
+        const Vec3d d{r * std::cos(a), y, r * std::sin(a)};
+        if (const float h = terrain.height(d); h < height)
+            height = h, lowest = d;
+    }
+    return lowest;
+}
+
 // No drawn patch may be one the frustum or the horizon could have rejected outright: every
 // sample of it outside one shared plane, or every sample below the camera's horizon.
 void test_cull_waste() {
@@ -188,10 +202,24 @@ void test_cull_waste() {
     const auto to_world = [](const TierView& v, Vec3d local) {
         return v.axes[0] * local.x + v.axes[1] * local.y + v.axes[2] * local.z;
     };
-    for (auto [altitude, pitch] : {std::pair{.05, 0.}, {.15, 0.}, {.05, .87}, {.15, 1.22}}) {
-        const Vec3d over = normalized(Vec3d{.6, .3, 1}) * (1 + altitude);
+    // Over generic ground, and low over the deepest lowland, where the camera stands below the
+    // reference sphere: the horizon test used to switch itself off there and keep the far side.
+    float lowest = 0;
+    const Vec3d lowland = lowest_ground(terrain, lowest);
+    assert(lowest < -.02f);
+    struct Case {
+        Vec3d local; // the camera in the body's frame, radii
+        double pitch;
+    };
+    const Vec3d generic = normalized(Vec3d{.6, .3, 1});
+    const Case cases[] = {{generic * 1.05, 0.},
+                          {generic * 1.15, 0.},
+                          {generic * 1.05, .87},
+                          {generic * 1.15, 1.22},
+                          {lowland * (1 + double(lowest) + .005), .1}};
+    for (auto [over, pitch] : cases) {
         CameraView camera;
-        const Vec3d down = over * -1;
+        const Vec3d down = normalized(over) * -1;
         const Vec3d east = normalized(cross(Vec3d{0, 1, 0}, down));
         camera.forward = normalized(down * std::cos(pitch) + east * std::sin(pitch));
         camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
@@ -210,11 +238,14 @@ void test_cull_waste() {
         for (unsigned frame = 1; frame <= 300; frame++)
             async.update(tier, view, frame);
         unsigned drawn = 0, wasted = 0;
+        double farthest = 0; // arc from the camera to the farthest patch centre drawn, radians
         for (const auto& draw : tier.draws()) {
             drawn++;
             const Range<float> h = tier.height_range(draw.key);
             const double size = 2.0 / double(1u << draw.key.level);
             const double s0 = -1 + draw.key.x * size, t0 = -1 + draw.key.y * size;
+            const Vec3d centre = cube_direction(draw.key.face, s0 + size / 2, t0 + size / 2);
+            farthest = std::max(farthest, std::acos(std::clamp(dot(centre, normalized(over)), -1.0, 1.0)));
             std::vector<Vec3f> points;
             bool any_visible_over_horizon = false;
             for (unsigned i = 0; i <= 4; i++)
@@ -225,7 +256,9 @@ void test_cull_waste() {
                     constexpr double occluder = 1 + double(MinorPlanetTerrain::height_min);
                     if (dot(d * (1 + double(h.max)), view.camera_local) >= occluder * occluder)
                         any_visible_over_horizon = true;
-                    for (float e : {h.min, h.max})
+                    // Down to the skirt ring, which is drawn and which the tier's bounds carry:
+                    // 0.002 radii, a third of the altitude in the lowest view here.
+                    for (float e : {h.min - patch_skirt_drop, h.max})
                         points.push_back(to_float(view.body_centre + to_world(view, d * (1 + double(e))) * radius));
                 }
             bool outside = false;
@@ -240,12 +273,18 @@ void test_cull_waste() {
             }
             wasted += outside || !any_visible_over_horizon;
         }
-        std::printf("terrain tier: cull at %.2f radii pitch %.2f: %u drawn, %u provably invisible\n", altitude, pitch,
-                    drawn, wasted);
+        std::printf("terrain tier: cull at %.3f radii pitch %.2f: %u drawn, %u provably invisible, farthest centre "
+                    "%.0f deg\n",
+                    length(over) - 1, pitch, drawn, wasted, farthest * 180 / pi<double>);
         assert(drawn > 0);
         // The defect this guards put two thirds of the set here, a sphere bound a third, and a
         // cap around the cell a sixth. Bounding the cell itself leaves almost nothing.
         assert(wasted * 8 < drawn);
+        // Nothing beyond a quarter turn can be seen from this close, whatever the relief. The
+        // horizon test is what rejects it, and comparing the camera distance with the reference
+        // sphere rather than the occluder switched that test off below the sphere: the lowland
+        // view then drew 99 patches instead of 42, out to 170 degrees of arc.
+        assert(farthest < pi<double> / 2);
     }
 }
 
