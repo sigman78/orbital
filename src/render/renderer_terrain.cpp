@@ -89,26 +89,44 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         return;
     }
     const unsigned body = showcase.minor_planet();
-    const CameraView& camera = frozen_cull ? frozen_cull->camera : input.camera;
+    const BodyState& state = input.bodies[body];
+    const double tilt = system.bodies[body].axial_tilt;
+    Vec3d axes[3];
+    for (unsigned axis = 0; axis < 3; axis++) {
+        const Vec3d e{axis == 0 ? 1. : 0., axis == 1 ? 1. : 0., axis == 2 ? 1. : 0.};
+        axes[axis] = rotate_about(rotate_about(e, Vec3d{0, 1, 0}, state.rotation_angle), Vec3d{0, 0, 1}, tilt);
+    }
+    const auto into_body = [&](Vec3d v) { return Vec3d{dot(axes[0], v), dot(axes[1], v), dot(axes[2], v)}; };
+    CameraView camera = frozen_cull ? frozen_cull->camera : input.camera;
+    // The belt freezes its cull camera in world space, which is right for a ring the body does
+    // not carry. This body turns once in 700 s and orbits besides, about one percent of its
+    // radius a second against a world-fixed point, which is most of a low flight's altitude: a
+    // set frozen that way slides over the ground, and into it, while it is being looked at. Hold
+    // the viewpoint in the body's frame instead, so the frozen set stays the frozen set.
+    if (frozen_cull) {
+        const auto from_body = [&](Vec3d v) { return axes[0] * v.x + axes[1] * v.y + axes[2] * v.z; };
+        if (!frozen_cull->terrain)
+            frozen_cull->terrain = {.position = into_body(camera.position - state.position) * (1 / state.radius),
+                                    .forward = into_body(camera.forward),
+                                    .right = into_body(camera.right),
+                                    .up = into_body(camera.up)};
+        const FrozenCull::BodyFrame& held = *frozen_cull->terrain;
+        camera.position = state.position + from_body(held.position) * state.radius;
+        camera.forward = from_body(held.forward);
+        camera.right = from_body(held.right);
+        camera.up = from_body(held.up);
+    }
     const float tan_y = frozen_cull ? frozen_cull->tan_y : float(std::tan(camera.vertical_fov * .5));
     const float tan_x = tan_y * float(extent.width) / float(std::max(extent.height, 1u));
-    const BodyState& state = input.bodies[body];
     TierView view{.body_centre = state.position - camera.position,
                   .radius = state.radius,
+                  .axes = {axes[0], axes[1], axes[2]},
+                  .camera_local = into_body(camera.position - state.position) * (1 / state.radius),
                   .frustum = view_frustum(camera, tan_x, tan_y),
                   .height_pixels = float(extent.height),
                   .tan_y = tan_y,
                   .activate_pixels = input.terrain.activate_pixels,
                   .lod_bias = input.terrain.lod_bias};
-    const double tilt = system.bodies[body].axial_tilt;
-    for (unsigned axis = 0; axis < 3; axis++) {
-        const Vec3d e{axis == 0 ? 1. : 0., axis == 1 ? 1. : 0., axis == 2 ? 1. : 0.};
-        view.axes[axis] = rotate_about(rotate_about(e, Vec3d{0, 1, 0}, state.rotation_angle), Vec3d{0, 0, 1}, tilt);
-    }
-    const Vec3d camera_relative = camera.position - state.position;
-    view.camera_local = Vec3d{dot(view.axes[0], camera_relative), dot(view.axes[1], camera_relative),
-                              dot(view.axes[2], camera_relative)} *
-                        (1 / state.radius);
     unsigned free_rings = 0;
     for (unsigned i = 0; i < tile_ring_count; i++)
         free_rings += ring_available(i);

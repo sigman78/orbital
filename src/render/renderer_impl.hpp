@@ -431,6 +431,13 @@ struct Renderer::Impl {
     struct FrozenCull {
         CameraView camera;
         float tan_y, disc_weight;
+        // The same viewpoint in the minor planet's frame, in radii, taken by prepare_terrain_tier
+        // the first frame it is frozen: the near tier must ride the spinning, orbiting body
+        // rather than the world, or its frozen set is a fresh one every frame.
+        struct BodyFrame {
+            Vec3d position, forward, right, up;
+        };
+        std::optional<BodyFrame> terrain;
     };
     std::optional<FrozenCull> frozen_cull;
     // Per body this frame, from cull_bodies: inside the (cull) view frustum with
