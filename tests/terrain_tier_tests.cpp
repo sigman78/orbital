@@ -737,11 +737,194 @@ void test_horizon_heuristic() {
     assert(seen_views > 0 && probes > 1000 && uncovered == 0);
 }
 
+// A flight rather than a view. Standing still, the tier converges in a second and every test
+// above reads a settled tree; flying, it never converges, and the selection is always a mixture
+// of what the camera wants now and what the cache happened to be holding a moment ago. That is
+// the state a stray patch lives in, so this walks the body -- a ladder of altitudes, a great
+// circle at each, the view swivelling as it goes -- and checks what must hold every single step.
+void test_flight_sweep() {
+    constexpr double radius = 2.5 / 15;
+    const MinorPlanetTerrain terrain(1007);
+    // The highest ground anywhere sets the cone horizon below, so it is the bound for everything.
+    const GroundExtremes ground = ground_extremes(terrain);
+    const double top = 1 + double(ground.high) + 1e-3;
+    constexpr double occluder = TerrainTier::horizon_occluder;
+
+    std::unordered_map<std::uint32_t, Range<float>> tile_bounds; // kept for the whole flight
+    struct Pending {
+        TerrainTier::Generation generation;
+        unsigned due;
+    };
+    std::vector<Pending> pending;
+    TerrainTier tier;
+    unsigned frame = 0, steps = 0, anomalies = 0, parentless = 0;
+    unsigned peak_drawn = 0, peak_nodes = 0, peak_resident = 0;
+    double worst_excess = 0;
+
+    const Vec3d axis = normalized(Vec3d{.3, 1, .2});
+    const Vec3d start = normalized(cross(axis, Vec3d{0, 0, 1})), across = cross(axis, start);
+    // Legs of a flight, not a ring of viewpoints: the step has to be small against the horizon
+    // at that altitude or the camera teleports, the cache is never warm, and the tier is starved
+    // the whole way -- which tests nothing it will meet in the app. A dive and a climb come last,
+    // since a coarse patch left behind by a changing altitude is the case being hunted.
+    struct Leg {
+        const char* name;
+        double from, to; // altitude at the start and the end of the leg
+        double begin;    // where on the circle it starts, radians
+        unsigned steps;
+    };
+    const Leg legs[] = {
+        {"low pass", .004, .004, 0.0, 400}, {"skim", .01, .01, 1.7, 400}, {"cruise", .03, .03, 3.1, 400},
+        {"high pass", .1, .1, 4.6, 300},    {"orbit", .3, .3, 5.6, 300},  {"dive", .3, .004, 2.2, 500},
+        {"climb", .004, .3, 0.8, 500},
+    };
+    for (const Leg& leg : legs) {
+        double along = leg.begin;
+        // Per leg, what the cull actually kept: the sound bound below can only catch what is
+        // provably invisible, and it is a loose one at low altitude, so the numbers matter too.
+        unsigned leg_steps = 0, leg_quadrants = 0, past_flat = 0;
+        double leg_worst_arc = 0;
+        for (unsigned i = 0; i < leg.steps; i++) {
+            const double t = double(i) / leg.steps;
+            // Geometric between the ends, so a dive spends its steps evenly across the decades.
+            const double altitude = leg.from * std::pow(leg.to / leg.from, t);
+            // A fraction of the horizon at this altitude: acos(1 / (1 + h)) is how far it reaches.
+            along += std::acos(1 / (1 + altitude)) / 6;
+            const Vec3d up = start * std::cos(along) + across * std::sin(along);
+            const Vec3d track = across * std::cos(along) - start * std::sin(along);
+            const Vec3d local = up * (1 + double(terrain.height(up)) + altitude);
+            // Swivel as it flies: the yaw turns by a fraction of a turn a step, so every heading
+            // is met at every part of the path, and the pitch sweeps from the nadir to the sky.
+            const double yaw = i * .05, pitch = .35 + .45 * std::sin(i * .021);
+            const Vec3d east = cross(up, track);
+            const Vec3d heading = track * std::cos(yaw) + east * std::sin(yaw);
+            CameraView camera;
+            camera.forward = normalized(heading * std::cos(pitch) - up * std::sin(pitch));
+            camera.right = normalized(cross(camera.forward, up));
+            camera.up = cross(camera.right, camera.forward);
+            const float tan_y = float(std::tan(camera.vertical_fov / 2));
+            const TierView view{.body_centre = local * -radius,
+                                .radius = radius,
+                                .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
+                                .camera_local = local,
+                                .frustum = view_frustum(camera, tan_y * 16 / 9, tan_y),
+                                .height_pixels = 900,
+                                .tan_y = tan_y,
+                                .activate_pixels = 100};
+
+            // Tiles arrive two steps after they are asked for, as they do in the renderer.
+            frame++;
+            for (auto it = pending.begin(); it != pending.end();) {
+                if (it->due > frame) {
+                    ++it;
+                    continue;
+                }
+                tier.mark_resident(it->generation.slot, it->generation.key, it->generation.stamp,
+                                   tile_bounds[it->generation.key.packed()]);
+                it = pending.erase(it);
+            }
+            tier.update(view, frame);
+            const std::vector<TerrainTier::Generation> made(tier.generate().begin(), tier.generate().end());
+            std::vector<Range<float>> fresh(made.size());
+            parallel_for(unsigned(made.size()), [&](unsigned k) {
+                if (tile_bounds.count(made[k].key.packed()))
+                    return; // this tile was generated earlier in the flight
+                std::vector<float> heights(tile_side * tile_side);
+                generate_height_tile(terrain, made[k].key, heights);
+                fresh[k] = height_tile_range(heights);
+            });
+            for (std::size_t k = 0; k < made.size(); k++) {
+                tile_bounds.emplace(made[k].key.packed(), fresh[k]);
+                pending.push_back({made[k], frame + 2});
+            }
+            if (!tier.active())
+                continue;
+            steps++;
+
+            const double d = length(local);
+            // Nothing past the cone horizon of the highest ground can be seen from here, whatever
+            // the relief between: a sound bound, not the tier's own rule, so it can fail.
+            const double reach = std::acos(std::min(1.0, occluder / d)) + std::acos(std::min(1.0, occluder / top));
+            std::unordered_map<std::uint32_t, unsigned> drawn_slots;
+            std::unordered_set<std::uint32_t> drawn_cells;
+            for (const TerrainTier::Draw& draw : tier.draws()) {
+                assert(draw.quadrants && draw.quadrants <= 0xf);
+                assert(drawn_slots.emplace(draw.slot, draw.key.packed()).second); // a slot drawn twice
+                parentless += draw.key.level && tier.resident_slot(draw.key.parent()) == TerrainTier::slot_count;
+                for (unsigned q = 0; q < 4; q++) {
+                    if (!(draw.quadrants >> q & 1))
+                        continue;
+                    const PatchKey cell = draw.key.child(q);
+                    assert(drawn_cells.insert(cell.packed()).second);
+                    const PatchBounds bounds = patch_bounds(cell);
+                    const double arc = std::acos(std::clamp(dot(bounds.centre, local) / d, -1.0, 1.0));
+                    // The nearest corner of the cell, not its centre: a coarse cell is wide.
+                    leg_quadrants++;
+                    leg_worst_arc = std::max(leg_worst_arc, arc);
+                    past_flat += arc - bounds.angular_radius > std::acos(std::min(1.0, 1 / d));
+                    const double excess = arc - bounds.angular_radius - reach;
+                    if (excess <= 0)
+                        continue;
+                    if (++anomalies <= 4) {
+                        std::printf("terrain tier: sweep anomaly on the %s at altitude %.4f step %u: face %u level "
+                                    "%u (%u,%u) "
+                                    "quadrant %u stands %.1f deg past the cone horizon (%.1f deg) from %.4f radii\n",
+                                    leg.name, altitude, i, cell.face, cell.level, cell.x, cell.y, q,
+                                    excess * 180 / pi<double>, reach * 180 / pi<double>, d);
+                        std::vector<TerrainTier::Step> chain;
+                        tier.explain(draw.key, view, chain);
+                        for (const TerrainTier::Step& step : chain)
+                            std::printf("    level %2u (%4u,%4u) %s reach %+.4f..%+.4f from level %u, horizon margin "
+                                        "%+.5f, plane %u margin %+.5f, distance %.4f vs %.4f\n",
+                                        step.key.level, step.key.x, step.key.y,
+                                        step.slot < TerrainTier::slot_count ? "resident" : "no tile ",
+                                        double(step.reach.min), double(step.reach.max), step.reach_level,
+                                        step.horizon_margin, step.plane, step.plane_margin, step.distance,
+                                        step.split_range);
+                        std::fflush(stdout); // the assertion below aborts, and this is the diagnosis
+                    }
+                    worst_excess = std::max(worst_excess, excess);
+                }
+            }
+            // No drawn cell may lie inside another: an ancestor covering a quadrant its own
+            // descendant also draws is double cover, and the seam between them is a crack.
+            for (std::uint32_t packed : drawn_cells) {
+                PatchKey cell{std::uint8_t(packed & 7), std::uint8_t(packed >> 3 & 0x1f),
+                              std::uint16_t(packed >> 8 & 0xfff), std::uint16_t(packed >> 20 & 0xfff)};
+                while (cell.level) {
+                    cell = cell.parent();
+                    assert(!drawn_cells.count(cell.packed()));
+                }
+            }
+            const TerrainTier::Audit audit = tier.audit();
+            assert(audit.reachable == audit.allocated); // a block no walk can reach again
+            assert(tier.nodes() <= TerrainTier::node_budget);
+            leg_steps++;
+            peak_drawn = std::max(peak_drawn, unsigned(tier.draws().size()));
+            peak_nodes = std::max(peak_nodes, audit.allocated);
+            peak_resident = std::max(peak_resident, audit.resident);
+        }
+        std::printf("terrain tier: sweep leg %-10s %4u steps, %6u quadrants drawn, %5.1f a step; farthest %5.1f deg "
+                    "of arc, %5.2f%% of them past the flat horizon\n",
+                    leg.name, leg_steps, leg_quadrants, leg_steps ? double(leg_quadrants) / leg_steps : 0.0,
+                    leg_worst_arc * 180 / pi<double>, leg_quadrants ? 100. * past_flat / leg_quadrants : 0.0);
+    }
+    std::printf("terrain tier: flight sweep, %u steps over seven legs, %zu tiles generated; peak %u drawn, %u "
+                "nodes, %u resident; %u quadrants drawn with no resident parent; %u past the cone horizon%s\n",
+                steps, tile_bounds.size(), peak_drawn, peak_nodes, peak_resident, parentless, anomalies,
+                anomalies ? "" : " (none)");
+    assert(steps > 500);
+    assert(anomalies == 0);
+}
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++)
         if (std::string_view(argv[i]) == "--truth") {
             test_cull_soundness(); // seconds a view of ray marching; see the note above it
             test_horizon_heuristic();
+            return 0;
+        } else if (std::string_view(argv[i]) == "--sweep") {
+            test_flight_sweep();
             return 0;
         }
     test_resident_height_selection();
