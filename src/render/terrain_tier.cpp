@@ -31,16 +31,25 @@ void TerrainTier::ensure_roots() {
 TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView& view) const {
     const PatchBounds& b = node.bounds;
     const Range<float> reach = reach_of(node.key);
-    // Past the horizon, by the same support. A point p at radius r is on the near side of an
+    // Past the horizon, by the same support: a point p at radius r is on the near side of an
     // occluding sphere of radius R seen from C when dot(p * r, C) >= R * R, so the patch is
-    // hidden when its support along the eye falls short of that. The occluder is the shell's
-    // floor, never the reference surface: ground below that surface sets the horizon further
-    // out, and assuming the surface itself would hide terrain that can be seen over it.
-    constexpr double occluder = 1 + double(MinorPlanetTerrain::height_min);
+    // hidden when its support along the eye falls short of that.
+    //
+    // That is the plane through the sphere's horizon circle, which decides visibility for
+    // points *on* the sphere and is a heuristic above it: a peak past the plane can still stand
+    // over the horizon. The sound test is the cone, hidden only past acos(R / d) + acos(R / r),
+    // and the plane always cuts inside it. What keeps this sound is slack of the other kind --
+    // the occluder is the shell's floor, 0.95, while ground near a limb stands near 1.0 -- and
+    // today that outweighs the error for the relief this body has. It is an accident of the
+    // constants, not a guarantee: `terrain_tier_tests --truth` is what checks it, and taller
+    // relief, a higher floor or a smaller descendant_relief would each have to be put through
+    // it. Do not raise the occluder while the plane formula stands. The known fallback is the
+    // cone test over the lowest ground within acos(R / d), at 10 to 40 percent more patches.
     const double d = length(view.camera_local);
     // The test is valid from anywhere outside the occluder, which is anywhere above ground.
     // Comparing with the reference surface instead switched the horizon off over every lowland,
     // half the body, and left the frustum alone to keep whatever it crossed on the far side.
+    constexpr double occluder = horizon_occluder;
     if (d > occluder && patch_cell_support(b, view.camera_local * (1 / d), reach) * d < occluder * occluder)
         return {};
     // The patch is a cell, not a ball and not the cap around it. A cap pre-test stood here to

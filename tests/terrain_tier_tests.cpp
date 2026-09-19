@@ -1,12 +1,16 @@
 #include "render/terrain_tier.hpp"
+#include "core/parallel.hpp"
 #include "render/frame_calculations.hpp"
 #include "scene/terrain.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 using namespace space;
@@ -180,18 +184,24 @@ struct MorphCheck {
     }
 };
 
-// The deepest lowland of a seed, by a spiral sample of the whole body.
-Vec3d lowest_ground(const MinorPlanetTerrain& terrain, float& height) {
+// The deepest lowland and the highest summit of a seed, by a spiral sample of the whole body.
+struct GroundExtremes {
+    Vec3d lowest{0, 0, 1}, highest{0, 0, 1};
+    float low = MinorPlanetTerrain::height_max, high = MinorPlanetTerrain::height_min;
+};
+GroundExtremes ground_extremes(const MinorPlanetTerrain& terrain) {
     constexpr unsigned samples = 4000;
-    Vec3d lowest{0, 0, 1};
-    height = MinorPlanetTerrain::height_max;
+    GroundExtremes found;
     for (unsigned i = 0; i < samples; i++) {
         const double y = 1 - 2 * (i + .5) / samples, a = i * 2.399963, r = std::sqrt(1 - y * y);
         const Vec3d d{r * std::cos(a), y, r * std::sin(a)};
-        if (const float h = terrain.height(d); h < height)
-            height = h, lowest = d;
+        const float h = terrain.height(d);
+        if (h < found.low)
+            found.low = h, found.lowest = d;
+        if (h > found.high)
+            found.high = h, found.highest = d;
     }
-    return lowest;
+    return found;
 }
 
 // No drawn patch may be one the frustum or the horizon could have rejected outright: every
@@ -204,9 +214,10 @@ void test_cull_waste() {
     };
     // Over generic ground, and low over the deepest lowland, where the camera stands below the
     // reference sphere: the horizon test used to switch itself off there and keep the far side.
-    float lowest = 0;
-    const Vec3d lowland = lowest_ground(terrain, lowest);
-    assert(lowest < -.02f);
+    const GroundExtremes ground = ground_extremes(terrain);
+    const Vec3d lowland = ground.lowest;
+    const double lowest = double(ground.low);
+    assert(lowest < -.02);
     struct Case {
         Vec3d local; // the camera in the body's frame, radii
         double pitch;
@@ -216,7 +227,7 @@ void test_cull_waste() {
                           {generic * 1.15, 0.},
                           {generic * 1.05, .87},
                           {generic * 1.15, 1.22},
-                          {lowland * (1 + double(lowest) + .005), .1}};
+                          {lowland * (1 + lowest + .005), .1}};
     for (auto [over, pitch] : cases) {
         CameraView camera;
         const Vec3d down = normalized(over) * -1;
@@ -253,7 +264,7 @@ void test_cull_waste() {
                     const Vec3d d = cube_direction(draw.key.face, s0 + i * size / 4, t0 + j * size / 4);
                     // Near side of the occluding sphere: dot(point, camera) >= radius squared,
                     // the occluder being the shell's floor as the tier takes it.
-                    constexpr double occluder = 1 + double(MinorPlanetTerrain::height_min);
+                    constexpr double occluder = TerrainTier::horizon_occluder;
                     if (dot(d * (1 + double(h.max)), view.camera_local) >= occluder * occluder)
                         any_visible_over_horizon = true;
                     // Down to the skirt ring, which is drawn and which the tier's bounds carry:
@@ -458,7 +469,245 @@ void test_resident_terrain_morph() {
     assert(checked > 0 && bad == 0);
 }
 
-int main() {
+// Ground truth for the cull: no terrain a viewer can actually see may be missing from the
+// drawn set. Visibility is decided by ray-marching the real surface, not by the rule the tier
+// applies, so this is the only check that can fail the horizon heuristic (terrain_tier.cpp
+// explains what rests on it). Seconds a view on the worker pool, which is too slow for every
+// ctest run and right for any change to the terrain's amplitude, height_min, descendant_relief
+// or the horizon test: `terrain_tier_tests --truth`.
+//
+// What it catches, by injection: an occluder at 1.02, above the ground the sight lines graze,
+// fails the first view outright. At 0.99, above the lowest ground but below a limb, it passes
+// -- no view here looks along a basin that deep. It is a net over the geometry that occurs,
+// not a proof, which is the whole reason the horizon rule needs one.
+namespace truth {
+
+struct View {
+    const MinorPlanetTerrain* terrain = nullptr;
+    CameraView camera;
+    Vec3d camera_local; // radii
+    double tan_x = 0, tan_y = 0;
+    TierView view;
+};
+
+// A camera `altitude` radii over the ground at `over`, pitched down from the local horizontal.
+View view_over_ground(const MinorPlanetTerrain& terrain, Vec3d over, double altitude, double pitch_down) {
+    constexpr double radius = 2.5 / 15;
+    const Vec3d up = normalized(over);
+    View v{.terrain = &terrain, .camera_local = up * (1 + double(terrain.height(up)) + altitude)};
+    const Vec3d east = normalized(cross(std::abs(up.y) < .9 ? Vec3d{0, 1, 0} : Vec3d{1, 0, 0}, up));
+    v.camera.forward = normalized(east * std::cos(pitch_down) - up * std::sin(pitch_down));
+    v.camera.right = normalized(cross(v.camera.forward, up));
+    v.camera.up = cross(v.camera.right, v.camera.forward);
+    v.tan_y = std::tan(v.camera.vertical_fov / 2);
+    v.tan_x = v.tan_y * 16 / 9;
+    v.view = {.body_centre = v.camera_local * -radius,
+              .radius = radius,
+              .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
+              .camera_local = v.camera_local,
+              .frustum = view_frustum(v.camera, float(v.tan_x), float(v.tan_y)),
+              .height_pixels = 900,
+              .tan_y = float(v.tan_y),
+              .activate_pixels = 100};
+    return v;
+}
+
+bool in_frustum(const View& v, Vec3d p) {
+    const Vec3d d = p - v.camera_local;
+    const double forward = dot(d, v.camera.forward);
+    return forward > 0 && std::abs(dot(d, v.camera.right)) <= forward * v.tan_x &&
+           std::abs(dot(d, v.camera.up)) <= forward * v.tan_y;
+}
+
+// The sight line from the camera to p clears the real terrain. Stepped at 0.0015 radii, about
+// half a level-9 cell, with a tolerance at the far end so a point does not occlude itself.
+bool unoccluded(const View& v, Vec3d p) {
+    const Vec3d d = p - v.camera_local;
+    const unsigned steps = unsigned(std::clamp(length(d) / .0015, 24.0, 1200.0));
+    for (unsigned i = 1; i < steps; i++) {
+        const Vec3d q = v.camera_local + d * (double(i) / steps);
+        const double r = length(q);
+        if (r > 1 + double(MinorPlanetTerrain::height_max))
+            continue;
+        if (r < 1 + double(v.terrain->height(q * (1 / r))) - 2e-4)
+            return false;
+    }
+    return true;
+}
+
+// Run the tier to a standstill with the tile height ranges the renderer would supply.
+void converge(TerrainTier& tier, const View& v) {
+    unsigned quiet = 0;
+    for (unsigned frame = 1; frame < 4000 && quiet < 30; frame++) {
+        tier.update(v.view, frame);
+        quiet = tier.generate().empty() ? quiet + 1 : 0;
+        const std::vector<TerrainTier::Generation> made(tier.generate().begin(), tier.generate().end());
+        std::vector<Range<float>> ranges(made.size());
+        parallel_for(unsigned(made.size()), [&](unsigned i) {
+            std::vector<float> heights(tile_side * tile_side);
+            generate_height_tile(*v.terrain, made[i].key, heights);
+            ranges[i] = height_tile_range(heights);
+        });
+        for (std::size_t i = 0; i < made.size(); i++)
+            tier.mark_resident(made[i].slot, made[i].key, made[i].stamp, ranges[i]);
+    }
+}
+
+} // namespace truth
+
+void test_cull_soundness() {
+    const MinorPlanetTerrain terrain(1007);
+    const GroundExtremes ground = ground_extremes(terrain);
+    struct Case {
+        const char* name;
+        Vec3d over;
+        double altitude, pitch;
+    };
+    // A spread of altitudes over generic, high and low ground, looking ahead and at the limb.
+    const Case cases[] = {
+        {"limb from .30", {-1, .2, .3}, .30, .69},      {"limb from .20", {.6, .3, 1}, .20, .6},
+        {"limb from .12", {.1, -1, .4}, .12, .46},      {"ahead from .05", {.6, .3, 1}, .05, .3},
+        {"ahead from .01", {.6, .3, 1}, .01, .1},       {"highland from .01", ground.highest, .01, .1},
+        {"lowland from .005", ground.lowest, .005, .5},
+    };
+    for (const Case& k : cases) {
+        const truth::View v = truth::view_over_ground(terrain, k.over, k.altitude, k.pitch);
+        TerrainTier tier;
+        truth::converge(tier, v);
+        // The drawn unit is a quadrant: what a patch draws is one level finer than the patch.
+        std::unordered_set<std::uint32_t> units;
+        for (const auto& draw : tier.draws())
+            for (unsigned q = 0; q < 4; q++)
+                if (draw.quadrants >> q & 1)
+                    units.insert(draw.key.child(q).packed());
+        // Probe the whole body on a level-9 lattice; every visible probe must lie in a unit.
+        constexpr unsigned level = 9, cells = 1u << level;
+        const double d = length(v.camera_local);
+        std::atomic<unsigned> visible{0}, missing{0};
+        parallel_for(6 * cells * cells, [&](unsigned index) {
+            const unsigned face = index / (cells * cells), x = index / cells % cells, y = index % cells;
+            const double s = -1 + (x + .5) * 2.0 / cells, t = -1 + (y + .5) * 2.0 / cells;
+            const Vec3d direction = cube_direction(face, s, t);
+            // Nothing is seen far past the flat horizon; skip the terrain lookup out there.
+            const double reach = std::min(std::acos(std::min(1.0, .95 / d)) + .45, 3.1);
+            if (dot(direction, v.camera_local) < d * std::cos(reach))
+                return;
+            const Vec3d p = direction * (1 + double(terrain.height(direction)));
+            if (!truth::in_frustum(v, p) || !truth::unoccluded(v, p))
+                return;
+            visible++;
+            // Walk up from the finest level: a unit may be finer than the probe lattice.
+            const double finest = double(1u << patch_level_max);
+            PatchKey cell{std::uint8_t(face), std::uint8_t(patch_level_max),
+                          std::uint16_t(std::min(finest - 1, (s + 1) / 2 * finest)),
+                          std::uint16_t(std::min(finest - 1, (t + 1) / 2 * finest))};
+            for (;; cell = cell.parent()) {
+                if (units.count(cell.packed()))
+                    return;
+                if (!cell.level)
+                    break;
+            }
+            missing++;
+        });
+        std::printf("terrain tier: truth, %-20s %4zu units drawn, %6u visible probes, %u uncovered\n", k.name,
+                    units.size(), visible.load(), missing.load());
+        assert(visible > 0 && missing == 0);
+    }
+}
+
+// The same question where the horizon heuristic is closest to failing: the highest summit of
+// the body, placed a degree or two past the plane's own cut-off, seen from every side. A sweep
+// of general views cannot find this -- the region is visible in a few of these arrangements and
+// covers a fraction of a probe lattice -- and it is what the plane's error would break first.
+void test_horizon_heuristic() {
+    const MinorPlanetTerrain terrain(1007);
+    Vec3d peak = ground_extremes(terrain).highest;
+    // Climb to the local summit: the spiral sample lands near it, not on it.
+    for (double step = .01; step > 1e-5; step *= .7)
+        for (unsigned k = 0; k < 8; k++) {
+            const Vec3d east = normalized(cross(std::abs(peak.y) < .9 ? Vec3d{0, 1, 0} : Vec3d{1, 0, 0}, peak));
+            const Vec3d turned = east * std::cos(k * .785) + cross(peak, east) * std::sin(k * .785);
+            if (const Vec3d trial = normalized(peak + turned * step); terrain.height(trial) > terrain.height(peak))
+                peak = trial;
+        }
+    const double summit = 1 + double(terrain.height(peak));
+    constexpr double occluder = TerrainTier::horizon_occluder;
+    const Vec3d east = normalized(cross(std::abs(peak.y) < .9 ? Vec3d{0, 1, 0} : Vec3d{1, 0, 0}, peak));
+    const Vec3d north = cross(peak, east);
+    unsigned views = 0, seen_views = 0, probes = 0, uncovered = 0;
+    for (double d : {1.15, 1.30})
+        for (double back : {1.0, 2.5}) // degrees inside the plane's cut-off for this summit
+            for (unsigned turn = 0; turn < 8; turn++) {
+                const double arc = std::acos(occluder * occluder / (d * summit)) - back / 180 * pi<double>;
+                const double phi = turn * pi<double> / 4;
+                const Vec3d up = peak * std::cos(arc) + (east * std::cos(phi) + north * std::sin(phi)) * std::sin(arc);
+                truth::View v{.terrain = &terrain, .camera_local = up * d};
+                v.camera.forward = normalized(peak * summit - v.camera_local);
+                v.camera.right = normalized(cross(v.camera.forward, up));
+                v.camera.up = cross(v.camera.right, v.camera.forward);
+                v.tan_y = std::tan(v.camera.vertical_fov / 2);
+                v.tan_x = v.tan_y * 16 / 9;
+                constexpr double radius = 2.5 / 15;
+                v.view = {.body_centre = v.camera_local * -radius,
+                          .radius = radius,
+                          .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
+                          .camera_local = v.camera_local,
+                          .frustum = view_frustum(v.camera, float(v.tan_x), float(v.tan_y)),
+                          .height_pixels = 900,
+                          .tan_y = float(v.tan_y),
+                          .activate_pixels = 100};
+                TerrainTier tier;
+                truth::converge(tier, v);
+                std::unordered_set<std::uint32_t> units;
+                for (const auto& draw : tier.draws())
+                    for (unsigned q = 0; q < 4; q++)
+                        if (draw.quadrants >> q & 1)
+                            units.insert(draw.key.child(q).packed());
+                // A 6 degree square over the summit, finer than the lattice above by far.
+                constexpr unsigned n = 120;
+                std::atomic<unsigned> visible{0}, missing{0};
+                parallel_for(n * n, [&](unsigned index) {
+                    const double x = (index % n + .5) / n - .5, y = (index / n + .5) / n - .5;
+                    const Vec3d direction = normalized(peak + east * (x * .105) + north * (y * .105));
+                    const Vec3d p = direction * (1 + double(terrain.height(direction)));
+                    if (!truth::in_frustum(v, p) || !truth::unoccluded(v, p))
+                        return;
+                    visible++;
+                    const CubeCoord at = cube_coordinates(direction);
+                    const double finest = double(1u << patch_level_max);
+                    PatchKey cell{std::uint8_t(at.face), std::uint8_t(patch_level_max),
+                                  std::uint16_t(std::min(finest - 1, (at.s + 1) / 2 * finest)),
+                                  std::uint16_t(std::min(finest - 1, (at.t + 1) / 2 * finest))};
+                    for (;; cell = cell.parent()) {
+                        if (units.count(cell.packed()))
+                            return;
+                        if (!cell.level)
+                            break;
+                    }
+                    missing++;
+                });
+                views++;
+                seen_views += visible > 0;
+                probes += visible;
+                uncovered += missing;
+                if (missing)
+                    std::printf("terrain tier: truth, summit at %.1f deg past the cut-off, distance %.2f, turn %u: "
+                                "%u visible, %u uncovered\n",
+                                back, d, turn, visible.load(), missing.load());
+            }
+    std::printf("terrain tier: truth, summit %.4f radii: visible in %u of %u views, %u probes, %u uncovered\n", summit,
+                seen_views, views, probes, uncovered);
+    // The region has to be visible somewhere, or the search proves nothing.
+    assert(seen_views > 0 && probes > 1000 && uncovered == 0);
+}
+
+int main(int argc, char** argv) {
+    for (int i = 1; i < argc; i++)
+        if (std::string_view(argv[i]) == "--truth") {
+            test_cull_soundness(); // seconds a view of ray marching; see the note above it
+            test_horizon_heuristic();
+            return 0;
+        }
     test_resident_height_selection();
     test_height_range_lifetime();
     test_resident_terrain_morph();

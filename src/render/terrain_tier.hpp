@@ -108,6 +108,10 @@ public:
     std::span<const Draw> draws() const { return draws_; } // this frame's patches
     std::span<const Generation> generate() const { return generate_; }
     static constexpr Range<float> full_height_range{MinorPlanetTerrain::height_min, MinorPlanetTerrain::height_max};
+    // The sphere the horizon test hides patches behind: the shell's floor, never the reference
+    // surface, since ground below that surface sets the horizon further out. visibility() has
+    // what rests on the choice; the truth test reads it to place its cameras.
+    static constexpr double horizon_occluder = 1 + double(MinorPlanetTerrain::height_min);
     // Accept uploaded contents and height bounds only for the current slot assignment.
     bool mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights = full_height_range);
     // Hand back a slot from generate() the caller could not serve, so the patch is asked for
