@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <span>
 #include <vector>
 
 namespace space::app {
@@ -287,6 +288,78 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
     }
     ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
 }
+// The near tier's quadtree, drawn as the cube unwrapped: six faces in a cross, each patch the
+// cell it occupies on its face, each drawn quadrant a square of that cell. A quadrant missing
+// from a patch is a quadrant its child draws, or one nothing does -- which is what the map is
+// for. Hue is the level, brightness how far the patch stands from its own shape: bright is its
+// own, dark is its parent's, and a tile still fading in reads white.
+void patch_map(const render::Stats::PatchMap& map) {
+    const std::span<const render::PatchView> patches = map.patches;
+    // +y over +z, the equatorial band beside it, -y under: the unwrap a cube map is stored in.
+    struct Place {
+        unsigned face, column, row;
+    };
+    static constexpr Place places[] = {{2, 1, 0}, {1, 0, 1}, {4, 1, 1}, {0, 2, 1}, {5, 3, 1}, {3, 1, 2}};
+    static constexpr const char* labels[] = {"+x", "-x", "+y", "-y", "+z", "-z"};
+    constexpr float gap = 2;
+    const float avail = ImGui::GetContentRegionAvail().x;
+    const float side = std::floor((avail - 3 * gap) / 4);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("##patch-map", {avail, 3 * side + 2 * gap});
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Hue is the patch level, dark is morphed to the parent's shape, washed out is a\n"
+                          "tile still fading in. A gap inside a patch is a quadrant its child draws, or\n"
+                          "one nothing draws. The cross is the camera.");
+    auto* draw = ImGui::GetWindowDrawList();
+    const auto corner = [&](unsigned face) {
+        for (const Place& place : places)
+            if (place.face == face)
+                return ImVec2{origin.x + place.column * (side + gap), origin.y + place.row * (side + gap)};
+        return origin;
+    };
+    for (const Place& place : places) {
+        const ImVec2 at = corner(place.face);
+        draw->AddRectFilled(at, {at.x + side, at.y + side}, IM_COL32(18, 20, 24, 255));
+        draw->AddRect(at, {at.x + side, at.y + side}, IM_COL32(70, 76, 86, 255));
+        draw->AddText({at.x + 3, at.y + 2}, IM_COL32(120, 128, 140, 255), labels[place.face]);
+    }
+    unsigned drawn_quadrants = 0, deepest = 0;
+    for (const render::PatchView& patch : patches) {
+        if (patch.face >= 6)
+            continue;
+        deepest = std::max(deepest, unsigned(patch.level));
+        const ImVec2 at = corner(patch.face);
+        const float cell = side / float(1u << patch.level);
+        // Hue by level, brightness by how far it has morphed toward its parent; a tile still
+        // fading in keeps its hue but washes out, so arrivals stand out from settled patches.
+        const ImVec4 tint = ImColor::HSV(std::fmod(patch.level * .17f, 1.f), .70f - .55f * patch.fade,
+                                         .35f + .65f * (1 - patch.morph));
+        const ImU32 fill = ImColor(tint);
+        for (unsigned q = 0; q < 4; q++) {
+            if (!(patch.quadrants >> q & 1))
+                continue;
+            drawn_quadrants++;
+            // t runs up the face, the screen runs down, so the row is mirrored.
+            const float x0 = at.x + (patch.x + (q & 1) * .5f) * cell;
+            const float y1 = at.y + side - (patch.y + (q >> 1) * .5f) * cell;
+            // Two pixels at least: a level-6 quadrant is under one on a face this size, and a
+            // map that drops the deep levels is no map of this tree.
+            const float half = std::max(cell * .5f, 2.f);
+            draw->AddRectFilled({x0, y1 - half}, {x0 + std::max(half - .75f, 1.5f), y1 - .75f}, fill);
+        }
+    }
+    // The camera's own direction, so the drawn set has something to sit against.
+    if (map.camera_face < 6) {
+        const ImVec2 at = corner(map.camera_face);
+        const float cx = at.x + (map.camera_s + 1) * .5f * side;
+        const float cy = at.y + side - (map.camera_t + 1) * .5f * side;
+        constexpr ImU32 mark = IM_COL32(255, 255, 255, 210);
+        draw->AddLine({cx - 5, cy}, {cx + 5, cy}, mark);
+        draw->AddLine({cx, cy - 5}, {cx, cy + 5}, mark);
+    }
+    ImGui::Text("%zu patches, %u quadrants, finest level %u", patches.size(), drawn_quadrants, deepest);
+}
+
 void quality_controls(bool& high, render::TerrainSettings& terrain) {
     ImGui::Checkbox("High tier (F2)", &high);
     ImGui::SameLine();
@@ -303,9 +376,6 @@ void quality_controls(bool& high, render::TerrainSettings& terrain) {
     ImGui::SliderFloat("LOD bias", &terrain.lod_bias, -3.f, 3.f, "%+.2f");
     // Changing detail regenerates all tiles.
     ImGui::SliderFloat("Surface detail", &terrain.detail, 0.f, 2.5f, "%.2f");
-    // Turn this up to the arc a suspect patch stands at, and the log explains why it is drawn.
-    ImGui::SliderFloat("Trace patches past", &terrain.trace_arc, 0.f, 180.f,
-                       terrain.trace_arc > 0 ? "%.0f deg" : "off");
 }
 void anti_aliasing_controls(render::AntiAliasingSettings& settings) {
     ImGui::Checkbox("Temporal (F5)", &settings.temporal_aa);
@@ -644,6 +714,10 @@ void draw_panel(AppState& app, const render::Stats& stats, const SmoothedStats& 
     }
     if (section("Quality")) {
         quality_controls(app.high, app.terrain);
+        ImGui::PopID();
+    }
+    if (!stats.patch_map.patches.empty() && section("Patch map")) {
+        patch_map(stats.patch_map);
         ImGui::PopID();
     }
     if (section("Anti-aliasing")) {

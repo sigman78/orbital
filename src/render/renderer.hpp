@@ -98,11 +98,30 @@ struct OutputStatus {
 
 // The renderer's readings: the frame and the memory sums every draw, the
 // exposure as the meter cycles, the output status as the mode changes.
+// One patch of the near tier's draw list, for the quadtree map in the panel. The map wants the
+// cell rather than the world: where it sits on its cube face, how much of it is drawn, and how
+// far it stands from its own shape.
+struct PatchView {
+    std::uint8_t face = 0, level = 0;
+    std::uint8_t quadrants = 0; // the grid quadrants drawn, bit i: x = i & 1, y = i >> 1
+    std::uint16_t x = 0, y = 0; // the cell within the face at this level
+    float morph = 0;            // 0 its own shape, 1 its parent's, at its nearest corner
+    float fade = 0;             // the arrival floor under that, 1 the frame the tile appears
+};
+
 struct Stats {
     FrameStats frame;
     ExposureStats exposure;
     MemoryStats memory;
     OutputStatus output;
+    // The near tier's draw list from the frame just recorded, and where the camera stands on
+    // the cube. Borrowed from the renderer and good until the next draw(), which is after the
+    // panel that reads it.
+    struct PatchMap {
+        std::span<const PatchView> patches;
+        std::uint8_t camera_face = 0;
+        float camera_s = 0, camera_t = 0; // the camera's own direction on that face, in [-1, 1]
+    } patch_map;
 };
 
 // Camera/settings are copied values; body and UI storage is borrowed for draw().

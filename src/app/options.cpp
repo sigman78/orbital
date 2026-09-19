@@ -89,8 +89,6 @@ bool apply_arguments(Options& options, std::span<const std::string_view> args) {
             ok = parse_number(value(), options.tier_activate) && options.tier_activate > 0;
         else if (arg == "--terrain-detail")
             ok = parse_number(value(), options.terrain_detail) && options.terrain_detail >= 0;
-        else if (arg == "--terrain-trace")
-            ok = parse_number(value(), options.terrain_trace) && options.terrain_trace >= 0;
         else if (arg == "--lod-bias")
             ok = parse_number(value(), options.lod_bias) && options.lod_bias >= -4 && options.lod_bias <= 4;
         else if (arg == "--dust")

@@ -5,6 +5,7 @@
 #include "render/frame_calculations.hpp"
 #include "scene/terrain_patch.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -144,10 +145,25 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     if (terrain_tier.active() != was_active)
         log::info("Near tier {} at frame {}, {} patches resident", terrain_tier.active() ? "on" : "off", frame_index,
                   terrain_tier.resident());
-    if (input.terrain.trace_arc > 0)
-        trace_far_patches(view, input.terrain.trace_arc);
-    else if (!traced_patches.empty())
-        traced_patches.clear();
+    // The draw list for the panel's patch map, kept until the next frame replaces it.
+    patch_views.clear();
+    patch_views.reserve(terrain_tier.draws().size());
+    for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
+        const float end = terrain_tier.range(draw.key.level), start = .7f * end;
+        const float morph = end > start ? std::clamp((draw.near_distance - start) / (end - start), 0.f, 1.f) : 0.f;
+        patch_views.push_back({.face = draw.key.face,
+                               .level = draw.key.level,
+                               .quadrants = std::uint8_t(draw.quadrants),
+                               .x = draw.key.x,
+                               .y = draw.key.y,
+                               .morph = std::max(morph, draw.fade),
+                               .fade = draw.fade});
+    }
+    const CubeCoord under = cube_coordinates(view.camera_local);
+    stats.patch_map = {.patches = patch_views,
+                       .camera_face = std::uint8_t(under.face),
+                       .camera_s = float(under.s),
+                       .camera_t = float(under.t)};
     auto& ts = stats.frame.terrain;
     ts.active = terrain_tier.active();
     ts.drawn = unsigned(terrain_tier.draws().size());
@@ -284,81 +300,6 @@ void Renderer::Impl::record_terrain_uploads(gpu::CommandBuffer* cmd) {
     if (!tile_uploads.empty() || !patch_copies.empty())
         synchronize(cmd, access::transfer_write, {gpu::Stage::vertex | gpu::Stage::fragment, gpu::Access::shader_read});
     tile_uploads.clear();
-}
-
-// Nothing much past the horizon should be in the draw list, and a patch that is there anyway has
-// a reason: every ancestor of it passed the same tests. Print the chain, so the level and the test
-// whose margin let it through name themselves rather than being guessed at. Each patch is reported
-// once, since a standing one would otherwise fill the log.
-void Renderer::Impl::trace_far_patches(const TierView& view, float min_arc) {
-    const double d = length(view.camera_local);
-    if (!terrain_tier.active() || d < 1e-9)
-        return;
-    const double limit = std::cos(std::min(double(min_arc) * pi<double> / 180, pi<double>));
-    const auto arc_of = [&](Vec3d direction) {
-        return std::acos(std::clamp(dot(direction, view.camera_local) / d, -1.0, 1.0)) * 180 / pi<double>;
-    };
-    // Coverage, while we are walking the set anyway: a cell drawn twice, or one drawn by an
-    // ancestor that also draws it as a quadrant, is real overlap and would crack at the seam.
-    // The tier's tests assert this every step of a flight; this says it in a live session.
-    std::unordered_set<std::uint32_t> cells;
-    unsigned doubled = 0;
-    for (const TerrainTier::Draw& draw : terrain_tier.draws())
-        for (unsigned q = 0; q < 4; q++)
-            if (draw.quadrants >> q & 1)
-                doubled += !cells.insert(draw.key.child(q).packed()).second;
-    for (std::uint32_t packed : cells)
-        for (PatchKey cell{std::uint8_t(packed & 7), std::uint8_t(packed >> 3 & 0x1f),
-                           std::uint16_t(packed >> 8 & 0xfff), std::uint16_t(packed >> 20 & 0xfff)};
-             cell.level;) {
-            cell = cell.parent();
-            doubled += cells.count(cell.packed());
-        }
-    if (doubled && frame_index % 120 == 0)
-        log::error("Near tier: {} drawn cells overlap another at frame {}", doubled, frame_index);
-    unsigned standing = 0;
-    double worst = 0;
-    for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
-        // The quadrant mask is what is drawn, not the whole cell: a root covering one quadrant
-        // has its centre 90 degrees away by construction, and that is not the defect. Judge the
-        // nearest quadrant actually drawn, and print both so the two cases read apart.
-        double nearest = pi<double>;
-        for (unsigned q = 0; q < 4; q++)
-            if (draw.quadrants >> q & 1)
-                nearest = std::min(nearest, arc_of(patch_bounds(draw.key.child(q)).centre) * pi<double> / 180);
-        if (std::cos(nearest) > limit)
-            continue;
-        standing++;
-        worst = std::max(worst, nearest * 180 / pi<double>);
-        if (!traced_patches.insert(draw.key.packed()).second)
-            continue;
-        const double cosine = dot(patch_bounds(draw.key).centre, view.camera_local) / d;
-        const TerrainTier::Audit audit = terrain_tier.audit();
-        log::info("Near tier: patch face {} level {} ({},{}) quadrants {:x}: nearest drawn quadrant {:.0f} deg of "
-                  "arc, cell centre {:.0f} deg, frame {}; camera at {:.4f} radii, occluder {:.4f}; nodes {} "
-                  "reachable of {} allocated, tiles {} resident, {} undrawn, oldest {} frames, {} pending the "
-                  "oldest {} frames",
-                  draw.key.face, draw.key.level, draw.key.x, draw.key.y, draw.quadrants, nearest * 180 / pi<double>,
-                  std::acos(std::clamp(cosine, -1.0, 1.0)) * 180 / pi<double>, frame_index, d,
-                  TerrainTier::horizon_occluder, audit.reachable, audit.allocated, audit.resident,
-                  audit.resident_undrawn, audit.oldest_age, audit.pending, audit.pending_age);
-        terrain_tier.explain(draw.key, view, trace_steps);
-        for (const TerrainTier::Step& step : trace_steps)
-            log::info("  level {:2} ({:4},{:4}) {} reach {:+.4f}..{:+.4f} from level {} | horizon {} | plane {} "
-                      "margin {:+.5f} | distance {:.4f} vs split range {:.4f} {} {}",
-                      step.key.level, step.key.x, step.key.y,
-                      step.slot < TerrainTier::slot_count ? "resident" : "no tile ", double(step.reach.min),
-                      double(step.reach.max), step.reach_level,
-                      std::isinf(step.horizon_margin) ? std::string("not applied, camera inside the occluder")
-                                                      : std::format("margin {:+.5f}", step.horizon_margin),
-                      step.plane, step.plane_margin, step.distance, step.split_range, step.split ? "split" : "leaf",
-                      step.drawn ? std::format("DRAWN quadrants {:x}", step.quadrants) : std::string());
-    }
-    // A patch is explained once; this says whether any are still there, which is what tells a
-    // convergence artefact apart from one that stands.
-    if (standing && frame_index % 120 == 0)
-        log::info("Near tier: {} patches still drawn past {:.0f} deg of arc at frame {}, farthest quadrant {:.0f} deg",
-                  standing, double(min_arc), frame_index, worst);
 }
 
 bool Renderer::Impl::terrain_tier_draws(unsigned body) const {

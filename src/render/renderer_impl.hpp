@@ -30,7 +30,6 @@
 #include <initializer_list>
 #include <optional>
 #include <span>
-#include <unordered_set>
 #include <vector>
 
 namespace space::render {
@@ -384,9 +383,7 @@ struct Renderer::Impl {
     TerrainTier terrain_tier;
     GpuImage tile_height, tile_albedo, tile_slope; // the three tile arrays, 1024 layers each
     float tile_detail = 1;                         // TerrainSettings::detail the resident tiles were built with
-    // TerrainSettings::trace_arc: the patches already explained, so a standing one is logged once.
-    std::unordered_set<std::uint32_t> traced_patches;
-    std::vector<TerrainTier::Step> trace_steps;
+    std::vector<PatchView> patch_views;            // the draw list as the panel's patch map wants it
     std::uint64_t grid_vertices_address = 0, grid_indices_address = 0;
     std::uint64_t grid_wire_address = 0; // the grid unindexed, a one-hot barycentric per corner, for the wireframe
     unsigned grid_index_count = 0;
@@ -558,7 +555,6 @@ struct Renderer::Impl {
     void prepare_terrain_tier(const FrameInput& input);        // before the wait: the patches to draw and the new ones
     void record_terrain_uploads(gpu::CommandBuffer* cmd);      // the new patches into the pool
     bool terrain_tier_draws(unsigned body) const;              // the body draws as patches this frame
-    void trace_far_patches(const TierView& view, float min_arc); // TerrainSettings::trace_arc
     void draw_body(gpu::CommandBuffer* cmd, Root& root, unsigned body,
                    bool wireframe = false); // its sphere level, or its patches, their grid drawn in the scene pass
     void cull_bodies(const FrameInput& input, const FrameData& frame);
