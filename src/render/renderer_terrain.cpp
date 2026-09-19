@@ -42,13 +42,14 @@ void Renderer::Impl::create_terrain_tier() {
     bind(ArraySlot::terrain_height, tile_height);
     bind(ArraySlot::terrain_albedo, tile_albedo);
     bind(ArraySlot::terrain_slope, tile_slope);
-    const auto grid = patch_grid_mesh();
+    const PatchGrid grid = patch_grid();
     std::vector<Vertex> gpu_vertices(grid.vertices.size());
-    for (std::size_t i = 0; i < grid.vertices.size(); i++)
-        // w is the quadrant that owns the vertex; the shader drops it with that quadrant.
-        gpu_vertices[i] = {
-            {grid.vertices[i].position.x, grid.vertices[i].position.y, grid.vertices[i].position.z, grid.vertices[i].u},
-            {0, 0, 0, 0}};
+    for (std::size_t i = 0; i < grid.vertices.size(); i++) {
+        // The lattice point, the skirt flag, and the quadrant that owns the vertex, which the
+        // shader drops it with; the position itself is the shader's to build from the cell.
+        const PatchVertex& v = grid.vertices[i];
+        gpu_vertices[i] = {{float(v.x), float(v.y), v.skirt ? 1.f : 0.f, float(v.quadrant)}, {0, 0, 0, 0}};
+    }
     grid_vertices_address = upload_static(bytes_of(gpu_vertices));
     grid_indices_address = upload_static(bytes_of(grid.indices));
     std::vector<Vertex> wire(grid.indices.size());

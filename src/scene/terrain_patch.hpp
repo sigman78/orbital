@@ -1,5 +1,5 @@
 #pragma once
-#include "scene/geometry.hpp"
+#include "core/math.hpp"
 #include "scene/terrain.hpp"
 
 #include <cstdint>
@@ -97,7 +97,22 @@ Range<float> height_tile_range(std::span<const float> heights);
 void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<std::uint8_t> albedo,
                            std::span<std::uint16_t> slope, float detail = 1);
 
-// Shared grid positions: (x, y, skirt), x/y in 0..tile_side-1; skirt=1 on the drop ring.
-geometry::Mesh patch_grid_mesh();
+// One vertex of the shared patch grid. It is not a mesh vertex: it carries no position of its
+// own, only where it sits on the tile's lattice and which quadrant owns it, and the shaders
+// build the rest. The owner is what lets a quadrant be masked away -- see patch_grid.
+struct PatchVertex {
+    std::uint8_t x = 0, y = 0; // the lattice point, 0 .. tile_side - 1
+    std::uint8_t quadrant = 0; // whose it is; it goes when that quadrant is not drawn
+    bool skirt = false;        // on the ring that hangs below the tile's border
+};
+
+struct PatchGrid {
+    std::vector<PatchVertex> vertices;
+    std::vector<std::uint32_t> indices;
+};
+
+// The grid every patch is drawn from: one tile's worth of quads, a skirt ring around it, and
+// each quadrant holding its own copy of the row and column it shares with its neighbours.
+PatchGrid patch_grid();
 
 } // namespace space

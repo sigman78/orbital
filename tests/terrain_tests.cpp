@@ -421,56 +421,54 @@ void test_height_tile_range() {
 // triangles outlived the mask -- degenerate at full morph, a flap at every phase before. This
 // models shaders/surface/patch.slang; the two have to say the same thing.
 void test_quadrant_mask() {
-    const auto mesh = patch_grid_mesh();
+    const PatchGrid grid = patch_grid();
     constexpr float centre = (tile_side - 1) * .5f;
     for (unsigned mask = 1; mask <= 0xf; mask++) {
-        const auto dropped = [&](std::uint32_t index) { // as the shader does, from the owner in u
-            return (mask >> unsigned(mesh.vertices[index].u) & 1) == 0;
+        const auto dropped = [&](std::uint32_t index) { // as the shader does, from the owner
+            return (mask >> grid.vertices[index].quadrant & 1) == 0;
         };
         unsigned alive = 0;
-        for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
-            const Vec3f a = mesh.vertices[mesh.indices[i]].position;
-            const Vec3f b = mesh.vertices[mesh.indices[i + 1]].position;
-            const Vec3f c = mesh.vertices[mesh.indices[i + 2]].position;
-            if (dropped(mesh.indices[i]) || dropped(mesh.indices[i + 1]) || dropped(mesh.indices[i + 2]))
+        for (std::size_t i = 0; i + 2 < grid.indices.size(); i += 3) {
+            if (dropped(grid.indices[i]) || dropped(grid.indices[i + 1]) || dropped(grid.indices[i + 2]))
                 continue;
             alive++;
             // Where its body lies, not where its corners do: a triangle of the drawn set must
             // sit in a drawn quadrant.
-            const float x = (a.x + b.x + c.x) / 3, y = (a.y + b.y + c.y) / 3;
+            float x = 0, y = 0;
+            for (std::size_t corner = i; corner < i + 3; corner++) {
+                x += grid.vertices[grid.indices[corner]].x / 3.f;
+                y += grid.vertices[grid.indices[corner]].y / 3.f;
+            }
             const unsigned quadrant = (x > centre ? 1u : 0u) | (y > centre ? 2u : 0u);
             assert(mask >> quadrant & 1);
         }
         assert(alive > 0);
         // Whole quadrants, skirt included: a quarter of the grid and a quarter of the ring each.
         const unsigned quarters = unsigned(std::popcount(mask));
-        assert(alive == quarters * unsigned(mesh.indices.size() / 3) / 4);
+        assert(alive == quarters * unsigned(grid.indices.size() / 3) / 4);
     }
-    std::printf("grid mesh: every triangle of all 15 quadrant masks lies in a drawn quadrant\n");
+    std::printf("patch grid: every triangle of all 15 quadrant masks lies in a drawn quadrant\n");
 }
 
 void test_grid_mesh() {
-    const auto mesh = patch_grid_mesh();
+    const PatchGrid grid = patch_grid();
     // Four quadrants of their own, each carrying the row and column it shares, and the skirt
-    // ring split the same way: see patch_grid_mesh.
+    // ring split the same way: see patch_grid.
     constexpr unsigned span = (tile_side - 1) / 2 + 1;
     constexpr unsigned expected_vertices = 4 * span * span + 8 * span;
     constexpr unsigned expected_indices = ((tile_side - 1) * (tile_side - 1) + 4 * (tile_side - 1)) * 6;
-    assert(mesh.vertices.size() == expected_vertices);
-    assert(mesh.indices.size() == expected_indices);
-    constexpr float half = (tile_side - 1) * .5f;
-    for (const auto& v : mesh.vertices) {
-        assert(v.position.x >= 0 && v.position.x <= tile_side - 1 && v.position.y >= 0 &&
-               v.position.y <= tile_side - 1 && (v.position.z == 0 || v.position.z == 1));
+    assert(grid.vertices.size() == expected_vertices);
+    assert(grid.indices.size() == expected_indices);
+    constexpr unsigned half = (tile_side - 1) / 2;
+    for (const PatchVertex& v : grid.vertices) {
+        assert(v.x <= tile_side - 1 && v.y <= tile_side - 1 && v.quadrant < 4);
         // A quadrant's copy lies in its own half, the row and column it shares included.
-        const unsigned quadrant = unsigned(v.u);
-        assert(quadrant < 4 && v.u == float(quadrant));
-        assert(quadrant & 1 ? v.position.x >= half : v.position.x <= half);
-        assert(quadrant >> 1 ? v.position.y >= half : v.position.y <= half);
+        assert(v.quadrant & 1 ? v.x >= half : v.x <= half);
+        assert(v.quadrant >> 1 ? v.y >= half : v.y <= half);
     }
-    for (const auto index : mesh.indices)
+    for (const auto index : grid.indices)
         assert(index < expected_vertices);
-    std::printf("grid mesh: %zu vertices, %zu indices\n", mesh.vertices.size(), mesh.indices.size());
+    std::printf("patch grid: %zu vertices, %zu indices\n", grid.vertices.size(), grid.indices.size());
 }
 
 int main(int argc, char** argv) {
