@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <span>
 #include <vector>
 
 namespace space::app {
@@ -274,6 +275,10 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
               terrain.served);
         pinch(terrain.evicted_recent > 0, "Evictions %u, of them still warm %u", terrain.evictions,
               terrain.evicted_recent);
+        // A tile that never arrives holds its slot, and its patch stays coarse until the sweep
+        // reclaims it, which takes seconds. That is what a patch stuck at the wrong level looks
+        // like from here, and it keeps counting while time is paused.
+        pinch(terrain.pending_age > 60, "A tile slot has waited %u frames for its tile", terrain.pending_age);
         pinch(terrain.starved > 0, "Quadrants covered: %u for want of a tile, %u out of range", terrain.starved,
               terrain.out_of_range);
         pinch(terrain.behind_mean > 1.f, "Finest level %u, drawn %.2f levels coarser than asked (%u over one)",
@@ -283,6 +288,72 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
     }
     ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
 }
+// The near tier's quadtree, drawn as the cube unwrapped: six faces in a cross, each patch the
+// cell it occupies on its face, each drawn quadrant a square of that cell. A quadrant missing
+// from a patch is a quadrant its child draws, or one nothing does -- which is what the map is
+// for. Hue is the level, brightness how far the patch stands from its own shape: bright is its
+// own, dark is its parent's, and a tile still fading in reads white.
+void patch_map(const render::Stats::PatchMap& map) {
+    const std::span<const render::PatchView> patches = map.patches;
+    // The six faces in index order, three by two. A cross reads as a cube but spends half the
+    // panel on squares that hold nothing, and a face here is worth more than the adjacency: the
+    // same width gives 118 pixels a face against 85, and the labels say which is which.
+    static constexpr const char* labels[] = {"+x", "-x", "+y", "-y", "+z", "-z"};
+    constexpr float gap = 1;
+    const float avail = ImGui::GetContentRegionAvail().x;
+    const float side = std::floor((avail - 2 * gap) / 3);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("##patch-map", {3 * side + 2 * gap, 2 * side + gap});
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Hue is the patch level, dark is morphed to the parent's shape, washed out is a\n"
+                          "tile still fading in. A gap inside a patch is a quadrant its child draws, or\n"
+                          "one nothing draws. The cross is the camera.");
+    auto* draw = ImGui::GetWindowDrawList();
+    const auto corner = [&](unsigned face) {
+        return ImVec2{origin.x + (face % 3) * (side + gap), origin.y + (face / 3) * (side + gap)};
+    };
+    for (unsigned face = 0; face < 6; face++) {
+        const ImVec2 at = corner(face);
+        draw->AddRectFilled(at, {at.x + side, at.y + side}, IM_COL32(18, 20, 24, 255));
+        draw->AddText({at.x + 2, at.y + 1}, IM_COL32(96, 104, 116, 255), labels[face]);
+    }
+    unsigned drawn_quadrants = 0, deepest = 0;
+    for (const render::PatchView& patch : patches) {
+        if (patch.face >= 6)
+            continue;
+        deepest = std::max(deepest, unsigned(patch.level));
+        const ImVec2 at = corner(patch.face);
+        const float cell = side / float(1u << patch.level);
+        // Hue by level, brightness by how far it has morphed toward its parent; a tile still
+        // fading in keeps its hue but washes out, so arrivals stand out from settled patches.
+        const ImVec4 tint = ImColor::HSV(std::fmod(patch.level * .17f, 1.f), .70f - .55f * patch.fade,
+                                         .35f + .65f * (1 - patch.morph));
+        const ImU32 fill = ImColor(tint);
+        for (unsigned q = 0; q < 4; q++) {
+            if (!(patch.quadrants >> q & 1))
+                continue;
+            drawn_quadrants++;
+            // t runs up the face, the screen runs down, so the row is mirrored.
+            const float x0 = at.x + (patch.x + (q & 1) * .5f) * cell;
+            const float y1 = at.y + side - (patch.y + (q >> 1) * .5f) * cell;
+            // Two pixels at least: a level-6 quadrant is under one on a face this size, and a
+            // map that drops the deep levels is no map of this tree.
+            const float half = std::max(cell * .5f, 2.f);
+            draw->AddRectFilled({x0, y1 - half}, {x0 + std::max(half - .75f, 1.5f), y1 - .75f}, fill);
+        }
+    }
+    // The camera's own direction, so the drawn set has something to sit against.
+    if (map.camera_face < 6) {
+        const ImVec2 at = corner(map.camera_face);
+        const float cx = at.x + (map.camera_s + 1) * .5f * side;
+        const float cy = at.y + side - (map.camera_t + 1) * .5f * side;
+        constexpr ImU32 mark = IM_COL32(255, 255, 255, 210);
+        draw->AddLine({cx - 5, cy}, {cx + 5, cy}, mark);
+        draw->AddLine({cx, cy - 5}, {cx, cy + 5}, mark);
+    }
+    ImGui::Text("%zu patches, %u quadrants, finest level %u", patches.size(), drawn_quadrants, deepest);
+}
+
 void quality_controls(bool& high, render::TerrainSettings& terrain) {
     ImGui::Checkbox("High tier (F2)", &high);
     ImGui::SameLine();
@@ -637,6 +708,10 @@ void draw_panel(AppState& app, const render::Stats& stats, const SmoothedStats& 
     }
     if (section("Quality")) {
         quality_controls(app.high, app.terrain);
+        ImGui::PopID();
+    }
+    if (!stats.patch_map.patches.empty() && section("Patch map")) {
+        patch_map(stats.patch_map);
         ImGui::PopID();
     }
     if (section("Anti-aliasing")) {

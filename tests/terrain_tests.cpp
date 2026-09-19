@@ -3,6 +3,7 @@
 #include "scene/terrain_patch.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -252,10 +253,12 @@ void test_tiles() {
         std::fprintf(stderr, "tiles: %u cube-corner face pairs compared, world normals within %.4f\n", compared, worst);
         assert(compared == 24 && worst < 5e-4); // three faces at each of the eight corners
     }
-    // Culling bounds must contain the full height shell and skirts without excessive slack.
+    // The support must hold every point of the shell, from every direction, without slack the
+    // cell does not require. A sphere is the comparison: how much of it the cell test removes.
     {
-        double worst_fill = 0, tightest = 1e9;
+        double worst_fill = 0, tightest = 1e9, best_gain = 0, mean_gain = 0, worst_deep = 0;
         unsigned sampled = 0;
+        std::uint64_t rng = 3;
         for (unsigned level = 0; level <= 6; level++) {
             const unsigned cells = 1u << level, step = std::max(1u, cells / 4);
             for (unsigned face = 0; face < 6; face++)
@@ -269,26 +272,53 @@ void test_tiles() {
                         for (Range<float> heights :
                              {Range<float>{MinorPlanetTerrain::height_min, MinorPlanetTerrain::height_max},
                               Range<float>{-.031f, -.029f}}) {
-                            const PatchSphere sphere = patch_cull_sphere(bounds, heights);
-                            const Vec3d centre = bounds.centre * sphere.offset;
-                            double reach = 0;
-                            for (unsigned i = 0; i <= 16; i++)
-                                for (unsigned j = 0; j <= 16; j++) {
-                                    const Vec3d d = cube_direction(face, -1 + cx * size + i * size / 16,
-                                                                   -1 + cy * size + j * size / 16);
-                                    for (double h : {double(heights.max), double(heights.min) - patch_skirt_drop})
-                                        reach = std::max(reach, length(d * (1 + h) - centre));
-                                }
-                            assert(reach <= sphere.radius * (1 + 1e-12)); // conservative, always
-                            worst_fill = std::max(worst_fill, sphere.radius / reach);
-                            tightest = std::min(tightest, sphere.radius / reach);
+                            // A sphere over the same shell, to measure what the cell removes.
+                            const double top = 1 + double(heights.max);
+                            const double bottom = 1 + double(heights.min) - patch_skirt_drop;
+                            const double mid = (top + bottom) * .5;
+                            const auto chord = [&](double r) {
+                                const double cos_radius = std::cos(bounds.angular_radius);
+                                return std::sqrt(std::max(0.0, r * r + mid * mid - 2 * r * mid * cos_radius));
+                            };
+                            const double ball = std::max(chord(top), chord(bottom));
+                            for (unsigned trial = 0; trial < 8; trial++) {
+                                const double z = uniform(rng) * 2 - 1, phi = uniform(rng) * 2 * pi<double>;
+                                const double s = std::sqrt(std::max(0.0, 1 - z * z));
+                                const Vec3d n{s * std::cos(phi), z, s * std::sin(phi)};
+                                const double support = patch_cell_support(bounds, n, heights);
+                                double reach = -1e9;
+                                for (unsigned i = 0; i <= 16; i++)
+                                    for (unsigned j = 0; j <= 16; j++) {
+                                        const Vec3d d = cube_direction(face, -1 + cx * size + i * size / 16,
+                                                                       -1 + cy * size + j * size / 16);
+                                        for (double h : {top, bottom})
+                                            reach = std::max(reach, dot(n, d * h));
+                                    }
+                                assert(reach <= support + 1e-12); // conservative, from every side
+                                worst_fill = std::max(worst_fill, support - reach);
+                                tightest = std::min(tightest, support - reach);
+                                if (level >= 3)
+                                    worst_deep = std::max(worst_deep, support - reach);
+                                // The sphere's support from the same side, always the looser.
+                                const double ball_support = dot(n, bounds.centre * mid) + ball;
+                                assert(ball_support >= support - 1e-12);
+                                best_gain = std::max(best_gain, ball_support - support);
+                                mean_gain += ball_support - support;
+                            }
                         }
                         sampled++;
                     }
         }
-        std::fprintf(stderr, "tiles: %u patch bounds, the sphere is %.3f to %.3f times the reach it must hold\n",
-                     sampled, tightest, worst_fill);
-        assert(sampled > 100 && worst_fill < 1.01); // the cap's corner is a sampled point, so it is nearly exact
+        std::fprintf(stderr,
+                     "tiles: %u patch bounds, support over the shell by %.2e to %.2e radii (%.2e from level 3 "
+                     "down); a sphere would reach %.4f further, %.4f on average\n",
+                     sampled, tightest, worst_fill, worst_deep, best_gain, mean_gain / std::max(sampled * 16u, 1u));
+        // The support is exact over the cell, so the slack left is the 17 by 17 lattice below
+        // missing the true maximum between its points: 5.6 degrees apart on a whole face, and
+        // nothing from level 3 down. It touches zero from above, hence the epsilon. Ceilings,
+        // not targets: the cull the bound buys is measured by test_cull_waste rather than here.
+        assert(sampled > 100 && tightest >= -1e-9 && worst_fill < .01 && worst_deep < 1e-3);
+        assert(best_gain > .1); // a sphere gives away this much reach at the coarse levels
     }
     const float error = patch_error(terrain, key);
     assert(error > 0 && error < .01f);
@@ -384,18 +414,61 @@ void test_height_tile_range() {
     }
 }
 
+// A quadrant a patch does not draw must contribute no triangle at all. The vertex shader can
+// only drop whole vertices, so the grid gives each quadrant its own copy of the row and column
+// it shares and names the owner in `u`. Sharing them, as it once did, left a flap: the quad
+// diagonally across the centre had three corners nothing could drop, and one of its two
+// triangles outlived the mask -- degenerate at full morph, a flap at every phase before. This
+// models shaders/surface/patch.slang; the two have to say the same thing.
+void test_quadrant_mask() {
+    const PatchGrid grid = patch_grid();
+    constexpr float centre = (tile_side - 1) * .5f;
+    for (unsigned mask = 1; mask <= 0xf; mask++) {
+        const auto dropped = [&](std::uint32_t index) { // as the shader does, from the owner
+            return (mask >> grid.vertices[index].quadrant & 1) == 0;
+        };
+        unsigned alive = 0;
+        for (std::size_t i = 0; i + 2 < grid.indices.size(); i += 3) {
+            if (dropped(grid.indices[i]) || dropped(grid.indices[i + 1]) || dropped(grid.indices[i + 2]))
+                continue;
+            alive++;
+            // Where its body lies, not where its corners do: a triangle of the drawn set must
+            // sit in a drawn quadrant.
+            float x = 0, y = 0;
+            for (std::size_t corner = i; corner < i + 3; corner++) {
+                x += grid.vertices[grid.indices[corner]].x / 3.f;
+                y += grid.vertices[grid.indices[corner]].y / 3.f;
+            }
+            const unsigned quadrant = (x > centre ? 1u : 0u) | (y > centre ? 2u : 0u);
+            assert(mask >> quadrant & 1);
+        }
+        assert(alive > 0);
+        // Whole quadrants, skirt included: a quarter of the grid and a quarter of the ring each.
+        const unsigned quarters = unsigned(std::popcount(mask));
+        assert(alive == quarters * unsigned(grid.indices.size() / 3) / 4);
+    }
+    std::printf("patch grid: every triangle of all 15 quadrant masks lies in a drawn quadrant\n");
+}
+
 void test_grid_mesh() {
-    const auto mesh = patch_grid_mesh();
-    constexpr unsigned expected_vertices = tile_side * tile_side + 4 * tile_side;
+    const PatchGrid grid = patch_grid();
+    // Four quadrants of their own, each carrying the row and column it shares, and the skirt
+    // ring split the same way: see patch_grid.
+    constexpr unsigned span = (tile_side - 1) / 2 + 1;
+    constexpr unsigned expected_vertices = 4 * span * span + 8 * span;
     constexpr unsigned expected_indices = ((tile_side - 1) * (tile_side - 1) + 4 * (tile_side - 1)) * 6;
-    assert(mesh.vertices.size() == expected_vertices);
-    assert(mesh.indices.size() == expected_indices);
-    for (const auto& v : mesh.vertices)
-        assert(v.position.x >= 0 && v.position.x <= tile_side - 1 && v.position.y >= 0 &&
-               v.position.y <= tile_side - 1 && (v.position.z == 0 || v.position.z == 1));
-    for (const auto index : mesh.indices)
+    assert(grid.vertices.size() == expected_vertices);
+    assert(grid.indices.size() == expected_indices);
+    constexpr unsigned half = (tile_side - 1) / 2;
+    for (const PatchVertex& v : grid.vertices) {
+        assert(v.x <= tile_side - 1 && v.y <= tile_side - 1 && v.quadrant < 4);
+        // A quadrant's copy lies in its own half, the row and column it shares included.
+        assert(v.quadrant & 1 ? v.x >= half : v.x <= half);
+        assert(v.quadrant >> 1 ? v.y >= half : v.y <= half);
+    }
+    for (const auto index : grid.indices)
         assert(index < expected_vertices);
-    std::printf("grid mesh: %zu vertices, %zu indices\n", mesh.vertices.size(), mesh.indices.size());
+    std::printf("patch grid: %zu vertices, %zu indices\n", grid.vertices.size(), grid.indices.size());
 }
 
 int main(int argc, char** argv) {
@@ -411,6 +484,7 @@ int main(int argc, char** argv) {
     test_cube_coordinates();
     test_tiles();
     test_grid_mesh();
+    test_quadrant_mask();
     test_height_tile_range();
 
     return 0;

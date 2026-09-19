@@ -1,5 +1,5 @@
 #pragma once
-#include "scene/geometry.hpp"
+#include "core/math.hpp"
 #include "scene/terrain.hpp"
 
 #include <cstdint>
@@ -21,6 +21,10 @@ struct PatchKey {
     }
     constexpr PatchKey child(unsigned i) const {
         return {face, std::uint8_t(level + 1), std::uint16_t(2 * x + (i & 1)), std::uint16_t(2 * y + (i >> 1))};
+    }
+    // The cell one level up that contains this one; a root is its own parent.
+    constexpr PatchKey parent() const {
+        return level ? PatchKey{face, std::uint8_t(level - 1), std::uint16_t(x / 2), std::uint16_t(y / 2)} : *this;
     }
 };
 
@@ -60,19 +64,28 @@ TangentFrame patch_tangent_frame(unsigned face, Vec3d direction);
 
 struct PatchBounds {
     Vec3d centre;              // unit direction
-    double angular_radius = 0; // radians, the cap holding every vertex
+    double angular_radius = 0; // radians, the cap holding every vertex, for the cap distances
     double angular_size = 0;   // radians, the cell's edge at its centre
+    // The cell itself: four corner directions around it, and the inward normals of the four
+    // planes through the origin that bound it. A cell's s = s0 boundary lies in the plane of
+    // the face axis offset by the warp and the face's t axis, so the cell is a convex cone.
+    Vec3d corners[4];
+    Vec3d edges[4]; // edges[i] bounds the arc from corners[i] to corners[(i + 1) & 3]
 };
 PatchBounds patch_bounds(PatchKey key);
 
-// The culling sphere over a height interval, the skirt drop included. Its centre sits on the
-// patch's own shell, not the reference surface: a tile lying 0.03 radii below that surface
-// would otherwise spend 0.03 of bound before reaching any of its own geometry.
-struct PatchSphere {
-    double offset = 1; // the centre is the cap's, scaled by this
-    double radius = 0; // radii
-};
-PatchSphere patch_cull_sphere(const PatchBounds& bounds, Range<float> heights);
+// Largest dot(normal, point) over the patch's shell: every direction of its cell at every
+// radius of the interval, the skirt drop included. A patch lies entirely outside a plane when
+// its support falls below the plane's own offset, which is the whole plane test.
+//
+// This is exact for the cell: the maximum over a convex cone is the normal itself where it
+// points inside, and otherwise lies on the boundary, at a corner or on one edge arc. A cap
+// around the cell reaches its angular radius in every direction while the cell is a factor of
+// root two closer along its edges, and what that gives away is 0.085 radii at level 2 and
+// 0.025 at level 4 -- tens of kilometres on this body, which is enough to keep a patch that
+// far outside the frustum. It is dearer per test, and still the cheaper cull: a cap pre-test
+// ahead of it only rejected what it rejects too, and cost more than it saved.
+double patch_cell_support(const PatchBounds& bounds, Vec3d normal, Range<float> heights);
 
 // Height-only error at quad centres against bilinear corner heights, in radii.
 float patch_error(const MinorPlanetTerrain& terrain, PatchKey key);
@@ -84,7 +97,22 @@ Range<float> height_tile_range(std::span<const float> heights);
 void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<std::uint8_t> albedo,
                            std::span<std::uint16_t> slope, float detail = 1);
 
-// Shared grid positions: (x, y, skirt), x/y in 0..tile_side-1; skirt=1 on the drop ring.
-geometry::Mesh patch_grid_mesh();
+// One vertex of the shared patch grid. It is not a mesh vertex: it carries no position of its
+// own, only where it sits on the tile's lattice and which quadrant owns it, and the shaders
+// build the rest. The owner is what lets a quadrant be masked away -- see patch_grid.
+struct PatchVertex {
+    std::uint8_t x = 0, y = 0; // the lattice point, 0 .. tile_side - 1
+    std::uint8_t quadrant = 0; // whose it is; it goes when that quadrant is not drawn
+    bool skirt = false;        // on the ring that hangs below the tile's border
+};
+
+struct PatchGrid {
+    std::vector<PatchVertex> vertices;
+    std::vector<std::uint32_t> indices;
+};
+
+// The grid every patch is drawn from: one tile's worth of quads, a skirt ring around it, and
+// each quadrant holding its own copy of the row and column it shares with its neighbours.
+PatchGrid patch_grid();
 
 } // namespace space

@@ -58,11 +58,12 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
 
     float2 g = grid.position.xy;
     float skirt = grid.position.z;
-    // Mask replaced quadrants, retaining centre-line vertices for adjacent quadrants.
+    // Mask replaced quadrants. The grid gives every quadrant its own copy of the row and column
+    // it shares, so a vertex names its owner in w and goes when that quadrant does; nothing has
+    // to reason about vertices two quadrants both want. patch_grid_mesh has the why.
     uint quadrants = (patch.tile[3] >> 6) & 0xf;
-    bool2 low = g < PATCH_QUADS * 0.5, high = g > PATCH_QUADS * 0.5;
-    uint quadrant = (high.x ? 1 : 0) | (high.y ? 2 : 0);
-    bool dropped = (low.x || high.x) && (low.y || high.y) && !((quadrants >> quadrant) & 1);
+    uint quadrant = uint(grid.position.w);
+    bool dropped = ((quadrants >> quadrant) & 1) == 0;
     float2 cell_origin = patch.cell.xy;
     float cell_size = patch.cell.z;
     uint face = patch.tile[0];

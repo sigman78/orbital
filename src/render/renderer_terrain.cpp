@@ -5,6 +5,7 @@
 #include "render/frame_calculations.hpp"
 #include "scene/terrain_patch.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -41,11 +42,14 @@ void Renderer::Impl::create_terrain_tier() {
     bind(ArraySlot::terrain_height, tile_height);
     bind(ArraySlot::terrain_albedo, tile_albedo);
     bind(ArraySlot::terrain_slope, tile_slope);
-    const auto grid = patch_grid_mesh();
+    const PatchGrid grid = patch_grid();
     std::vector<Vertex> gpu_vertices(grid.vertices.size());
-    for (std::size_t i = 0; i < grid.vertices.size(); i++)
-        gpu_vertices[i] = {{grid.vertices[i].position.x, grid.vertices[i].position.y, grid.vertices[i].position.z, 0},
-                           {0, 0, 0, 0}};
+    for (std::size_t i = 0; i < grid.vertices.size(); i++) {
+        // The lattice point, the skirt flag, and the quadrant that owns the vertex, which the
+        // shader drops it with; the position itself is the shader's to build from the cell.
+        const PatchVertex& v = grid.vertices[i];
+        gpu_vertices[i] = {{float(v.x), float(v.y), v.skirt ? 1.f : 0.f, float(v.quadrant)}, {0, 0, 0, 0}};
+    }
     grid_vertices_address = upload_static(bytes_of(gpu_vertices));
     grid_indices_address = upload_static(bytes_of(grid.indices));
     std::vector<Vertex> wire(grid.indices.size());
@@ -89,26 +93,44 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         return;
     }
     const unsigned body = showcase.minor_planet();
-    const CameraView& camera = frozen_cull ? frozen_cull->camera : input.camera;
+    const BodyState& state = input.bodies[body];
+    const double tilt = system.bodies[body].axial_tilt;
+    Vec3d axes[3];
+    for (unsigned axis = 0; axis < 3; axis++) {
+        const Vec3d e{axis == 0 ? 1. : 0., axis == 1 ? 1. : 0., axis == 2 ? 1. : 0.};
+        axes[axis] = rotate_about(rotate_about(e, Vec3d{0, 1, 0}, state.rotation_angle), Vec3d{0, 0, 1}, tilt);
+    }
+    const auto into_body = [&](Vec3d v) { return Vec3d{dot(axes[0], v), dot(axes[1], v), dot(axes[2], v)}; };
+    CameraView camera = frozen_cull ? frozen_cull->camera : input.camera;
+    // The belt freezes its cull camera in world space, which is right for a ring the body does
+    // not carry. This body turns once in 700 s and orbits besides, about one percent of its
+    // radius a second against a world-fixed point, which is most of a low flight's altitude: a
+    // set frozen that way slides over the ground, and into it, while it is being looked at. Hold
+    // the viewpoint in the body's frame instead, so the frozen set stays the frozen set.
+    if (frozen_cull) {
+        const auto from_body = [&](Vec3d v) { return axes[0] * v.x + axes[1] * v.y + axes[2] * v.z; };
+        if (!frozen_cull->terrain)
+            frozen_cull->terrain = {.position = into_body(camera.position - state.position) * (1 / state.radius),
+                                    .forward = into_body(camera.forward),
+                                    .right = into_body(camera.right),
+                                    .up = into_body(camera.up)};
+        const FrozenCull::BodyFrame& held = *frozen_cull->terrain;
+        camera.position = state.position + from_body(held.position) * state.radius;
+        camera.forward = from_body(held.forward);
+        camera.right = from_body(held.right);
+        camera.up = from_body(held.up);
+    }
     const float tan_y = frozen_cull ? frozen_cull->tan_y : float(std::tan(camera.vertical_fov * .5));
     const float tan_x = tan_y * float(extent.width) / float(std::max(extent.height, 1u));
-    const BodyState& state = input.bodies[body];
     TierView view{.body_centre = state.position - camera.position,
                   .radius = state.radius,
+                  .axes = {axes[0], axes[1], axes[2]},
+                  .camera_local = into_body(camera.position - state.position) * (1 / state.radius),
                   .frustum = view_frustum(camera, tan_x, tan_y),
                   .height_pixels = float(extent.height),
                   .tan_y = tan_y,
                   .activate_pixels = input.terrain.activate_pixels,
                   .lod_bias = input.terrain.lod_bias};
-    const double tilt = system.bodies[body].axial_tilt;
-    for (unsigned axis = 0; axis < 3; axis++) {
-        const Vec3d e{axis == 0 ? 1. : 0., axis == 1 ? 1. : 0., axis == 2 ? 1. : 0.};
-        view.axes[axis] = rotate_about(rotate_about(e, Vec3d{0, 1, 0}, state.rotation_angle), Vec3d{0, 0, 1}, tilt);
-    }
-    const Vec3d camera_relative = camera.position - state.position;
-    view.camera_local = Vec3d{dot(view.axes[0], camera_relative), dot(view.axes[1], camera_relative),
-                              dot(view.axes[2], camera_relative)} *
-                        (1 / state.radius);
     unsigned free_rings = 0;
     for (unsigned i = 0; i < tile_ring_count; i++)
         free_rings += ring_available(i);
@@ -124,11 +146,31 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     if (terrain_tier.active() != was_active)
         log::info("Near tier {} at frame {}, {} patches resident", terrain_tier.active() ? "on" : "off", frame_index,
                   terrain_tier.resident());
+    // The draw list for the panel's patch map, kept until the next frame replaces it.
+    patch_views.clear();
+    patch_views.reserve(terrain_tier.draws().size());
+    for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
+        const float end = terrain_tier.range(draw.key.level), start = .7f * end;
+        const float morph = end > start ? std::clamp((draw.near_distance - start) / (end - start), 0.f, 1.f) : 0.f;
+        patch_views.push_back({.face = draw.key.face,
+                               .level = draw.key.level,
+                               .quadrants = std::uint8_t(draw.quadrants),
+                               .x = draw.key.x,
+                               .y = draw.key.y,
+                               .morph = std::max(morph, draw.fade),
+                               .fade = draw.fade});
+    }
+    const CubeCoord under = cube_coordinates(view.camera_local);
+    stats.patch_map = {.patches = patch_views,
+                       .camera_face = std::uint8_t(under.face),
+                       .camera_s = float(under.s),
+                       .camera_t = float(under.t)};
     auto& ts = stats.frame.terrain;
     ts.active = terrain_tier.active();
     ts.drawn = unsigned(terrain_tier.draws().size());
     ts.resident = terrain_tier.resident();
     ts.pending = terrain_tier.pending();
+    ts.pending_age = terrain_tier.pending_age();
     ts.queued = tile_pool ? tile_pool->in_flight() : 0;
     ts.rings_free = free_rings;
     ts.rings = tile_ring_count;

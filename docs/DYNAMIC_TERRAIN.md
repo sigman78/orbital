@@ -59,8 +59,9 @@ only delays a request to the next frame.
 ### Patches, tiles, slots
 
 A patch is a cell of a face's quadtree (`PatchKey`: face, level, x, y, packed to 32 bits).
-`patch_bounds` gives its cap centre, angular radius and angular size; `patch_cull_sphere` turns those
-and a height interval into the sphere the culling tests use.
+`patch_bounds` gives its cap centre, angular radius and angular size, that radius' cosine and sine for
+`patch_support`, and the cell itself -- four corner directions and the four plane normals bounding it
+-- for `patch_cell_support`. Both culling tests are built on those two.
 
 A tile is that patch's textures: `tile_side` (33) squared heights and `tile_colour_side` (65) squared
 albedo and slope texels. Texel (i, j) is the terrain sampled at cell coordinates `s0 + i * size / 32`
@@ -158,13 +159,51 @@ The horizon test allows only what stands above the reference surface, per patch,
 constant 17.75 degrees taken from the shell's `height_max`. The terrain's true relief is -0.029 to
 +0.023 radii, so the constant let a patch 130 km past the limb survive.
 
-`patch_cull_sphere` centres the sphere on the patch's own shell rather than the reference surface.
-Centred on the surface, a tile lying 0.03 radii below it spends 0.03 of bound before reaching any of
-its own geometry, which is most of the bound for a patch whose cell is a few hundred metres across.
+Those two were one defect seen twice: culling a patch by a shell it does not occupy. Together they
+cut the drawn set by a fifth to a half, and the share of it provably off screen from two thirds to a
+third. `test_cull_waste` holds the line by re-deriving visibility from the patch's own samples.
 
-All three were one defect seen three ways: culling a patch by a shell it does not occupy. Together
-they cut the drawn set by a fifth to a half, and the share of it provably off screen from two thirds
-to a third. `test_cull_waste` holds the line by re-deriving visibility from the patch's own samples.
+**Both tests are `patch_support`**, the largest `dot(normal, point)` over the shell — every direction
+of the cap at every radius of the interval. A patch is outside a plane when its support falls below
+that plane's offset, and hidden past the horizon when its support along the eye falls short of the
+occluder's radius squared, since a point is on the near side of a sphere of radius R seen from C when
+`dot(point, C) >= R * R`.
+
+The maximum is closed-form, which is why this is cheaper than the sphere it replaced rather than
+dearer. Over a cap of radius θ about `centre`, the direction closest to a normal is the normal itself
+where it points inside the cap and the rim otherwise, so the largest `dot(normal, direction)` is
+`cos(max(0, φ - θ))` for `φ` the angle to the centre — expanded as `cos φ cos θ + sin φ sin θ`, one
+dot and a square root, no inverse trig at all. The radius that maximises it is the far end of the
+interval when that reach is positive and the near end when it is not. `patch_bounds` carries `cos θ`
+and `sin θ` so a node never recomputes them, and `update` carries the frustum into the body's frame
+once, so a plane test is a dot and a compare.
+
+A cap is not a ball, and a cell is not its cap. A sphere drawn around a cap also contains the space
+behind it, which is most of its volume once the cap is wide; close to the ground that space alone
+reaches every frustum plane, since they all pass through the camera. And a cap reaches its angular
+radius in every direction where the cell is a factor of root two closer along its edges, which at
+level 2 is 0.085 radii of slack, 36 km on this body -- enough to keep a patch that far outside the
+frustum, and what detached islands in a frozen-cull view were made of.
+
+So `patch_cell_support` bounds the cell itself, which is exact: the cell is a convex cone of four
+planes through the origin, since its `s = s0` boundary lies in the plane of the face axis offset by
+the warp and the face's t axis. The maximum over a convex cone is the normal itself where it points
+inside, and otherwise on the boundary, at a corner or on one edge arc -- four corner dots and four
+arc projections, against the cap's one dot. The cap still runs first, since it is conservative and
+settles any plane it already rejects.
+
+| bound | drawn, looking down at 0.05 and 0.15 radii | of those provably off screen | selection |
+|---|---|---|---|
+| sphere | 44, 47 | 16, 18 | 0.070, 0.056 ms |
+| cap | 34, 34 | 6, 5 | 0.047, 0.035 ms |
+| cell | 28, 29 | **0, 0** | 0.098, 0.080 ms |
+
+The cell bound costs about half again what the sphere did and draws a third fewer patches for it.
+
+The occluder for the horizon is the shell's floor, never the reference surface: ground below that
+surface sets the horizon further out, so assuming the surface itself would hide terrain that can in
+fact be seen over it. The horizon takes the cell support too, which at a steep pitch is worth four
+patches of thirty-four.
 
 ### Generation and upload
 
@@ -303,17 +342,17 @@ A level `L` node splits against `range[L + 1]`, so it stays selected past its ow
 and morph bands want deriving together from the error of the geometry actually drawn; changing one
 comparison alone invalidates the seam relationships.
 
-### 6. A sphere is a weak bound for a patch, and worthless near the ground
+### 6. What the cull still keeps, and nothing says whether it costs
 
-A third of the drawn set is still provably off screen after the culling fix, and the bound's shape is
-why. Every frustum plane passes through the camera, so close to the surface any sphere of comparable
-size touches all of them: at 0.05 radii the test barely discriminates. Coarse parent patches covering
-out-of-range quadrants have caps of 0.1 to 0.4 radii and always pass whatever the camera does.
+Two of five views draw nothing that is provably off screen, and the other three keep one or two
+patches of thirty to sixty. What is left is the tail of the same thing: a plane rejects on the
+shell's extremes, and a patch can have a corner inside the frustum while almost all of it is outside.
+Closing that wants per-quadrant culling, which is a change to what a draw is, not to the bound.
 
-A patch is a cap, not a ball, and testing its samples instead removes essentially all of the
-remainder — `test_cull_waste` measures precisely that difference. It wants the cap's bulge accounted
-for so it stays conservative at coarse levels, and costs about 40 dot products a node against 5. A
-change of bound rather than a bug fix, so it is recorded here rather than folded into one.
+There is also no counter for it. `test_cull_waste` measures waste offline by re-deriving visibility
+from each patch's samples, far too slow for a frame, and the frozen-cull view shows culled quadrants
+and kept islands alike with no number beside them. A cheap proxy on the panel would say whether the
+remaining tail is worth anything at all.
 
 ### 7. Detail still stops at the depth cap, further in
 
@@ -329,6 +368,10 @@ not accurate large shapes, and shader detail costs no tiles, no slots and no CPU
 
 ### 8. Leftovers
 
+- No counter says how much of the drawn set is wasted. `test_cull_waste` measures it offline by
+  re-deriving visibility from each patch's samples, which is far too slow for a frame, but a cheap
+  proxy -- patches whose support clears a plane by less than their own reach -- would put a number
+  beside the frozen-cull view, which otherwise shows culled quadrants and kept islands alike.
 - Constants duplicated between C++ and the shaders: the Everitt constant, the face tables, `tile_side`.
 - `draw_body` leaves `ORBITAL_ROOT_PATCHES` and `root.patches` on the caller's `Root`; harmless only
   because the minor planet is drawn last.

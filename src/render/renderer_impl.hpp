@@ -383,6 +383,7 @@ struct Renderer::Impl {
     TerrainTier terrain_tier;
     GpuImage tile_height, tile_albedo, tile_slope; // the three tile arrays, 1024 layers each
     float tile_detail = 1;                         // TerrainSettings::detail the resident tiles were built with
+    std::vector<PatchView> patch_views;            // the draw list as the panel's patch map wants it
     std::uint64_t grid_vertices_address = 0, grid_indices_address = 0;
     std::uint64_t grid_wire_address = 0; // the grid unindexed, a one-hot barycentric per corner, for the wireframe
     unsigned grid_index_count = 0;
@@ -431,6 +432,13 @@ struct Renderer::Impl {
     struct FrozenCull {
         CameraView camera;
         float tan_y, disc_weight;
+        // The same viewpoint in the minor planet's frame, in radii, taken by prepare_terrain_tier
+        // the first frame it is frozen: the near tier must ride the spinning, orbiting body
+        // rather than the world, or its frozen set is a fresh one every frame.
+        struct BodyFrame {
+            Vec3d position, forward, right, up;
+        };
+        std::optional<BodyFrame> terrain;
     };
     std::optional<FrozenCull> frozen_cull;
     // Per body this frame, from cull_bodies: inside the (cull) view frustum with
