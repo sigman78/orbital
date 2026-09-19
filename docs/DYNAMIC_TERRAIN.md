@@ -147,7 +147,9 @@ The draw list is balanced locally to at most one level of difference across an e
 tile would create a larger gap, only the adjacent fine subtree is drawn from a resident ancestor.
 The final coverage map supplies per-quadrant edge constraints, including internal parent-mask
 boundaries and cube edges. Same-face peers retain the common distance morph; independent arrival
-weights affect patch interiors only. New draws relax their interior fade over 15 updates. Boundary
+weights affect patch interiors only. Each tile assignment relaxes its interior fade over 15 updates
+from its first display. Hidden intervals count toward that fade; cached tiles never restart it when
+they reappear after culling, refinement, or local balancing. Boundary
 vertices can still change when local topology changes; this is a local transition, not a shared
 quality scale affecting the entire screen.
 

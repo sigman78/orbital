@@ -188,7 +188,7 @@ private:
     struct Slot {
         PatchKey key;
         unsigned used = 0;
-        unsigned shown_update = 0, fade_update = 0;
+        unsigned fade_update = 0;    // first display of this assignment; visibility never restarts the fade
         unsigned assigned_frame = 0; // when the generation went out; `used` tracks visits instead
         // Distinguishes repeated assignments of the same key and slot, including detail changes.
         std::uint32_t stamp = 0;

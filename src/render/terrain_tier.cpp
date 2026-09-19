@@ -462,9 +462,8 @@ void TerrainTier::stitch(const TierView& view) {
                     }
                 }
         Slot& slot = slots_[draw.slot];
-        if (slot.shown_update + 1 != update_)
+        if (!slot.fade_update)
             slot.fade_update = update_;
-        slot.shown_update = update_;
         const unsigned age = update_ - slot.fade_update;
         draw.fade = draw.key.level && age < recovery_frames ? 1.f - float(age) / recovery_frames : 0;
     }

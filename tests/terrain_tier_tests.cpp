@@ -434,6 +434,35 @@ void test_motion_stability() {
     assert(waiting > 0 && worst_loss < .2);
 }
 
+// Looking away must not replay arrival morphs on already settled, cached geometry.
+void test_cached_reentry() {
+    TerrainTier tier;
+    AsyncTiles async;
+    const auto view = view_at(.2, 2.5 / 15);
+    for (unsigned frame = 1; frame <= 150; frame++)
+        async.update(tier, view, frame);
+    assert(async.pending.empty() && tier.generate().empty());
+    const std::vector<TerrainTier::Draw> settled(tier.draws().begin(), tier.draws().end());
+    assert(!settled.empty());
+    for (const auto& draw : settled)
+        assert(draw.fade == 0);
+    async.update(tier, view_at(.2, 2.5 / 15, {0, 0, 1}), 151);
+    assert(tier.draws().empty());
+    async.update(tier, view, 152);
+    assert(tier.generate().empty() && async.pending.empty());
+    assert(tier.draws().size() == settled.size());
+    unsigned restarted = 0;
+    for (const auto& draw : tier.draws()) {
+        const auto previous = std::find_if(settled.begin(), settled.end(), [&](const auto& old) {
+            return old.key == draw.key && old.slot == draw.slot && old.quadrants == draw.quadrants;
+        });
+        assert(previous != settled.end());
+        restarted += draw.fade != 0;
+    }
+    std::printf("terrain tier: cached reentry, %u of %zu patches restarted their morph\n", restarted, settled.size());
+    assert(restarted == 0);
+}
+
 // Startup --terrain-detail can invalidate before update has ever initialized the cache.
 // Cycle beyond its capacity and verify that eviction removes the old owner's lookup.
 void test_invalidate_before_update() {
@@ -1068,6 +1097,7 @@ int main(int argc, char** argv) {
             return 0;
         }
     test_motion_stability();
+    test_cached_reentry();
     test_invalidate_before_update();
     test_morph_streaming();
     test_resident_height_selection();
