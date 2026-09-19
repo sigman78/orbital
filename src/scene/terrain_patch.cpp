@@ -70,8 +70,6 @@ PatchBounds patch_bounds(PatchKey key) {
     }
     bounds.angular_size = 2 * std::atan(std::tan(everitt_k * cell.size / 2) / tan_k);
     bounds.angular_radius += 1e-6;
-    bounds.cos_radius = std::cos(bounds.angular_radius);
-    bounds.sin_radius = std::sin(bounds.angular_radius);
     // Around the cell, so consecutive corners share an edge.
     const double s[4] = {cell.s0, cell.s0 + cell.size, cell.s0 + cell.size, cell.s0};
     const double t[4] = {cell.t0, cell.t0, cell.t0 + cell.size, cell.t0 + cell.size};
@@ -112,20 +110,6 @@ double patch_cell_support(const PatchBounds& bounds, Vec3d normal, Range<float> 
                 reach = std::max(reach, len); // dot(normal, candidate) is the projection's length
         }
     }
-    return reach >= 0 ? top * reach : bottom * reach;
-}
-
-double patch_support(const PatchBounds& bounds, Vec3d normal, Range<float> heights) {
-    const double top = 1 + double(heights.max);
-    const double bottom = 1 + double(heights.min) - patch_skirt_drop;
-    const double cosine = dot(normal, bounds.centre);
-    // The cap direction lying closest to the normal: the normal itself where it points inside
-    // the cap, otherwise the rim, at cos(angle to the centre minus the cap's own radius).
-    const double reach = cosine >= bounds.cos_radius
-                             ? 1.0
-                             : cosine * bounds.cos_radius +
-                                   std::sqrt(std::max(0.0, 1 - cosine * cosine)) * bounds.sin_radius;
-    // The far end of the interval when that reach is positive, the near end when it is not.
     return reach >= 0 ? top * reach : bottom * reach;
 }
 

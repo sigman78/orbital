@@ -43,11 +43,10 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
     // half the body, and left the frustum alone to keep whatever it crossed on the far side.
     if (d > occluder && patch_cell_support(b, view.camera_local * (1 / d), reach) * d < occluder * occluder)
         return {};
-    // The patch is a cell, not a ball and not the cap around it. The cap is conservative, so it
-    // settles any plane it already rejects on one dot; the cell's own support decides the rest.
+    // The patch is a cell, not a ball and not the cap around it. A cap pre-test stood here to
+    // settle a plane on one dot, but it only ever rejects what the cell also rejects, and most
+    // nodes pass most planes and paid for both: dropping it took 5 percent off update.
     for (const LocalPlane& plane : planes_) {
-        if (plane.offset + patch_support(b, plane.normal, reach) < 0)
-            return {};
         if (plane.offset + patch_cell_support(b, plane.normal, reach) < 0)
             return {};
     }
@@ -172,8 +171,9 @@ void TerrainTier::request(PatchKey key, float pixels) {
     requests_.push_back({key, pixels});
 }
 
-void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
-    const Visibility seen = visibility(nodes_[index], view);
+// `seen` is the caller's, which already has it: a node computed its children's visibility to
+// choose between them, and recomputing it on entry paid for every plane of every node twice.
+void TerrainTier::visit(std::uint32_t index, const TierView& view, const Visibility& seen, float fade) {
     if (!seen.visible) {
         collapse(nodes_[index]);
         return;
@@ -199,14 +199,15 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
         quadrants = 0;
         // The youngest resident sibling sets the shared fade, bounded below by the parent's.
         unsigned descend = 0, youngest = 0;
+        Visibility child_seen[4];
         for (unsigned i = 0; i < 4; i++) {
             const Node& child = nodes_[children + i];
-            const Visibility child_seen = visibility(child, view);
-            if (!child_seen.visible) {
+            child_seen[i] = visibility(child, view);
+            if (!child_seen[i].visible) {
                 collapse(nodes_[children + i]);
                 continue;
             }
-            const bool in_range = child_seen.distance < double(range_[key.level + 1]);
+            const bool in_range = child_seen[i].distance < double(range_[key.level + 1]);
             const unsigned child_slot = slot_of(child.key);
             if (in_range && child_slot != no_slot && slots_[child_slot].resident) {
                 descend |= 1u << i;
@@ -220,7 +221,7 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
             } else {
                 pressure_.starved++; // it wanted this child and has no tile for it
                 if (child_slot == no_slot)
-                    request(child.key, child_seen.pixels);
+                    request(child.key, child_seen[i].pixels);
             }
             if (child_slot != no_slot)
                 touch(child.key);
@@ -230,7 +231,7 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
             const float group = age >= fade_frames ? 0.f : 1.f - float(age) / float(fade_frames);
             for (unsigned i = 0; i < 4; i++)
                 if (descend >> i & 1)
-                    visit(children + i, view, std::max(fade, group));
+                    visit(children + i, view, child_seen[i], std::max(fade, group));
         }
         if (!quadrants)
             return;
@@ -369,7 +370,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     for (unsigned face = 0; face < 6; face++)
         touch(nodes_[face].key);
     for (unsigned face = 0; face < 6; face++)
-        visit(face, view, 0); // a face has no parent to fade from
+        visit(face, view, visibility(nodes_[face], view), 0); // a face has no parent to fade from
     // The tier takes over once every face is resident; the sphere levels draw until then.
     active_ = true;
     for (unsigned face = 0; face < 6; face++) {

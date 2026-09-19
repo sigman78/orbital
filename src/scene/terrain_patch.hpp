@@ -63,10 +63,9 @@ struct TangentFrame {
 TangentFrame patch_tangent_frame(unsigned face, Vec3d direction);
 
 struct PatchBounds {
-    Vec3d centre;                          // unit direction
-    double angular_radius = 0;             // radians, the cap holding every vertex
-    double angular_size = 0;               // radians, the cell's edge at its centre
-    double cos_radius = 1, sin_radius = 0; // of angular_radius, for patch_support
+    Vec3d centre;              // unit direction
+    double angular_radius = 0; // radians, the cap holding every vertex, for the cap distances
+    double angular_size = 0;   // radians, the cell's edge at its centre
     // The cell itself: four corner directions around it, and the inward normals of the four
     // planes through the origin that bound it. A cell's s = s0 boundary lies in the plane of
     // the face axis offset by the warp and the face's t axis, so the cell is a convex cone.
@@ -75,23 +74,17 @@ struct PatchBounds {
 };
 PatchBounds patch_bounds(PatchKey key);
 
-// Largest dot(normal, point) over the patch's shell: every direction of its cap at every radius
-// of the interval, the skirt drop included. A patch lies entirely outside a plane when its
-// support falls below the plane's own offset, which is the whole plane test.
+// Largest dot(normal, point) over the patch's shell: every direction of its cell at every
+// radius of the interval, the skirt drop included. A patch lies entirely outside a plane when
+// its support falls below the plane's own offset, which is the whole plane test.
 //
-// The shell is a cap, not a ball, and this is exact for the cap, so it rejects everything a
-// sphere around the same cap would and a great deal besides -- a sphere carries the empty space
-// behind the cap, which is most of its volume once the cap is wide, and near the camera that
-// space alone can reach every frustum plane. `normal` must be unit length.
-double patch_support(const PatchBounds& bounds, Vec3d normal, Range<float> heights);
-
-// The same support over the cell rather than the cap around it, which is exact: the maximum
-// over a convex cone is the normal itself where it points inside, and otherwise lies on the
-// boundary, at a corner or on one edge arc. A cap reaches its angular radius in every
-// direction while the cell is a factor of root two closer along its edges, and what that gives
-// away is 0.085 radii at level 2 and 0.025 at level 4 -- tens of kilometres on this body, which
-// is enough to keep a patch that far outside the frustum. Dearer than the cap, so the cap
-// still serves where its slack costs nothing.
+// This is exact for the cell: the maximum over a convex cone is the normal itself where it
+// points inside, and otherwise lies on the boundary, at a corner or on one edge arc. A cap
+// around the cell reaches its angular radius in every direction while the cell is a factor of
+// root two closer along its edges, and what that gives away is 0.085 radii at level 2 and
+// 0.025 at level 4 -- tens of kilometres on this body, which is enough to keep a patch that
+// far outside the frustum. It is dearer per test, and still the cheaper cull: a cap pre-test
+// ahead of it only rejected what it rejects too, and cost more than it saved.
 double patch_cell_support(const PatchBounds& bounds, Vec3d normal, Range<float> heights);
 
 // Height-only error at quad centres against bilinear corner heights, in radii.

@@ -253,7 +253,7 @@ void test_tiles() {
         assert(compared == 24 && worst < 5e-4); // three faces at each of the eight corners
     }
     // The support must hold every point of the shell, from every direction, without slack the
-    // cap does not require. A sphere is the comparison: how much of it the cap test removes.
+    // cell does not require. A sphere is the comparison: how much of it the cell test removes.
     {
         double worst_fill = 0, tightest = 1e9, best_gain = 0, mean_gain = 0, worst_deep = 0;
         unsigned sampled = 0;
@@ -271,19 +271,20 @@ void test_tiles() {
                         for (Range<float> heights :
                              {Range<float>{MinorPlanetTerrain::height_min, MinorPlanetTerrain::height_max},
                               Range<float>{-.031f, -.029f}}) {
-                            // A sphere over the same shell, to measure what the cap removes.
+                            // A sphere over the same shell, to measure what the cell removes.
                             const double top = 1 + double(heights.max);
                             const double bottom = 1 + double(heights.min) - patch_skirt_drop;
                             const double mid = (top + bottom) * .5;
                             const auto chord = [&](double r) {
-                                return std::sqrt(std::max(0.0, r * r + mid * mid - 2 * r * mid * bounds.cos_radius));
+                                const double cos_radius = std::cos(bounds.angular_radius);
+                                return std::sqrt(std::max(0.0, r * r + mid * mid - 2 * r * mid * cos_radius));
                             };
                             const double ball = std::max(chord(top), chord(bottom));
                             for (unsigned trial = 0; trial < 8; trial++) {
                                 const double z = uniform(rng) * 2 - 1, phi = uniform(rng) * 2 * pi<double>;
                                 const double s = std::sqrt(std::max(0.0, 1 - z * z));
                                 const Vec3d n{s * std::cos(phi), z, s * std::sin(phi)};
-                                const double support = patch_support(bounds, n, heights);
+                                const double support = patch_cell_support(bounds, n, heights);
                                 double reach = -1e9;
                                 for (unsigned i = 0; i <= 16; i++)
                                     for (unsigned j = 0; j <= 16; j++) {
@@ -311,11 +312,11 @@ void test_tiles() {
                      "tiles: %u patch bounds, support over the shell by %.2e to %.2e radii (%.2e from level 3 "
                      "down); a sphere would reach %.4f further, %.4f on average\n",
                      sampled, tightest, worst_fill, worst_deep, best_gain, mean_gain / std::max(sampled * 16u, 1u));
-        // The slack left is the cell bowing inside its cap -- a whole face is 90 degrees across
-        // but its cap reaches 54.7 in every direction -- and it falls away with the cell.
-        // Ceilings, not targets: what the cap gives away is the cell's own shape, and the cull
-        // it buys is measured by test_cull_waste rather than here.
-        assert(sampled > 100 && tightest >= 0 && worst_fill < .25 && worst_deep < .1);
+        // The support is exact over the cell, so the slack left is the 17 by 17 lattice below
+        // missing the true maximum between its points: 5.6 degrees apart on a whole face, and
+        // nothing from level 3 down. It touches zero from above, hence the epsilon. Ceilings,
+        // not targets: the cull the bound buys is measured by test_cull_waste rather than here.
+        assert(sampled > 100 && tightest >= -1e-9 && worst_fill < .01 && worst_deep < 1e-3);
         assert(best_gain > .1); // a sphere gives away this much reach at the coarse levels
     }
     const float error = patch_error(terrain, key);

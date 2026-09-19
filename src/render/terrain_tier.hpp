@@ -164,7 +164,7 @@ private:
 
     void ensure_roots();
     Visibility visibility(const Node& node, const TierView& view) const;
-    void visit(std::uint32_t index, const TierView& view, float fade);
+    void visit(std::uint32_t index, const TierView& view, const Visibility& seen, float fade);
     void collapse(Node& node);
     std::uint32_t allocate_children(const Node& node);
     unsigned slot_of(PatchKey key) const; // slot_count when not in the cache
@@ -181,7 +181,7 @@ private:
     std::vector<Request> requests_;
     std::vector<Generation> generate_;
     float range_[13] = {};
-    LocalPlane planes_[std::size(geometry::Frustum{}.planes)] = {};
+    LocalPlane planes_[5] = {}; // near and the four sides; the frustum's sixth is the far plane, not tested
     unsigned frame_ = 0;
     unsigned sweep_cursor_ = 0; // where the pending-slot reclaim sweep resumes
     std::uint32_t stamp_ = 0;   // the last generation stamp issued, never reused
