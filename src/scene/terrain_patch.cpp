@@ -9,6 +9,19 @@ namespace space {
 
 namespace {
 
+// A grid point, which the skirt's ring hands back as a pair of coordinates.
+struct Point {
+    unsigned x, y;
+};
+
+// The patch grid, in quads a side and in the vertices one quadrant owns. They live here rather
+// than inside patch_grid_mesh so its lambdas need capture nothing: a constant read there is a
+// use a lambda must capture the moment anything binds a reference to it, which is easy to trip
+// over and awkward to see.
+constexpr unsigned grid_quads = tile_side - 1;
+constexpr unsigned grid_half = grid_quads / 2;
+constexpr unsigned grid_span = grid_half + 1;
+
 // Each face's axis with the in-face directions of s and t, chosen so that
 // s cross t is the axis: a quad's triangles then wind outward.
 struct Face {
@@ -226,9 +239,7 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
 }
 
 geometry::Mesh patch_grid_mesh() {
-    constexpr unsigned quads = tile_side - 1; // 32
-    constexpr unsigned half = quads / 2;
-    constexpr unsigned span = half + 1; // vertices along one quadrant's edge
+    constexpr unsigned quads = grid_quads, half = grid_half, span = grid_span;
     // Every quadrant owns each vertex it uses, the row and column it shares with its neighbours
     // included. A patch draws only the quadrants its children do not, and the shader masks one
     // away by dropping its vertices -- but a shared vertex is needed by the quadrant across it,
@@ -243,14 +254,19 @@ geometry::Mesh patch_grid_mesh() {
             for (unsigned x = 0; x < span; x++)
                 mesh.vertices.push_back(
                     {.position = {float((quadrant & 1) * half + x), float((quadrant >> 1) * half + y), 0},
+                     .normal = {},
                      .u = float(quadrant)});
     // A grid point as the given quadrant holds it, and the quadrant a cell belongs to, taken
     // from a point inside the cell so the centre row and column never decide it.
     const auto grid = [](unsigned quadrant, unsigned x, unsigned y) {
-        return std::uint32_t(quadrant * span * span + (y - (quadrant >> 1) * half) * span +
-                             (x - (quadrant & 1) * half));
+        // The point must lie in the quadrant that is being asked for it, shared row and column
+        // included; outside, the offsets below wrap and hand back a plausible wrong vertex.
+        ORBITAL_ASSERT(x >= (quadrant & 1) * grid_half && x <= (quadrant & 1) * grid_half + grid_half);
+        ORBITAL_ASSERT(y >= (quadrant >> 1) * grid_half && y <= (quadrant >> 1) * grid_half + grid_half);
+        return std::uint32_t(quadrant * grid_span * grid_span + (y - (quadrant >> 1) * grid_half) * grid_span +
+                             (x - (quadrant & 1) * grid_half));
     };
-    const auto quadrant_at = [](float x, float y) { return (x > half ? 1u : 0u) | (y > half ? 2u : 0u); };
+    const auto quadrant_at = [](float x, float y) { return (x > grid_half ? 1u : 0u) | (y > grid_half ? 2u : 0u); };
     mesh.indices.reserve((quads * quads + 4 * quads) * 6);
     for (unsigned y = 0; y < quads; y++)
         for (unsigned x = 0; x < quads; x++) {
@@ -260,12 +276,13 @@ geometry::Mesh patch_grid_mesh() {
             mesh.indices.insert(mesh.indices.end(), {a, b, c, a, c, d});
         }
     // The skirt ribbon, split at the middle of each side so every half belongs to one quadrant.
+    // The ring runs counter-clockwise, which is what keeps the skirt's winding with the grid's.
     const auto edge = [](unsigned side, unsigned along) {
         switch (side) {
-        case 0: return std::pair{along, 0u};
-        case 1: return std::pair{quads, along};
-        case 2: return std::pair{quads - along, quads};
-        default: return std::pair{0u, quads - along};
+        case 0: return Point{along, 0};
+        case 1: return Point{grid_quads, along};
+        case 2: return Point{grid_quads - along, grid_quads};
+        default: return Point{0, grid_quads - along};
         }
     };
     for (unsigned side = 0; side < 4; side++)
@@ -276,7 +293,7 @@ geometry::Mesh patch_grid_mesh() {
             const std::uint32_t base = std::uint32_t(mesh.vertices.size());
             for (unsigned i = 0; i <= half; i++) {
                 const auto [x, y] = edge(side, part * half + i);
-                mesh.vertices.push_back({.position = {float(x), float(y), 1}, .u = float(q)});
+                mesh.vertices.push_back({.position = {float(x), float(y), 1}, .normal = {}, .u = float(q)});
             }
             for (unsigned i = 0; i < half; i++) {
                 const auto [x, y] = edge(side, part * half + i);
@@ -285,6 +302,8 @@ geometry::Mesh patch_grid_mesh() {
                 mesh.indices.insert(mesh.indices.end(), {a, a2, b, b, a2, b2});
             }
         }
+    ORBITAL_ASSERT(mesh.vertices.size() == 4 * span * span + 8 * span);
+    ORBITAL_ASSERT(mesh.indices.size() == (quads * quads + 4 * quads) * 6);
     return mesh;
 }
 
