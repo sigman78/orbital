@@ -505,6 +505,36 @@ void test_provenance_and_audit() {
     assert(audit.resident >= tier.draws().size());
 }
 
+// The horizon test hides a patch behind a sphere of radius horizon_occluder, and every bit of
+// that rests on one premise: that no ground anywhere stands below it. If any did, a sight line
+// could graze across that basin and reach terrain this test says is hidden. The premise is
+// cheap to check and nothing was checking it -- and a sparse sample will not do, since 4000
+// directions put seed 1007's floor at 0.9796 where four million find 0.9703, a 45 percent
+// underestimate of the depth. That gap is most of the margin the occluder has.
+void test_occluder_floor() {
+    constexpr unsigned samples = 4000000;
+    double worst = 1;
+    // The showcase's own seed, and others for --seed and for any reseeding of the showcase.
+    for (std::uint64_t seed : {1007ull, 1008ull, 2024ull}) {
+        const MinorPlanetTerrain terrain(seed);
+        std::vector<float> low(64, MinorPlanetTerrain::height_max);
+        parallel_for(64, [&](unsigned block) {
+            for (unsigned i = block; i < samples; i += 64) {
+                const double y = 1 - 2 * (i + .5) / samples, a = i * 2.399963, r = std::sqrt(1 - y * y);
+                low[block] = std::min(low[block], terrain.height({r * std::cos(a), y, r * std::sin(a)}));
+            }
+        });
+        const double floor = 1 + double(*std::min_element(low.begin(), low.end()));
+        std::printf("terrain tier: seed %llu floor %.5f radii, %.5f over the occluder\n",
+                    static_cast<unsigned long long>(seed), floor, floor - TerrainTier::horizon_occluder);
+        worst = std::min(worst, floor);
+    }
+    // Craters stack and a deeper seed is only a reseed away, so the occluder wants real room
+    // under the lowest ground, not the last decimal of it.
+    assert(worst > TerrainTier::horizon_occluder);
+    assert(worst - TerrainTier::horizon_occluder > .005);
+}
+
 // Ground truth for the cull: no terrain a viewer can actually see may be missing from the
 // drawn set. Visibility is decided by ray-marching the real surface, not by the rule the tier
 // applies, so this is the only check that can fail the horizon heuristic (terrain_tier.cpp
@@ -745,9 +775,10 @@ void test_horizon_heuristic() {
 void test_flight_sweep() {
     constexpr double radius = 2.5 / 15;
     const MinorPlanetTerrain terrain(1007);
-    // The highest ground anywhere sets the cone horizon below, so it is the bound for everything.
-    const GroundExtremes ground = ground_extremes(terrain);
-    const double top = 1 + double(ground.high) + 1e-3;
+    // The cone horizon below is only sound against a top no terrain can exceed, so it takes the
+    // shell's ceiling rather than a sampled one: a spiral of a few thousand directions misses
+    // the extremes badly (4000 of them put this seed's floor 0.009 radii too high).
+    const double top = 1 + double(MinorPlanetTerrain::height_max);
     constexpr double occluder = TerrainTier::horizon_occluder;
 
     std::unordered_map<std::uint32_t, Range<float>> tile_bounds; // kept for the whole flight
@@ -928,6 +959,7 @@ void test_flight_sweep() {
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++)
         if (std::string_view(argv[i]) == "--truth") {
+            test_occluder_floor(); // the premise the other two rest on
             test_cull_soundness(); // seconds a view of ray marching; see the note above it
             test_horizon_heuristic();
             return 0;
