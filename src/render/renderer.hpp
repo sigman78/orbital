@@ -66,8 +66,12 @@ struct FrameStats {
         unsigned drawn = 0;      // patches drawn this frame
         unsigned resident = 0;   // tiles in the cache, arrived
         unsigned pending = 0;    // slots handed out whose tile has not arrived (queued, generating or uploading)
-        unsigned queued = 0;     // generation jobs on the workers, submitted and not yet finished
-        unsigned uploaded = 0;   // tiles copied into the arrays this frame
+        // Frames the oldest of those has waited. Nothing evicts a pending slot and the tree
+        // re-requests only keys without one, so a tile that never comes back leaves its patch
+        // drawn coarse by its parent until the reclaim sweep takes the slot; seconds, not frames.
+        unsigned pending_age = 0;
+        unsigned queued = 0;                // generation jobs on the workers, submitted and not yet finished
+        unsigned uploaded = 0;              // tiles copied into the arrays this frame
         unsigned rings_free = 0, rings = 0; // upload ring entries free, and the ring's size
         unsigned slots = 0;                 // the cache's capacity
         unsigned nodes = 0;                 // quadtree nodes alive

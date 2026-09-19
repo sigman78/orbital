@@ -113,6 +113,13 @@ public:
         unsigned reachable = 0, allocated = 0;
         unsigned resident = 0, resident_undrawn = 0;
         unsigned oldest_age = 0; // frames since the least recently used tile was last touched
+        // Slots handed out whose tile never came back, and how long the oldest has waited. This
+        // is the one part of the tier that clears over many frames rather than at once: nothing
+        // evicts a pending slot and visit() re-requests only keys that have none, so the patch
+        // is drawn by its parent, coarse, until the reclaim sweep takes the slot back -- up to
+        // pending_timeout plus a sweep cycle, four seconds at 60 Hz. It looks stuck because it
+        // is, briefly. A pending_age that keeps climbing past that is a real leak.
+        unsigned pending = 0, pending_age = 0;
     };
     Audit audit() const;
 
@@ -157,6 +164,7 @@ public:
     float range(unsigned level) const { return level < std::size(range_) ? range_[level] : 0; }
     unsigned resident_slot(PatchKey key) const; // the tile's slot, slot_count when absent or pending
     unsigned pending() const;                   // slots handed out whose tile has not arrived
+    unsigned pending_age() const;               // frames the oldest of those has waited, 0 when there are none
     // Cap distance over the supplied height interval, excluding skirts as in the shader.
     static double nearest_distance(Vec3d camera_local, const PatchBounds& bounds,
                                    Range<float> heights = full_height_range);

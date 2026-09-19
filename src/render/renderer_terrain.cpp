@@ -151,6 +151,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     ts.drawn = unsigned(terrain_tier.draws().size());
     ts.resident = terrain_tier.resident();
     ts.pending = terrain_tier.pending();
+    ts.pending_age = terrain_tier.pending_age();
     ts.queued = tile_pool ? tile_pool->in_flight() : 0;
     ts.rings_free = free_rings;
     ts.rings = tile_ring_count;
@@ -315,11 +316,12 @@ void Renderer::Impl::trace_far_patches(const TierView& view, float min_arc) {
         const TerrainTier::Audit audit = terrain_tier.audit();
         log::info("Near tier: patch face {} level {} ({},{}) quadrants {:x}: nearest drawn quadrant {:.0f} deg of "
                   "arc, cell centre {:.0f} deg, frame {}; camera at {:.4f} radii, occluder {:.4f}; nodes {} "
-                  "reachable of {} allocated, tiles {} resident, {} undrawn, oldest {} frames",
+                  "reachable of {} allocated, tiles {} resident, {} undrawn, oldest {} frames, {} pending the "
+                  "oldest {} frames",
                   draw.key.face, draw.key.level, draw.key.x, draw.key.y, draw.quadrants, nearest * 180 / pi<double>,
                   std::acos(std::clamp(cosine, -1.0, 1.0)) * 180 / pi<double>, frame_index, d,
                   TerrainTier::horizon_occluder, audit.reachable, audit.allocated, audit.resident,
-                  audit.resident_undrawn, audit.oldest_age);
+                  audit.resident_undrawn, audit.oldest_age, audit.pending, audit.pending_age);
         terrain_tier.explain(draw.key, view, trace_steps);
         for (const TerrainTier::Step& step : trace_steps)
             log::info("  level {:2} ({:4},{:4}) {} reach {:+.4f}..{:+.4f} from level {} | horizon {} | plane {} "

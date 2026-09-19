@@ -274,6 +274,10 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
               terrain.served);
         pinch(terrain.evicted_recent > 0, "Evictions %u, of them still warm %u", terrain.evictions,
               terrain.evicted_recent);
+        // A tile that never arrives holds its slot, and its patch stays coarse until the sweep
+        // reclaims it, which takes seconds. That is what a patch stuck at the wrong level looks
+        // like from here, and it keeps counting while time is paused.
+        pinch(terrain.pending_age > 60, "A tile slot has waited %u frames for its tile", terrain.pending_age);
         pinch(terrain.starved > 0, "Quadrants covered: %u for want of a tile, %u out of range", terrain.starved,
               terrain.out_of_range);
         pinch(terrain.behind_mean > 1.f, "Finest level %u, drawn %.2f levels coarser than asked (%u over one)",

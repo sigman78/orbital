@@ -758,7 +758,7 @@ void test_flight_sweep() {
     std::vector<Pending> pending;
     TerrainTier tier;
     unsigned frame = 0, steps = 0, anomalies = 0, parentless = 0;
-    unsigned peak_drawn = 0, peak_nodes = 0, peak_resident = 0;
+    unsigned peak_drawn = 0, peak_nodes = 0, peak_resident = 0, worst_pending_age = 0;
     double worst_excess = 0;
 
     const Vec3d axis = normalized(Vec3d{.3, 1, .2});
@@ -903,6 +903,7 @@ void test_flight_sweep() {
             peak_drawn = std::max(peak_drawn, unsigned(tier.draws().size()));
             peak_nodes = std::max(peak_nodes, audit.allocated);
             peak_resident = std::max(peak_resident, audit.resident);
+            worst_pending_age = std::max(worst_pending_age, audit.pending_age);
         }
         std::printf("terrain tier: sweep leg %-10s %4u steps, %6u quadrants drawn, %5.1f a step; farthest %5.1f deg "
                     "of arc, %5.2f%% of them past the flat horizon\n",
@@ -910,11 +911,18 @@ void test_flight_sweep() {
                     leg_worst_arc * 180 / pi<double>, leg_quadrants ? 100. * past_flat / leg_quadrants : 0.0);
     }
     std::printf("terrain tier: flight sweep, %u steps over seven legs, %zu tiles generated; peak %u drawn, %u "
-                "nodes, %u resident; %u quadrants drawn with no resident parent; %u past the cone horizon%s\n",
-                steps, tile_bounds.size(), peak_drawn, peak_nodes, peak_resident, parentless, anomalies,
-                anomalies ? "" : " (none)");
+                "nodes, %u resident; %u quadrants drawn with no resident parent; a slot waited %u frames for its "
+                "tile at worst; %u past the cone horizon%s\n",
+                steps, tile_bounds.size(), peak_drawn, peak_nodes, peak_resident, parentless, worst_pending_age,
+                anomalies, anomalies ? "" : " (none)");
     assert(steps > 500);
     assert(anomalies == 0);
+    // A slot whose tile never arrives holds its key: nothing evicts a pending slot and visit()
+    // re-requests only keys without one, so the patch stays coarse, drawn by its parent, until
+    // the reclaim sweep takes the slot back. That is the one part of the tier that clears over
+    // many frames rather than at once, and its backstop -- pending_timeout plus a full sweep
+    // cycle, about four seconds at 60 Hz -- must hold, or a patch really would look stuck.
+    assert(worst_pending_age <= TerrainTier::pending_timeout + TerrainTier::slot_count / TerrainTier::sweep_window);
 }
 
 int main(int argc, char** argv) {

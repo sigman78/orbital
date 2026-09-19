@@ -229,20 +229,33 @@ TerrainTier::Audit TerrainTier::audit() const {
     std::unordered_map<std::uint32_t, unsigned> drawn;
     for (const Draw& draw : draws_)
         drawn[draw.key.packed()] = draw.quadrants;
-    unsigned oldest = frame_;
+    unsigned oldest = frame_, assigned = frame_;
     for (const auto& [packed, slot] : slots_by_key_) {
-        if (!slots_[slot].resident)
+        if (!slots_[slot].resident) {
+            result.pending++;
+            assigned = std::min(assigned, slots_[slot].assigned_frame);
             continue;
+        }
         result.resident++;
         result.resident_undrawn += !drawn.count(packed);
         oldest = std::min(oldest, slots_[slot].used);
     }
     result.oldest_age = frame_ - oldest;
+    result.pending_age = result.pending ? frame_ - assigned : 0;
     return result;
 }
 
 unsigned TerrainTier::pending() const {
     return unsigned(slots_by_key_.size()) - resident();
+}
+
+// The wait of the oldest slot whose tile never came back. One pass of the map, as resident() is.
+unsigned TerrainTier::pending_age() const {
+    unsigned oldest = frame_;
+    for (const auto& [_, slot] : slots_by_key_)
+        if (!slots_[slot].resident)
+            oldest = std::min(oldest, slots_[slot].assigned_frame);
+    return frame_ - oldest;
 }
 
 unsigned TerrainTier::resident() const {
