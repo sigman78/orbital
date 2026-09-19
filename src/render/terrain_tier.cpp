@@ -46,12 +46,12 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
     // relief, a higher floor or a smaller descendant_relief would each have to be put through
     // it. Do not raise the occluder while the plane formula stands. The known fallback is the
     // cone test over the lowest ground within acos(R / d), at 10 to 40 percent more patches.
-    const double d = length(view.camera_local);
+    const double d = camera_distance_; // both taken once a frame: every node would redo the root
     // The test is valid from anywhere outside the occluder, which is anywhere above ground.
     // Comparing with the reference surface instead switched the horizon off over every lowland,
     // half the body, and left the frustum alone to keep whatever it crossed on the far side.
     constexpr double occluder = horizon_occluder;
-    if (d > occluder && patch_cell_support(b, view.camera_local * (1 / d), reach) * d < occluder * occluder)
+    if (d > occluder && patch_cell_support(b, eye_, reach) * d < occluder * occluder)
         return {};
     // The patch is a cell, not a ball and not the cap around it. A cap pre-test stood here to
     // settle a plane on one dot, but it only ever rejects what the cell also rejects, and most
@@ -253,6 +253,19 @@ unsigned TerrainTier::resident() const {
     return count;
 }
 
+// Does any of this geometry stand over the camera's horizon? The reach visibility() culls by
+// pads for the relief a descendant may reveal, because dropping the node drops that subtree with
+// it. What is *drawn*, though, is one tile and nothing else, and for a coarse patch the pad is
+// larger than the whole body's relief: at level 0 it is 0.0286 radii against 0.0207 of terrain,
+// so the top of the bound stands at 1.05 where the tile itself reaches 1.02. The draw asks the
+// narrower question over exactly the geometry it is about to put on screen, and the answer holds
+// whatever happens to the subtree: a quadrant covered by this tile shows this tile's shape.
+bool TerrainTier::drawn_over_horizon(const PatchBounds& bounds, Range<float> heights) const {
+    if (camera_distance_ <= horizon_occluder)
+        return true; // inside the occluder the test says nothing, as in visibility()
+    return patch_cell_support(bounds, eye_, heights) * camera_distance_ >= horizon_occluder * horizon_occluder;
+}
+
 void TerrainTier::touch(PatchKey key) {
     if (const unsigned slot = slot_of(key); slot != no_slot)
         slots_[slot].used = frame_;
@@ -271,6 +284,11 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, const Visibil
     }
     const PatchKey key = nodes_[index].key;
     touch(key);
+    const unsigned own_slot = resident_slot(key); // the tile this node would draw from
+    // Only where the pad is large enough to decide anything: it is 0.0286 radii at level 0 and
+    // 0.00026 by level 6, and below the skirt drop it cannot move the horizon by a tenth of a
+    // degree. Asking anyway would cost a support test for every patch drawn to no purpose.
+    const bool tight_worth_asking = relief_margin(key.level) > patch_skirt_drop;
     // The distance visibility measured covers the whole subtree, so it decides the split too.
     // Measuring against the full shell instead read zero straight below a camera inside it,
     // and every node around the nadir then asked for children it would never draw.
@@ -305,7 +323,11 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, const Visibil
                 youngest = std::max(youngest, slots_[child_slot].resident_frame);
                 continue;
             }
-            quadrants |= 1u << i;
+            // This quadrant would be drawn from this node's tile, so it is that tile's own
+            // heights over the child's cell that decide whether it can be seen at all.
+            if (own_slot == no_slot || !tight_worth_asking ||
+                drawn_over_horizon(child.bounds, slots_[own_slot].heights))
+                quadrants |= 1u << i;
             if (!in_range) {
                 collapse(nodes_[children + i]);
                 pressure_.out_of_range++;
@@ -330,6 +352,12 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, const Visibil
         if (descend)
             fade = 0;
     }
+    // A leaf covers its whole cell from its own tile, so the same narrow question applies to it.
+    // A node with children has had each covered quadrant asked already, and their union is this
+    // cell, so there is nothing left to ask here.
+    if (own_slot != no_slot && tight_worth_asking && !nodes_[index].children &&
+        !drawn_over_horizon(nodes_[index].bounds, slots_[own_slot].heights))
+        return;
     const unsigned slot = slot_of(key);
     if (slot != no_slot && slots_[slot].resident)
         draws_.push_back(
@@ -448,6 +476,8 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         planes_[i] = {.normal = {dot(n, view.axes[0]), dot(n, view.axes[1]), dot(n, view.axes[2])},
                       .offset = (dot(n, view.body_centre) + double(plane.distance)) / std::max(view.radius, 1e-12)};
     }
+    camera_distance_ = length(view.camera_local);
+    eye_ = camera_distance_ > 1e-12 ? view.camera_local * (1 / camera_distance_) : Vec3d{0, 0, 1};
     const double distance = std::max(length(view.body_centre), view.radius);
     const float projected = float(view.radius * view.height_pixels / (distance * view.tan_y));
     wanted_ = projected > view.activate_pixels * (wanted_ ? hysteresis : 1);

@@ -200,6 +200,9 @@ private:
 
     void ensure_roots();
     const Node* find(PatchKey key) const; // the node for a key, null where the tree stops short
+    // The horizon test over the geometry a draw actually puts on screen: one tile's own heights
+    // rather than the reach, which pads for descendants that will not be drawn in its place.
+    bool drawn_over_horizon(const PatchBounds& bounds, Range<float> heights) const;
     Visibility visibility(const Node& node, const TierView& view) const;
     void visit(std::uint32_t index, const TierView& view, const Visibility& seen, float fade);
     void collapse(Node& node);
@@ -219,6 +222,10 @@ private:
     std::vector<Generation> generate_;
     float range_[13] = {};
     LocalPlane planes_[5] = {}; // near and the four sides; the frustum's sixth is the far plane, not tested
+    // The camera in the body's frame, resolved once an update: every node tested the horizon
+    // against it, and every one of them was taking the same square root to do so.
+    Vec3d eye_{0, 0, 1};
+    double camera_distance_ = 0;
     unsigned frame_ = 0;
     unsigned sweep_cursor_ = 0; // where the pending-slot reclaim sweep resumes
     std::uint32_t stamp_ = 0;   // the last generation stamp issued, never reused
