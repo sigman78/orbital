@@ -30,11 +30,7 @@ void TerrainTier::ensure_roots() {
 
 TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView& view) const {
     const PatchBounds& b = node.bounds;
-    // Cull against the patch's own heights once its tile is resident, padded for the relief a
-    // child may still reveal. Unknown tiles keep the global shell, so the bound stays sound.
-    const Range<float> heights = height_range(node.key);
-    const float margin = relief_margin(node.key.level);
-    const Range<float> reach{heights.min - margin, heights.max + margin};
+    const Range<float> reach = reach_of(node.key);
     // Past the horizon, by the same support. A point p at radius r is on the near side of an
     // occluding sphere of radius R seen from C when dot(p * r, C) >= R * R, so the patch is
     // hidden when its support along the eye falls short of that. The occluder is the shell's
@@ -55,8 +51,9 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
         if (plane.offset + patch_cell_support(b, plane.normal, reach) < 0)
             return {};
     }
-    // Prioritize nearby patch coverage; distances and sizes are both in radii.
-    const double near = nearest_distance(view.camera_local, b, heights);
+    // Prioritize nearby patch coverage; distances and sizes are both in radii. The reach serves
+    // here too, so the distance covers this patch and every descendant it may still grow.
+    const double near = nearest_distance(view.camera_local, b, reach);
     const float scale = float(view.height_pixels / (std::max(near, 1e-4) * view.tan_y));
     return {.visible = true, .pixels = float(b.angular_size) * scale, .distance = near};
 }
@@ -137,6 +134,23 @@ Range<float> TerrainTier::height_range(PatchKey key) const {
     return slot != no_slot ? slots_[slot].heights : full_height_range;
 }
 
+// A node's height reach: its own tile's range and margin, or the nearest resident ancestor's.
+// An ancestor's margin covers its whole subtree, so the inherited bound stays sound, and it is
+// far tighter than the global shell -- whose 1.05 top stands several degrees of arc further
+// over the horizon than the 1.01 a loaded neighbour has. A root is resident while the tier is
+// active, so the walk ends in a measured range; in practice it is a lookup or two, since a
+// node is only reached through a parent that has a tile.
+Range<float> TerrainTier::reach_of(PatchKey key) const {
+    for (;; key = key.parent()) {
+        const unsigned slot = resident_slot(key);
+        if (slot == no_slot && key.level)
+            continue;
+        const Range<float> heights = slot != no_slot ? slots_[slot].heights : full_height_range;
+        const float margin = relief_margin(key.level);
+        return {heights.min - margin, heights.max + margin};
+    }
+}
+
 unsigned TerrainTier::pending() const {
     return unsigned(slots_by_key_.size()) - resident();
 }
@@ -166,10 +180,11 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, float fade) {
     }
     const PatchKey key = nodes_[index].key;
     touch(key);
-    // Use the full shell for undiscovered children; resident tile bounds cover only their own geometry.
-    const double descendant_distance = nearest_distance(view.camera_local, nodes_[index].bounds);
+    // The distance visibility measured covers the whole subtree, so it decides the split too.
+    // Measuring against the full shell instead read zero straight below a camera inside it,
+    // and every node around the nadir then asked for children it would never draw.
     const bool wants = key.level < patch_level_max && key.level + 1 < std::size(level_error) &&
-                       descendant_distance <
+                       seen.distance <
                            double(range_[key.level + 1]) * (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0);
     const bool allowed = nodes_[index].children || nodes() < node_budget;
     pressure_.splits_blocked += wants && !allowed;

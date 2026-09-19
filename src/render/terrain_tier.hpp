@@ -115,6 +115,9 @@ public:
     void release(unsigned slot, PatchKey key, std::uint32_t stamp);
     // Only resident tiles supply a tighter range. Unknown tiles retain the full shell.
     Range<float> height_range(PatchKey key) const;
+    // The interval culling and distances use: height_range padded by relief_margin, inherited
+    // from the nearest resident ancestor while a node has no tile of its own.
+    Range<float> reach_of(PatchKey key) const;
     float range(unsigned level) const { return level < std::size(range_) ? range_[level] : 0; }
     unsigned resident_slot(PatchKey key) const; // the tile's slot, slot_count when absent or pending
     unsigned pending() const;                   // slots handed out whose tile has not arrived

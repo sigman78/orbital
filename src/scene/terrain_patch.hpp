@@ -22,6 +22,10 @@ struct PatchKey {
     constexpr PatchKey child(unsigned i) const {
         return {face, std::uint8_t(level + 1), std::uint16_t(2 * x + (i & 1)), std::uint16_t(2 * y + (i >> 1))};
     }
+    // The cell one level up that contains this one; a root is its own parent.
+    constexpr PatchKey parent() const {
+        return level ? PatchKey{face, std::uint8_t(level - 1), std::uint16_t(x / 2), std::uint16_t(y / 2)} : *this;
+    }
 };
 
 constexpr unsigned patch_level_max = 11; // a cell of 90 degrees over 2048, quads of 24 urad
