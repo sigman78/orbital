@@ -156,6 +156,10 @@ struct TerrainSettings {
     float lod_bias = 0;
     // Slope detail strength; 0 disables it. Changes regenerate all tiles.
     float detail = 1;
+    // Debugging: log the provenance of any patch drawn this many degrees of arc or further from
+    // the camera, once per patch. 0 is off. Nothing should stand much past the horizon, so this
+    // is how a patch that does explains itself. See TerrainTier::explain.
+    float trace_arc = 0;
 };
 
 struct GasSettings {

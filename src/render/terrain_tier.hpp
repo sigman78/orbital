@@ -84,6 +84,38 @@ public:
         float near_distance = 0, far_distance = 0;
     };
 
+    // One level of a drawn patch's provenance, its root first: what each test compared, and by
+    // how much it passed. A margin is the room the test had; negative would have culled it, so a
+    // drawn patch has none negative and the smallest says which test nearly caught it.
+    struct Step {
+        PatchKey key;
+        unsigned slot = 0;        // slot_count when this node has no tile of its own
+        unsigned reach_level = 0; // the level whose tile supplied the reach; its own, or an ancestor's
+        Range<float> reach{0, 0};
+        // support * d - occluder^2, or infinity where the camera stands inside the occluder and
+        // the horizon test does not apply. This is the one that keeps the far side out.
+        double horizon_margin = 0;
+        double plane_margin = 0; // the tightest frustum plane, and which of the five it was
+        unsigned plane = 0;
+        double distance = 0, split_range = 0; // what the split decision compared
+        bool split = false, drawn = false;
+        unsigned quadrants = 0; // the mask it draws, when it is in the draw list
+    };
+    // The chain of decisions that put a patch in the draw list, root first. Off the hot path: it
+    // recomputes what visibility() weighed for a key already chosen, so call it after update()
+    // and within the frame whose planes are loaded.
+    void explain(PatchKey key, const TierView& view, std::vector<Step>& steps) const;
+
+    // Tree and cache health for the same debugging. `reachable` walks from the six roots, so a
+    // gap against `allocated` is a subtree no visit can reach again; `resident_undrawn` is tiles
+    // held for a set that is no longer drawn, which is normal for a few and a leak for many.
+    struct Audit {
+        unsigned reachable = 0, allocated = 0;
+        unsigned resident = 0, resident_undrawn = 0;
+        unsigned oldest_age = 0; // frames since the least recently used tile was last touched
+    };
+    Audit audit() const;
+
     // Per-frame limits and coverage diagnostics; out_of_range is normal coverage.
     struct Pressure {
         unsigned nodes = 0, node_budget = 0, splits_blocked = 0;
@@ -167,6 +199,7 @@ private:
     };
 
     void ensure_roots();
+    const Node* find(PatchKey key) const; // the node for a key, null where the tree stops short
     Visibility visibility(const Node& node, const TierView& view) const;
     void visit(std::uint32_t index, const TierView& view, const Visibility& seen, float fade);
     void collapse(Node& node);

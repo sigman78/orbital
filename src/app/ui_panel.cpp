@@ -299,6 +299,9 @@ void quality_controls(bool& high, render::TerrainSettings& terrain) {
     ImGui::SliderFloat("LOD bias", &terrain.lod_bias, -3.f, 3.f, "%+.2f");
     // Changing detail regenerates all tiles.
     ImGui::SliderFloat("Surface detail", &terrain.detail, 0.f, 2.5f, "%.2f");
+    // Turn this up to the arc a suspect patch stands at, and the log explains why it is drawn.
+    ImGui::SliderFloat("Trace patches past", &terrain.trace_arc, 0.f, 180.f,
+                       terrain.trace_arc > 0 ? "%.0f deg" : "off");
 }
 void anti_aliasing_controls(render::AntiAliasingSettings& settings) {
     ImGui::Checkbox("Temporal (F5)", &settings.temporal_aa);

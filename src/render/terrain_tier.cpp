@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace space::render {
 
@@ -157,6 +158,87 @@ Range<float> TerrainTier::reach_of(PatchKey key) const {
         const float margin = relief_margin(key.level);
         return {heights.min - margin, heights.max + margin};
     }
+}
+
+const TerrainTier::Node* TerrainTier::find(PatchKey key) const {
+    if (nodes_.size() < 6 || key.face >= 6)
+        return nullptr;
+    const Node* node = &nodes_[key.face];
+    for (unsigned level = 1; level <= key.level; level++) {
+        if (!node->children)
+            return nullptr; // the tree stops here: everything below is covered by this node
+        const unsigned shift = key.level - level;
+        node = &nodes_[node->children + (((key.x >> shift) & 1) | ((key.y >> shift) & 1) << 1)];
+    }
+    return node;
+}
+
+void TerrainTier::explain(PatchKey key, const TierView& view, std::vector<Step>& steps) const {
+    steps.clear();
+    for (PatchKey k = key;; k = k.parent()) {
+        steps.push_back({.key = k});
+        if (!k.level)
+            break;
+    }
+    std::reverse(steps.begin(), steps.end());
+    const double d = length(view.camera_local);
+    const Vec3d eye = d > 1e-12 ? view.camera_local * (1 / d) : Vec3d{0, 0, 1};
+    for (Step& step : steps) {
+        const PatchBounds b = patch_bounds(step.key);
+        step.slot = resident_slot(step.key);
+        step.reach = reach_of(step.key);
+        for (PatchKey a = step.key;; a = a.parent())
+            if (resident_slot(a) != no_slot || !a.level) {
+                step.reach_level = a.level;
+                break;
+            }
+        // Infinity where the camera stands inside the occluder: the test does not run at all,
+        // which is worth seeing, since then only the frustum holds the far side out.
+        step.horizon_margin = d > horizon_occluder
+                                  ? patch_cell_support(b, eye, step.reach) * d - horizon_occluder * horizon_occluder
+                                  : std::numeric_limits<double>::infinity();
+        step.plane_margin = std::numeric_limits<double>::infinity();
+        for (unsigned i = 0; i < std::size(planes_); i++)
+            if (const double margin = planes_[i].offset + patch_cell_support(b, planes_[i].normal, step.reach);
+                margin < step.plane_margin) {
+                step.plane_margin = margin;
+                step.plane = i;
+            }
+        step.distance = nearest_distance(view.camera_local, b, step.reach);
+        step.split_range = step.key.level + 1 < std::size(range_) ? double(range_[step.key.level + 1]) : 0;
+        const Node* node = find(step.key);
+        step.split = node && node->children;
+        for (const Draw& draw : draws_)
+            if (draw.key == step.key) {
+                step.drawn = true;
+                step.quadrants = draw.quadrants;
+            }
+    }
+}
+
+TerrainTier::Audit TerrainTier::audit() const {
+    Audit result{.allocated = nodes()};
+    const auto walk = [&](auto&& self, std::uint32_t index) -> void {
+        result.reachable++;
+        if (const std::uint32_t children = nodes_[index].children)
+            for (unsigned i = 0; i < 4; i++)
+                self(self, children + i);
+    };
+    for (unsigned face = 0; face < std::min<std::size_t>(6, nodes_.size()); face++)
+        walk(walk, face);
+    std::unordered_map<std::uint32_t, unsigned> drawn;
+    for (const Draw& draw : draws_)
+        drawn[draw.key.packed()] = draw.quadrants;
+    unsigned oldest = frame_;
+    for (const auto& [packed, slot] : slots_by_key_) {
+        if (!slots_[slot].resident)
+            continue;
+        result.resident++;
+        result.resident_undrawn += !drawn.count(packed);
+        oldest = std::min(oldest, slots_[slot].used);
+    }
+    result.oldest_age = frame_ - oldest;
+    return result;
 }
 
 unsigned TerrainTier::pending() const {

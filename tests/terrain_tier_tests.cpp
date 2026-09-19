@@ -469,6 +469,42 @@ void test_resident_terrain_morph() {
     assert(checked > 0 && bad == 0);
 }
 
+// The tree must stay reachable from its six roots -- a block that falls out of the walk is one
+// no visit can collapse again -- and every drawn patch must be able to account for itself: a
+// chain from its root to itself in which no test has a negative margin, since a negative one is
+// a test that should have culled it. This is the invariant behind `--terrain-trace`.
+void test_provenance_and_audit() {
+    constexpr double radius = 2.5 / 15;
+    const MinorPlanetTerrain terrain(1007);
+    TerrainTier tier;
+    AsyncTiles async;
+    async.terrain = &terrain;
+    const TierView view = view_over({.6, .3, 1}, .05, radius);
+    for (unsigned frame = 1; frame <= 300; frame++)
+        async.update(tier, view, frame);
+    const TerrainTier::Audit audit = tier.audit();
+    std::vector<TerrainTier::Step> steps;
+    unsigned checked = 0;
+    for (const auto& draw : tier.draws()) {
+        tier.explain(draw.key, view, steps);
+        assert(steps.size() == std::size_t(draw.key.level) + 1);
+        assert(steps.front().key.level == 0 && steps.back().key == draw.key);
+        assert(steps.back().drawn && steps.back().quadrants == draw.quadrants);
+        for (const TerrainTier::Step& step : steps) {
+            assert(step.plane_margin >= 0);   // every ancestor passed the frustum
+            assert(step.horizon_margin >= 0); // and the horizon, or stood inside the occluder
+            assert(step.reach_level <= step.key.level && step.reach.min < step.reach.max);
+            checked++;
+        }
+    }
+    std::printf("terrain tier: %zu drawn patches explained over %u levels; nodes %u reachable of %u, tiles %u "
+                "resident, %u undrawn, oldest %u frames\n",
+                tier.draws().size(), checked, audit.reachable, audit.allocated, audit.resident, audit.resident_undrawn,
+                audit.oldest_age);
+    assert(checked > 0 && audit.reachable == audit.allocated);
+    assert(audit.resident >= tier.draws().size());
+}
+
 // Ground truth for the cull: no terrain a viewer can actually see may be missing from the
 // drawn set. Visibility is decided by ray-marching the real surface, not by the rule the tier
 // applies, so this is the only check that can fail the horizon heuristic (terrain_tier.cpp
@@ -715,6 +751,7 @@ int main(int argc, char** argv) {
     test_morph_continuity();
     test_morph_streaming();
     test_cull_waste();
+    test_provenance_and_audit();
     constexpr double radius = 2.5 / 15;
     TerrainTier tier;
     AsyncTiles async;
