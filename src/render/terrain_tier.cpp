@@ -1,14 +1,16 @@
 #include "render/terrain_tier.hpp"
+#include "core/panic.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <unordered_set>
 
 namespace space::render {
 
 namespace {
 
-constexpr unsigned no_slot = TerrainTier::slot_count;
+constexpr unsigned no_slot = TerrainTier::no_slot;
 
 Vec3d to_world(const TierView& view, Vec3d local) {
     return view.axes[0] * local.x + view.axes[1] * local.y + view.axes[2] * local.z;
@@ -24,8 +26,8 @@ void TerrainTier::ensure_roots() {
         const PatchKey key{std::uint8_t(face), 0, 0, 0};
         nodes_.push_back({.key = key, .bounds = patch_bounds(key)});
     }
-    slots_.resize(slot_count);
-    for (unsigned slot = slot_count; slot-- > 0;)
+    slots_.resize(capacity_);
+    for (unsigned slot = capacity_; slot-- > 0;)
         free_slots_.push_back(slot);
 }
 
@@ -110,15 +112,15 @@ double TerrainTier::nearest_distance(Vec3d camera_local, const PatchBounds& boun
 
 // Interpolate the distance ranges in log space to estimate the desired level.
 double TerrainTier::level_at(double distance) const {
-    if (distance >= double(range_[0]))
+    if (distance >= double(range_[1]))
         return 0;
-    for (std::size_t i = 1; i < std::size(range_); i++)
+    for (std::size_t i = 2; i < std::size(range_); i++)
         if (range_[i] > 0 && distance >= double(range_[i])) {
             const double t = std::log(distance / double(range_[i - 1])) /
                              std::log(double(range_[i]) / double(range_[i - 1]));
-            return double(i - 1) + t;
+            return double(i - 2) + t;
         }
-    return double(std::size(range_) - 1);
+    return double(std::size(level_error) - 1);
 }
 
 double TerrainTier::farthest_distance(Vec3d camera_local, const PatchBounds& bounds, Range<float> heights) {
@@ -240,8 +242,30 @@ TerrainTier::Audit TerrainTier::audit() const {
         result.resident_undrawn += !drawn.count(packed);
         oldest = std::min(oldest, slots_[slot].used);
     }
-    result.oldest_age = frame_ - oldest;
+    result.oldest_age = result.resident ? frame_ - oldest : 0;
     result.pending_age = result.pending ? frame_ - assigned : 0;
+    return result;
+}
+
+TerrainTier::CacheStats TerrainTier::cache_stats(unsigned frame) const {
+    CacheStats result{.capacity = capacity_};
+    unsigned oldest = frame, assigned = frame;
+    for (const Slot& slot : slots_) {
+        if (!slot.stamp)
+            continue;
+        if (!slot.resident) {
+            result.pending++;
+            assigned = std::min(assigned, slot.assigned_frame);
+            continue;
+        }
+        result.resident++;
+        const unsigned age = frame - slot.used;
+        result.age[std::min(age / cache_age_bucket_frames, cache_age_buckets - 1)]++;
+        oldest = std::min(oldest, slot.used);
+    }
+    result.free = capacity_ - result.resident - result.pending;
+    result.oldest_age = result.resident ? frame - oldest : 0;
+    result.pending_age = result.pending ? frame - assigned : 0;
     return result;
 }
 
@@ -288,112 +312,197 @@ void TerrainTier::request(PatchKey key, float pixels) {
     requests_.push_back({key, pixels});
 }
 
-// `seen` is the caller's, which already has it: a node computed its children's visibility to
-// choose between them, and recomputing it on entry paid for every plane of every node twice.
-void TerrainTier::visit(std::uint32_t index, const TierView& view, const Visibility& seen, float fade) {
+// Discover requested tiles independently of local resident fallback. Missing tiles never change
+// the distance ranges used by other patches.
+void TerrainTier::prepare(std::uint32_t index, const TierView& view, const Visibility& seen) {
     if (!seen.visible) {
         collapse(nodes_[index]);
         return;
     }
     const PatchKey key = nodes_[index].key;
-    touch(key);
-    const unsigned own_slot = resident_slot(key); // the tile this node would draw from
-    // Only where the pad is large enough to decide anything: it is 0.0286 radii at level 0 and
-    // 0.00026 by level 6, and below the skirt drop it cannot move the horizon by a tenth of a
-    // degree. Asking anyway would cost a support test for every patch drawn to no purpose.
-    const bool tight_worth_asking = relief_margin(key.level) > patch_skirt_drop;
-    // The distance visibility measured covers the whole subtree, so it decides the split too.
-    // Measuring against the full shell instead read zero straight below a camera inside it,
-    // and every node around the nadir then asked for children it would never draw.
-    const bool wants = key.level < patch_level_max && key.level + 1 < std::size(level_error) &&
+    const unsigned slot = slot_of(key);
+    if (slot == no_slot || !slots_[slot].resident) {
+        if (slot == no_slot)
+            request(key, seen.pixels);
+        pressure_.starved++;
+        return;
+    }
+    const bool wants = key.level < patch_level_max &&
                        seen.distance <
                            double(range_[key.level + 1]) * (nodes_[index].children ? 1.0 / double(hysteresis) : 1.0);
-    const bool allowed = nodes_[index].children || nodes() < node_budget;
-    pressure_.splits_blocked += wants && !allowed;
-    const bool split = wants && allowed;
-    if (split && !nodes_[index].children)
-        nodes_[index].children = allocate_children(nodes_[index]);
-    if (!split && nodes_[index].children)
+    if (!wants) {
         collapse(nodes_[index]);
-    // Visit resident children within range; cover the other visible quadrants here.
+        return;
+    }
+    if (!nodes_[index].children) {
+        if (nodes() + 4 > node_budget) {
+            pressure_.splits_blocked++;
+            return;
+        }
+        nodes_[index].children = allocate_children(nodes_[index]);
+    }
+    const unsigned children = nodes_[index].children;
+    for (unsigned i = 0; i < 4; i++) {
+        const Visibility child_seen = visibility(nodes_[children + i], view);
+        if (child_seen.visible && child_seen.distance < double(range_[key.level + 1]))
+            prepare(children + i, view, child_seen);
+        else
+            collapse(nodes_[children + i]);
+    }
+}
+
+void TerrainTier::visit(std::uint32_t index, const TierView& view, const Visibility& seen) {
+    if (!seen.visible)
+        return;
+    const PatchKey key = nodes_[index].key;
+    touch(key); // pin the drawn tile and every ancestor used by material blending
+    const unsigned own_slot = resident_slot(key);
+    ORBITAL_ASSERT(own_slot != no_slot);
+    const bool tight_worth_asking = relief_margin(key.level) > patch_skirt_drop;
     unsigned quadrants = 0xf;
-    if (const std::uint32_t children = nodes_[index].children) {
+    if (const unsigned children = nodes_[index].children) {
         quadrants = 0;
-        // The youngest resident sibling sets the shared fade, bounded below by the parent's.
-        unsigned descend = 0, youngest = 0;
-        Visibility child_seen[4];
         for (unsigned i = 0; i < 4; i++) {
             const Node& child = nodes_[children + i];
-            child_seen[i] = visibility(child, view);
-            if (!child_seen[i].visible) {
-                collapse(nodes_[children + i]);
+            const Visibility child_seen = visibility(child, view);
+            if (!child_seen.visible)
+                continue;
+            if (child_seen.distance < double(range_[key.level + 1]) && resident_slot(child.key) != no_slot) {
+                visit(children + i, view, child_seen);
                 continue;
             }
-            const bool in_range = child_seen[i].distance < double(range_[key.level + 1]);
-            const unsigned child_slot = slot_of(child.key);
-            if (in_range && child_slot != no_slot && slots_[child_slot].resident) {
-                descend |= 1u << i;
-                youngest = std::max(youngest, slots_[child_slot].resident_frame);
-                continue;
-            }
-            // This quadrant would be drawn from this node's tile, so it is that tile's own
-            // heights over the child's cell that decide whether it can be seen at all.
-            if (own_slot == no_slot || !tight_worth_asking ||
-                drawn_over_horizon(child.bounds, slots_[own_slot].heights))
+            pressure_.out_of_range++;
+            if (!tight_worth_asking || drawn_over_horizon(child.bounds, slots_[own_slot].heights))
                 quadrants |= 1u << i;
-            if (!in_range) {
-                collapse(nodes_[children + i]);
-                pressure_.out_of_range++;
-            } else {
-                pressure_.starved++; // it wanted this child and has no tile for it
-                if (child_slot == no_slot)
-                    request(child.key, child_seen[i].pixels);
-            }
-            if (child_slot != no_slot)
-                touch(child.key);
         }
-        if (descend) {
-            const unsigned age = frame_ - std::min(youngest, frame_);
-            const float group = age >= fade_frames ? 0.f : 1.f - float(age) / float(fade_frames);
-            for (unsigned i = 0; i < 4; i++)
-                if (descend >> i & 1)
-                    visit(children + i, view, child_seen[i], std::max(fade, group));
-        }
-        if (!quadrants)
-            return;
-        // Drop inherited arrival fade when children use this node as their reference; keep distance morphing.
-        if (descend)
-            fade = 0;
-    }
-    // A leaf covers its whole cell from its own tile, so the same narrow question applies to it.
-    // A node with children has had each covered quadrant asked already, and their union is this
-    // cell, so there is nothing left to ask here.
-    if (own_slot != no_slot && tight_worth_asking && !nodes_[index].children &&
-        !drawn_over_horizon(nodes_[index].bounds, slots_[own_slot].heights))
+    } else if (tight_worth_asking && !drawn_over_horizon(nodes_[index].bounds, slots_[own_slot].heights)) {
         return;
-    const unsigned slot = slot_of(key);
-    if (slot != no_slot && slots_[slot].resident)
+    }
+    if (quadrants)
         draws_.push_back(
             {.key = key,
-             .slot = slot,
+             .slot = own_slot,
              .quadrants = quadrants,
-             .fade = fade,
              .near_distance = float(seen.distance),
              .far_distance = float(farthest_distance(view.camera_local, nodes_[index].bounds, height_range(key)))});
-    else if (slot == no_slot)
-        request(key, seen.pixels);
+}
+
+// Balance only the neighbourhood of a late tile. A fine quadrant may meet a patch at most
+// one level coarser, so collapsing its odd boundary vertices reproduces that neighbour's edge.
+void TerrainTier::stitch(const TierView& view) {
+    std::unordered_map<std::uint32_t, unsigned> cover;
+    const auto rebuild = [&] {
+        cover.clear();
+        for (unsigned i = 0; i < draws_.size(); i++)
+            for (unsigned q = 0; q < 4; q++)
+                if (draws_[i].quadrants >> q & 1)
+                    cover[draws_[i].key.child(q).packed()] = i;
+    };
+    const auto covering = [&](PatchKey key) {
+        for (;;) {
+            if (const auto it = cover.find(key.packed()); it != cover.end())
+                return it->second;
+            if (!key.level)
+                return unsigned(draws_.size());
+            key = key.parent();
+        }
+    };
+    const auto contains = [](PatchKey parent, PatchKey child) {
+        return parent.face == child.face && parent.level <= child.level &&
+               (unsigned(child.x) >> (child.level - parent.level)) == parent.x &&
+               (unsigned(child.y) >> (child.level - parent.level)) == parent.y;
+    };
+    for (;;) {
+        rebuild();
+        std::vector<PatchKey> coarsen;
+        for (const Draw& draw : draws_)
+            for (unsigned q = 0; q < 4; q++) {
+                if (!(draw.quadrants >> q & 1))
+                    continue;
+                for (unsigned side = 0; side < 4; side++) {
+                    const unsigned other = covering(patch_neighbour(draw.key.child(q), side).key);
+                    if (other == draws_.size() || draw.key.level <= draws_[other].key.level + 1)
+                        continue;
+                    PatchKey parent = draw.key.parent();
+                    while (parent.level > draws_[other].key.level + 1)
+                        parent = parent.parent();
+                    coarsen.push_back(parent);
+                }
+            }
+        if (coarsen.empty())
+            break;
+        std::sort(coarsen.begin(), coarsen.end(), [](PatchKey a, PatchKey b) {
+            return a.level != b.level ? a.level < b.level : a.packed() < b.packed();
+        });
+        std::vector<PatchKey> replaced;
+        for (PatchKey key : coarsen) {
+            if (std::any_of(replaced.begin(), replaced.end(), [&](PatchKey parent) { return contains(parent, key); }))
+                continue;
+            replaced.push_back(key);
+            unsigned quadrants = 0;
+            std::erase_if(draws_, [&](const Draw& draw) {
+                if (!contains(key, draw.key))
+                    return false;
+                if (key == draw.key) {
+                    quadrants |= draw.quadrants;
+                } else {
+                    const unsigned shift = draw.key.level - key.level - 1;
+                    const unsigned q = ((draw.key.x >> shift) & 1) | (((draw.key.y >> shift) & 1) << 1);
+                    quadrants |= 1u << q;
+                }
+                return true;
+            });
+            const Node* node = find(key);
+            const unsigned slot = resident_slot(key);
+            ORBITAL_ASSERT(node && slot != no_slot);
+            touch(key);
+            draws_.push_back(
+                {.key = key,
+                 .slot = slot,
+                 .quadrants = quadrants,
+                 .near_distance = float(nearest_distance(view.camera_local, node->bounds, reach_of(key))),
+                 .far_distance = float(farthest_distance(view.camera_local, node->bounds, height_range(key)))});
+            pressure_.balanced++;
+        }
+    }
+    // Stitch both sides of every unequal-level boundary, including internal mask boundaries.
+    // Same-face peers retain their common distance morph; cube peers pin their shared edge
+    // because their lattice axes may run in opposite directions.
+    for (Draw& draw : draws_) {
+        for (unsigned q = 0; q < 4; q++)
+            if (draw.quadrants >> q & 1)
+                for (unsigned side = 0; side < 4; side++) {
+                    const auto neighbour = patch_neighbour(draw.key.child(q), side);
+                    const unsigned other = covering(neighbour.key);
+                    if (other < draws_.size() && draws_[other].key.level < draw.key.level) {
+                        draw.coarse_edges |= 1u << (4 * q + side);
+                        const unsigned shift = neighbour.key.level - draws_[other].key.level - 1;
+                        const unsigned other_q = ((neighbour.key.x >> shift) & 1) |
+                                                 (((neighbour.key.y >> shift) & 1) << 1);
+                        draws_[other].fine_edges |= 1u << (4 * other_q + neighbour.side);
+                    } else if (other < draws_.size() && draws_[other].key.face != draw.key.face) {
+                        draw.fine_edges |= 1u << (4 * q + side);
+                    }
+                }
+        Slot& slot = slots_[draw.slot];
+        if (!slot.fade_update)
+            slot.fade_update = update_;
+        const unsigned age = update_ - slot.fade_update;
+        draw.fade = draw.key.level && age < recovery_frames ? 1.f - float(age) / recovery_frames : 0;
+    }
 }
 
 // Serve coarse/large patches first; LRU eviction protects pending and currently used slots.
 void TerrainTier::choose_generation(unsigned budget) {
     const unsigned cap = std::min(budget, generate_per_frame);
+    pressure_.generation_budget = cap;
     // Reclaim slots whose generation never came back, whatever lost it. `used` cannot say:
     // a visible pending patch is touched every frame, so the assignment frame decides.
     // A cursor over a window per frame rather than the whole array: there is no queue to
-    // overrun, and a slot waits at most slot_count / sweep_window extra frames.
+    // overrun, and a slot waits at most capacity / sweep_window extra frames.
     for (unsigned n = 0; n < sweep_window; n++) {
         Slot& slot = slots_[sweep_cursor_];
-        sweep_cursor_ = (sweep_cursor_ + 1) % slot_count;
+        sweep_cursor_ = (sweep_cursor_ + 1) % capacity_;
         if (!slot.resident && slot.stamp && slot.assigned_frame + pending_timeout < frame_) {
             slots_by_key_.erase(slot.key.packed());
             free_slots_.push_back(unsigned(&slot - slots_.data()));
@@ -401,28 +510,49 @@ void TerrainTier::choose_generation(unsigned budget) {
         }
     }
     std::sort(requests_.begin(), requests_.end(), [](const Request& a, const Request& b) {
-        return a.key.level != b.key.level ? a.key.level < b.key.level : a.pixels > b.pixels;
+        if (a.key.level != b.key.level)
+            return a.key.level < b.key.level;
+        if (a.pixels != b.pixels)
+            return a.pixels > b.pixels;
+        return a.key.packed() < b.key.packed();
     });
+    std::unordered_set<std::uint32_t> seen;
+    bool slots_unavailable = false;
     for (const Request& r : requests_) {
-        if (generate_.size() >= cap)
-            break;
+        if (!seen.insert(r.key.packed()).second)
+            continue;
+        pressure_.requested++;
         if (slot_of(r.key) != no_slot)
             continue; // requested twice, or already resident
+        if (generate_.size() >= cap) {
+            pressure_.generation_budget_limited++;
+            continue;
+        }
+        if (slots_unavailable) {
+            pressure_.slots_blocked++;
+            continue;
+        }
         unsigned slot = no_slot;
         if (!free_slots_.empty()) {
             slot = free_slots_.back();
             free_slots_.pop_back();
         } else {
             unsigned oldest = frame_;
-            for (unsigned i = 0; i < slot_count; i++)
+            for (unsigned i = 0; i < capacity_; i++)
                 if (slots_[i].resident && slots_[i].used < oldest) {
                     oldest = slots_[i].used;
                     slot = i;
                 }
-            if (slot == no_slot)
-                break; // nothing evictable: every other slot is pending
+            if (slot == no_slot) {
+                pressure_.slots_blocked++; // every usable slot is pending or touched this frame
+                slots_unavailable = true;
+                continue;
+            }
             pressure_.evictions++;
-            pressure_.evicted_recent += slots_[slot].used + 60 > frame_;
+            const bool warm = slots_[slot].used + 60 > frame_;
+            pressure_.evicted_recent += warm;
+            eviction_total_++;
+            warm_eviction_total_ += warm;
             slots_by_key_.erase(slots_[slot].key.packed());
         }
         slots_[slot] = {.key = r.key, .used = frame_, .assigned_frame = frame_, .stamp = ++stamp_, .resident = false};
@@ -432,11 +562,12 @@ void TerrainTier::choose_generation(unsigned budget) {
 }
 
 void TerrainTier::invalidate() {
+    ensure_roots();
     for (Slot& slot : slots_)
         slot = {};
     slots_by_key_.clear();
     free_slots_.clear();
-    for (unsigned slot = slot_count; slot-- > 0;)
+    for (unsigned slot = capacity_; slot-- > 0;)
         free_slots_.push_back(slot);
     draws_.clear();
     generate_.clear();
@@ -453,7 +584,7 @@ void TerrainTier::disable() {
 
 void TerrainTier::release(unsigned slot, PatchKey key, std::uint32_t stamp) {
     // Stamps start at one, so a cleared slot matches nothing; a resident slot is not ours to free.
-    if (slot >= slot_count || slots_[slot].stamp != stamp || slots_[slot].key != key || slots_[slot].resident)
+    if (slot >= slots_.size() || slots_[slot].stamp != stamp || slots_[slot].key != key || slots_[slot].resident)
         return;
     slots_by_key_.erase(key.packed());
     slots_[slot] = {};
@@ -462,24 +593,40 @@ void TerrainTier::release(unsigned slot, PatchKey key, std::uint32_t stamp) {
 
 bool TerrainTier::mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights) {
     // Stamps start at one, so a slot cleared by invalidate() matches nothing in flight.
-    if (slots_[slot].stamp != stamp || slots_[slot].key != key)
+    if (slot >= slots_.size() || slots_[slot].stamp != stamp || slots_[slot].key != key)
         return false; // recycled, or regenerated at another detail, since the request went out
     slots_[slot].resident = true;
     slots_[slot].heights = heights;
-    // The frame it can first be drawn in: residency is marked between updates.
-    slots_[slot].resident_frame = frame_ + 1;
     return true;
 }
 
 void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) {
     frame_ = frame;
+    update_++;
     draws_.clear();
     requests_.clear();
     generate_.clear();
     pressure_ = {};
+    const auto cache_snapshot = [&] {
+        const CacheStats cache = cache_stats(frame_);
+        pressure_.cache_capacity = cache.capacity;
+        pressure_.cache_free = cache.free;
+        pressure_.cache_resident = cache.resident;
+        pressure_.cache_pending = cache.pending;
+        pressure_.cache_oldest_age = cache.oldest_age;
+        pressure_.cache_pending_age = cache.pending_age;
+        pressure_.cache_age = cache.age;
+        pressure_.eviction_total = eviction_total_;
+        pressure_.warm_eviction_total = warm_eviction_total_;
+        pressure_.nodes = nodes();
+        pressure_.node_budget = node_budget;
+    };
     const float bias = std::exp2(view.lod_bias);
-    for (unsigned level = 0; level < std::size(level_error); level++)
-        range_[level] = level_error[level] * view.height_pixels / (view.tan_y * error_pixels) * bias;
+    // A child replaces its parent when the parent's projected error reaches the budget.
+    // range[L] is both L's handover/morph end and (L-1)'s split distance.
+    for (unsigned level = 0; level < std::size(range_); level++)
+        range_[level] = (level ? level_error[level - 1] : 2 * level_error[0]) * view.height_pixels /
+                        (view.tan_y * error_pixels) * bias;
     ensure_roots();
     // Carry the frustum into the body's frame and into radii, once: the axes are orthonormal,
     // so a plane normal transposes by three dots and a patch test becomes one more.
@@ -498,13 +645,17 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         for (unsigned face = 0; face < 6; face++)
             collapse(nodes_[face]);
         active_ = false;
+        cache_snapshot();
         return;
     }
     // Pin all six roots as fallback coverage, including faces outside the current view.
     for (unsigned face = 0; face < 6; face++)
         touch(nodes_[face].key);
-    for (unsigned face = 0; face < 6; face++)
-        visit(face, view, visibility(nodes_[face], view), 0); // a face has no parent to fade from
+    Visibility roots[6];
+    for (unsigned face = 0; face < 6; face++) {
+        roots[face] = visibility(nodes_[face], view);
+        prepare(face, view, roots[face]);
+    }
     // The tier takes over once every face is resident; the sphere levels draw until then.
     active_ = true;
     for (unsigned face = 0; face < 6; face++) {
@@ -514,25 +665,25 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         if (slot == no_slot || !slots_[slot].resident)
             active_ = false;
     }
-    if (!active_)
-        draws_.clear();
+    if (active_)
+        for (unsigned face = 0; face < 6; face++)
+            visit(face, view, roots[face]);
+    if (active_)
+        stitch(view);
     choose_generation(budget);
-    pressure_.nodes = nodes();
-    pressure_.node_budget = node_budget;
-    pressure_.requested = unsigned(requests_.size());
+    cache_snapshot();
     pressure_.served = unsigned(generate_.size());
-    double behind = 0, fade = 0;
+    double behind = 0;
     for (const Draw& draw : draws_) {
         pressure_.deepest = std::max(pressure_.deepest, unsigned(draw.key.level));
         const double near = double(draw.near_distance);
         const double over = level_at(near) - double(draw.key.level);
         behind += over;
         pressure_.behind_one += over > 1;
-        fade += double(draw.fade);
         // Estimate morph variation from the patch's distance bounds.
-        const double end = double(range_[draw.key.level]), start = .7 * end;
+        const double end = double(range_[draw.key.level]), start = morph_start(draw.key.level);
         const auto morph = [&](double d) {
-            return std::max(std::clamp((d - start) / std::max(end - start, 1e-9), 0.0, 1.0), double(draw.fade));
+            return draw.key.level ? std::clamp((d - start) / std::max(end - start, 1e-6), 0.0, 1.0) : 0.0;
         };
         const double lo = morph(near), hi = morph(double(draw.far_distance));
         if (hi - lo > .02)
@@ -542,7 +693,6 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         else
             pressure_.flat_near++; // standing at its own
     }
-    pressure_.fade_mean = draws_.empty() ? 0 : float(fade / double(draws_.size()));
     pressure_.behind_count = unsigned(draws_.size());
     pressure_.behind_mean = draws_.empty() ? 0 : float(behind / double(draws_.size()));
 }

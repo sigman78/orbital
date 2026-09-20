@@ -28,8 +28,8 @@ using ShaderMatrix4 = float[16];
 #define ORBITAL_ROOT_FOLD_CLOUDS 1 // the cloud shell is not drawn: the ground shader blends the clouds in
 #define ORBITAL_ROOT_WIREFRAME 2   // the near tier's triangles and patch borders drawn over it (with ORBITAL_ROOT_PATCHES)
 #define ORBITAL_ROOT_PATCHES 4     // this draw uses the CDLOD patch path: root.patches points to PatchInstance records
-// Must match TerrainTier::slot_count; also the missing-parent sentinel.
-#define ORBITAL_TERRAIN_SLOTS 1024
+// Renderer cache capacity and missing-parent layer sentinel. CPU sweeps vary capacity independently.
+#define ORBITAL_TERRAIN_SLOTS 2048
 // Height range in radii; must match MinorPlanetTerrain::height_min/max.
 #define MINOR_PLANET_HEIGHT_MIN (-.05)
 #define MINOR_PLANET_HEIGHT_MAX (.05)
@@ -71,8 +71,8 @@ struct AsteroidInstance {
 struct Vertex { SHADER_FLOAT4 position; SHADER_FLOAT4 normal; };
 struct PatchInstance {
     SHADER_FLOAT4 cell;  // s0, t0, size, level
-    SHADER_FLOAT4 morph; // start distance (radii), end distance, the fade floor under it, w unused
-    SHADER_UINT tile[4]; // face, slot, the parent's slot (or the slot count: none), the child's quadrant bits (x & 1, y & 1 << 1) and, bits 2 to 5, which sides lie on a cube edge (s low, s high, t low, t high), bits 6 to 9 the grid quadrants drawn
+    SHADER_FLOAT4 morph; // start distance (radii), end distance, interior arrival fade, 16-bit coarse-edge mask as a float
+    SHADER_UINT tile[4]; // face, slot, the parent's slot (or the slot count: none), the child's quadrant bits (x & 1, y & 1 << 1) and, bits 2 to 5, which sides lie on a cube edge (s low, s high, t low, t high), bits 6 to 9 the grid quadrants drawn, bits 16 to 31 the per-quadrant unmorphed-edge mask
 };
 struct Frame {
     SHADER_MATRIX4 view_projection;

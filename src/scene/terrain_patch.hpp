@@ -30,6 +30,13 @@ struct PatchKey {
 
 constexpr unsigned patch_level_max = 11; // a cell of 90 degrees over 2048, quads of 24 urad
 
+// Same-level neighbour across s-low, s-high, t-low, t-high; also works across cube faces.
+struct PatchNeighbour {
+    PatchKey key;
+    unsigned side; // the neighbour's side facing this cell
+};
+PatchNeighbour patch_neighbour(PatchKey key, unsigned side);
+
 // The deepest level decides every field that carries a cell index, so raising it silently
 // truncates rather than failing. Each of these is the real ceiling, not a restatement of it.
 constexpr unsigned patch_cells_max = 1u << patch_level_max; // cells per face edge at the deepest level
@@ -87,7 +94,7 @@ PatchBounds patch_bounds(PatchKey key);
 // ahead of it only rejected what it rejects too, and cost more than it saved.
 double patch_cell_support(const PatchBounds& bounds, Vec3d normal, Range<float> heights);
 
-// Height-only error at quad centres against bilinear corner heights, in radii.
+// Sampled 3D error against the grid's two triangles per quad, in radii (not a proven bound).
 float patch_error(const MinorPlanetTerrain& terrain, PatchKey key);
 
 // Outputs: tile_side squared heights; colour-side RGBA8 albedo and RG16_UNORM tangent slopes.

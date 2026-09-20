@@ -5,9 +5,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstdarg>
 #include <cstdio>
+#include <format>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace space::app {
@@ -239,60 +240,26 @@ void frame_controls(const SmoothedStats& smoothed, const FrameHistory& history, 
                 history.percentile(.95f));
     ImGui::PlotLines("##frame", raw.data(), int(raw.size()), history.offset(), nullptr, 0,
                      std::max(history.peak(), 1.f) * 1.1f, {-1, 60});
-    ImGui::TextDisabled("Timings: smoothed over 0.5 s | graph: raw frames");
-    ImGui::Text("Draw %.2f ms incl. GPU wait", stats.draw_ms);
-    ImGui::Text("GPU %.2f ms", stats.gpu[render::GpuPass::Frame]);
+    ImGui::Text("Time   %.2f / %.2f / %.2f ms", stats.draw_ms, stats.prepare_ms, stats.gpu[render::GpuPass::Frame]);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("CPU draw (including GPU wait) / CPU prepare / GPU frame.\n"
+                          "Timings are smoothed over 0.5 s; the graph shows raw frame times.");
     gpu_time_bar(stats);
-    ImGui::Text("Cull + shadows %.2f ms", stats.gpu[render::GpuPass::CullAndShadows]);
-    ImGui::Text("CPU prepare %.2f ms", stats.prepare_ms);
     ImGui::Checkbox("VSync", &vsync);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Disable VSync for performance comparisons: a waiting GPU may clock down.");
-    ImGui::Text("%u draws, %u bodies, %u rock groups", stats.draw_calls, stats.bodies_drawn, stats.rock_groups_drawn);
-    if (stats.terrain.slots) {
-        const auto& terrain = stats.terrain;
-        if (terrain.active)
-            ImGui::Text("Near tier on: %u patches, %u / %u tiles, %u pending", terrain.drawn, terrain.resident,
-                        terrain.slots, terrain.pending);
-        else
-            ImGui::TextDisabled("Near tier off: %u / %u tiles, %u pending", terrain.resident, terrain.slots,
-                                terrain.pending);
-        ImGui::Text("Tiles: %u queued on %u workers, %u uploaded, %.1f ms each", terrain.queued, terrain.workers,
-                    terrain.uploaded, terrain.generate_ms);
-        ImGui::Text("Ring %u / %u free, nodes %u / %u", terrain.rings_free, terrain.rings, terrain.nodes,
-                    terrain.node_budget);
-        const auto pinch = [](bool bad, const char* text, ...) {
-            va_list args;
-            va_start(args, text);
-            if (bad)
-                ImGui::TextColoredV(ImVec4(1.f, .45f, .35f, 1.f), text, args);
-            else
-                ImGui::TextV(text, args);
-            va_end(args);
-        };
-        pinch(terrain.splits_blocked > 0, "Splits blocked by the node budget: %u", terrain.splits_blocked);
-        pinch(terrain.requested > terrain.served, "Tiles asked for %u, given a slot %u", terrain.requested,
-              terrain.served);
-        pinch(terrain.evicted_recent > 0, "Evictions %u, of them still warm %u", terrain.evictions,
-              terrain.evicted_recent);
-        // A tile that never arrives holds its slot, and its patch stays coarse until the sweep
-        // reclaims it, which takes seconds. That is what a patch stuck at the wrong level looks
-        // like from here, and it keeps counting while time is paused.
-        pinch(terrain.pending_age > 60, "A tile slot has waited %u frames for its tile", terrain.pending_age);
-        pinch(terrain.starved > 0, "Quadrants covered: %u for want of a tile, %u out of range", terrain.starved,
-              terrain.out_of_range);
-        pinch(terrain.behind_mean > 1.f, "Finest level %u, drawn %.2f levels coarser than asked (%u over one)",
-              terrain.deepest, double(terrain.behind_mean), terrain.behind_one);
-        pinch(terrain.graded * 2 < terrain.drawn, "Morph grades %u, switches %u near + %u far, fade %.2f",
-              terrain.graded, terrain.flat_near, terrain.flat_far, double(terrain.fade_mean));
-    }
-    ImGui::Text("%u rocks, %.2f M triangles", stats.visible_asteroids, stats.triangles / 1e6);
+    ImGui::Text("Scene  %u / %u / %u", stats.draw_calls, stats.bodies_drawn, stats.rock_groups_drawn);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Draw calls / bodies / rock groups");
+    ImGui::Text("Mesh   %u / %.2f M", stats.visible_asteroids, stats.triangles / 1e6);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Visible rocks / triangles (millions)");
 }
 // The near tier's quadtree, drawn as the cube unwrapped: six faces in a cross, each patch the
 // cell it occupies on its face, each drawn quadrant a square of that cell. A quadrant missing
 // from a patch is a quadrant its child draws, or one nothing does -- which is what the map is
 // for. Hue is the level, brightness how far the patch stands from its own shape: bright is its
-// own, dark is its parent's, and a tile still fading in reads white.
+// own, dark is its parent's, and a new patch reads white.
 void patch_map(const render::Stats::PatchMap& map) {
     const std::span<const render::PatchView> patches = map.patches;
     // The six faces in index order, three by two. A cross reads as a cube but spends half the
@@ -326,7 +293,7 @@ void patch_map(const render::Stats::PatchMap& map) {
         const float cell = side / float(1u << patch.level);
         // Hue by level, brightness by how far it has morphed toward its parent; a tile still
         // fading in keeps its hue but washes out, so arrivals stand out from settled patches.
-        const ImVec4 tint = ImColor::HSV(std::fmod(patch.level * .17f, 1.f), .70f - .55f * patch.fade,
+        const ImVec4 tint = ImColor::HSV(std::fmod(patch.level * .17f, 1.f), .70f - .55f * patch.recovery,
                                          .35f + .65f * (1 - patch.morph));
         const ImU32 fill = ImColor(tint);
         for (unsigned q = 0; q < 4; q++) {
@@ -354,22 +321,121 @@ void patch_map(const render::Stats::PatchMap& map) {
     ImGui::Text("%zu patches, %u quadrants, finest level %u", patches.size(), drawn_quadrants, deepest);
 }
 
-void quality_controls(bool& high, render::TerrainSettings& terrain) {
-    ImGui::Checkbox("High tier (F2)", &high);
+void terrain_controls(render::TerrainSettings& terrain, bool& freeze_culling) {
+    ImGui::Checkbox("Near tier (N)", &terrain.near_tier);
     ImGui::SameLine();
-    ImGui::TextDisabled(high ? "520k rocks" : "280k rocks");
-    ImGui::Checkbox("Near tier", &terrain.near_tier); // the minor planet's patches close in; off keeps its sphere
-    ImGui::SameLine();
-    ImGui::Checkbox("Wireframe", &terrain.wireframe); // the patches' triangles over the surface
+    ImGui::Checkbox("Wireframe (G)", &terrain.wireframe);
     const char* debug_views[] = {"Shaded",    "Tile coordinate", "Normal",
                                  "Elevation", "Crater shadow",   "Morph and level"};
     int debug = int(terrain.debug);
-    if (ImGui::Combo("Patch view", &debug, debug_views, 6))
+    if (ImGui::Combo("Patch view (V)", &debug, debug_views, 6))
         terrain.debug = unsigned(debug);
-    ImGui::SliderFloat("Tier switch", &terrain.activate_pixels, 50.f, 2400.f, "%.0f px", ImGuiSliderFlags_Logarithmic);
     ImGui::SliderFloat("LOD bias", &terrain.lod_bias, -3.f, 3.f, "%+.2f");
-    // Changing detail regenerates all tiles.
+    ImGui::Checkbox("Freeze culling (C)", &freeze_culling);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Holds terrain and belt selection at the current viewpoint.\n"
+                          "Move the camera to inspect coverage; streaming can still complete.");
+    ImGui::SliderFloat("Tier switch", &terrain.activate_pixels, 50.f, 2400.f, "%.0f px", ImGuiSliderFlags_Logarithmic);
     ImGui::SliderFloat("Surface detail", &terrain.detail, 0.f, 2.5f, "%.2f");
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Changing surface detail invalidates and regenerates every cached tile.");
+}
+
+// A capacity strip ordered by last-use age: its width is slots, not elapsed time.
+// Ages use render frames, so the reading remains meaningful while simulation is paused.
+void terrain_cache(const render::FrameStats::Terrain& terrain) {
+    if (!terrain.slots) {
+        ImGui::TextDisabled("Tile cache not initialized");
+        return;
+    }
+    ImGui::Spacing();
+    if (ImGui::BeginTable("##terrain-stats", 2, ImGuiTableFlags_SizingStretchSame)) {
+        const auto row = [](const char* label, const std::string& value, const std::string& hint,
+                            const char* state = "", bool warning = false) {
+            ImGui::TableNextColumn();
+            const float available = ImGui::GetContentRegionAvail().x;
+            ImGui::BeginGroup();
+            if (warning)
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{1.f, .7f, .35f, 1.f});
+            ImGui::Text("%s%s", label, warning ? "!" : "");
+            // Keep unusually large lifetime counters readable by wrapping within their column.
+            if (available >= 48 + ImGui::CalcTextSize(value.c_str()).x)
+                ImGui::SameLine(48);
+            ImGui::TextUnformatted(value.c_str());
+            if (warning)
+                ImGui::PopStyleColor();
+            ImGui::EndGroup();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s%s%s\n%s", label, *state ? ": " : "", state, hint.c_str());
+        };
+        row("Cache", std::format("{}/{}/{}", terrain.resident, terrain.pending, terrain.slots_free),
+            std::format("Resident / pending / free tiles ({} capacity).\n"
+                        "{} requests blocked: no slot can be evicted.\n"
+                        "Oldest last use: {} frames; oldest pending: {} frames.\n"
+                        "A full cache alone is not evidence of thrashing.\n"
+                        "Strip below: recent to cold, then amber pending and gray free.",
+                        terrain.slots, terrain.slots_blocked, terrain.oldest_age, terrain.pending_age),
+            terrain.slots_blocked ? "blocked" : "", terrain.slots_blocked > 0);
+        row("Flow", std::format("{}/{}/{}", terrain.requested, terrain.served, terrain.uploaded),
+            std::format("Requested / admitted / uploaded tiles this frame.\n"
+                        "{} deferred by throughput; admission budget {}.\n"
+                        "A capped flow is normal while loading; it is not cache exhaustion.",
+                        terrain.generation_budget_limited, terrain.generation_budget),
+            terrain.generation_budget_limited ? "capped" : "");
+        row("Queue", std::format("{}/{}/{}", terrain.queued, terrain.rings_free, terrain.rings),
+            std::format("Worker jobs / free upload rings / total rings.\n"
+                        "{} workers; last generated tile {:.1f} ms.\n"
+                        "Oldest pending tile: {} frames. Slow flags a wait over 60 frames.",
+                        terrain.workers, terrain.generate_ms, terrain.pending_age),
+            terrain.pending_age > 60 ? "slow" : "", terrain.pending_age > 60);
+        row("Evict", std::format("{}/{}/{}", terrain.evictions, terrain.evicted_recent, terrain.eviction_total),
+            std::format("Evictions / warm evictions this frame / lifetime evictions.\n"
+                        "Warm means used fewer than 60 frames ago: a sign of cache competition.\n"
+                        "Lifetime warm evictions: {}. Totals survive cache resets.",
+                        terrain.warm_eviction_total),
+            terrain.evicted_recent ? "warm" : "", terrain.evicted_recent > 0);
+        row("Tree", std::format("{}/{}/{}", terrain.nodes, terrain.node_budget, terrain.splits_blocked),
+            "Allocated nodes / node budget / blocked splits this frame.\n"
+            "The tree budget is independent of tile-cache capacity.",
+            terrain.splits_blocked ? "blocked" : "", terrain.splits_blocked > 0);
+        row("LOD", std::format("{}/{}/{}", terrain.drawn, terrain.deepest, terrain.behind_one),
+            std::format("Drawn patches / finest level / patches over one level behind target.\n"
+                        "Mean shortfall: {:.2f} levels; awaiting tiles: {}; balance replacements: {}.\n"
+                        "Morph graded / near / far: {} / {} / {}. Range-covered quadrants: {}.\n"
+                        "Coarse flags a mean shortfall above one level; loading can cause this.",
+                        terrain.behind_mean, terrain.starved, terrain.balanced, terrain.graded, terrain.flat_near,
+                        terrain.flat_far, terrain.out_of_range),
+            !terrain.active             ? "sphere"
+            : terrain.behind_mean > 1.f ? "coarse"
+                                        : "",
+            terrain.active && terrain.behind_mean > 1.f);
+        ImGui::EndTable();
+    }
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const ImVec2 size{std::max(ImGui::GetContentRegionAvail().x, 1.f), 18};
+    ImGui::InvisibleButton("##tile-age", size);
+    const bool hovered = ImGui::IsItemHovered();
+    auto* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(origin, {origin.x + size.x, origin.y + size.y}, IM_COL32(50, 54, 62, 255));
+    float x = origin.x;
+    const auto segment = [&](unsigned count, ImU32 color, const char* label) {
+        const float end = x + size.x * float(count) / float(terrain.slots);
+        draw->AddRectFilled({x, origin.y}, {end, origin.y + size.y}, color);
+        if (hovered && ImGui::GetIO().MousePos.x >= x && ImGui::GetIO().MousePos.x < end)
+            ImGui::SetTooltip("%s: %u tiles (%.1f%% of capacity)", label, count, 100.f * count / terrain.slots);
+        x = end;
+    };
+    constexpr unsigned age_step = render::FrameStats::Terrain::cache_age_bucket_frames;
+    for (unsigned i = 0; i < std::size(terrain.cache_age); ++i) {
+        char label[64];
+        if (i + 1 == std::size(terrain.cache_age))
+            std::snprintf(label, sizeof(label), "Last used %u+ frames ago", i * age_step);
+        else
+            std::snprintf(label, sizeof(label), "Last used %u-%u frames ago", i * age_step, (i + 1) * age_step - 1);
+        segment(terrain.cache_age[i], IM_COL32(70 + i * 12, 185 - i * 11, 220 - i * 7, 255), label);
+    }
+    segment(terrain.pending, IM_COL32(230, 159, 0, 255), "Pending generation/upload");
+    segment(terrain.slots_free, IM_COL32(50, 54, 62, 255), "Free slots");
 }
 void anti_aliasing_controls(render::AntiAliasingSettings& settings) {
     ImGui::Checkbox("Temporal (F5)", &settings.temporal_aa);
@@ -392,10 +458,6 @@ void belt_controls(render::BeltSettings& belt, render::BeltDustSettings& dust, f
     static constexpr const char* cutoffs[] = {"Off", "1.2 px", "2.5 px", "4 px"};
     combo("Splat cut-off (F6)", belt.splat_mode, cutoffs);
     ImGui::Checkbox("Light splats in both cull passes (F7)", &belt.splat_light_twice);
-    ImGui::Checkbox("Freeze culling", &belt.freeze_culling); // the rock set, levels and splats of this view stay put
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Holds the cull camera: frustum, occlusion, mesh levels, splat coverage and far-tier\n"
-                          "weight stay as in the view where this was switched on while the camera flies around.");
     ImGui::Checkbox("Far-belt disc LOD",
                     &belt.disc); // off: the dust march and splats at every distance, as before the disc
     ImGui::SameLine();
@@ -706,12 +768,16 @@ void draw_panel(AppState& app, const render::Stats& stats, const SmoothedStats& 
         memory_bar(stats.memory);
         ImGui::PopID();
     }
-    if (section("Quality")) {
-        quality_controls(app.high, app.terrain);
+    if (section("Terrain", true)) {
+        terrain_controls(app.terrain, app.belt.freeze_culling);
+        terrain_cache(stats.frame.terrain);
+        patch_map(stats.patch_map);
         ImGui::PopID();
     }
-    if (!stats.patch_map.patches.empty() && section("Patch map")) {
-        patch_map(stats.patch_map);
+    if (section("Quality")) {
+        ImGui::Checkbox("High tier (F2)", &app.high);
+        ImGui::SameLine();
+        ImGui::TextDisabled(app.high ? "520k rocks" : "280k rocks");
         ImGui::PopID();
     }
     if (section("Anti-aliasing")) {

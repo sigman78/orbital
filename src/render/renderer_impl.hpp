@@ -107,7 +107,8 @@ enum class SamplerSlot : unsigned {
     count = ORBITAL_SAMPLER_COUNT
 };
 
-static_assert(TerrainTier::slot_count == ORBITAL_TERRAIN_SLOTS);
+// 2x the CPU regression baseline: the +3 grazing sweep settles here; 4x adds no benefit.
+inline constexpr unsigned terrain_cache_slots = ORBITAL_TERRAIN_SLOTS;
 static_assert(float(MinorPlanetTerrain::height_min) == float(MINOR_PLANET_HEIGHT_MIN) &&
               float(MinorPlanetTerrain::height_max) == float(MINOR_PLANET_HEIGHT_MAX));
 static_assert(tile_slope_scale == float(MINOR_PLANET_SLOPE_SCALE));
@@ -380,8 +381,8 @@ struct Renderer::Impl {
     BeltMotion belt_motion;     // the rocks' seeds and states, stepped on the CPU
     // Near-terrain selection, tile arrays, and upload staging (renderer_terrain.cpp).
     std::optional<MinorPlanetTerrain> minor_planet_terrain;
-    TerrainTier terrain_tier;
-    GpuImage tile_height, tile_albedo, tile_slope; // the three tile arrays, 1024 layers each
+    TerrainTier terrain_tier{terrain_cache_slots};
+    GpuImage tile_height, tile_albedo, tile_slope; // the three tile arrays, terrain_cache_slots layers each
     float tile_detail = 1;                         // TerrainSettings::detail the resident tiles were built with
     std::vector<PatchView> patch_views;            // the draw list as the panel's patch map wants it
     std::uint64_t grid_vertices_address = 0, grid_indices_address = 0;

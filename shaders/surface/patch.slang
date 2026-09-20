@@ -86,8 +86,19 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     float h = patchHeight(slot, g);
     float3 world = inst.center_radius.xyz + mul(rotate, d) * radius * (1 + h);
     float dist = length(world) / radius;
-    // Arrival fade is a floor under the distance morph, relaxing from the parent shape.
-    float m = max(saturate((dist - patch.morph.x) / max(patch.morph.y - patch.morph.x, 1e-6)), patch.morph.z);
+    float distanceMorph = patch.cell.w > 0 ? saturate((dist - patch.morph.x) / max(patch.morph.y - patch.morph.x, 1e-6)) : 0;
+    float m = max(distanceMorph, patch.morph.z);
+    // Quadrants own their boundary vertices. Stitch unequal levels locally; peers share
+    // the distance morph, without independent arrival weights. Cube peers pin their edge.
+    float2 qg = g - float2(quadrant & 1, quadrant >> 1) * (PATCH_QUADS * 0.5);
+    uint edges = (uint(patch.morph.w) >> (quadrant * 4)) & 15;
+    uint pinned = (patch.tile[3] >> (16 + quadrant * 4)) & 15;
+    bool boundary = qg.x == 0 || qg.x == PATCH_QUADS * 0.5 || qg.y == 0 || qg.y == PATCH_QUADS * 0.5;
+    if (boundary) {
+        uint sides = (qg.x == 0 ? 1u : 0u) | (qg.x == PATCH_QUADS * 0.5 ? 2u : 0u) |
+                     (qg.y == 0 ? 4u : 0u) | (qg.y == PATCH_QUADS * 0.5 ? 8u : 0u);
+        m = (edges & sides) != 0 ? 1 : (pinned & sides) != 0 ? 0 : distanceMorph;
+    }
     float2 gm = g - frac(g * 0.5) * 2.0 * m;
     st = cell_origin + gm / PATCH_QUADS * cell_size;
     d = patchCubeDirection(face, st);

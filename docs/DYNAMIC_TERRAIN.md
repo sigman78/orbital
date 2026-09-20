@@ -19,7 +19,7 @@ each and the limits on them are unrelated.
 | **Patch** | A cell of a face's quadtree, named by a `PatchKey` (face, level, x, y). The unit of drawing. | one draw instance each |
 | **Node** | The quadtree bookkeeping for a patch the selector is tracking: its key, bounds and child link. 64 bytes, CPU only. | `node_budget`, 4096 |
 | **Tile** | A patch's three textures: heights, albedo, slope. What a worker generates and the GPU samples. | one per resident patch |
-| **Slot** | One layer index shared by the three texture arrays, holding one tile. The cache entry, LRU-evicted. | `slot_count`, 1024 |
+| **Slot** | One layer index shared by the three texture arrays, holding one tile. The cache entry, LRU-evicted. | renderer `terrain_cache_slots`, 2048; CPU sweep baseline 1024 |
 | **Ring** | One entry of the staging ring buffer: a CPU-writable, GPU-readable scratch block sized for one tile's three planes. | `tile_ring_count`, 32 |
 
 A **ring** is the hand-off lane between a worker thread and the GPU, and the name is literal: entries
@@ -37,7 +37,7 @@ only delays a request to the next frame.
 
 1. Tiles live in texture arrays, one layer per slot: heights `r16_unorm`, albedo `rgba8_unorm` in
    linear light, slope `rg16_unorm`. Not atlases.
-2. Selection is by distance ranges per level, derived from that level's worst error, so a patch's
+2. Selection is by distance ranges per level, derived from the parent level's sampled triangle error, so a patch's
    morph state at an edge is a function of distance alone. Per-tile error is not used for selection.
 3. The colour planes are finer than the height plane by `tile_colour_ratio` (2): 32 quads of geometry,
    65 colour texels a side. Both sides are named constants; block compression later wants a multiple
@@ -47,8 +47,8 @@ only delays a request to the next frame.
    within about 11 percent, against 43 for a plain tangent warp.
 6. Generation stays on the CPU on a persistent worker pool.
 7. Texture compression of tiles is out of scope. Heights stay 16-bit raw in any case.
-8. The tree size (`node_budget`) is not the cache size. A node is 64 bytes of CPU bookkeeping and
-   only drawn patches need slots, so the two have no reason to share a number. They did once, and
+8. The tree size (`node_budget`) is not the cache size. Nodes are CPU bookkeeping; drawn patches and
+   their material ancestors need slots, so the two have no reason to share a number. They did once, and
    capping the tree at `slot_count - 64` starved splits long before memory justified it.
 9. `patch_level_max` is 11: cells of 90 degrees over 2048, quads of 24 urad, about 10 m on this body.
    Every field carrying a cell index is guarded by a `static_assert` in `terrain_patch.hpp`, because
@@ -85,19 +85,21 @@ owns the arrays.
 
 ### The shared grid
 
-One static mesh, `patch_grid_mesh()`: 33 by 33 vertices holding `(x, y, skirt)` plus a ring of
-4 × 33 skirt vertices the shader drops by `patch_skirt_drop` (0.002 radii) along `-d`. Quads are
-triangulated on a uniform `(x,y)–(x+1,y+1)` diagonal — **this is load-bearing**, see the open defects.
+One static mesh, `patch_grid()`: four quadrant grids of 17 by 17 vertices, each owning its
+centre-cross boundary vertices, plus eight half-edge skirt strips of 17 vertices. That is 1292
+vertices and 6912 indices. Vertices carry `(x, y, skirt, quadrant)`, so removing a quadrant removes
+all its triangles. This fix is already present; the former shared-vertex mask left two triangles.
+The uniform `(x,y)–(x+1,y+1)` diagonal preserves the child's collapse into the parent triangulation.
 
-The skirt is a fallback only: with correct morphing no crack exists between neighbours one level apart.
-It hides the transient where a neighbour is two levels coarser while children load.
+Skirts remain an outer-edge fallback. Streaming continuity is enforced by selection and common
+morph bands; skirts do not cover the internal boundaries of a partially drawn parent.
 
 ### Per-patch records
 
 `PatchInstance` in `scene_shared.h`, 48 bytes: `cell` (s0, t0, size, level), `morph` (start and end
-distance in radii, the arrival fade floor under them, and an unused fourth), `tile` (face, slot, the
+distance in radii, the local interior fade and the coarse-edge mask), `tile` (face, slot, the
 parent's slot or the slot count for none, then the child's quadrant, which sides lie on a cube edge,
-and which grid quadrants to draw). One record per drawn patch, written each frame into a host-visible
+which grid quadrants to draw, and a 16-bit mask of edges to keep unmorphed). One record per drawn patch, written each frame into a host-visible
 slot chosen by frame parity and copied beside the tile uploads. `ORBITAL_ROOT_PATCHES` puts the vertex
 shaders on the patch path.
 
@@ -106,8 +108,10 @@ shaders on the patch path.
 `shaders/surface/patch.slang`, shared by `surface.slang` and `motion.slang`:
 
 1. `g = position.xy` (0..32), `skirt = position.z`.
-2. `m = max(saturate((dist - morph.x) / (morph.y - morph.x)), morph.z)`, the second term the arrival
-   fade floor.
+2. Interior `m = max(saturate((dist - morph.x) / (morph.y - morph.x)), morph.z)`; roots use zero.
+   Quadrant edges ignore the arrival fade. At a 2:1 boundary the fine edge uses one and the coarse
+   edge zero; same-face peers use the common distance morph, and cube-face peers pin their edge.
+   The CPU supplies four side bits per quadrant for each kind of constraint.
 3. `g' = g - frac(g * 0.5) * 2 * m` — odd vertices slide to the even neighbour along each axis.
 4. Height is a bilinear read of the height array at layer `slot`, coordinates `g'`.
 5. A quadrant the record does not list is dropped.
@@ -117,36 +121,49 @@ carry false motion vectors into TAA.
 
 ### Selection
 
-`level_error[level]` is the worst measured geometric error per level in radii, from
-`terrain_tests --calibrate`: a uniform sample per level (64 patches, 1024 below level 9), then a hill
-climb around the worst one found, because relief clusters and a uniform sample of a deep level misses
-it entirely. Levels 9..12 used to be extrapolated at 2.3x a level and ran about **half** the true
-error, which understated their ranges and held those levels back until the camera was far too close.
+`level_error[level]` estimates error in radii against the actual 3D triangles. `patch_error` samples
+the diagonal midpoint and both triangle centroids, including curvature. `terrain_tests --calibrate`
+samples 64 patches per level (1024 at levels 9–12), then hill-climbs around the worst patch. This is
+not a certified bound over all terrain, seeds or intermediate morphs.
 
-The whole table must come from one method. `test_morph_bands` requires every adjacent ratio to exceed
-`1 / 0.7`, so a level measured more thoroughly than its neighbour shrinks the step between them and
-breaks the band it hands over in — measuring only 9..12 fails at the 8->9 step. Re-derive all of it
-or none of it.
+With `projection = height_pixels / (tan_y * error_pixels)`, the requested handover distance is
+`range[L + 1] = level_error[L] * projection * exp2(lod_bias)`. A parent therefore asks for children
+when its own estimated error reaches the configured budget. The default is now 5 screen pixels,
+chosen to retain the original workload: the convergence view draws 56 patches, versus 52 before
+these fixes and 308 with the initial 1.5-pixel correction. The triangle calibration and parent-error
+model remain; `--lod-bias 1.737` requests approximately the stricter 1.5-pixel budget explicitly.
+Cache capacity and the depth cap can still prevent the requested accuracy.
 
-Each frame the tier derives
-`range[level] = level_error[level] * height_pixels / (tan_y * error_pixels)` with `error_pixels` 3 in
-`cull_bodies`' units, and `morph.start = 0.7 * range[level]`.
+The morph band for level L ends at `range[L]` and starts at
+`range[L + 1] + 0.4 * (range[L] - range[L + 1])`. Thus a parent's morph starts beyond its child
+handover, without assuming an exact 2:1 ratio. The current calibration has at least 1.232x headroom
+through the supported levels. Geometry and material use the same band.
 
-Visiting from the six roots: a node out of the frustum or past the horizon collapses. A node whose
-nearest distance is under `range[level + 1]` wants children, with 0.8 hysteresis on the way back.
-A child is drawn only within its own range and once resident; the node draws every other visible
-quadrant itself, so nothing is drawn beyond its level's range and neighbours at one level morph alike.
-Residency is therefore per quadrant: a patch refines as each child's tile arrives.
+Selection uses two walks: discover desired tiles, then select resident tiles with local parent
+fallback. Missing tiles never change another patch's distance ranges. All roots must be resident
+before the terrain tier takes over.
 
-Distances come from `nearest_distance`, the closest the camera can be to any point of the patch's cap
-over its height shell. The shader tests each vertex, which is never nearer, so a child drawn within its
-range is fully morphed wherever an unsplit neighbour meets it.
+The draw list is balanced locally to at most one level of difference across an edge. Where a late
+tile would create a larger gap, only the adjacent fine subtree is drawn from a resident ancestor.
+The final coverage map supplies per-quadrant edge constraints, including internal parent-mask
+boundaries and cube edges. Same-face peers retain the common distance morph; independent arrival
+weights affect patch interiors only. Each tile assignment relaxes its interior fade over 15 updates
+from its first display. Hidden intervals count toward that fade; cached tiles never restart it when
+they reappear after culling, refinement, or local balancing. Boundary
+vertices can still change when local topology changes; this is a local transition, not a shared
+quality scale affecting the entire screen.
 
-**A resident tile supplies its own height range** rather than the global `[-0.05, +0.05]` shell,
-measured from the tile it uploaded and padded by one `r16_unorm` quantum plus float decode roundoff.
-The asymmetry here is deliberate and easy to get backwards: **the split test keeps the global shell**,
-because a tile bounds its own bilinear surface and says nothing about relief its children will reveal.
-Drawing, gating and culling use the tight range.
+The first implementation reduced every range when any needed tile was missing. It passed spatial
+seam tests but made small view changes promote/demote the whole visible planet. That policy was
+removed after interactive feedback. The pressure panel now reports local balancing work. A delayed
+upload is covered locally, and the existing timeout reclaims permanently missing jobs.
+
+Invalidation initializes the cache before resetting it, so non-default startup detail cannot insert
+the free-slot list twice.
+
+Distances and culling use the tile height interval padded for the entire descendant subtree, or the
+nearest resident ancestor's interval until the tile arrives. The sampled interval includes height
+quantization padding. This prevents a loose global shell from selecting fully collapsed extra levels.
 
 ### Culling
 
@@ -253,99 +270,51 @@ path one term at a time so a seam can be attributed.
 
 | Item | Size |
 |---|---|
-| Height array, 1024 layers of 33×33 r16 | 2.1 MiB |
-| Albedo and slope arrays, 1024 layers of 65×65 at 4 B | 16.5 MiB each |
-| Patch records, 1024 × 48 B, two staging slots plus device | 150 KiB |
+| Height array, 2048 layers of 33×33 r16 | 4.3 MiB |
+| Albedo and slope arrays, 2048 layers of 65×65 at 4 B | 33.0 MiB each |
+| Patch records, 2048 × 48 B, two staging slots plus device | 288 KiB |
 | Staging ring, 32 tiles | 1.1 MiB host-visible |
 | Quadtree nodes, 4096 × 64 B worst case | 256 KiB |
-| Shared grid | 1221 vertices, 6912 indices, static |
+| Shared grid | 1292 vertices, 6912 indices, static |
 
 Host-visible heaps count against the BAR aperture (`tools/check-bar1.py`).
 
-## Open defects, in the order they matter
+## Fixes verified on 2026-09-19
 
-### 1. The range ratios are not a geometric series
+Startup invalidation survived 5595 slot assignments without duplicate live ownership. Delayed and
+out-of-order streaming checked 15736 moving boundary vertices with zero violations; settled checks
+covered another 24544. Cube-neighbour mapping is reciprocal and has matching physical edge midpoints.
+A small-step flight with delayed uploads replaced at most 7.1% of drawn patches in a frame, with
+40 frames awaiting tiles. The default convergence workload is bounded by a regression test.
+The quadrant-ownership mesh fix predates this work.
 
-CDLOD wants each level's range to be half the one above, because the morph band is defined as a
-fraction of a range whose neighbour is assumed to be half of it. With the re-derived table the ratios
-between adjacent ranges run:
+## Remaining limits
 
-| levels | 0→1 | 1→2 | 2→3 | 3→4 | 4→5 | 5→6 | 6→7 | 7→8 | 8→9 | 9→10 | 10→11 | 11→12 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| now | 1.45 | 2.65 | 2.12 | 3.23 | 2.45 | 1.86 | 2.03 | 2.01 | 1.75 | 2.35 | 2.27 | 2.01 |
-| before | 1.45 | 2.65 | 3.46 | 2.30 | 2.11 | 2.38 | 1.59 | 2.76 | 2.31 | 2.31 | 2.32 | 2.29 |
+### 1. Cache capacity still limits the requested working set
 
-One consistent measurement narrowed the spread from 1.45–3.46 to 1.45–3.23 and put most steps near 2,
-but no morph band spans 1.45 and 3.23 alike. `test_morph_bands` reports 1.013x headroom at the 0→1
-step — it passes, with almost nothing to spare, and any future re-measure that lowers level 0 or
-raises level 1 breaks it.
+The renderer now uses 2048 slots. A deterministic +3 grazing-view replay sustained generation and
+coverage changes while stationary at 1024 slots, but settled at 2048; 4096 gave no further benefit.
+This raises the pressure threshold, not an unlimited-residency guarantee. See
+[the recorded sweep](TERRAIN_LOD_STABILITY.md#verification-and-changes-2026-09-20).
+Unavailable detail is covered by local resident ancestors, and neighbouring subtrees may
+be coarsened to preserve 2:1 edge stitching. More generation throughput cannot supply an oversized
+resident set.
 
-The fix is still a design decision, not a bug fix: prescribe the x2 series and use the measured errors
-to *place* it rather than to define each step.
+The tree still has a separate 4096-node budget and fixed traversal order; existing splits retain
+priority. Reclaiming low-priority splits and bounded warm retention remain future work.
 
-Related: `patch_error` compares scalar radii using `length(d)` on a normalized direction, so sphere
-curvature is excluded despite the comment. Correcting that does not fix the ratios — it reshuffles
-them. The curvature term is 7 percent of the error at level 0 and under 0.1 percent from level 4 down,
-so it is not worth a change on its own. The table is also sampled, not a conservative bound.
+The Terrain panel separates cache exhaustion, generation throughput and tree-budget pressure.
+Its capacity strip groups resident tiles by last-use age in 30-frame bands, then pending and free slots.
+Six always-visible readings (Cache/Flow, Queue/Evict, Tree/LOD) occupy three rows in two columns.
+Grouped x/y/z counters have hover hints explaining their order and secondary details. Amber readings
+with a `!` flag blocked capacity, warm evictions, slow arrivals or coarse coverage; the hint names the
+cause. Tier switch, surface detail and the patch map remain visible whenever Terrain is open.
+Normal distance/morph endpoints are not warnings. Counter lists no longer require expanding sections.
+`--benchmark` records named `terrain_*` columns for inspecting admission and eviction after a run.
 
-### 2. Quadrant removal leaves two parent triangles
+### 2. What the cull still keeps, and nothing says whether it costs
 
-Triangles whose three vertices all lie on the centre cross are never dropped: quadrant 1 leaves
-`(16,15)–(17,16)–(16,16)` and quadrant 2 leaves `(15,16)–(16,16)–(16,17)`, 16 across all 16 masks out
-of 2048 per patch. They overlap the child replacing that quadrant and can fight it in depth.
-
-**Do not fix this with a checkerboard diagonal.** It removes all 16 and breaks the collapse invariant:
-enumerated, a child at `m = 1` no longer has the parent's triangulation, so it would crack every level
-boundary to remove a sliver at one patch centre.
-
-The vertices survive because they are *shared* with the neighbouring quadrant, so no per-vertex rule can
-reach them. The cheapest correct fix keeping one draw per patch: duplicate the 65 centre-cross vertices
-once per adjacent quadrant (64 at two quadrants, the centre at four, so +67 of 1089, about 6 percent)
-and carry an explicit quadrant index per vertex. Duplicates hold identical positions, so the morph and
-the collapse invariant are untouched.
-
-### 3. The tile cache is too small above the default bias
-
-Children already allocated bypass the node budget, traversal is in fixed face and child order, and
-there is no way to reclaim a low-priority split for a more demanding patch. So whichever patches split
-first keep their splits, and a patch refused at the ceiling is refused *every* frame — the selection
-settles stable and inadequate. That is what a lone coarse patch among refined neighbours looks like,
-and it does not heal, which is how it differs from streaming lag.
-
-Raising `node_budget` off `slot_count` removed it at the measured demand: `splits_blocked` went from
-93 to 0, the tree settled at its true 1398 nodes (2422 at level 11), and the worst run of a patch more
-than one level behind fell from 101 frames to 66. **The grandfathering and the fixed order are still
-there** — they simply have headroom now, and would bite again at a ceiling.
-
-What is left at `--lod-bias 2` is capacity, not selection: 4198 of 8515 evictions are of tiles used
-within the last 60 frames, so the working set genuinely exceeds 1024 slots and tiles are thrown out
-before they are done with. At bias 0 nothing warm is evicted in any flight measured — stationary,
-rotating, orbiting fast or slow. Wants slot count scaled with bias, or eviction ordered by view
-importance instead of plain LRU. More generation throughput does not fix a cache that is too small.
-
-### 4. The fade does not enforce continuity at partial boundaries
-
-A resident child can finish fading while a sibling is still missing, leaving the parent covering an
-unmatched boundary. `fade = 0` on the parent's remaining quadrants removes its inherited arrival fade
-but does **not** hold them still — the shader morphs by `max(distance, fade)`. Held still they would
-crack against the outer neighbours instead, which is CDLOD's granularity limit: one node carries one
-level of transition, not two.
-
-The real remedy is the streaming policy, never splitting until all four children are resident, which
-was measured and rejected once for its transient cost. The internal quadrant boundaries also have no
-skirts, so skirts do not cover every parent/child fallback seam.
-
-### 5. Selection uses the child's threshold to judge the parent
-
-A level `L` node splits against `range[L + 1]`, so it stays selected past its own tolerance — about
-5.2 px of table-predicted level-2 error against the stated 1.5 px near the child threshold. Thresholds
-and morph bands want deriving together from the error of the geometry actually drawn; changing one
-comparison alone invalidates the seam relationships.
-
-### 6. What the cull still keeps, and nothing says whether it costs
-
-Two of five views draw nothing that is provably off screen, and the other three keep one or two
-patches of thirty to sixty. What is left is the tail of the same thing: a plane rejects on the
+The five default test views currently draw 13–43 patches with none provably off screen. What is left is the tail of the same thing: a plane rejects on the
 shell's extremes, and a patch can have a corner inside the frustum while almost all of it is outside.
 Closing that wants per-quadrant culling, which is a change to what a draw is, not to the bound.
 
@@ -354,11 +323,10 @@ from each patch's samples, far too slow for a frame, and the frozen-cull view sh
 and kept islands alike with no number beside them. A cheap proxy on the panel would say whether the
 remaining tail is worth anything at all.
 
-### 7. Detail still stops at the depth cap, further in
+### 3. Detail still stops at the depth cap, further in
 
 `patch_level_max` bounds how fine the geometry goes, and the error metric keeps asking past it. At 11
-the smallest quad is 24 urad, about 10 m on this body, and the metric wants finer from roughly 650 m
-up. Below that the near patches sit at the cap while their farther neighbours are served correctly —
+the smallest quad is 24 urad, about 10 m on this body, and the calibrated metric continues asking for finer detail close to the ground. Below that the near patches sit at the cap while their farther neighbours are served correctly —
 correct saturation, but it reads as a stall, and it is worth ruling out before chasing one.
 
 Level 12 is the last the packing allows and needs no code change beyond the constant, but each level
@@ -366,7 +334,7 @@ multiplies the near working set against a cache already short at bias 2. The che
 detail octaves below tile resolution listed under *Later*: what is missing up close is small relief,
 not accurate large shapes, and shader detail costs no tiles, no slots and no CPU generation.
 
-### 8. Leftovers
+### 4. Leftovers
 
 - No counter says how much of the drawn set is wasted. `test_cull_waste` measures it offline by
   re-deriving visibility from each patch's samples, which is far too slow for a frame, but a cheap

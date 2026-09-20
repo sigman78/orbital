@@ -471,12 +471,42 @@ void test_grid_mesh() {
     std::printf("patch grid: %zu vertices, %zu indices\n", grid.vertices.size(), grid.indices.size());
 }
 
+// Cube-neighbour mapping must be reciprocal and share the same physical edge, including corners.
+void test_patch_neighbours() {
+    for (unsigned level : {0u, 1u, 4u, patch_level_max}) {
+        const unsigned cells = 1u << level;
+        for (unsigned face = 0; face < 6; face++)
+            for (unsigned along : {0u, cells / 2, cells - 1})
+                for (unsigned side = 0; side < 4; side++) {
+                    const PatchKey key{std::uint8_t(face), std::uint8_t(level),
+                                       std::uint16_t(side < 2 ? (side == 0 ? 0 : cells - 1) : along),
+                                       std::uint16_t(side >= 2 ? (side == 2 ? 0 : cells - 1) : along)};
+                    const auto n = patch_neighbour(key, side);
+                    const auto back = patch_neighbour(n.key, n.side);
+                    assert(back.key == key && back.side == side);
+                    const auto midpoint = [cells](PatchKey k, unsigned edge) {
+                        return cube_direction(k.face,
+                                              -1 + (k.x + (edge == 0   ? 0
+                                                           : edge == 1 ? 1
+                                                                       : .5)) *
+                                                       2 / cells,
+                                              -1 + (k.y + (edge == 2   ? 0
+                                                           : edge == 3 ? 1
+                                                                       : .5)) *
+                                                       2 / cells);
+                    };
+                    assert(length(midpoint(key, side) - midpoint(n.key, n.side)) < 1e-12);
+                }
+    }
+}
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++)
         if (std::string_view(argv[i]) == "--calibrate") {
             calibrate_level_errors();
             return 0;
         }
+    test_patch_neighbours();
     test_noise();
     test_terrain();
     test_bake();

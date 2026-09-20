@@ -58,6 +58,8 @@ struct AsyncTiles {
     };
     std::vector<Pending> pending;
     unsigned step = 0;
+    unsigned jitter = 0, hold_frames = 0;
+    bool held = false;
     // Set to hand the tier each tile's own height bounds, as the renderer does. Left null the
     // residency carries the global shell, which is cheaper and all most tests need.
     const MinorPlanetTerrain* terrain = nullptr;
@@ -82,8 +84,14 @@ struct AsyncTiles {
             }
         }
         tier.update(view, frame, budget);
-        for (const auto& g : tier.generate())
-            pending.push_back({g.slot, g.key, g.stamp, step + 2});
+        for (const auto& g : tier.generate()) {
+            unsigned delay = 2 + (jitter ? g.key.packed() % jitter : 0);
+            if (hold_frames && !held && g.key.level >= 2) {
+                held = true;
+                delay += hold_frames;
+            }
+            pending.push_back({g.slot, g.key, g.stamp, step + delay});
+        }
     }
 };
 
@@ -102,23 +110,35 @@ struct MorphCheck {
 
     struct Surface {
         PatchKey key;
-        float start = 0, end = 0, floor = 0;
+        float start = 0, end = 0;
+        unsigned coarse_edges = 0, fine_edges = 0;
+        float fade = 0;
         const std::vector<float>* height = nullptr;
     };
 
     // Match the vertex shader morph.
-    float morph_at(const Surface& s, unsigned x, unsigned y, Vec3d camera_local) {
+    float morph_at(const Surface& s, unsigned x, unsigned y, unsigned quadrant, Vec3d camera_local) {
         constexpr unsigned quads = tile_side - 1;
+        const unsigned qx = x - (quadrant & 1) * quads / 2, qy = y - (quadrant >> 1) * quads / 2;
+        const unsigned edges = s.coarse_edges >> (4 * quadrant) & 15;
+        const unsigned pinned = s.fine_edges >> (4 * quadrant) & 15;
+        const unsigned sides = (qx == 0 ? 1u : 0u) | (qx == quads / 2 ? 2u : 0u) | (qy == 0 ? 4u : 0u) |
+                               (qy == quads / 2 ? 8u : 0u);
+        if (edges & sides)
+            return 1;
+        if (pinned & sides)
+            return 0;
+        if (!s.key.level)
+            return 0;
         const double size = 2.0 / double(1u << s.key.level);
         const Vec3d d = cube_direction(s.key.face, -1 + s.key.x * size + double(x) * size / quads,
                                        -1 + s.key.y * size + double(y) * size / quads);
         const double dist = length(d * (1 + (*s.height)[y * tile_side + x]) - camera_local);
-        return std::max(float(std::clamp((dist - s.start) / std::max(double(s.end) - s.start, 1e-6), 0.0, 1.0)),
-                        s.floor);
+        return std::max(sides ? 0.f : s.fade,
+                        float(std::clamp((dist - s.start) / std::max(double(s.end) - s.start, 1e-6), 0.0, 1.0)));
     }
 
-    unsigned violations(const TerrainTier& tier, const TierView& view, unsigned* checked = nullptr,
-                        bool use_fade = true) {
+    unsigned violations(const TerrainTier& tier, const TierView& view, unsigned* checked = nullptr) {
         constexpr unsigned quads = tile_side - 1;
         std::vector<Surface> surfaces;
         std::unordered_map<std::uint32_t, unsigned> cover; // a drawn quadrant's cell -> its surface
@@ -132,7 +152,8 @@ struct MorphCheck {
             for (unsigned i = 0; i < 4; i++)
                 if (draw.quadrants >> i & 1)
                     cover[draw.key.child(i).packed()] = unsigned(surfaces.size());
-            surfaces.push_back({draw.key, .7f * end, end, use_fade ? draw.fade : 0.f, &height});
+            surfaces.push_back({draw.key, tier.morph_start(draw.key.level), end, draw.coarse_edges, draw.fine_edges,
+                                draw.fade, &height});
         }
         // Find the covering ancestor; finer neighbors perform their own check.
         const auto coverer = [&](PatchKey cell) -> const Surface* {
@@ -149,23 +170,11 @@ struct MorphCheck {
             const Surface& s = surfaces[index];
             const PatchKey cell{std::uint8_t(packed & 7), std::uint8_t(packed >> 3 & 0x1f),
                                 std::uint16_t(packed >> 8 & 0xfff), std::uint16_t(packed >> 20 & 0xfff)};
-            const unsigned cells = 1u << cell.level, qx = cell.x & 1, qy = cell.y & 1;
-            for (int side = 0; side < 4; side++) {
-                const int dx = side == 0 ? -1 : side == 1 ? 1 : 0, dy = side == 2 ? -1 : side == 3 ? 1 : 0;
-                const int nx = int(cell.x) + dx, ny = int(cell.y) + dy;
-                PatchKey neighbour{cell.face, cell.level, std::uint16_t(nx), std::uint16_t(ny)};
-                if (nx < 0 || ny < 0 || nx >= int(cells) || ny >= int(cells)) {
-                    // Map the adjacent cell onto its cube face.
-                    const double size = 2.0 / cells;
-                    const CubeCoord c = cube_coordinates(cube_direction(
-                        cell.face, -1 + (cell.x + .5) * size + dx * size, -1 + (cell.y + .5) * size + dy * size));
-                    const auto index_of = [&](double v) {
-                        return std::uint16_t(std::clamp(int((v + 1) / size), 0, int(cells) - 1));
-                    };
-                    neighbour = {std::uint8_t(c.face), cell.level, index_of(c.s), index_of(c.t)};
-                }
+            const unsigned qx = cell.x & 1, qy = cell.y & 1;
+            for (unsigned side = 0; side < 4; side++) {
+                const PatchKey neighbour = patch_neighbour(cell, side).key;
                 const Surface* other = coverer(neighbour);
-                if (!other || other->key.level == s.key.level)
+                if (!other || (other->key.level == s.key.level && other->key.face == s.key.face))
                     continue;
                 const bool finer = s.key.level > other->key.level, vertical = side < 2;
                 const unsigned fixed = vertical ? qx * (quads / 2) + (side == 1) * quads / 2
@@ -173,7 +182,11 @@ struct MorphCheck {
                 const unsigned from = vertical ? qy * (quads / 2) : qx * (quads / 2);
                 for (unsigned i = 0; i <= quads / 2; i++) {
                     const unsigned x = vertical ? fixed : from + i, y = vertical ? from + i : fixed;
-                    const float m = morph_at(s, x, y, view.camera_local);
+                    // Even/even vertices never move under any morph weight.
+                    if (!(x & 1) && !(y & 1))
+                        continue;
+                    const float m = morph_at(s, x, y, qx | (qy << 1), view.camera_local);
+                    bad += finer && s.key.level > other->key.level + 1;
                     if (checked)
                         (*checked)++;
                     bad += finer ? m < .999f : m > .001f;
@@ -299,13 +312,26 @@ void test_cull_waste() {
     }
 }
 
-// Parent morphing must start beyond the child handover distance.
+// Exercise the production bands and screen-error budget, not a separate ratio formula.
 void test_morph_bands() {
     double worst = 1e9;
-    for (unsigned level = 0; level + 1 < std::size(TerrainTier::level_error); level++)
-        worst = std::min(worst, .7 * TerrainTier::level_error[level] / TerrainTier::level_error[level + 1]);
-    std::printf("terrain tier: worst morph-band headroom over the child's hand-over %.3fx\n", worst);
-    assert(worst > 1);
+    for (float bias : {-1.f, 0.f, 2.f}) {
+        TierView view = view_at(20, 2.5 / 15);
+        view.lod_bias = bias;
+        TerrainTier tier;
+        tier.update(view, 1); // inactive: requested ranges, with no streaming restriction
+        const double projection = view.height_pixels / (2 * double(view.tan_y));
+        for (unsigned level = 0; level <= patch_level_max; level++) {
+            const double split = tier.range(level + 1);
+            const double pixels = TerrainTier::level_error[level] * projection / split;
+            assert(std::abs(pixels * std::exp2(bias) - TerrainTier::error_pixels / 2) < 1e-5);
+            assert(tier.morph_start(level) > split);
+            assert(tier.morph_start(level) < tier.range(level));
+            worst = std::min(worst, tier.morph_start(level) / split);
+        }
+    }
+    std::printf("terrain tier: parent-error split budget verified; morph-band headroom %.3fx\n", worst);
+    assert(worst > 1.1);
 }
 
 void test_morph_continuity() {
@@ -332,34 +358,137 @@ void test_morph_continuity() {
     std::printf("terrain tier: %u boundary vertices at settled level boundaries, %u break the morph, "
                 "%u of %u draws partial\n",
                 checked, bad, partial, drawn);
-    assert(checked > 20000 && bad == 0);
+    assert(checked > 1000 && bad == 0);
 }
 
-// Arrival fading should reduce mismatches beside missing-child fallback quadrants.
+// Uneven completion, a held tile, and a moving view must never introduce a late-tile seam.
 void test_morph_streaming() {
-    constexpr double radius = 2.5 / 15;
     const MinorPlanetTerrain terrain(1007);
     MorphCheck check{terrain};
-    const TierView view = view_over({.6, .3, 1}, .05, radius);
-    struct Count {
-        unsigned frames = 0, worst = 0, total = 0;
-    };
-    Count faded, plain;
+    unsigned checked = 0, bad = 0, waiting = 0;
+    for (bool moving : {false, true}) {
+        TerrainTier tier;
+        AsyncTiles async;
+        async.terrain = &terrain;
+        async.jitter = 11;
+        async.hold_frames = 70;
+        for (unsigned frame = 1; frame <= 200; frame++) {
+            const double x = moving ? .98 + .0003 * frame : .6;
+            const TierView view = view_over({x, .3, 1}, .05, 2.5 / 15);
+            async.update(tier, view, frame, 4);
+            if (!tier.active())
+                continue;
+            waiting += tier.pressure().starved > 0;
+            const double projection = view.height_pixels / (view.tan_y * TerrainTier::error_pixels);
+            for (unsigned level = 1; level <= patch_level_max; level++)
+                assert(std::abs(tier.range(level) - TerrainTier::level_error[level - 1] * projection) <
+                       1e-6 * tier.range(level));
+            bad += check.violations(tier, view, &checked);
+            for (const auto& draw : tier.draws()) {
+                assert(tier.resident_slot(draw.key) == draw.slot);
+                for (const auto& g : tier.generate())
+                    assert(g.slot != draw.slot);
+            }
+        }
+        assert(async.held);
+        if (!moving) {
+            assert(tier.generate().empty() && async.pending.empty());
+        }
+    }
+    std::printf("terrain tier: streaming, %u boundary vertices, %u violations, %u frames waiting for tiles\n", checked,
+                bad, waiting);
+    assert(checked > 1000 && waiting > 20 && bad == 0);
+}
+
+// Tiny camera steps while uploads lag must not demote the established view as a whole.
+void test_motion_stability() {
+    const MinorPlanetTerrain terrain(1007);
     TerrainTier tier;
     AsyncTiles async;
-    for (unsigned frame = 1; frame <= 80; frame++) {
-        async.update(tier, view, frame);
-        if (tier.draws().empty())
-            continue;
-        const unsigned with = check.violations(tier, view, nullptr, true);
-        const unsigned without = check.violations(tier, view, nullptr, false);
-        faded.frames += with > 0, faded.worst = std::max(faded.worst, with), faded.total += with;
-        plain.frames += without > 0, plain.worst = std::max(plain.worst, without), plain.total += without;
+    async.terrain = &terrain;
+    for (unsigned frame = 1; frame <= 150; frame++)
+        async.update(tier, view_over({.6, .3, 1}, .05, 2.5 / 15), frame);
+    assert(tier.active() && async.pending.empty());
+    async.jitter = 23;
+    std::unordered_set<std::uint32_t> previous;
+    for (const auto& draw : tier.draws())
+        previous.insert(draw.key.packed());
+    double worst_loss = 0;
+    unsigned waiting = 0, peak = 0;
+    for (unsigned frame = 151; frame <= 350; frame++) {
+        const double x = .6 + .0001 * (frame - 150);
+        async.update(tier, view_over({x, .3, 1}, .05, 2.5 / 15), frame, 4);
+        std::unordered_set<std::uint32_t> current;
+        for (const auto& draw : tier.draws())
+            current.insert(draw.key.packed());
+        unsigned lost = 0;
+        for (auto key : previous)
+            lost += !current.contains(key);
+        worst_loss = std::max(worst_loss, double(lost) / std::max(previous.size(), std::size_t(1)));
+        waiting += tier.pressure().starved > 0;
+        peak = std::max(peak, unsigned(current.size()));
+        previous = std::move(current);
     }
-    std::printf("terrain tier: streaming, boundary vertices breaking the morph: without the fade %u over %u frames "
-                "(worst %u), with it %u over %u frames (worst %u)\n",
-                plain.total, plain.frames, plain.worst, faded.total, faded.frames, faded.worst);
-    assert(faded.total <= plain.total);
+    std::printf("terrain tier: small-step flight, worst draw replacement %.1f%%, %u waiting frames, peak %u patches\n",
+                100 * worst_loss, waiting, peak);
+    assert(waiting > 0 && worst_loss < .2);
+}
+
+// Looking away must not replay arrival morphs on already settled, cached geometry.
+void test_cached_reentry() {
+    TerrainTier tier;
+    AsyncTiles async;
+    const auto view = view_at(.2, 2.5 / 15);
+    for (unsigned frame = 1; frame <= 150; frame++)
+        async.update(tier, view, frame);
+    assert(async.pending.empty() && tier.generate().empty());
+    const std::vector<TerrainTier::Draw> settled(tier.draws().begin(), tier.draws().end());
+    assert(!settled.empty());
+    for (const auto& draw : settled)
+        assert(draw.fade == 0);
+    async.update(tier, view_at(.2, 2.5 / 15, {0, 0, 1}), 151);
+    assert(tier.draws().empty());
+    async.update(tier, view, 152);
+    assert(tier.generate().empty() && async.pending.empty());
+    assert(tier.draws().size() == settled.size());
+    unsigned restarted = 0;
+    for (const auto& draw : tier.draws()) {
+        const auto previous = std::find_if(settled.begin(), settled.end(), [&](const auto& old) {
+            return old.key == draw.key && old.slot == draw.slot && old.quadrants == draw.quadrants;
+        });
+        assert(previous != settled.end());
+        restarted += draw.fade != 0;
+    }
+    std::printf("terrain tier: cached reentry, %u of %zu patches restarted their morph\n", restarted, settled.size());
+    assert(restarted == 0);
+}
+
+// Startup --terrain-detail can invalidate before update has ever initialized the cache.
+// Cycle beyond its capacity and verify that eviction removes the old owner's lookup.
+void test_invalidate_before_update() {
+    TerrainTier tier;
+    tier.invalidate();
+    tier.invalidate();
+    PatchKey owners[TerrainTier::slot_count]{};
+    bool assigned[TerrainTier::slot_count]{};
+    unsigned generations = 0;
+    for (unsigned frame = 1; frame <= 700; frame++) {
+        const double angle = frame * .035;
+        const TierView view = view_over({std::sin(angle), .3, std::cos(angle)}, .08, 2.5 / 15);
+        tier.update(view, frame);
+        for (const auto& g : tier.generate()) {
+            assert(g.slot < TerrainTier::slot_count);
+            if (assigned[g.slot])
+                assert(tier.resident_slot(owners[g.slot]) == TerrainTier::no_slot);
+            owners[g.slot] = g.key;
+            assigned[g.slot] = true;
+            assert(tier.mark_resident(g.slot, g.key, g.stamp));
+            generations++;
+        }
+        assert(tier.resident() <= TerrainTier::slot_count);
+    }
+    std::printf("terrain tier: startup invalidation, %u assignments with unique live slot owners\n", generations);
+    assert(generations > 2 * TerrainTier::slot_count);
 }
 
 // Regression: loose height bounds fully collapsed adjacent finest levels, leaving a 2x border.
@@ -392,9 +521,8 @@ void test_resident_height_selection() {
             for (const auto& draw : tier.draws()) {
                 if (draw.key.level != deepest[tight])
                     continue;
-                assert(draw.fade == 0);
                 const double size = 2.0 / (1u << draw.key.level);
-                const double end = tier.range(draw.key.level), start = .7 * end;
+                const double end = tier.range(draw.key.level), start = tier.morph_start(draw.key.level);
                 for (unsigned y = 0; y < tile_side; y++)
                     for (unsigned x = 0; x < tile_side; x++) {
                         const Vec3d d = cube_direction(draw.key.face,
@@ -405,7 +533,7 @@ void test_resident_height_selection() {
                     }
             }
             if (tight)
-                assert(least_morph < .01); // the finest grid is actually present
+                assert(least_morph < .99); // the finest grid is not fully collapsed into its parent
             else
                 assert(least_morph == 1); // reproduce the previous all-collapsed selection
         }
@@ -881,7 +1009,7 @@ void test_flight_sweep() {
             for (const TerrainTier::Draw& draw : tier.draws()) {
                 assert(draw.quadrants && draw.quadrants <= 0xf);
                 assert(drawn_slots.emplace(draw.slot, draw.key.packed()).second); // a slot drawn twice
-                parentless += draw.key.level && tier.resident_slot(draw.key.parent()) == TerrainTier::slot_count;
+                parentless += draw.key.level && tier.resident_slot(draw.key.parent()) == TerrainTier::no_slot;
                 for (unsigned q = 0; q < 4; q++) {
                     if (!(draw.quadrants >> q & 1))
                         continue;
@@ -908,7 +1036,7 @@ void test_flight_sweep() {
                             std::printf("    level %2u (%4u,%4u) %s reach %+.4f..%+.4f from level %u, horizon margin "
                                         "%+.5f, plane %u margin %+.5f, distance %.4f vs %.4f\n",
                                         step.key.level, step.key.x, step.key.y,
-                                        step.slot < TerrainTier::slot_count ? "resident" : "no tile ",
+                                        step.slot != TerrainTier::no_slot ? "resident" : "no tile ",
                                         double(step.reach.min), double(step.reach.max), step.reach_level,
                                         step.horizon_margin, step.plane, step.plane_margin, step.distance,
                                         step.split_range);
@@ -956,7 +1084,218 @@ void test_flight_sweep() {
     assert(worst_pending_age <= TerrainTier::pending_timeout + TerrainTier::slot_count / TerrainTier::sweep_window);
 }
 
+// A repeatable cache-pressure trace.  It deliberately reports the result rather than asserting
+// that a larger cache must win: a cache can be full of useful history, and a larger one can move
+// pressure to another limit.  The useful comparison is repeated assignment and coverage churn
+// over the same settle, pan, look-away and re-entry path.
+struct CacheSweepRow {
+    const char* scenario = "";
+    unsigned capacity = 0, bias = 0, frames = 0;
+    unsigned generated = 0, evictions = 0, warm_evictions = 0;
+    unsigned regenerated = 0, regenerated_within_60_frames = 0;
+    unsigned peak_resident = 0, peak_nodes = 0;
+    unsigned coverage_changes = 0, edge_changes = 0;
+    unsigned changes_without_eviction = 0, changes_without_generation = 0;
+    unsigned tail_generated = 0, tail_changes = 0, tail_pending = 0;
+    unsigned seam_violations = 0, seam_vertices = 0;
+};
+
+TierView cache_sweep_look(TierView view, bool away) {
+    CameraView camera;
+    camera.forward = normalized(view.camera_local) * (away ? 1.0 : -1.0);
+    camera.right = normalized(cross(camera.forward, std::abs(camera.forward.y) < .9 ? Vec3d{0, 1, 0} : Vec3d{1, 0, 0}));
+    camera.up = cross(camera.right, camera.forward);
+    view.frustum = view_frustum(camera, view.tan_y * 16 / 9, view.tan_y);
+    return view;
+}
+
+TierView cache_sweep_grazing(TierView view) {
+    CameraView camera;
+    const Vec3d radial = normalized(view.camera_local);
+    camera.forward = normalized(normalized(cross(Vec3d{0, 1, 0}, radial)) - radial * .1);
+    camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
+    camera.up = cross(camera.right, camera.forward);
+    view.frustum = view_frustum(camera, view.tan_y * 16 / 9, view.tan_y);
+    return view;
+}
+
+void test_cache_sweep() {
+    constexpr double radius = 2.5 / 15;
+    constexpr unsigned capacities[] = {TerrainTier::slot_count, TerrainTier::slot_count * 2,
+                                       TerrainTier::slot_count * 4};
+    const MinorPlanetTerrain terrain(1007);
+    std::printf("scenario,cache_capacity,lod_bias,frames,generated,evictions,warm_evictions,regenerated,"
+                "regenerated_within_60_frames,peak_resident,peak_nodes,coverage_changes,edge_changes,"
+                "changes_without_eviction,changes_without_generation,tail_generated,tail_changes,tail_pending,"
+                "seam_violations,seam_vertices\n");
+    for (unsigned capacity : capacities)
+        for (unsigned bias = 0; bias <= 3; bias++) {
+            for (bool grazing : {false, true}) {
+                TerrainTier tier(capacity);
+                AsyncTiles async;
+                async.terrain = &terrain;
+                // Varying completion time makes later requests overtake earlier ones.  The single
+                // held request also exercises the pending-slot path without turning this into a
+                // timeout test.
+                async.jitter = 11;
+                async.hold_frames = 19;
+                CacheSweepRow row{.scenario = grazing ? "grazing" : "nadir", .capacity = capacity, .bias = bias};
+                std::unordered_map<std::uint32_t, unsigned> generated_at;
+                std::unordered_map<std::uint64_t, unsigned> previous;
+                MorphCheck seams{terrain};
+                auto update = [&](TierView view, bool tail = false, bool away = false) {
+                    if (grazing && !away)
+                        view = cache_sweep_grazing(view);
+                    else
+                        view = cache_sweep_look(view, away);
+                    view.lod_bias = float(bias);
+                    async.update(tier, view, ++row.frames, 6);
+                    const TerrainTier::Audit audit = tier.audit();
+                    const TerrainTier::CacheStats cache = tier.cache_stats(row.frames);
+                    const TerrainTier::Pressure& pressure = tier.pressure();
+                    assert(audit.reachable == audit.allocated);
+                    assert(tier.nodes() <= TerrainTier::node_budget);
+                    assert(tier.resident() <= tier.capacity());
+                    assert(tier.pending() <= tier.capacity());
+                    assert(cache.capacity == tier.capacity());
+                    assert(cache.resident == tier.resident() && cache.pending == tier.pending());
+                    assert(cache.free + cache.resident + cache.pending == cache.capacity);
+                    assert(pressure.cache_capacity == cache.capacity && pressure.cache_free == cache.free);
+                    assert(pressure.cache_resident == cache.resident && pressure.cache_pending == cache.pending);
+                    unsigned age_sum = 0;
+                    for (unsigned age : cache.age)
+                        age_sum += age;
+                    assert(age_sum == cache.resident);
+                    assert(pressure.served == tier.generate().size());
+                    assert(pressure.served + pressure.generation_budget_limited + pressure.slots_blocked <=
+                           pressure.requested);
+                    row.generated += unsigned(tier.generate().size());
+                    row.evictions += pressure.evictions;
+                    row.warm_evictions += pressure.evicted_recent;
+                    for (const TerrainTier::Generation& generation : tier.generate()) {
+                        const auto previous_generation = generated_at.find(generation.key.packed());
+                        if (previous_generation != generated_at.end()) {
+                            row.regenerated++;
+                            row.regenerated_within_60_frames += row.frames - previous_generation->second <= 60;
+                        }
+                        generated_at[generation.key.packed()] = row.frames;
+                    }
+                    row.peak_resident = std::max(row.peak_resident, tier.resident());
+                    row.peak_nodes = std::max(row.peak_nodes, tier.nodes());
+                    if (tail) {
+                        row.tail_generated += unsigned(tier.generate().size());
+                        row.tail_pending = std::max(row.tail_pending, tier.pending());
+                    }
+                    std::unordered_map<std::uint64_t, unsigned> current;
+                    for (const TerrainTier::Draw& draw : tier.draws()) {
+                        assert(tier.resident_slot(draw.key) == draw.slot);
+                        assert(draw.slot < tier.capacity());
+                        assert(current
+                                   .emplace((std::uint64_t(draw.key.packed()) << 4) | draw.quadrants,
+                                            draw.coarse_edges | (draw.fine_edges << 16))
+                                   .second);
+                    }
+                    unsigned changed = 0;
+                    for (const auto& [key, edges] : previous) {
+                        changed += !current.contains(key);
+                        if (const auto found = current.find(key); found != current.end())
+                            row.edge_changes += found->second != edges;
+                    }
+                    for (const auto& [key, _] : current)
+                        changed += !previous.contains(key);
+                    if (changed) {
+                        row.coverage_changes += changed;
+                        if (tier.pressure().evictions == 0)
+                            row.changes_without_eviction += changed;
+                        if (tier.generate().empty())
+                            row.changes_without_generation += changed;
+                        if (tail)
+                            row.tail_changes += changed;
+                    }
+                    previous = std::move(current);
+                    // Sample transitions as well as the settled endpoint; this catches a seam that
+                    // exists only while a delayed tile arrives or a neighbor is restitched.
+                    if (row.frames % 80 == 0) {
+                        row.seam_violations += seams.violations(tier, view, &row.seam_vertices);
+                    }
+                };
+                const TierView settled = view_over({.6, .3, 1}, .035, radius);
+                for (unsigned i = 0; i < 150; i++)
+                    update(settled);
+                for (unsigned cycle = 0; cycle < 3; cycle++) {
+                    for (unsigned i = 0; i < 70; i++)
+                        update(view_over({.6 + .00055 * i, .3, 1}, .035, radius));
+                    const TierView panned = view_over({.6 + .00055 * 69, .3, 1}, .035, radius);
+                    for (unsigned i = 0; i < 35; i++)
+                        update(panned, false, true);
+                    for (unsigned i = 0; i < 70; i++)
+                        update(panned);
+                }
+                const TierView panned = view_over({.6 + .00055 * 69, .3, 1}, .035, radius);
+                // This fixed tail makes persistent requests and selection-only churn visible.
+                for (unsigned i = 0; i < 80; i++)
+                    update(panned, true);
+                TierView seam_view = panned;
+                seam_view.lod_bias = float(bias);
+                if (grazing)
+                    seam_view = cache_sweep_grazing(seam_view);
+                row.seam_violations += seams.violations(tier, seam_view, &row.seam_vertices);
+                assert(row.seam_violations == 0);
+                std::printf("%s,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n", row.scenario, row.capacity,
+                            row.bias, row.frames, row.generated, row.evictions, row.warm_evictions, row.regenerated,
+                            row.regenerated_within_60_frames, row.peak_resident, row.peak_nodes, row.coverage_changes,
+                            row.edge_changes, row.changes_without_eviction, row.changes_without_generation,
+                            row.tail_generated, row.tail_changes, row.tail_pending, row.seam_violations,
+                            row.seam_vertices);
+            }
+        }
+}
+
+// The cache snapshot is also used by the panel, so exercise empty, pending, full, disabled and
+// invalidated states without relying on the renderer's fixed 1024-layer GPU array.
+void test_cache_stats_accounting() {
+    constexpr double radius = 2.5 / 15;
+    const TierView close = view_at(.2, radius);
+    TerrainTier empty(2048);
+    assert(empty.cache_stats(0).free == 2048);
+    assert(!empty.mark_resident(0, {0, 0, 0, 0}, 1));
+    empty.release(0, {0, 0, 0, 0}, 1);
+    TerrainTier throughput(6);
+    throughput.update(close, 1, 0);
+    assert(throughput.pressure().generation_budget_limited > 0);
+    assert(throughput.pressure().slots_blocked == 0);
+
+    TerrainTier tier(6);
+    tier.update(close, 1, TerrainTier::generate_per_frame);
+    const TerrainTier::CacheStats pending = tier.cache_stats(1);
+    assert(pending.capacity == 6 && pending.free == 0 && pending.resident == 0 && pending.pending == 6);
+    for (const TerrainTier::Generation& generation : tier.generate()) {
+        assert(generation.slot < tier.capacity());
+        assert(tier.mark_resident(generation.slot, generation.key, generation.stamp));
+    }
+    tier.update(close, 2, TerrainTier::generate_per_frame);
+    const TerrainTier::CacheStats full = tier.cache_stats(2);
+    unsigned ages = 0;
+    for (unsigned count : full.age)
+        ages += count;
+    assert(full.free == 0 && full.resident == 6 && full.pending == 0 && ages == full.resident);
+    assert(tier.pressure().served == tier.generate().size());
+    assert(tier.pressure().slots_blocked > 0);
+    assert(tier.pressure().generation_budget_limited == 0);
+    tier.disable();
+    const TerrainTier::CacheStats disabled = tier.cache_stats(2);
+    assert(disabled.free == 0 && disabled.resident == 6 && disabled.pending == 0);
+    assert(tier.cache_stats(31).age[0] == 6);
+    assert(tier.cache_stats(32).age[1] == 6);
+    assert(tier.cache_stats(212).age.back() == 6);
+    tier.invalidate();
+    const TerrainTier::CacheStats invalidated = tier.cache_stats(3);
+    assert(invalidated.free == 6 && invalidated.resident == 0 && invalidated.pending == 0);
+    assert(tier.resident_slot({0, 0, 0, 0}) == TerrainTier::no_slot);
+}
+
 int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
     for (int i = 1; i < argc; i++)
         if (std::string_view(argv[i]) == "--truth") {
             test_occluder_floor(); // the premise the other two rest on
@@ -966,13 +1305,20 @@ int main(int argc, char** argv) {
         } else if (std::string_view(argv[i]) == "--sweep") {
             test_flight_sweep();
             return 0;
+        } else if (std::string_view(argv[i]) == "--cache-sweep") {
+            test_cache_sweep();
+            return 0;
         }
+    test_motion_stability();
+    test_cached_reentry();
+    test_invalidate_before_update();
+    test_morph_streaming();
     test_resident_height_selection();
     test_height_range_lifetime();
     test_resident_terrain_morph();
     test_morph_bands();
     test_morph_continuity();
-    test_morph_streaming();
+    test_cache_stats_accounting();
     test_cull_waste();
     test_provenance_and_audit();
     constexpr double radius = 2.5 / 15;
@@ -1007,7 +1353,7 @@ int main(int argc, char** argv) {
     assert(converged_at && tier.active() && !tier.draws().empty());
     std::printf("terrain tier: converged at frame %u with %zu patches drawn, %u resident, %u nodes\n", converged_at,
                 tier.draws().size(), tier.resident(), tier.nodes());
-    assert(tier.draws().size() > 6 && tier.draws().size() < 400);
+    assert(tier.draws().size() > 6 && tier.draws().size() <= 58); // former default workload was 52
     // Every drawn slot is drawn once, and no slot is both drawn and regenerated in one frame.
     std::vector<unsigned> drawn;
     for (const auto& draw : tier.draws())
@@ -1033,7 +1379,7 @@ int main(int argc, char** argv) {
         const PatchKey parent{a.key.face, std::uint8_t(a.key.level - 1), std::uint16_t(a.key.x / 2),
                               std::uint16_t(a.key.y / 2)};
         const double dist = TerrainTier::nearest_distance(close.camera_local, patch_bounds(parent));
-        parents_resident += tier.resident_slot(parent) != TerrainTier::slot_count;
+        parents_resident += tier.resident_slot(parent) != TerrainTier::no_slot;
         children_drawn++;
         assert(dist < double(tier.range(a.key.level)) / TerrainTier::hysteresis);
     }

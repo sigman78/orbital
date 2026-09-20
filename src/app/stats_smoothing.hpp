@@ -36,6 +36,7 @@ struct SmoothedStats {
         // The rest changes rarely or is a small count: shown as is.
         frame.rock_triangles = sample.rock_triangles;
         frame.draw_calls = sample.draw_calls;
+        frame.bodies_drawn = sample.bodies_drawn;
         frame.rock_groups_drawn = sample.rock_groups_drawn;
         frame.terrain = sample.terrain;
         frame.belt_lod = sample.belt_lod;

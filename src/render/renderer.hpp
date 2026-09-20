@@ -2,6 +2,7 @@
 #include "render/camera_view.hpp"
 #include "render/gpu_pass.hpp"
 #include "render/settings.hpp"
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -62,10 +63,12 @@ struct FrameStats {
     unsigned draw_calls = 0;     // API draw calls submitted this frame (an indirect multi-draw counts once)
     unsigned bodies_drawn = 0;   // bodies inside the view frustum this frame
     struct Terrain {             // the minor planet's near tier
-        bool active = false;     // the tier draws the body; its sphere levels otherwise
-        unsigned drawn = 0;      // patches drawn this frame
-        unsigned resident = 0;   // tiles in the cache, arrived
-        unsigned pending = 0;    // slots handed out whose tile has not arrived (queued, generating or uploading)
+        static constexpr unsigned cache_age_buckets = 8;
+        static constexpr unsigned cache_age_bucket_frames = 30;
+        bool active = false;   // the tier draws the body; its sphere levels otherwise
+        unsigned drawn = 0;    // patches drawn this frame
+        unsigned resident = 0; // tiles in the cache, arrived
+        unsigned pending = 0;  // slots handed out whose tile has not arrived (queued, generating or uploading)
         // Frames the oldest of those has waited. Nothing evicts a pending slot and the tree
         // re-requests only keys without one, so a tile that never comes back leaves its patch
         // drawn coarse by its parent until the reclaim sweep takes the slot; seconds, not frames.
@@ -74,16 +77,22 @@ struct FrameStats {
         unsigned uploaded = 0;              // tiles copied into the arrays this frame
         unsigned rings_free = 0, rings = 0; // upload ring entries free, and the ring's size
         unsigned slots = 0;                 // the cache's capacity
-        unsigned nodes = 0;                 // quadtree nodes alive
+        unsigned slots_free = 0, oldest_age = 0;
+        // Resident cache-age bars, recent to cold. See TerrainTier::cache_age_bucket_frames.
+        std::array<unsigned, cache_age_buckets> cache_age{};
+        unsigned nodes = 0; // quadtree nodes alive
         unsigned workers = 0;
         float generate_ms = 0; // the last finished tile's time on its worker
         // TerrainTier::Pressure counters.
         unsigned node_budget = 0, splits_blocked = 0;
         unsigned requested = 0, served = 0;
         unsigned evictions = 0, evicted_recent = 0;
+        std::uint64_t eviction_total = 0, warm_eviction_total = 0;
+        unsigned generation_budget = 0, generation_budget_limited = 0, slots_blocked = 0;
         unsigned starved = 0, out_of_range = 0, deepest = 0, behind_one = 0;
         unsigned flat_near = 0, flat_far = 0, graded = 0; // patches the morph grades against ones it switches
-        float behind_mean = 0, fade_mean = 0;
+        float behind_mean = 0;
+        unsigned balanced = 0;
     } terrain;
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
     float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc
@@ -106,7 +115,7 @@ struct PatchView {
     std::uint8_t quadrants = 0; // the grid quadrants drawn, bit i: x = i & 1, y = i >> 1
     std::uint16_t x = 0, y = 0; // the cell within the face at this level
     float morph = 0;            // 0 its own shape, 1 its parent's, at its nearest corner
-    float fade = 0;             // the arrival floor under that, 1 the frame the tile appears
+    float recovery = 0;         // local arrival fade in the patch interior
 };
 
 struct Stats {

@@ -87,22 +87,20 @@ normal+height map and an albedo map in the layout the Moon and Mars use, so the 
 airless shader (`KIND_MINOR_PLANET`) with the same terrain shadowing and draw tiers, and the atmosphere
 pass gives it a faint blue haze after Pluto's, tripled from the physical optical depth to read.
 
-Close in, above a projected radius where the finest sphere level runs out, the body draws as its near
-tier instead: a cube sphere of six faces, each a quadtree of 16 by 16 quad patches with skirts
-(`scene/terrain_patch.hpp`), split while a patch's geometric error (the terrain at its quad centres against
-the mean of their corners, measured at generation) projects over 1.5 px at the limb and 3 px head-on, with
-hysteresis, collapsed out of view. `render/terrain_tier.hpp` keeps the tree and a
-cache of 1024 vertex slots by patch (least recently used out, the six faces pinned), lists the patches to
-draw and asks for up to eight new ones a frame; a patch whose visible children are not all resident draws
-itself, so the surface is complete every frame and refines over the following ones. The renderer
-(`renderer_terrain.cpp`) generates the requested patches on the CPU before the previous frame's wait
-into a staging slot chosen by frame parity, copies them into a device pool at the start of the command
-buffer, and draws the listed slots as one indexed multi-draw through the surface vertex shader with one shared
-index buffer, in the depth pre-pass, the scene pass and the motion pass; the shadow map keeps the sphere. Patch vertices are
-the terrain's positions in radii with the sphere's normals, so the maps shade them exactly as the far
-tier and the switch is invisible; procedural detail past the maps is the step after. For the review the
-airless shader can draw a patch's quad grid over the surface from the face's cell coordinates (the
-wireframe switch, `--wireframe`), and Z slows the flight to a fiftieth for the approach.
+Close in, the body draws as a CDLOD cube sphere with a shared 32-quad grid, sampled from height,
+albedo and slope tile arrays. `render/terrain_tier.hpp` selects patches using distance ranges derived
+from calibrated parent triangle error, with a default five-screen-pixel target. The renderer gives it
+2048 cache slots, independently of the 4096-node ceiling. Pending tiles, current traversal dependencies,
+and all six roots are protected from LRU eviction. Local resident ancestors cover missing refinement;
+neighbour balancing and edge morph constraints preserve 2:1 boundaries. The worker pool admits at most
+eight tiles per frame, further capped by free entries in the 32-entry staging ring. Completed tiles are
+uploaded into array layers and shared-grid instances draw in the depth, scene and motion passes;
+the shadow map keeps the sphere. See [Dynamic terrain](DYNAMIC_TERRAIN.md) for the current contract and
+[Cache stability](TERRAIN_LOD_STABILITY.md) for the capacity measurements.
+
+The panel and keyboard expose the same terrain checks: N toggles the near
+tier, G toggles wireframe, V cycles the six patch debug views, and C freezes culling for inspection; Z slows the
+flight to a fiftieth for the approach.
 
 ## Frame
 
