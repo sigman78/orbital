@@ -31,6 +31,8 @@ public:
         buffer_ = "frame,frame_ms,cpu_submit_and_wait_ms,cpu_prepare_ms";
         for (const auto& pass : render::gpu_pass_info)
             std::format_to(std::back_inserter(buffer_), ",{}", pass.column);
+        for (const auto& column : terrain_columns)
+            std::format_to(std::back_inserter(buffer_), ",{}", column.name);
         buffer_ += '\n';
     }
     ~BenchmarkLog() { flush(); }
@@ -44,6 +46,8 @@ public:
         std::format_to(std::back_inserter(buffer_), "{},{},{},{}", rows_++, frame_ms, frame.draw_ms, frame.prepare_ms);
         for (const float ms : frame.gpu.ms)
             std::format_to(std::back_inserter(buffer_), ",{}", ms);
+        for (const auto& column : terrain_columns)
+            std::format_to(std::back_inserter(buffer_), ",{}", frame.terrain.*column.value);
         buffer_ += '\n';
         draw_ms_.push_back(frame.draw_ms);
         if (rows_ % rows_per_flush == 0)
@@ -64,6 +68,30 @@ public:
     }
 
 private:
+    // Keep diagnostic columns named so recorded movement can be compared after a visible jump.
+    struct TerrainColumn {
+        const char* name;
+        unsigned render::FrameStats::Terrain::* value;
+    };
+    static constexpr TerrainColumn terrain_columns[] = {
+        {"terrain_slots", &render::FrameStats::Terrain::slots},
+        {"terrain_resident", &render::FrameStats::Terrain::resident},
+        {"terrain_free", &render::FrameStats::Terrain::slots_free},
+        {"terrain_pending", &render::FrameStats::Terrain::pending},
+        {"terrain_pending_age", &render::FrameStats::Terrain::pending_age},
+        {"terrain_oldest_age", &render::FrameStats::Terrain::oldest_age},
+        {"terrain_drawn", &render::FrameStats::Terrain::drawn},
+        {"terrain_requested", &render::FrameStats::Terrain::requested},
+        {"terrain_served", &render::FrameStats::Terrain::served},
+        {"terrain_evictions", &render::FrameStats::Terrain::evictions},
+        {"terrain_warm_evictions", &render::FrameStats::Terrain::evicted_recent},
+        {"terrain_slots_blocked", &render::FrameStats::Terrain::slots_blocked},
+        {"terrain_budget_deferred", &render::FrameStats::Terrain::generation_budget_limited},
+        {"terrain_rings_free", &render::FrameStats::Terrain::rings_free},
+        {"terrain_nodes", &render::FrameStats::Terrain::nodes},
+        {"terrain_splits_blocked", &render::FrameStats::Terrain::splits_blocked},
+        {"terrain_balanced", &render::FrameStats::Terrain::balanced},
+    };
     void flush() {
         if (file_ && !buffer_.empty()) {
             file_.write(buffer_.data(), std::streamsize(buffer_.size()));

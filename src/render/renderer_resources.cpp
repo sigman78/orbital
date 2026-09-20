@@ -488,7 +488,7 @@ void Renderer::Impl::collect_memory_stats() {
             memory.tile_arrays.bytes += image->bytes();
             memory.tile_arrays.count++;
         }
-    memory.tile_arrays.used = memory.tile_arrays.bytes * stats.frame.terrain.resident / TerrainTier::slot_count;
+    memory.tile_arrays.used = memory.tile_arrays.bytes * stats.frame.terrain.resident / terrain_cache_slots;
     memory.readback = {};
     heap(memory.readback, buffers.cull_readback);
     heap(memory.readback, buffers.meter_readback);

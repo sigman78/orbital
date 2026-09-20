@@ -4,12 +4,13 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <unordered_set>
 
 namespace space::render {
 
 namespace {
 
-constexpr unsigned no_slot = TerrainTier::slot_count;
+constexpr unsigned no_slot = TerrainTier::no_slot;
 
 Vec3d to_world(const TierView& view, Vec3d local) {
     return view.axes[0] * local.x + view.axes[1] * local.y + view.axes[2] * local.z;
@@ -25,8 +26,8 @@ void TerrainTier::ensure_roots() {
         const PatchKey key{std::uint8_t(face), 0, 0, 0};
         nodes_.push_back({.key = key, .bounds = patch_bounds(key)});
     }
-    slots_.resize(slot_count);
-    for (unsigned slot = slot_count; slot-- > 0;)
+    slots_.resize(capacity_);
+    for (unsigned slot = capacity_; slot-- > 0;)
         free_slots_.push_back(slot);
 }
 
@@ -241,8 +242,30 @@ TerrainTier::Audit TerrainTier::audit() const {
         result.resident_undrawn += !drawn.count(packed);
         oldest = std::min(oldest, slots_[slot].used);
     }
-    result.oldest_age = frame_ - oldest;
+    result.oldest_age = result.resident ? frame_ - oldest : 0;
     result.pending_age = result.pending ? frame_ - assigned : 0;
+    return result;
+}
+
+TerrainTier::CacheStats TerrainTier::cache_stats(unsigned frame) const {
+    CacheStats result{.capacity = capacity_};
+    unsigned oldest = frame, assigned = frame;
+    for (const Slot& slot : slots_) {
+        if (!slot.stamp)
+            continue;
+        if (!slot.resident) {
+            result.pending++;
+            assigned = std::min(assigned, slot.assigned_frame);
+            continue;
+        }
+        result.resident++;
+        const unsigned age = frame - slot.used;
+        result.age[std::min(age / cache_age_bucket_frames, cache_age_buckets - 1)]++;
+        oldest = std::min(oldest, slot.used);
+    }
+    result.free = capacity_ - result.resident - result.pending;
+    result.oldest_age = result.resident ? frame - oldest : 0;
+    result.pending_age = result.pending ? frame - assigned : 0;
     return result;
 }
 
@@ -472,13 +495,14 @@ void TerrainTier::stitch(const TierView& view) {
 // Serve coarse/large patches first; LRU eviction protects pending and currently used slots.
 void TerrainTier::choose_generation(unsigned budget) {
     const unsigned cap = std::min(budget, generate_per_frame);
+    pressure_.generation_budget = cap;
     // Reclaim slots whose generation never came back, whatever lost it. `used` cannot say:
     // a visible pending patch is touched every frame, so the assignment frame decides.
     // A cursor over a window per frame rather than the whole array: there is no queue to
-    // overrun, and a slot waits at most slot_count / sweep_window extra frames.
+    // overrun, and a slot waits at most capacity / sweep_window extra frames.
     for (unsigned n = 0; n < sweep_window; n++) {
         Slot& slot = slots_[sweep_cursor_];
-        sweep_cursor_ = (sweep_cursor_ + 1) % slot_count;
+        sweep_cursor_ = (sweep_cursor_ + 1) % capacity_;
         if (!slot.resident && slot.stamp && slot.assigned_frame + pending_timeout < frame_) {
             slots_by_key_.erase(slot.key.packed());
             free_slots_.push_back(unsigned(&slot - slots_.data()));
@@ -486,28 +510,49 @@ void TerrainTier::choose_generation(unsigned budget) {
         }
     }
     std::sort(requests_.begin(), requests_.end(), [](const Request& a, const Request& b) {
-        return a.key.level != b.key.level ? a.key.level < b.key.level : a.pixels > b.pixels;
+        if (a.key.level != b.key.level)
+            return a.key.level < b.key.level;
+        if (a.pixels != b.pixels)
+            return a.pixels > b.pixels;
+        return a.key.packed() < b.key.packed();
     });
+    std::unordered_set<std::uint32_t> seen;
+    bool slots_unavailable = false;
     for (const Request& r : requests_) {
-        if (generate_.size() >= cap)
-            break;
+        if (!seen.insert(r.key.packed()).second)
+            continue;
+        pressure_.requested++;
         if (slot_of(r.key) != no_slot)
             continue; // requested twice, or already resident
+        if (generate_.size() >= cap) {
+            pressure_.generation_budget_limited++;
+            continue;
+        }
+        if (slots_unavailable) {
+            pressure_.slots_blocked++;
+            continue;
+        }
         unsigned slot = no_slot;
         if (!free_slots_.empty()) {
             slot = free_slots_.back();
             free_slots_.pop_back();
         } else {
             unsigned oldest = frame_;
-            for (unsigned i = 0; i < slot_count; i++)
+            for (unsigned i = 0; i < capacity_; i++)
                 if (slots_[i].resident && slots_[i].used < oldest) {
                     oldest = slots_[i].used;
                     slot = i;
                 }
-            if (slot == no_slot)
-                break; // nothing evictable: every other slot is pending
+            if (slot == no_slot) {
+                pressure_.slots_blocked++; // every usable slot is pending or touched this frame
+                slots_unavailable = true;
+                continue;
+            }
             pressure_.evictions++;
-            pressure_.evicted_recent += slots_[slot].used + 60 > frame_;
+            const bool warm = slots_[slot].used + 60 > frame_;
+            pressure_.evicted_recent += warm;
+            eviction_total_++;
+            warm_eviction_total_ += warm;
             slots_by_key_.erase(slots_[slot].key.packed());
         }
         slots_[slot] = {.key = r.key, .used = frame_, .assigned_frame = frame_, .stamp = ++stamp_, .resident = false};
@@ -522,7 +567,7 @@ void TerrainTier::invalidate() {
         slot = {};
     slots_by_key_.clear();
     free_slots_.clear();
-    for (unsigned slot = slot_count; slot-- > 0;)
+    for (unsigned slot = capacity_; slot-- > 0;)
         free_slots_.push_back(slot);
     draws_.clear();
     generate_.clear();
@@ -539,7 +584,7 @@ void TerrainTier::disable() {
 
 void TerrainTier::release(unsigned slot, PatchKey key, std::uint32_t stamp) {
     // Stamps start at one, so a cleared slot matches nothing; a resident slot is not ours to free.
-    if (slot >= slot_count || slots_[slot].stamp != stamp || slots_[slot].key != key || slots_[slot].resident)
+    if (slot >= slots_.size() || slots_[slot].stamp != stamp || slots_[slot].key != key || slots_[slot].resident)
         return;
     slots_by_key_.erase(key.packed());
     slots_[slot] = {};
@@ -548,7 +593,7 @@ void TerrainTier::release(unsigned slot, PatchKey key, std::uint32_t stamp) {
 
 bool TerrainTier::mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights) {
     // Stamps start at one, so a slot cleared by invalidate() matches nothing in flight.
-    if (slots_[slot].stamp != stamp || slots_[slot].key != key)
+    if (slot >= slots_.size() || slots_[slot].stamp != stamp || slots_[slot].key != key)
         return false; // recycled, or regenerated at another detail, since the request went out
     slots_[slot].resident = true;
     slots_[slot].heights = heights;
@@ -562,6 +607,20 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     requests_.clear();
     generate_.clear();
     pressure_ = {};
+    const auto cache_snapshot = [&] {
+        const CacheStats cache = cache_stats(frame_);
+        pressure_.cache_capacity = cache.capacity;
+        pressure_.cache_free = cache.free;
+        pressure_.cache_resident = cache.resident;
+        pressure_.cache_pending = cache.pending;
+        pressure_.cache_oldest_age = cache.oldest_age;
+        pressure_.cache_pending_age = cache.pending_age;
+        pressure_.cache_age = cache.age;
+        pressure_.eviction_total = eviction_total_;
+        pressure_.warm_eviction_total = warm_eviction_total_;
+        pressure_.nodes = nodes();
+        pressure_.node_budget = node_budget;
+    };
     const float bias = std::exp2(view.lod_bias);
     // A child replaces its parent when the parent's projected error reaches the budget.
     // range[L] is both L's handover/morph end and (L-1)'s split distance.
@@ -586,6 +645,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         for (unsigned face = 0; face < 6; face++)
             collapse(nodes_[face]);
         active_ = false;
+        cache_snapshot();
         return;
     }
     // Pin all six roots as fallback coverage, including faces outside the current view.
@@ -611,9 +671,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     if (active_)
         stitch(view);
     choose_generation(budget);
-    pressure_.nodes = nodes();
-    pressure_.node_budget = node_budget;
-    pressure_.requested = unsigned(requests_.size());
+    cache_snapshot();
     pressure_.served = unsigned(generate_.size());
     double behind = 0;
     for (const Draw& draw : draws_) {

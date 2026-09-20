@@ -66,6 +66,14 @@ void handle_key(AppState& app, Key key) {
         orbit_selected(app);
     else if (key == platform::letter_key('F'))
         free_camera(app);
+    else if (key == platform::letter_key('G'))
+        app.terrain.wireframe = !app.terrain.wireframe;
+    else if (key == platform::letter_key('N'))
+        app.terrain.near_tier = !app.terrain.near_tier;
+    else if (key == platform::letter_key('V'))
+        app.terrain.debug = (app.terrain.debug + 1) % 6;
+    else if (key == platform::letter_key('C'))
+        app.belt.freeze_culling = !app.belt.freeze_culling;
     else if (key == platform::letter_key('X'))
         app.tone.auto_exposure = !app.tone.auto_exposure;
     else if (key == platform::letter_key('Z'))

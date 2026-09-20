@@ -27,18 +27,19 @@ constexpr std::uint64_t tile_total_bytes = align4(slope_offset + colour_tile_byt
 // shaders' debug packing reads tile[2] and tile[3] through 12-bit fields (see patch.slang).
 constexpr unsigned patch_tile_flag_bits = 10;
 static_assert(patch_tile_flag_bits <= 12, "tile[3] is unpacked from a 12-bit field");
-static_assert(TerrainTier::slot_count <= 0xfff, "tile[2] carries the parent slot in a 12-bit field");
+static_assert(terrain_cache_slots <= 0xfff, "tile[2] carries the parent slot in a 12-bit field");
+static_assert(FrameStats::Terrain::cache_age_buckets == TerrainTier::cache_age_buckets &&
+              FrameStats::Terrain::cache_age_bucket_frames == TerrainTier::cache_age_bucket_frames);
 } // namespace
 
 void Renderer::Impl::create_terrain_tier() {
     if (!showcase.has_minor_planet())
         return;
     minor_planet_terrain.emplace(system.bodies[showcase.minor_planet()].material_seed);
-    tile_height = GpuImage::create_array(device, {tile_side, tile_side}, TerrainTier::slot_count,
-                                         gpu::Format::r16_unorm);
-    tile_albedo = GpuImage::create_array(device, {tile_colour_side, tile_colour_side}, TerrainTier::slot_count,
+    tile_height = GpuImage::create_array(device, {tile_side, tile_side}, terrain_cache_slots, gpu::Format::r16_unorm);
+    tile_albedo = GpuImage::create_array(device, {tile_colour_side, tile_colour_side}, terrain_cache_slots,
                                          gpu::Format::rgba8_unorm);
-    tile_slope = GpuImage::create_array(device, {tile_colour_side, tile_colour_side}, TerrainTier::slot_count,
+    tile_slope = GpuImage::create_array(device, {tile_colour_side, tile_colour_side}, terrain_cache_slots,
                                         gpu::Format::rg16_unorm);
     bind(ArraySlot::terrain_height, tile_height);
     bind(ArraySlot::terrain_albedo, tile_albedo);
@@ -60,10 +61,9 @@ void Renderer::Impl::create_terrain_tier() {
     }
     grid_wire_address = upload_static(bytes_of(wire));
     grid_index_count = unsigned(grid.indices.size());
-    buffers.patch_records = UniqueGpuHeap::create(device, TerrainTier::slot_count * sizeof(PatchInstance),
+    buffers.patch_records = UniqueGpuHeap::create(device, terrain_cache_slots * sizeof(PatchInstance),
                                                   gpu::MemoryType::gpu_only);
-    buffers.patch_records_staging = UniqueGpuHeap::create(device,
-                                                          2ull * TerrainTier::slot_count * sizeof(PatchInstance));
+    buffers.patch_records_staging = UniqueGpuHeap::create(device, 2ull * terrain_cache_slots * sizeof(PatchInstance));
     buffers.tile_staging = UniqueGpuHeap::create(device, std::uint64_t(tile_ring_count) * tile_total_bytes);
     panic_if(!buffers.patch_records.range().gpu || !buffers.patch_records_staging.range().cpu ||
                  !buffers.tile_staging.range().cpu,
@@ -72,8 +72,8 @@ void Renderer::Impl::create_terrain_tier() {
     tile_workers = std::max(1u, cores > 2 ? cores - 2 : 1u);
     tile_pool = std::make_unique<WorkerPool<TileResult>>(tile_workers);
     log::info("Near tier: {} tile slots, {} workers, {} KiB height + {} KiB albedo + {} KiB slope arrays",
-              TerrainTier::slot_count, tile_workers, TerrainTier::slot_count * height_tile_bytes >> 10,
-              TerrainTier::slot_count * colour_tile_bytes >> 10, TerrainTier::slot_count * colour_tile_bytes >> 10);
+              terrain_cache_slots, tile_workers, terrain_cache_slots * height_tile_bytes >> 10,
+              terrain_cache_slots * colour_tile_bytes >> 10, terrain_cache_slots * colour_tile_bytes >> 10);
 }
 
 void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
@@ -90,7 +90,39 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         }
     if (!input.terrain.near_tier) {
         terrain_tier.disable();
-        stats.frame.terrain = {.slots = TerrainTier::slot_count, .workers = tile_workers};
+        // Disabling only stops selection; it deliberately keeps the cache warm. Preserve a
+        // truthful pressure strip instead of showing an empty cache while its tiles remain.
+        const TerrainTier::CacheStats cache = terrain_tier.cache_stats(frame_index);
+        auto& ts = stats.frame.terrain;
+        const TerrainTier::Pressure& p = terrain_tier.pressure();
+        unsigned rings_free = 0;
+        for (unsigned i = 0; i < tile_ring_count; i++)
+            rings_free += ring_available(i);
+        ts.active = false;
+        ts.drawn = 0;
+        ts.resident = cache.resident;
+        ts.pending = cache.pending;
+        ts.pending_age = cache.pending_age;
+        ts.queued = tile_pool ? tile_pool->in_flight() : 0;
+        ts.rings_free = rings_free;
+        ts.rings = tile_ring_count;
+        ts.slots = cache.capacity;
+        ts.slots_free = cache.free;
+        ts.oldest_age = cache.oldest_age;
+        ts.cache_age = cache.age;
+        ts.nodes = terrain_tier.nodes();
+        ts.node_budget = TerrainTier::node_budget;
+        ts.workers = tile_workers;
+        ts.splits_blocked = ts.requested = ts.served = ts.evictions = ts.evicted_recent = 0;
+        ts.generation_budget = ts.generation_budget_limited = ts.slots_blocked = 0;
+        ts.starved = ts.out_of_range = ts.deepest = ts.behind_one = 0;
+        ts.flat_near = ts.flat_far = ts.graded = ts.balanced = 0;
+        ts.behind_mean = 0;
+        // Totals survive disable/invalidate and remain useful after the current-frame counters clear.
+        ts.eviction_total = p.eviction_total;
+        ts.warm_eviction_total = p.warm_eviction_total;
+        patch_views.clear();
+        stats.patch_map = {};
         return;
     }
     const unsigned body = showcase.minor_planet();
@@ -169,24 +201,32 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                        .camera_s = float(under.s),
                        .camera_t = float(under.t)};
     auto& ts = stats.frame.terrain;
+    const TerrainTier::Pressure& p = terrain_tier.pressure();
     ts.active = terrain_tier.active();
     ts.drawn = unsigned(terrain_tier.draws().size());
-    ts.resident = terrain_tier.resident();
-    ts.pending = terrain_tier.pending();
-    ts.pending_age = terrain_tier.pending_age();
+    ts.resident = p.cache_resident;
+    ts.pending = p.cache_pending;
+    ts.pending_age = p.cache_pending_age;
     ts.queued = tile_pool ? tile_pool->in_flight() : 0;
     ts.rings_free = free_rings;
     ts.rings = tile_ring_count;
-    ts.slots = TerrainTier::slot_count;
+    ts.slots = terrain_tier.capacity();
     ts.nodes = terrain_tier.nodes();
     ts.workers = tile_workers;
-    const TerrainTier::Pressure& p = terrain_tier.pressure();
     ts.node_budget = p.node_budget;
     ts.splits_blocked = p.splits_blocked;
     ts.requested = p.requested;
     ts.served = p.served;
     ts.evictions = p.evictions;
     ts.evicted_recent = p.evicted_recent;
+    ts.eviction_total = p.eviction_total;
+    ts.warm_eviction_total = p.warm_eviction_total;
+    ts.slots_free = p.cache_free;
+    ts.oldest_age = p.cache_oldest_age;
+    ts.cache_age = p.cache_age;
+    ts.generation_budget = p.generation_budget;
+    ts.generation_budget_limited = p.generation_budget_limited;
+    ts.slots_blocked = p.slots_blocked;
     ts.starved = p.starved;
     ts.out_of_range = p.out_of_range;
     ts.deepest = p.deepest;
@@ -248,8 +288,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
             });
         }
     }
-    const std::uint64_t records_slot = (frame_index & 1) * std::uint64_t(TerrainTier::slot_count) *
-                                       sizeof(PatchInstance);
+    const std::uint64_t records_slot = (frame_index & 1) * std::uint64_t(terrain_cache_slots) * sizeof(PatchInstance);
     auto* records = reinterpret_cast<PatchInstance*>(buffers.patch_records_staging.range().cpu + records_slot);
     for (std::size_t i = 0; i < terrain_tier.draws().size(); i++) {
         const TerrainTier::Draw& draw = terrain_tier.draws()[i];
@@ -263,7 +302,10 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         const PatchKey parent{draw.key.face, std::uint8_t(draw.key.level ? draw.key.level - 1 : 0),
                               std::uint16_t(draw.key.x / 2), std::uint16_t(draw.key.y / 2)};
         // The parent tile supplies material at the coarse end of the distance band.
-        const unsigned parent_slot = draw.key.level ? terrain_tier.resident_slot(parent) : TerrainTier::slot_count;
+        const unsigned resident_parent = draw.key.level ? terrain_tier.resident_slot(parent) : TerrainTier::no_slot;
+        // The shader's parent-layer absence marker is the fixed GPU array size, while the CPU
+        // cache uses no_slot so deterministic tests can safely exceed that array's capacity.
+        const unsigned parent_slot = resident_parent == TerrainTier::no_slot ? terrain_cache_slots : resident_parent;
         records[i] = {.cell = cell,
                       .morph = {morph_start, morph_end, draw.fade, float(draw.coarse_edges)},
                       .tile = {draw.key.face, draw.slot, parent_slot,

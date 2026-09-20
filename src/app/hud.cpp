@@ -13,6 +13,10 @@ constexpr platform::TextItem hud_text[] = {
     {.text = "01 / TERRA     02 / JOVIAN     03 / SELENE     04 / ARES", .x = 6, .y = 124, .pixel_height = 14},
     {.text = "RMB + WASD  NAVIGATE     1-8  VIEWS     T  TOUR     TAB  PANEL", .x = 6, .y = 174, .pixel_height = 13},
     {.text = "SPACE  PAUSE     F2  QUALITY     +/-  EXPOSURE     F1  HIDE", .x = 6, .y = 202, .pixel_height = 13},
+    {.text = "N  NEAR TERRAIN     G  WIREFRAME     V  PATCH VIEW     C  FREEZE CULL",
+     .x = 6,
+     .y = 230,
+     .pixel_height = 13},
 };
 
 constexpr platform::RuleItem hud_rules[] = {{.x0 = 6, .y = 94, .x1 = 256}};

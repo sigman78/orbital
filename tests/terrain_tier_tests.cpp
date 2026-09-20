@@ -479,7 +479,7 @@ void test_invalidate_before_update() {
         for (const auto& g : tier.generate()) {
             assert(g.slot < TerrainTier::slot_count);
             if (assigned[g.slot])
-                assert(tier.resident_slot(owners[g.slot]) == TerrainTier::slot_count);
+                assert(tier.resident_slot(owners[g.slot]) == TerrainTier::no_slot);
             owners[g.slot] = g.key;
             assigned[g.slot] = true;
             assert(tier.mark_resident(g.slot, g.key, g.stamp));
@@ -1009,7 +1009,7 @@ void test_flight_sweep() {
             for (const TerrainTier::Draw& draw : tier.draws()) {
                 assert(draw.quadrants && draw.quadrants <= 0xf);
                 assert(drawn_slots.emplace(draw.slot, draw.key.packed()).second); // a slot drawn twice
-                parentless += draw.key.level && tier.resident_slot(draw.key.parent()) == TerrainTier::slot_count;
+                parentless += draw.key.level && tier.resident_slot(draw.key.parent()) == TerrainTier::no_slot;
                 for (unsigned q = 0; q < 4; q++) {
                     if (!(draw.quadrants >> q & 1))
                         continue;
@@ -1036,7 +1036,7 @@ void test_flight_sweep() {
                             std::printf("    level %2u (%4u,%4u) %s reach %+.4f..%+.4f from level %u, horizon margin "
                                         "%+.5f, plane %u margin %+.5f, distance %.4f vs %.4f\n",
                                         step.key.level, step.key.x, step.key.y,
-                                        step.slot < TerrainTier::slot_count ? "resident" : "no tile ",
+                                        step.slot != TerrainTier::no_slot ? "resident" : "no tile ",
                                         double(step.reach.min), double(step.reach.max), step.reach_level,
                                         step.horizon_margin, step.plane, step.plane_margin, step.distance,
                                         step.split_range);
@@ -1084,6 +1084,216 @@ void test_flight_sweep() {
     assert(worst_pending_age <= TerrainTier::pending_timeout + TerrainTier::slot_count / TerrainTier::sweep_window);
 }
 
+// A repeatable cache-pressure trace.  It deliberately reports the result rather than asserting
+// that a larger cache must win: a cache can be full of useful history, and a larger one can move
+// pressure to another limit.  The useful comparison is repeated assignment and coverage churn
+// over the same settle, pan, look-away and re-entry path.
+struct CacheSweepRow {
+    const char* scenario = "";
+    unsigned capacity = 0, bias = 0, frames = 0;
+    unsigned generated = 0, evictions = 0, warm_evictions = 0;
+    unsigned regenerated = 0, regenerated_within_60_frames = 0;
+    unsigned peak_resident = 0, peak_nodes = 0;
+    unsigned coverage_changes = 0, edge_changes = 0;
+    unsigned changes_without_eviction = 0, changes_without_generation = 0;
+    unsigned tail_generated = 0, tail_changes = 0, tail_pending = 0;
+    unsigned seam_violations = 0, seam_vertices = 0;
+};
+
+TierView cache_sweep_look(TierView view, bool away) {
+    CameraView camera;
+    camera.forward = normalized(view.camera_local) * (away ? 1.0 : -1.0);
+    camera.right = normalized(cross(camera.forward, std::abs(camera.forward.y) < .9 ? Vec3d{0, 1, 0} : Vec3d{1, 0, 0}));
+    camera.up = cross(camera.right, camera.forward);
+    view.frustum = view_frustum(camera, view.tan_y * 16 / 9, view.tan_y);
+    return view;
+}
+
+TierView cache_sweep_grazing(TierView view) {
+    CameraView camera;
+    const Vec3d radial = normalized(view.camera_local);
+    camera.forward = normalized(normalized(cross(Vec3d{0, 1, 0}, radial)) - radial * .1);
+    camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
+    camera.up = cross(camera.right, camera.forward);
+    view.frustum = view_frustum(camera, view.tan_y * 16 / 9, view.tan_y);
+    return view;
+}
+
+void test_cache_sweep() {
+    constexpr double radius = 2.5 / 15;
+    constexpr unsigned capacities[] = {TerrainTier::slot_count, TerrainTier::slot_count * 2,
+                                       TerrainTier::slot_count * 4};
+    const MinorPlanetTerrain terrain(1007);
+    std::printf("scenario,cache_capacity,lod_bias,frames,generated,evictions,warm_evictions,regenerated,"
+                "regenerated_within_60_frames,peak_resident,peak_nodes,coverage_changes,edge_changes,"
+                "changes_without_eviction,changes_without_generation,tail_generated,tail_changes,tail_pending,"
+                "seam_violations,seam_vertices\n");
+    for (unsigned capacity : capacities)
+        for (unsigned bias = 0; bias <= 3; bias++) {
+            for (bool grazing : {false, true}) {
+                TerrainTier tier(capacity);
+                AsyncTiles async;
+                async.terrain = &terrain;
+                // Varying completion time makes later requests overtake earlier ones.  The single
+                // held request also exercises the pending-slot path without turning this into a
+                // timeout test.
+                async.jitter = 11;
+                async.hold_frames = 19;
+                CacheSweepRow row{.scenario = grazing ? "grazing" : "nadir", .capacity = capacity, .bias = bias};
+                std::unordered_map<std::uint32_t, unsigned> generated_at;
+                std::unordered_map<std::uint64_t, unsigned> previous;
+                MorphCheck seams{terrain};
+                auto update = [&](TierView view, bool tail = false, bool away = false) {
+                    if (grazing && !away)
+                        view = cache_sweep_grazing(view);
+                    else
+                        view = cache_sweep_look(view, away);
+                    view.lod_bias = float(bias);
+                    async.update(tier, view, ++row.frames, 6);
+                    const TerrainTier::Audit audit = tier.audit();
+                    const TerrainTier::CacheStats cache = tier.cache_stats(row.frames);
+                    const TerrainTier::Pressure& pressure = tier.pressure();
+                    assert(audit.reachable == audit.allocated);
+                    assert(tier.nodes() <= TerrainTier::node_budget);
+                    assert(tier.resident() <= tier.capacity());
+                    assert(tier.pending() <= tier.capacity());
+                    assert(cache.capacity == tier.capacity());
+                    assert(cache.resident == tier.resident() && cache.pending == tier.pending());
+                    assert(cache.free + cache.resident + cache.pending == cache.capacity);
+                    assert(pressure.cache_capacity == cache.capacity && pressure.cache_free == cache.free);
+                    assert(pressure.cache_resident == cache.resident && pressure.cache_pending == cache.pending);
+                    unsigned age_sum = 0;
+                    for (unsigned age : cache.age)
+                        age_sum += age;
+                    assert(age_sum == cache.resident);
+                    assert(pressure.served == tier.generate().size());
+                    assert(pressure.served + pressure.generation_budget_limited + pressure.slots_blocked <=
+                           pressure.requested);
+                    row.generated += unsigned(tier.generate().size());
+                    row.evictions += pressure.evictions;
+                    row.warm_evictions += pressure.evicted_recent;
+                    for (const TerrainTier::Generation& generation : tier.generate()) {
+                        const auto previous_generation = generated_at.find(generation.key.packed());
+                        if (previous_generation != generated_at.end()) {
+                            row.regenerated++;
+                            row.regenerated_within_60_frames += row.frames - previous_generation->second <= 60;
+                        }
+                        generated_at[generation.key.packed()] = row.frames;
+                    }
+                    row.peak_resident = std::max(row.peak_resident, tier.resident());
+                    row.peak_nodes = std::max(row.peak_nodes, tier.nodes());
+                    if (tail) {
+                        row.tail_generated += unsigned(tier.generate().size());
+                        row.tail_pending = std::max(row.tail_pending, tier.pending());
+                    }
+                    std::unordered_map<std::uint64_t, unsigned> current;
+                    for (const TerrainTier::Draw& draw : tier.draws()) {
+                        assert(tier.resident_slot(draw.key) == draw.slot);
+                        assert(draw.slot < tier.capacity());
+                        assert(current
+                                   .emplace((std::uint64_t(draw.key.packed()) << 4) | draw.quadrants,
+                                            draw.coarse_edges | (draw.fine_edges << 16))
+                                   .second);
+                    }
+                    unsigned changed = 0;
+                    for (const auto& [key, edges] : previous) {
+                        changed += !current.contains(key);
+                        if (const auto found = current.find(key); found != current.end())
+                            row.edge_changes += found->second != edges;
+                    }
+                    for (const auto& [key, _] : current)
+                        changed += !previous.contains(key);
+                    if (changed) {
+                        row.coverage_changes += changed;
+                        if (tier.pressure().evictions == 0)
+                            row.changes_without_eviction += changed;
+                        if (tier.generate().empty())
+                            row.changes_without_generation += changed;
+                        if (tail)
+                            row.tail_changes += changed;
+                    }
+                    previous = std::move(current);
+                    // Sample transitions as well as the settled endpoint; this catches a seam that
+                    // exists only while a delayed tile arrives or a neighbor is restitched.
+                    if (row.frames % 80 == 0) {
+                        row.seam_violations += seams.violations(tier, view, &row.seam_vertices);
+                    }
+                };
+                const TierView settled = view_over({.6, .3, 1}, .035, radius);
+                for (unsigned i = 0; i < 150; i++)
+                    update(settled);
+                for (unsigned cycle = 0; cycle < 3; cycle++) {
+                    for (unsigned i = 0; i < 70; i++)
+                        update(view_over({.6 + .00055 * i, .3, 1}, .035, radius));
+                    const TierView panned = view_over({.6 + .00055 * 69, .3, 1}, .035, radius);
+                    for (unsigned i = 0; i < 35; i++)
+                        update(panned, false, true);
+                    for (unsigned i = 0; i < 70; i++)
+                        update(panned);
+                }
+                const TierView panned = view_over({.6 + .00055 * 69, .3, 1}, .035, radius);
+                // This fixed tail makes persistent requests and selection-only churn visible.
+                for (unsigned i = 0; i < 80; i++)
+                    update(panned, true);
+                TierView seam_view = panned;
+                seam_view.lod_bias = float(bias);
+                if (grazing)
+                    seam_view = cache_sweep_grazing(seam_view);
+                row.seam_violations += seams.violations(tier, seam_view, &row.seam_vertices);
+                assert(row.seam_violations == 0);
+                std::printf("%s,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n", row.scenario, row.capacity,
+                            row.bias, row.frames, row.generated, row.evictions, row.warm_evictions, row.regenerated,
+                            row.regenerated_within_60_frames, row.peak_resident, row.peak_nodes, row.coverage_changes,
+                            row.edge_changes, row.changes_without_eviction, row.changes_without_generation,
+                            row.tail_generated, row.tail_changes, row.tail_pending, row.seam_violations,
+                            row.seam_vertices);
+            }
+        }
+}
+
+// The cache snapshot is also used by the panel, so exercise empty, pending, full, disabled and
+// invalidated states without relying on the renderer's fixed 1024-layer GPU array.
+void test_cache_stats_accounting() {
+    constexpr double radius = 2.5 / 15;
+    const TierView close = view_at(.2, radius);
+    TerrainTier empty(2048);
+    assert(empty.cache_stats(0).free == 2048);
+    assert(!empty.mark_resident(0, {0, 0, 0, 0}, 1));
+    empty.release(0, {0, 0, 0, 0}, 1);
+    TerrainTier throughput(6);
+    throughput.update(close, 1, 0);
+    assert(throughput.pressure().generation_budget_limited > 0);
+    assert(throughput.pressure().slots_blocked == 0);
+
+    TerrainTier tier(6);
+    tier.update(close, 1, TerrainTier::generate_per_frame);
+    const TerrainTier::CacheStats pending = tier.cache_stats(1);
+    assert(pending.capacity == 6 && pending.free == 0 && pending.resident == 0 && pending.pending == 6);
+    for (const TerrainTier::Generation& generation : tier.generate()) {
+        assert(generation.slot < tier.capacity());
+        assert(tier.mark_resident(generation.slot, generation.key, generation.stamp));
+    }
+    tier.update(close, 2, TerrainTier::generate_per_frame);
+    const TerrainTier::CacheStats full = tier.cache_stats(2);
+    unsigned ages = 0;
+    for (unsigned count : full.age)
+        ages += count;
+    assert(full.free == 0 && full.resident == 6 && full.pending == 0 && ages == full.resident);
+    assert(tier.pressure().served == tier.generate().size());
+    assert(tier.pressure().slots_blocked > 0);
+    assert(tier.pressure().generation_budget_limited == 0);
+    tier.disable();
+    const TerrainTier::CacheStats disabled = tier.cache_stats(2);
+    assert(disabled.free == 0 && disabled.resident == 6 && disabled.pending == 0);
+    assert(tier.cache_stats(31).age[0] == 6);
+    assert(tier.cache_stats(32).age[1] == 6);
+    assert(tier.cache_stats(212).age.back() == 6);
+    tier.invalidate();
+    const TerrainTier::CacheStats invalidated = tier.cache_stats(3);
+    assert(invalidated.free == 6 && invalidated.resident == 0 && invalidated.pending == 0);
+    assert(tier.resident_slot({0, 0, 0, 0}) == TerrainTier::no_slot);
+}
+
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     for (int i = 1; i < argc; i++)
@@ -1095,6 +1305,9 @@ int main(int argc, char** argv) {
         } else if (std::string_view(argv[i]) == "--sweep") {
             test_flight_sweep();
             return 0;
+        } else if (std::string_view(argv[i]) == "--cache-sweep") {
+            test_cache_sweep();
+            return 0;
         }
     test_motion_stability();
     test_cached_reentry();
@@ -1105,6 +1318,7 @@ int main(int argc, char** argv) {
     test_resident_terrain_morph();
     test_morph_bands();
     test_morph_continuity();
+    test_cache_stats_accounting();
     test_cull_waste();
     test_provenance_and_audit();
     constexpr double radius = 2.5 / 15;
@@ -1165,7 +1379,7 @@ int main(int argc, char** argv) {
         const PatchKey parent{a.key.face, std::uint8_t(a.key.level - 1), std::uint16_t(a.key.x / 2),
                               std::uint16_t(a.key.y / 2)};
         const double dist = TerrainTier::nearest_distance(close.camera_local, patch_bounds(parent));
-        parents_resident += tier.resident_slot(parent) != TerrainTier::slot_count;
+        parents_resident += tier.resident_slot(parent) != TerrainTier::no_slot;
         children_drawn++;
         assert(dist < double(tier.range(a.key.level)) / TerrainTier::hysteresis);
     }

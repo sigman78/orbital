@@ -19,7 +19,7 @@ each and the limits on them are unrelated.
 | **Patch** | A cell of a face's quadtree, named by a `PatchKey` (face, level, x, y). The unit of drawing. | one draw instance each |
 | **Node** | The quadtree bookkeeping for a patch the selector is tracking: its key, bounds and child link. 64 bytes, CPU only. | `node_budget`, 4096 |
 | **Tile** | A patch's three textures: heights, albedo, slope. What a worker generates and the GPU samples. | one per resident patch |
-| **Slot** | One layer index shared by the three texture arrays, holding one tile. The cache entry, LRU-evicted. | `slot_count`, 1024 |
+| **Slot** | One layer index shared by the three texture arrays, holding one tile. The cache entry, LRU-evicted. | renderer `terrain_cache_slots`, 2048; CPU sweep baseline 1024 |
 | **Ring** | One entry of the staging ring buffer: a CPU-writable, GPU-readable scratch block sized for one tile's three planes. | `tile_ring_count`, 32 |
 
 A **ring** is the hand-off lane between a worker thread and the GPU, and the name is literal: entries
@@ -270,9 +270,9 @@ path one term at a time so a seam can be attributed.
 
 | Item | Size |
 |---|---|
-| Height array, 1024 layers of 33×33 r16 | 2.1 MiB |
-| Albedo and slope arrays, 1024 layers of 65×65 at 4 B | 16.5 MiB each |
-| Patch records, 1024 × 48 B, two staging slots plus device | 150 KiB |
+| Height array, 2048 layers of 33×33 r16 | 4.3 MiB |
+| Albedo and slope arrays, 2048 layers of 65×65 at 4 B | 33.0 MiB each |
+| Patch records, 2048 × 48 B, two staging slots plus device | 288 KiB |
 | Staging ring, 32 tiles | 1.1 MiB host-visible |
 | Quadtree nodes, 4096 × 64 B worst case | 256 KiB |
 | Shared grid | 1292 vertices, 6912 indices, static |
@@ -290,15 +290,27 @@ The quadrant-ownership mesh fix predates this work.
 
 ## Remaining limits
 
-### 1. The tile cache is too small above the default bias
+### 1. Cache capacity still limits the requested working set
 
-The fixed 1024-slot cache can be smaller than the requested working set, particularly at positive
-LOD bias. Unavailable detail is covered by local resident ancestors, and neighbouring subtrees may
+The renderer now uses 2048 slots. A deterministic +3 grazing-view replay sustained generation and
+coverage changes while stationary at 1024 slots, but settled at 2048; 4096 gave no further benefit.
+This raises the pressure threshold, not an unlimited-residency guarantee. See
+[the recorded sweep](TERRAIN_LOD_STABILITY.md#verification-and-changes-2026-09-20).
+Unavailable detail is covered by local resident ancestors, and neighbouring subtrees may
 be coarsened to preserve 2:1 edge stitching. More generation throughput cannot supply an oversized
 resident set.
 
 The tree still has a separate 4096-node budget and fixed traversal order; existing splits retain
-priority. Reclaiming low-priority splits or scaling cache capacity remains future work.
+priority. Reclaiming low-priority splits and bounded warm retention remain future work.
+
+The Terrain panel separates cache exhaustion, generation throughput and tree-budget pressure.
+Its capacity strip groups resident tiles by last-use age in 30-frame bands, then pending and free slots.
+Six always-visible readings (Cache/Flow, Queue/Evict, Tree/LOD) occupy three rows in two columns.
+Grouped x/y/z counters have hover hints explaining their order and secondary details. Amber readings
+with a `!` flag blocked capacity, warm evictions, slow arrivals or coarse coverage; the hint names the
+cause. Tier switch, surface detail and the patch map remain visible whenever Terrain is open.
+Normal distance/morph endpoints are not warnings. Counter lists no longer require expanding sections.
+`--benchmark` records named `terrain_*` columns for inspecting admission and eviction after a run.
 
 ### 2. What the cull still keeps, and nothing says whether it costs
 

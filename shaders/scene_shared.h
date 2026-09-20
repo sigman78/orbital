@@ -28,8 +28,8 @@ using ShaderMatrix4 = float[16];
 #define ORBITAL_ROOT_FOLD_CLOUDS 1 // the cloud shell is not drawn: the ground shader blends the clouds in
 #define ORBITAL_ROOT_WIREFRAME 2   // the near tier's triangles and patch borders drawn over it (with ORBITAL_ROOT_PATCHES)
 #define ORBITAL_ROOT_PATCHES 4     // this draw uses the CDLOD patch path: root.patches points to PatchInstance records
-// Must match TerrainTier::slot_count; also the missing-parent sentinel.
-#define ORBITAL_TERRAIN_SLOTS 1024
+// Renderer cache capacity and missing-parent layer sentinel. CPU sweeps vary capacity independently.
+#define ORBITAL_TERRAIN_SLOTS 2048
 // Height range in radii; must match MinorPlanetTerrain::height_min/max.
 #define MINOR_PLANET_HEIGHT_MIN (-.05)
 #define MINOR_PLANET_HEIGHT_MAX (.05)
