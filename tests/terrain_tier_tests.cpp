@@ -750,6 +750,108 @@ void converge(TerrainTier& tier, const View& v) {
 
 } // namespace truth
 
+// Every submitted unit is the quadrant of its draw tile, so its own tile range, padded only
+// for the skirt drop, must clear each active frustum plane and the existing horizon bound.
+unsigned check_draw_quadrant_bounds(const TerrainTier& tier, const TierView& view) {
+    unsigned submitted = 0;
+    for (const TerrainTier::Draw& draw : tier.draws())
+        for (unsigned q = 0; q < 4; q++) {
+            if (!(draw.quadrants >> q & 1))
+                continue;
+            submitted++;
+            const PatchBounds bounds = patch_bounds(draw.key.child(q));
+            const Range<float> heights = tier.height_range(draw.key);
+            for (unsigned i = 0; i < 5; i++) {
+                const geometry::Plane& plane = view.frustum.planes[i];
+                const Vec3d n{double(plane.normal.x), double(plane.normal.y), double(plane.normal.z)};
+                const double offset = (dot(n, view.body_centre) + double(plane.distance)) / view.radius;
+                const Vec3d local{dot(n, view.axes[0]), dot(n, view.axes[1]), dot(n, view.axes[2])};
+                assert(offset + patch_cell_support(bounds, local, heights) >= 0);
+            }
+            const double distance = length(view.camera_local);
+            if (distance > TerrainTier::horizon_occluder)
+                assert(patch_cell_support(bounds, view.camera_local * (1 / distance), heights) * distance >=
+                       TerrainTier::horizon_occluder * TerrainTier::horizon_occluder);
+        }
+    return submitted;
+}
+
+void test_leaf_quadrant_outside_frustum() {
+    const MinorPlanetTerrain terrain(1007);
+    const truth::View v = truth::view_over_ground(terrain, {.6, .3, 1}, .08, 0.);
+    TerrainTier tier;
+    truth::converge(tier, v);
+
+    // This leaf's whole descendant reach passes visibility, but all four quadrants of its own
+    // resident tile are outside the frustum. The old leaf path submitted the whole patch.
+    const PatchKey key{0, 3, 0, 2};
+    assert(tier.resident_slot(key) != TerrainTier::no_slot);
+    std::vector<TerrainTier::Step> steps;
+    tier.explain(key, v.view, steps);
+    assert(!steps.back().split && !steps.back().drawn);
+    const PatchBounds whole = patch_bounds(key);
+    const Range<float> reach = tier.reach_of(key);
+    const double distance = length(v.camera_local);
+    assert(patch_cell_support(whole, normalized(v.camera_local), reach) * distance >=
+           TerrainTier::horizon_occluder * TerrainTier::horizon_occluder);
+    for (const geometry::Plane& plane : v.view.frustum.planes) {
+        const Vec3d n{double(plane.normal.x), double(plane.normal.y), double(plane.normal.z)};
+        const double offset = (dot(n, v.view.body_centre) + double(plane.distance)) / v.view.radius;
+        assert(offset + patch_cell_support(whole, n, reach) >= 0);
+    }
+    const Range<float> own = tier.height_range(key);
+    for (unsigned q = 0; q < 4; q++) {
+        const PatchBounds quadrant = patch_bounds(key.child(q));
+        bool outside = false;
+        for (const geometry::Plane& plane : v.view.frustum.planes) {
+            const Vec3d n{double(plane.normal.x), double(plane.normal.y), double(plane.normal.z)};
+            const double offset = (dot(n, v.view.body_centre) + double(plane.distance)) / v.view.radius;
+            outside |= offset + patch_cell_support(quadrant, n, own) < 0;
+        }
+        assert(outside);
+    }
+}
+
+void test_draw_quadrant_culling() {
+    const MinorPlanetTerrain terrain(1007);
+    struct Case {
+        Vec3d over;
+        double altitude, pitch;
+    };
+    const Case cases[] = {{{.6, .3, 1}, .08, 0.}, {{.6, .3, 1}, .08, .1}, {{.6, .3, 1}, .08, .2},
+                          {{.6, .3, 1}, .15, 0.}, {{.6, .3, 1}, .15, .1}, {{.6, .3, 1}, .15, .2}};
+    // A prior eight-view sweep, including pitch .05 at both altitudes, found 11–24 quadrant
+    // candidates outside a frustum plane and 5–13 below the horizon bound in the pre-filter
+    // draw list. These are observations, not count assertions: selection and measured tile
+    // ranges can change while the bound must hold.
+    for (const Case& k : cases) {
+        const truth::View v = truth::view_over_ground(terrain, k.over, k.altitude, k.pitch);
+        TerrainTier tier;
+        truth::converge(tier, v);
+        assert(check_draw_quadrant_bounds(tier, v.view) > 0);
+    }
+    test_leaf_quadrant_outside_frustum();
+
+    // Keep the balancing path exercised too: delayed, out-of-order uploads create adjacent
+    // levels for stitch() to coarsen before the final quadrant filter runs.
+    truth::View high = truth::view_over_ground(terrain, {.6, .3, 1}, .08, .1);
+    high.view.lod_bias = 3;
+    TerrainTier balanced;
+    AsyncTiles delayed;
+    delayed.terrain = high.terrain;
+    delayed.jitter = 30;
+    unsigned settled = 0, balanced_total = 0;
+    for (unsigned frame = 1; frame < 400 && settled < 30; frame++) {
+        delayed.update(balanced, high.view, frame, 2);
+        balanced_total += balanced.pressure().balanced;
+        if (balanced.pressure().balanced)
+            assert(check_draw_quadrant_bounds(balanced, high.view) > 0);
+        settled = balanced.generate().empty() && delayed.pending.empty() ? settled + 1 : 0;
+    }
+    assert(balanced_total > 0);
+    assert(check_draw_quadrant_bounds(balanced, high.view) > 0);
+}
+
 void test_cull_soundness() {
     const MinorPlanetTerrain terrain(1007);
     const GroundExtremes ground = ground_extremes(terrain);
@@ -1377,6 +1479,7 @@ int main(int argc, char** argv) {
     test_morph_continuity();
     test_cache_stats_accounting();
     test_cull_waste();
+    test_draw_quadrant_culling();
     test_provenance_and_audit();
     constexpr double radius = 2.5 / 15;
     TerrainTier tier;

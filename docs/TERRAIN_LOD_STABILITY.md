@@ -1,5 +1,31 @@
 # Terrain LOD stability under cache pressure
 
+## Glancing-view draw coverage, 2026-10-25
+
+The remaining report concerned distant pieces in the patch map or after freezing
+culling and moving away, not visible popping in the original camera. A leaf could
+submit all four quadrants after its whole cell passed visibility; descendant relief
+padding also kept geometry whose own tile lay outside the view.
+
+Draw visibility now tests the actual tile's measured height range against the
+frustum and existing horizon rule. A final per-quadrant filter runs after stitching,
+so balancing cannot reintroduce unchecked coarse quadrants. Refinement discovery
+still uses padded descendant reach: hiding that potential geometry would be unsafe.
+
+At the close bookmark, bias +2, 1280x900, 1200 frames, this reduces submitted
+quadrants from 599 to 545 and triangles from 345024 to 313920, with a pixel-identical
+capture. CPU prepare medians were 0.263 and 0.262 ms in the final 200 frames; these
+single-run timings do not establish a speedup. New tests cover shallow-angle views,
+an entirely rejected leaf, and delayed uploads that trigger balancing. They fail
+against the preceding tier implementation and pass with the final quadrant filter.
+All 18 Release tests and the separate ray-marched `--truth` checks pass, with zero
+uncovered visible probes.
+
+This reduces conservative draw coverage, not all invisible generation. Some off-view
+ancestors are needed for fallback, and the inner-sphere horizon is not a terrain
+occlusion map: ridges can hide geometry that still passes it. A frozen draw set is
+therefore still a conservative set rather than an exact visible-surface mask.
+
 ## Fix, 2026-10-25
 
 Two remaining mechanisms were isolated in the close grazing selection path:

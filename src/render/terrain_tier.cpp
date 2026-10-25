@@ -307,17 +307,21 @@ unsigned TerrainTier::resident() const {
     return count;
 }
 
-// Does any of this geometry stand over the camera's horizon? The reach visibility() culls by
+// Does any of this geometry meet the frustum and horizon tests? The reach visibility() culls by
 // pads for the relief a descendant may reveal, because dropping the node drops that subtree with
 // it. What is *drawn*, though, is one tile and nothing else, and for a coarse patch the pad is
 // larger than the whole body's relief: at level 0 it is 0.0286 radii against 0.0207 of terrain,
 // so the top of the bound stands at 1.05 where the tile itself reaches 1.02. The draw asks the
 // narrower question over exactly the geometry it is about to put on screen, and the answer holds
 // whatever happens to the subtree: a quadrant covered by this tile shows this tile's shape.
-bool TerrainTier::drawn_over_horizon(const PatchBounds& bounds, Range<float> heights) const {
-    if (camera_distance_ <= horizon_occluder)
-        return true; // inside the occluder the test says nothing, as in visibility()
-    return patch_cell_support(bounds, eye_, heights) * camera_distance_ >= horizon_occluder * horizon_occluder;
+bool TerrainTier::drawn_visible(const PatchBounds& bounds, Range<float> heights) const {
+    if (camera_distance_ > horizon_occluder &&
+        patch_cell_support(bounds, eye_, heights) * camera_distance_ < horizon_occluder * horizon_occluder)
+        return false;
+    for (const LocalPlane& plane : planes_)
+        if (plane.offset + patch_cell_support(bounds, plane.normal, heights) < 0)
+            return false;
+    return true;
 }
 
 void TerrainTier::touch(PatchKey key) {
@@ -375,7 +379,6 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, const Visibil
     touch(key); // pin the drawn tile and every ancestor used by material blending
     const unsigned own_slot = resident_slot(key);
     ORBITAL_ASSERT(own_slot != no_slot);
-    const bool tight_worth_asking = relief_margin(key.level) > patch_skirt_drop;
     unsigned quadrants = 0xf;
     if (const unsigned children = nodes_[index].children) {
         quadrants = 0;
@@ -389,10 +392,10 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, const Visibil
                 continue;
             }
             pressure_.out_of_range++;
-            if (!tight_worth_asking || drawn_over_horizon(child.bounds, slots_[own_slot].heights))
+            if (drawn_visible(child.bounds, slots_[own_slot].heights))
                 quadrants |= 1u << i;
         }
-    } else if (tight_worth_asking && !drawn_over_horizon(nodes_[index].bounds, slots_[own_slot].heights)) {
+    } else if (!drawn_visible(nodes_[index].bounds, slots_[own_slot].heights)) {
         return;
     }
     if (quadrants)
@@ -507,6 +510,25 @@ void TerrainTier::stitch(const TierView& view) {
         const unsigned age = update_ - slot.fade_update;
         draw.fade = draw.key.level && age < recovery_frames ? 1.f - float(age) / recovery_frames : 0;
     }
+}
+
+// A whole-cell bound can intersect a glancing frustum while some of its draw quadrants
+// are entirely outside. Use the actual tile's geometry, not padded descendant reach.
+// Do this after stitching: balancing can replace fine draws with new coarse quadrants.
+void TerrainTier::cull_draw_quadrants() {
+    std::erase_if(draws_, [&](Draw& draw) {
+        const Node* node = find(draw.key);
+        ORBITAL_ASSERT(node);
+        for (unsigned q = 0; q < 4; q++) {
+            if (!(draw.quadrants >> q & 1))
+                continue;
+            const PatchBounds bounds = node->children ? nodes_[node->children + q].bounds
+                                                      : patch_bounds(draw.key.child(q));
+            if (!drawn_visible(bounds, slots_[draw.slot].heights))
+                draw.quadrants &= ~(1u << q);
+        }
+        return draw.quadrants == 0;
+    });
 }
 
 // Serve coarse/large patches first; LRU eviction protects pending and currently used slots.
@@ -692,8 +714,10 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     if (active_)
         for (unsigned face = 0; face < 6; face++)
             visit(face, view, roots[face]);
-    if (active_)
+    if (active_) {
         stitch(view);
+        cull_draw_quadrants();
+    }
     choose_generation(budget);
     cache_snapshot();
     pressure_.served = unsigned(generate_.size());

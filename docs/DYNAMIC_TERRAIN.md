@@ -316,11 +316,14 @@ Normal distance/morph endpoints are not warnings. Counter lists no longer requir
 
 ### 2. What the cull still keeps, and nothing says whether it costs
 
-The five default test views currently draw 13–43 patches with none provably off screen. What is left is the tail of the same thing: a plane rejects on the
-shell's extremes, and a patch can have a corner inside the frustum while almost all of it is outside.
-Closing that wants per-quadrant culling, which is a change to what a draw is, not to the bound.
+Draw quadrants are now filtered against their own tile's height bounds after stitching,
+including frustum and the existing horizon test. The close +2 bookmark drops from 599
+to 545 submitted quadrants with an unchanged capture. Remaining bounds can still keep
+a quadrant whose corner intersects the frustum while most of it lies outside; the
+inner-sphere horizon also does not account for occlusion by terrain ridges.
 
-There is also no counter for it. `test_cull_waste` measures waste offline by re-deriving visibility
+Benchmark CSVs count submitted triangles and quadrants, but do not report exact visible
+pixel contribution. `test_cull_waste` measures waste offline by re-deriving visibility
 from each patch's samples, far too slow for a frame, and the frozen-cull view shows culled quadrants
 and kept islands alike with no number beside them. A cheap proxy on the panel would say whether the
 remaining tail is worth anything at all.

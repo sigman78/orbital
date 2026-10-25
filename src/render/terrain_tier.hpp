@@ -244,13 +244,14 @@ private:
 
     void ensure_roots();
     const Node* find(PatchKey key) const; // the node for a key, null where the tree stops short
-    // The horizon test over the geometry a draw actually puts on screen: one tile's own heights
-    // rather than the reach, which pads for descendants that will not be drawn in its place.
-    bool drawn_over_horizon(const PatchBounds& bounds, Range<float> heights) const;
+    // Visibility of geometry actually submitted: one tile's own heights, without padding
+    // for descendants that will not be drawn in its place.
+    bool drawn_visible(const PatchBounds& bounds, Range<float> heights) const;
     Visibility visibility(const Node& node, const TierView& view) const;
     void prepare(std::uint32_t index, const TierView& view, const Visibility& seen);
     void visit(std::uint32_t index, const TierView& view, const Visibility& seen);
     void stitch(const TierView& view);
+    void cull_draw_quadrants();
     void collapse(Node& node);
     std::uint32_t allocate_children(const Node& node);
     unsigned slot_of(PatchKey key) const; // no_slot when not in the cache
