@@ -112,7 +112,7 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
 // build the rest. The owner is what lets a quadrant be masked away -- see patch_grid.
 struct PatchVertex {
     std::uint8_t x = 0, y = 0; // the lattice point, 0 .. tile_side - 1
-    std::uint8_t quadrant = 0; // whose it is; it goes when that quadrant is not drawn
+    std::uint8_t quadrant = 0; // owner on the full grid; side code on the quadrant skirt mesh
     bool skirt = false;        // on the ring that hangs below the tile's border
 };
 
@@ -124,5 +124,10 @@ struct PatchGrid {
 // The grid every patch is drawn from: one tile's worth of quads, a skirt ring around it, and
 // each quadrant holding its own copy of the row and column it shares with its neighbours.
 PatchGrid patch_grid();
+
+// One canonical quadrant surface and its two canonical outer skirts. A one-hot quadrant
+// record places these on each patch's active quadrant without duplicating the mesh.
+PatchGrid patch_quadrant_surface_grid();
+PatchGrid patch_quadrant_skirt_grid();
 
 } // namespace space

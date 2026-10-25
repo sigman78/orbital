@@ -1,0 +1,29 @@
+[
+  {
+    "bias": 0,
+    "changed_pixels": 0,
+    "before_triangles": 94464,
+    "after_triangles": 89856,
+    "before_body_ms": 0.4864,
+    "after_body_ms": 0.362496,
+    "pending": 0
+  },
+  {
+    "bias": 1,
+    "changed_pixels": 0,
+    "before_triangles": 163584,
+    "after_triangles": 158400,
+    "before_body_ms": 0.401408,
+    "after_body_ms": 0.400384,
+    "pending": 0
+  },
+  {
+    "bias": 2,
+    "changed_pixels": 1,
+    "before_triangles": 354816,
+    "after_triangles": 345024,
+    "before_body_ms": 0.6517759999999999,
+    "after_body_ms": 0.651264,
+    "pending": 0
+  }
+]

@@ -75,6 +75,11 @@ add_executable(storage_profile EXCLUDE_FROM_ALL tools/storage_profile.cpp)
 target_link_libraries(storage_profile PRIVATE orbital_scene orbital_assets)
 target_compile_options(storage_profile PRIVATE ${ORBITAL_WARNINGS})
 
+# Opt-in CPU-only terrain generation benchmark; excluded from ordinary builds.
+add_executable(terrain_budget EXCLUDE_FROM_ALL tools/terrain_budget.cpp)
+target_link_libraries(terrain_budget PRIVATE orbital_scene)
+target_compile_options(terrain_budget PRIVATE ${ORBITAL_WARNINGS})
+
 if(BUILD_TESTING)
   if(NOT MINGW) # NoGraphicsAPI headers explicitly exclude MinGW.
     add_executable(gpu_scopes_tests tests/gpu_scopes_tests.cpp)

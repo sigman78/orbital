@@ -259,8 +259,8 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
                          dt = (at(x, y + 1) - at(x, y - 1)) / length(vt);
             const double c = dot(u, v), det = std::max(1 - c * c, 1e-6);
             const Vec3d g = u * ((ds - c * dt) / det) + v * ((dt - c * ds) / det);
-            const Vec3f a = terrain.albedo(
-                d, hc, float(1 - dot(normalized(d - g), d))); // the slope term as the bake passes it
+            const Vec3f a = terrain.albedo(d, hc, float(1 - dot(normalized(d - g), d)),
+                                           region); // the slope term as the bake passes it
             const auto u8 = [](float v) { return std::uint8_t(std::clamp(v * 255.0f + 0.5f, 0.0f, 255.0f)); };
             const std::size_t p = i * 4;
             albedo[p] = u8(a.x);
@@ -341,6 +341,50 @@ PatchGrid patch_grid() {
         }
     ORBITAL_ASSERT(grid.vertices.size() == 4 * span * span + 8 * span);
     ORBITAL_ASSERT(grid.indices.size() == (quads * quads + 4 * quads) * 6);
+    return grid;
+}
+
+PatchGrid patch_quadrant_surface_grid() {
+    constexpr unsigned quads = grid_half, span = quads + 1;
+    PatchGrid grid;
+    grid.vertices.reserve(span * span);
+    for (unsigned y = 0; y < span; y++)
+        for (unsigned x = 0; x < span; x++)
+            grid.vertices.push_back({.x = std::uint8_t(x), .y = std::uint8_t(y)});
+    grid.indices.reserve(quads * quads * 6);
+    for (unsigned y = 0; y < quads; y++)
+        for (unsigned x = 0; x < quads; x++) {
+            const std::uint32_t a = y * span + x, b = a + 1, d = a + span, c = d + 1;
+            grid.indices.insert(grid.indices.end(), {a, b, c, a, c, d});
+        }
+    ORBITAL_ASSERT(grid.vertices.size() == 289 && grid.indices.size() == 1536);
+    return grid;
+}
+
+PatchGrid patch_quadrant_skirt_grid() {
+    constexpr unsigned steps = grid_half;
+    PatchGrid grid;
+    grid.vertices.reserve(68);
+    grid.indices.reserve(192);
+    const auto side = [&](unsigned side_id, unsigned side_code) {
+        std::uint32_t top[steps + 1], bottom[steps + 1];
+        for (unsigned i = 0; i <= steps; i++) {
+            // The canonical outer edges are x=0 (traversed down) and y=0 (traversed right).
+            const unsigned x = side_id == 0 ? 0 : i;
+            const unsigned y = side_id == 0 ? steps - i : 0;
+            top[i] = std::uint32_t(grid.vertices.size());
+            grid.vertices.push_back({.x = std::uint8_t(x), .y = std::uint8_t(y), .quadrant = std::uint8_t(side_code)});
+            bottom[i] = std::uint32_t(grid.vertices.size());
+            grid.vertices.push_back(
+                {.x = std::uint8_t(x), .y = std::uint8_t(y), .quadrant = std::uint8_t(side_code), .skirt = true});
+        }
+        for (unsigned i = 0; i < steps; i++)
+            grid.indices.insert(grid.indices.end(),
+                                {top[i], bottom[i], top[i + 1], top[i + 1], bottom[i], bottom[i + 1]});
+    };
+    side(0, 1); // left edge
+    side(1, 2); // bottom edge
+    ORBITAL_ASSERT(grid.vertices.size() == 68 && grid.indices.size() == 192);
     return grid;
 }
 

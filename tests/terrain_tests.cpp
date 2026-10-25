@@ -3,7 +3,7 @@
 #include "scene/terrain_patch.hpp"
 
 #include <algorithm>
-#include <bit>
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -65,6 +65,39 @@ void test_terrain() {
     assert(low < -.005f && high > .01f); // terrain on both sides of the sphere
     assert(largest_step < 2e-3f);        // continuous at the sampling scale of the bake
     assert(differs > 3900);              // a different seed is a different body
+}
+
+// The regional material path must be identical to the full crater list at tile
+// boundaries as well as in tile interiors. Regions preserve source order, so an
+// exact component comparison catches both missing craters and changed arithmetic.
+void test_regional_albedo() {
+    for (const std::uint64_t seed : {1007ull, 1008ull, 4242ull}) {
+        const MinorPlanetTerrain terrain(seed);
+        for (const unsigned level : {0u, 2u, 5u, 8u}) {
+            const unsigned cells = 1u << level;
+            for (unsigned face = 0; face < 6; ++face)
+                for (const unsigned x : {0u, cells - 1})
+                    for (const unsigned y : {0u, cells - 1}) {
+                        const PatchKey key{std::uint8_t(face), std::uint8_t(level), std::uint16_t(x), std::uint16_t(y)};
+                        const PatchBounds bounds = patch_bounds(key);
+                        const auto region = terrain.region(bounds.centre, bounds.angular_radius + 1e-9);
+                        const double size = 2.0 / cells;
+                        for (unsigned iy = 0; iy < 3; ++iy)
+                            for (unsigned ix = 0; ix < 3; ++ix) {
+                                const double s = -1 + (x + ix * .5) * size;
+                                const double t = -1 + (y + iy * .5) * size;
+                                const Vec3d d = cube_direction(face, s, t);
+                                const float h = terrain.height(d);
+                                assert(terrain.height(d, region) == h);
+                                for (const float slope : {0.f, .3f, 1.f}) {
+                                    const Vec3f full = terrain.albedo(d, h, slope);
+                                    const Vec3f local = terrain.albedo(d, h, slope, region);
+                                    assert(full.x == local.x && full.y == local.y && full.z == local.z);
+                                }
+                            }
+                    }
+        }
+    }
 }
 
 // A small bake carries the height in the normal map's alpha and an upward normal.
@@ -414,40 +447,70 @@ void test_height_tile_range() {
     }
 }
 
-// A quadrant a patch does not draw must contribute no triangle at all. The vertex shader can
-// only drop whole vertices, so the grid gives each quadrant its own copy of the row and column
-// it shares and names the owner in `u`. Sharing them, as it once did, left a flap: the quad
-// diagonally across the centre had three corners nothing could drop, and one of its two
-// triangles outlived the mask -- degenerate at full morph, a flap at every phase before. This
-// models shaders/surface/patch.slang; the two have to say the same thing.
+// The instanced surface and skirt meshes must reproduce each quadrant of the old shared grid,
+// including its diagonal and skirt winding. Surface indices stay in the original x/y orientation;
+// only skirt ribbons rotate, since their topology has no surface diagonal to change.
 void test_quadrant_mask() {
-    const PatchGrid grid = patch_grid();
-    constexpr float centre = (tile_side - 1) * .5f;
-    for (unsigned mask = 1; mask <= 0xf; mask++) {
-        const auto dropped = [&](std::uint32_t index) { // as the shader does, from the owner
-            return (mask >> grid.vertices[index].quadrant & 1) == 0;
-        };
-        unsigned alive = 0;
-        for (std::size_t i = 0; i + 2 < grid.indices.size(); i += 3) {
-            if (dropped(grid.indices[i]) || dropped(grid.indices[i + 1]) || dropped(grid.indices[i + 2]))
+    const PatchGrid full = patch_grid();
+    const PatchGrid surface = patch_quadrant_surface_grid();
+    const PatchGrid skirts = patch_quadrant_skirt_grid();
+    using Point = std::array<unsigned, 3>; // x, y, skirt flag
+    using Triangle = std::array<Point, 3>;
+    const auto point = [](const PatchVertex& v, unsigned x, unsigned y) -> Point { return {x, y, unsigned(v.skirt)}; };
+    for (unsigned quadrant = 0; quadrant < 4; quadrant++) {
+        const unsigned origin_x = quadrant & 1 ? 16 : 0;
+        const unsigned origin_y = quadrant & 2 ? 16 : 0;
+        std::vector<Triangle> expected_surface, actual_surface, expected_skirts, actual_skirts;
+        for (std::size_t i = 0; i < full.indices.size(); i += 3) {
+            const std::uint32_t a = full.indices[i], b = full.indices[i + 1], c = full.indices[i + 2];
+            if (full.vertices[a].quadrant != quadrant || full.vertices[b].quadrant != quadrant ||
+                full.vertices[c].quadrant != quadrant)
                 continue;
-            alive++;
-            // Where its body lies, not where its corners do: a triangle of the drawn set must
-            // sit in a drawn quadrant.
-            float x = 0, y = 0;
-            for (std::size_t corner = i; corner < i + 3; corner++) {
-                x += grid.vertices[grid.indices[corner]].x / 3.f;
-                y += grid.vertices[grid.indices[corner]].y / 3.f;
-            }
-            const unsigned quadrant = (x > centre ? 1u : 0u) | (y > centre ? 2u : 0u);
-            assert(mask >> quadrant & 1);
+            const bool skirt_triangle = full.vertices[a].skirt || full.vertices[b].skirt || full.vertices[c].skirt;
+            auto& expected = skirt_triangle ? expected_skirts : expected_surface;
+            expected.push_back({point(full.vertices[a], full.vertices[a].x, full.vertices[a].y),
+                                point(full.vertices[b], full.vertices[b].x, full.vertices[b].y),
+                                point(full.vertices[c], full.vertices[c].x, full.vertices[c].y)});
         }
-        assert(alive > 0);
-        // Whole quadrants, skirt included: a quarter of the grid and a quarter of the ring each.
-        const unsigned quarters = unsigned(std::popcount(mask));
-        assert(alive == quarters * unsigned(grid.indices.size() / 3) / 4);
+        for (std::size_t i = 0; i < surface.indices.size(); i += 3) {
+            Triangle triangle{};
+            for (unsigned corner = 0; corner < 3; corner++) {
+                const PatchVertex& v = surface.vertices[surface.indices[i + corner]];
+                triangle[corner] = point(v, v.x + origin_x, v.y + origin_y);
+            }
+            actual_surface.push_back(triangle);
+        }
+        for (std::size_t i = 0; i < skirts.indices.size(); i += 3) {
+            Triangle triangle{};
+            for (unsigned corner = 0; corner < 3; corner++) {
+                const PatchVertex& v = skirts.vertices[skirts.indices[i + corner]];
+                unsigned x = v.x, y = v.y;
+                if (quadrant == 1) {
+                    x = 32 - v.y;
+                    y = v.x;
+                } else if (quadrant == 2) {
+                    x = v.y;
+                    y = 32 - v.x;
+                } else if (quadrant == 3) {
+                    x = 32 - v.x;
+                    y = 32 - v.y;
+                }
+                triangle[corner] = point(v, x, y);
+            }
+            actual_skirts.push_back(triangle);
+        }
+        std::sort(expected_surface.begin(), expected_surface.end());
+        std::sort(actual_surface.begin(), actual_surface.end());
+        std::sort(expected_skirts.begin(), expected_skirts.end());
+        std::sort(actual_skirts.begin(), actual_skirts.end());
+        assert(actual_surface == expected_surface);
+        assert(actual_skirts == expected_skirts);
+        assert(expected_surface.size() == 512);
+        assert(expected_skirts.size() == 64);
     }
-    std::printf("patch grid: every triangle of all 15 quadrant masks lies in a drawn quadrant\n");
+    assert(surface.vertices.size() == 289 && surface.indices.size() == 1536);
+    assert(skirts.vertices.size() == 68 && skirts.indices.size() == 192);
+    std::printf("patch quadrant meshes: all four surfaces and skirts preserve original triangle topology\n");
 }
 
 void test_grid_mesh() {
@@ -509,6 +572,7 @@ int main(int argc, char** argv) {
     test_patch_neighbours();
     test_noise();
     test_terrain();
+    test_regional_albedo();
     test_bake();
     test_patches();
     test_cube_coordinates();

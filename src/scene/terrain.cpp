@@ -137,7 +137,7 @@ float MinorPlanetTerrain::detail(Vec3d direction, double nyquist, float strength
     return float(total * double(strength) * detail_slope * calibration);
 }
 
-Vec3f MinorPlanetTerrain::albedo(Vec3d direction, float height, float slope) const {
+Vec3f MinorPlanetTerrain::albedo(Vec3d direction, float height, float slope, std::span<const Crater> craters) const {
     const Vec3d d = normalized(direction);
     // Dark ground, warm maculae, lowland frost, and brighter steep faces.
     const float lows = std::clamp((height - height_min) / (height_max - height_min), 0.f, 1.f);
@@ -147,7 +147,7 @@ Vec3f MinorPlanetTerrain::albedo(Vec3d direction, float height, float slope) con
     albedo = albedo * (.9f + .25f * (1 - lows) + .6f * frost) * (1 + .5f * slope);
     // Fresh craters darken floors and brighten ejecta; some carry central faculae.
     const float patchy = .4f + .6f * (1 + fbm(d * 30.0, 2, seed_ + 13));
-    for (const Crater& crater : craters_) {
+    for (const Crater& crater : craters) {
         const auto x = crater_x(crater, d);
         if (!x)
             continue;

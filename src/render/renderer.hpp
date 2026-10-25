@@ -65,10 +65,12 @@ struct FrameStats {
     struct Terrain {             // the minor planet's near tier
         static constexpr unsigned cache_age_buckets = 8;
         static constexpr unsigned cache_age_bucket_frames = 30;
-        bool active = false;   // the tier draws the body; its sphere levels otherwise
-        unsigned drawn = 0;    // patches drawn this frame
-        unsigned resident = 0; // tiles in the cache, arrived
-        unsigned pending = 0;  // slots handed out whose tile has not arrived (queued, generating or uploading)
+        bool active = false;              // the tier draws the body; its sphere levels otherwise
+        unsigned drawn = 0;               // patches drawn this frame
+        unsigned submitted_triangles = 0; // selected mask-specific grid triangles, counted once per view
+        unsigned covered_quadrants = 0;   // sum of owned quadrants across drawn patches
+        unsigned resident = 0;            // tiles in the cache, arrived
+        unsigned pending = 0; // slots handed out whose tile has not arrived (queued, generating or uploading)
         // Frames the oldest of those has waited. Nothing evicts a pending slot and the tree
         // re-requests only keys without one, so a tile that never comes back leaves its patch
         // drawn coarse by its parent until the reclaim sweep takes the slot; seconds, not frames.

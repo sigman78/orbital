@@ -42,11 +42,17 @@ public:
     float height(Vec3d direction, const Region& region) const { return height(direction, region.craters); }
     Region region(Vec3d centre, double angular_radius) const;
     // Linear-light albedo at a point, given its height and slope (0 flat, 1 vertical).
-    Vec3f albedo(Vec3d direction, float height, float slope) const;
+    Vec3f albedo(Vec3d direction, float height, float slope) const {
+        return albedo(direction, height, slope, craters_);
+    }
+    Vec3f albedo(Vec3d direction, float height, float slope, const Region& region) const {
+        return albedo(direction, height, slope, region.craters);
+    }
     std::span<const Crater> craters() const { return craters_; }
 
 private:
     float height(Vec3d direction, std::span<const Crater> craters) const;
+    Vec3f albedo(Vec3d direction, float height, float slope, std::span<const Crater> craters) const;
 
     std::uint64_t seed_;
     std::vector<Crater> craters_;

@@ -6,6 +6,7 @@
 #include "scene/terrain_patch.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -44,26 +45,32 @@ void Renderer::Impl::create_terrain_tier() {
     bind(ArraySlot::terrain_height, tile_height);
     bind(ArraySlot::terrain_albedo, tile_albedo);
     bind(ArraySlot::terrain_slope, tile_slope);
-    const PatchGrid grid = patch_grid();
-    std::vector<Vertex> gpu_vertices(grid.vertices.size());
-    for (std::size_t i = 0; i < grid.vertices.size(); i++) {
-        // The lattice point, the skirt flag, and the quadrant that owns the vertex, which the
-        // shader drops it with; the position itself is the shader's to build from the cell.
-        const PatchVertex& v = grid.vertices[i];
-        gpu_vertices[i] = {{float(v.x), float(v.y), v.skirt ? 1.f : 0.f, float(v.quadrant)}, {0, 0, 0, 0}};
-    }
-    grid_vertices_address = upload_static(bytes_of(gpu_vertices));
-    grid_indices_address = upload_static(bytes_of(grid.indices));
-    std::vector<Vertex> wire(grid.indices.size());
-    for (std::size_t i = 0; i < wire.size(); i++) {
-        wire[i] = gpu_vertices[grid.indices[i]];
-        wire[i].normal = {i % 3 == 0 ? 1.f : 0.f, i % 3 == 1 ? 1.f : 0.f, i % 3 == 2 ? 1.f : 0.f, 0};
-    }
-    grid_wire_address = upload_static(bytes_of(wire));
-    grid_index_count = unsigned(grid.indices.size());
-    buffers.patch_records = UniqueGpuHeap::create(device, terrain_cache_slots * sizeof(PatchInstance),
-                                                  gpu::MemoryType::gpu_only);
-    buffers.patch_records_staging = UniqueGpuHeap::create(device, 2ull * terrain_cache_slots * sizeof(PatchInstance));
+    const auto upload_grid = [&](const PatchGrid& grid, std::uint64_t& vertices_address, std::uint64_t& indices_address,
+                                 std::uint64_t& wire_address, unsigned& index_count) {
+        std::vector<Vertex> vertices(grid.vertices.size());
+        for (std::size_t i = 0; i < grid.vertices.size(); i++) {
+            const PatchVertex& v = grid.vertices[i];
+            // Position.w is zero for surfaces and identifies the canonical outer skirt edge otherwise.
+            vertices[i] = {{float(v.x), float(v.y), v.skirt ? 1.f : 0.f, float(v.quadrant)}, {0, 0, 0, 0}};
+        }
+        vertices_address = upload_static(bytes_of(vertices));
+        indices_address = upload_static(bytes_of(grid.indices));
+        std::vector<Vertex> wire(grid.indices.size());
+        for (std::size_t i = 0; i < wire.size(); i++) {
+            wire[i] = vertices[grid.indices[i]];
+            wire[i].normal = {i % 3 == 0 ? 1.f : 0.f, i % 3 == 1 ? 1.f : 0.f, i % 3 == 2 ? 1.f : 0.f, 0};
+        }
+        wire_address = upload_static(bytes_of(wire));
+        index_count = unsigned(grid.indices.size());
+    };
+    upload_grid(patch_quadrant_surface_grid(), grid_vertices_address, grid_indices_address, grid_wire_address,
+                grid_index_count);
+    upload_grid(patch_quadrant_skirt_grid(), skirt_vertices_address, skirt_indices_address, skirt_wire_address,
+                skirt_index_count);
+    buffers.patch_records = UniqueGpuHeap::create(
+        device, std::uint64_t(terrain_patch_record_capacity) * sizeof(PatchInstance), gpu::MemoryType::gpu_only);
+    buffers.patch_records_staging = UniqueGpuHeap::create(device,
+                                                          2ull * terrain_patch_record_capacity * sizeof(PatchInstance));
     buffers.tile_staging = UniqueGpuHeap::create(device, std::uint64_t(tile_ring_count) * tile_total_bytes);
     panic_if(!buffers.patch_records.range().gpu || !buffers.patch_records_staging.range().cpu ||
                  !buffers.tile_staging.range().cpu,
@@ -100,6 +107,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
             rings_free += ring_available(i);
         ts.active = false;
         ts.drawn = 0;
+        ts.submitted_triangles = ts.covered_quadrants = 0;
         ts.resident = cache.resident;
         ts.pending = cache.pending;
         ts.pending_age = cache.pending_age;
@@ -204,6 +212,11 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     const TerrainTier::Pressure& p = terrain_tier.pressure();
     ts.active = terrain_tier.active();
     ts.drawn = unsigned(terrain_tier.draws().size());
+    ts.submitted_triangles = ts.covered_quadrants = 0;
+    for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
+        ts.covered_quadrants += std::popcount(unsigned(draw.quadrants));
+    }
+    ts.submitted_triangles = ts.covered_quadrants * ((grid_index_count + skirt_index_count) / 3);
     ts.resident = p.cache_resident;
     ts.pending = p.cache_pending;
     ts.pending_age = p.cache_pending_age;
@@ -288,10 +301,15 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
             });
         }
     }
-    const std::uint64_t records_slot = (frame_index & 1) * std::uint64_t(terrain_cache_slots) * sizeof(PatchInstance);
+    const std::uint64_t records_slot = (frame_index & 1) * std::uint64_t(terrain_patch_record_capacity) *
+                                       sizeof(PatchInstance);
     auto* records = reinterpret_cast<PatchInstance*>(buffers.patch_records_staging.range().cpu + records_slot);
-    for (std::size_t i = 0; i < terrain_tier.draws().size(); i++) {
-        const TerrainTier::Draw& draw = terrain_tier.draws()[i];
+    std::size_t expected_records = 0;
+    for (const TerrainTier::Draw& draw : terrain_tier.draws())
+        expected_records += std::popcount(unsigned(draw.quadrants));
+    ORBITAL_ASSERT(expected_records <= terrain_patch_record_capacity);
+    std::size_t record_index = 0;
+    for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
         const auto cell = [&] {
             const double size = 2.0 / double(1u << draw.key.level);
             return ShaderFloat4{float(-1 + draw.key.x * size), float(-1 + draw.key.y * size), float(size),
@@ -306,15 +324,21 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         // The shader's parent-layer absence marker is the fixed GPU array size, while the CPU
         // cache uses no_slot so deterministic tests can safely exceed that array's capacity.
         const unsigned parent_slot = resident_parent == TerrainTier::no_slot ? terrain_cache_slots : resident_parent;
-        records[i] = {.cell = cell,
-                      .morph = {morph_start, morph_end, draw.fade, float(draw.coarse_edges)},
-                      .tile = {draw.key.face, draw.slot, parent_slot,
-                               (draw.key.x & 1u) | (draw.key.y & 1u) << 1 | (draw.key.x == 0) << 2 |
-                                   (unsigned(draw.key.x) + 1 == 1u << draw.key.level) << 3 | (draw.key.y == 0) << 4 |
-                                   (unsigned(draw.key.y) + 1 == 1u << draw.key.level) << 5 | draw.quadrants << 6 |
-                                   draw.fine_edges << 16}};
+        const unsigned edge_flags = (draw.key.x & 1u) | (draw.key.y & 1u) << 1 | (draw.key.x == 0) << 2 |
+                                    (unsigned(draw.key.x) + 1 == 1u << draw.key.level) << 3 | (draw.key.y == 0) << 4 |
+                                    (unsigned(draw.key.y) + 1 == 1u << draw.key.level) << 5;
+        for (unsigned quadrant = 0; quadrant < 4; quadrant++) {
+            if (!(draw.quadrants >> quadrant & 1))
+                continue;
+            records[record_index++] = {.cell = cell,
+                                       .morph = {morph_start, morph_end, draw.fade, float(draw.coarse_edges)},
+                                       .tile = {draw.key.face, draw.slot, parent_slot,
+                                                edge_flags | (1u << (6 + quadrant)) | draw.fine_edges << 16}};
+        }
     }
-    patch_records_bytes = terrain_tier.draws().size() * sizeof(PatchInstance);
+    ORBITAL_ASSERT(record_index == expected_records);
+    patch_record_count = unsigned(record_index);
+    patch_records_bytes = record_index * sizeof(PatchInstance);
     if (patch_records_bytes)
         patch_copies.push_back(
             {.source = reinterpret_cast<std::uint64_t>(buffers.patch_records_staging.range().gpu) + records_slot,
@@ -361,17 +385,23 @@ void Renderer::Impl::draw_body(gpu::CommandBuffer* cmd, Root& root, unsigned bod
     root.base = body;
     root.patches = reinterpret_cast<std::uint64_t>(buffers.patch_records.range().gpu);
     root.flags = ORBITAL_ROOT_PATCHES | (wireframe ? ORBITAL_ROOT_WIREFRAME : 0);
-    const unsigned count = unsigned(terrain_tier.draws().size());
-    stats.frame.draw_calls++;
-    if (wireframe) { // the unindexed grid: the corner barycentrics the overlay needs
+    if (wireframe) {
         root.vertices = grid_wire_address;
-        gpu::draw(cmd, root, grid_index_count, count);
+        gpu::draw(cmd, root, grid_index_count, patch_record_count);
+        root.vertices = skirt_wire_address;
+        gpu::draw(cmd, root, skirt_index_count, patch_record_count);
     } else {
+        const gpu::GpuRange surface_indices{reinterpret_cast<void*>(grid_indices_address),
+                                            std::uint64_t(grid_index_count) * 4};
         root.vertices = grid_vertices_address;
-        const gpu::GpuRange indices{reinterpret_cast<void*>(grid_indices_address), std::uint64_t(grid_index_count) * 4};
-        gpu::draw_indexed(cmd, root, indices, gpu::IndexType::uint32, grid_index_count, count);
+        gpu::draw_indexed(cmd, root, surface_indices, gpu::IndexType::uint32, grid_index_count, patch_record_count);
+        const gpu::GpuRange skirt_indices{reinterpret_cast<void*>(skirt_indices_address),
+                                          std::uint64_t(skirt_index_count) * 4};
+        root.vertices = skirt_vertices_address;
+        gpu::draw_indexed(cmd, root, skirt_indices, gpu::IndexType::uint32, skirt_index_count, patch_record_count);
     }
-    stats.frame.triangles += count * (grid_index_count / 3);
+    stats.frame.draw_calls += 2;
+    stats.frame.triangles += patch_record_count * ((grid_index_count + skirt_index_count) / 3);
 }
 
 } // namespace space::render

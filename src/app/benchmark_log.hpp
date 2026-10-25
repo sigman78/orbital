@@ -81,6 +81,8 @@ private:
         {"terrain_pending_age", &render::FrameStats::Terrain::pending_age},
         {"terrain_oldest_age", &render::FrameStats::Terrain::oldest_age},
         {"terrain_drawn", &render::FrameStats::Terrain::drawn},
+        {"terrain_submitted_triangles", &render::FrameStats::Terrain::submitted_triangles},
+        {"terrain_covered_quadrants", &render::FrameStats::Terrain::covered_quadrants},
         {"terrain_requested", &render::FrameStats::Terrain::requested},
         {"terrain_served", &render::FrameStats::Terrain::served},
         {"terrain_evictions", &render::FrameStats::Terrain::evictions},
