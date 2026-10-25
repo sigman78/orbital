@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -139,6 +141,98 @@ void stationary_constrained_cache(unsigned capacity) {
     assert(recovery_tail_changes == 0);
 }
 
+// Deterministic low-altitude cruise; delayed uploads and a bounded 32-entry ring.
+void cruise(unsigned capacity, unsigned delay, float bias, double speed, double altitude, bool report = true,
+            bool verify = false) {
+    const MinorPlanetTerrain terrain(1007);
+    TerrainTier tier(capacity);
+    struct Pending {
+        TerrainTier::Generation g;
+        unsigned due;
+    };
+    std::vector<Pending> pending;
+    std::unordered_map<std::uint32_t, Range<float>> heights;
+    unsigned rollbacks = 0, evictions = 0, tail_generation = 0;
+    TierView last_view;
+    if (report)
+        std::puts("frame,drawn,resident,pending,evictions,warm,balanced,rollback_quadrants,rollback_levels,selection,"
+                  "balance,missing_previous,slots_blocked,nodes,splits_blocked,timeouts");
+    for (unsigned frame = 1; frame <= 2100; ++frame) {
+        for (auto it = pending.begin(); it != pending.end();) {
+            if (it->due > frame) {
+                ++it;
+                continue;
+            }
+            auto [h, inserted] = heights.try_emplace(it->g.key.packed());
+            if (inserted) {
+                std::vector<float> tile(tile_side * tile_side);
+                generate_height_tile(terrain, it->g.key, tile);
+                h->second = height_tile_range(tile);
+            }
+            assert(tier.mark_resident(it->g.slot, it->g.key, it->g.stamp, h->second));
+            it = pending.erase(it);
+        }
+        const double angle = speed * std::clamp(int(frame) - 500, 0, 1100);
+        const Vec3d radial = rotate_about(normalized(Vec3d{.6, .3, 1}), Vec3d{0, 1, 0}, angle);
+        const Vec3d local = radial * (1 + altitude);
+        CameraView camera;
+        camera.forward = normalized(normalized(cross(Vec3d{0, 1, 0}, radial)) - radial * .1);
+        camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
+        camera.up = cross(camera.right, camera.forward);
+        const float tan_y = float(std::tan(camera.vertical_fov / 2));
+        TierView view{.body_centre = local * -1.0,
+                      .radius = 1,
+                      .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
+                      .camera_local = local,
+                      .frustum = view_frustum(camera, tan_y * 16 / 9, tan_y),
+                      .height_pixels = 1440,
+                      .tan_y = tan_y,
+                      .lod_bias = bias,
+                      .mesh_pixels = 8};
+        last_view = view;
+        tier.update(view, frame, 32 - unsigned(pending.size()));
+        for (const auto& g : tier.generate())
+            pending.push_back({g, frame + delay + (g.key.packed() % 5)});
+        const auto& p = tier.pressure();
+        const auto& h = tier.health();
+        if (frame > 500)
+            rollbacks += h.rollback_quadrants > 0;
+        evictions += p.evictions;
+        if (frame > 2000)
+            tail_generation += unsigned(tier.generate().size());
+        if (report)
+            std::printf("%u,%zu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n", frame, tier.draws().size(),
+                        tier.resident(), tier.pending(), p.evictions, p.evicted_recent, p.balanced,
+                        h.rollback_quadrants, h.rollback_levels, h.selection_rollbacks, h.balance_rollbacks,
+                        h.missing_previous, p.slots_blocked, tier.nodes(), p.splits_blocked, h.timeouts);
+        assert(pending.size() <= 32);
+        assert(tier.audit().allocated == tier.audit().reachable);
+        for (const auto& draw : tier.draws()) {
+            assert(tier.resident_slot(draw.key) == draw.slot);
+            for (const auto& g : tier.generate())
+                assert(g.slot != draw.slot);
+        }
+    }
+    if (verify) {
+        std::printf("cruise: %u slots, %u evictions, %u rollback frames, %u tail generations\n", capacity, evictions,
+                    rollbacks, tail_generation);
+        assert(evictions > 0 && rollbacks == 0 && tail_generation == 0);
+        assert(tier.health().invalidations == 0 && tier.health().timeouts == 0);
+        // An explicit quality change is a selection rollback, not a residency failure.
+        last_view.lod_bias = -4;
+        last_view.mesh_pixels = 64;
+        tier.update(last_view, 2101, 0);
+        assert(tier.health().selection_rollbacks > 0);
+        assert(tier.health().missing_previous == 0);
+        const unsigned recorded = tier.health().last_quadrants;
+        tier.update(last_view, 2102, 0);
+        assert(tier.health().rollback_quadrants == 0);
+        assert(recorded > 0 && tier.health().last_quadrants == recorded);
+        tier.disable();
+        assert(tier.health().rollback_quadrants == 0 && tier.health().last_quadrants == recorded);
+    }
+}
+
 void invalidation_rejects_late_bounds() {
     constexpr double radius = 2.5 / 15;
     CameraView camera;
@@ -168,14 +262,22 @@ void invalidation_rejects_late_bounds() {
     assert(reset.max == TerrainTier::full_height_range.max + TerrainTier::relief_margin(0));
     // A completion racing with invalidation must not restore stale measurements.
     assert(!tier.mark_resident(old.slot, old.key, old.stamp, measured));
+    assert(tier.health().invalidations == 1 && tier.health().stale_completions == 1);
     const Range<float> after_late_upload = tier.reach_of(old.key);
     assert(after_late_upload.min == reset.min && after_late_upload.max == reset.max);
 }
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc > 1 && std::string_view(argv[1]) == "--cruise") {
+        cruise(argc > 2 ? unsigned(std::atoi(argv[2])) : 2048, argc > 3 ? unsigned(std::atoi(argv[3])) : 12,
+               argc > 4 ? float(std::atof(argv[4])) : 0, argc > 5 ? std::atof(argv[5]) : .00012,
+               argc > 6 ? std::atof(argv[6]) : .035);
+        return 0;
+    }
     invalidation_rejects_late_bounds();
     stationary_constrained_cache(TerrainTier::slot_count);
     stationary_constrained_cache(TerrainTier::slot_count * 2);
+    cruise(512, 24, 0, .0012, .08, false, true);
 }

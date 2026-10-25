@@ -1,0 +1,19 @@
+{
+  "frames": 2100,
+  "actual_extent": [
+    2560,
+    1421
+  ],
+  "max": {
+    "terrain_resident": 2048,
+    "terrain_pending": 32,
+    "terrain_rollback_events": 0,
+    "terrain_invalidations": 0,
+    "terrain_timeouts": 0,
+    "terrain_releases": 0,
+    "terrain_stale_completions": 0,
+    "terrain_nodes": 526
+  },
+  "total_evictions": 1850,
+  "tail_pending_max": 0
+}

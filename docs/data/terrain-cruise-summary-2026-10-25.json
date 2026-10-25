@@ -1,0 +1,80 @@
+[
+  {
+    "capacity": 2048,
+    "stage": "before",
+    "rollback_frames": 28,
+    "worst_quadrants": 802,
+    "max_levels": 4,
+    "evictions": 0,
+    "warm_evictions": 0,
+    "missing_previous": 0,
+    "timeouts": 0,
+    "tail_pending": 0,
+    "source": "docs/data/terrain-cruise-fast-before-2026-10-25.csv"
+  },
+  {
+    "capacity": 2048,
+    "stage": "after",
+    "rollback_frames": 0,
+    "worst_quadrants": 0,
+    "max_levels": 0,
+    "evictions": 29,
+    "warm_evictions": 0,
+    "missing_previous": 0,
+    "timeouts": 0,
+    "tail_pending": 0,
+    "source": "docs/data/terrain-cruise-fast-after-2026-10-25.csv"
+  },
+  {
+    "capacity": 512,
+    "stage": "before",
+    "rollback_frames": 28,
+    "worst_quadrants": 802,
+    "max_levels": 4,
+    "evictions": 1347,
+    "warm_evictions": 0,
+    "missing_previous": 0,
+    "timeouts": 0,
+    "tail_pending": 0,
+    "source": "docs/data/terrain-cruise-512-before-2026-10-25.csv"
+  },
+  {
+    "capacity": 512,
+    "stage": "after",
+    "rollback_frames": 0,
+    "worst_quadrants": 0,
+    "max_levels": 0,
+    "evictions": 1568,
+    "warm_evictions": 1,
+    "missing_previous": 0,
+    "timeouts": 0,
+    "tail_pending": 0,
+    "source": "docs/data/terrain-cruise-512-after-2026-10-25.csv"
+  },
+  {
+    "capacity": 256,
+    "stage": "before",
+    "rollback_frames": 26,
+    "worst_quadrants": 556,
+    "max_levels": 3,
+    "evictions": 1292,
+    "warm_evictions": 1291,
+    "missing_previous": 0,
+    "timeouts": 0,
+    "tail_pending": 0,
+    "source": "docs/data/terrain-cruise-256-before-2026-10-25.csv"
+  },
+  {
+    "capacity": 256,
+    "stage": "after",
+    "rollback_frames": 25,
+    "worst_quadrants": 546,
+    "max_levels": 4,
+    "evictions": 1393,
+    "warm_evictions": 1334,
+    "missing_previous": 0,
+    "timeouts": 0,
+    "tail_pending": 0,
+    "source": "docs/data/terrain-cruise-256-after-2026-10-25.csv"
+  }
+]

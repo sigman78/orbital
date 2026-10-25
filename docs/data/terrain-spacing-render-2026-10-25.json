@@ -1,0 +1,54 @@
+[
+  {
+    "mesh_target_px": 0,
+    "window_frames": 200,
+    "terrain_drawn": 36.0,
+    "terrain_resident": 81.0,
+    "terrain_pending": 0.0,
+    "terrain_submitted_triangles": 64512.0,
+    "terrain_evictions": 0.0,
+    "gpu_surface_bodies_ms": 0.360448,
+    "gpu_ms": 3.19815995,
+    "cpu_prepare_ms": 0.273,
+    "pending_max": 0
+  },
+  {
+    "mesh_target_px": 16,
+    "window_frames": 200,
+    "terrain_drawn": 36.0,
+    "terrain_resident": 81.0,
+    "terrain_pending": 0.0,
+    "terrain_submitted_triangles": 64512.0,
+    "terrain_evictions": 0.0,
+    "gpu_surface_bodies_ms": 0.361472,
+    "gpu_ms": 3.313808,
+    "cpu_prepare_ms": 0.27685,
+    "pending_max": 0
+  },
+  {
+    "mesh_target_px": 8,
+    "window_frames": 200,
+    "terrain_drawn": 104.0,
+    "terrain_resident": 183.0,
+    "terrain_pending": 0.0,
+    "terrain_submitted_triangles": 214272.0,
+    "terrain_evictions": 0.0,
+    "gpu_surface_bodies_ms": 0.488448,
+    "gpu_ms": 3.588112,
+    "cpu_prepare_ms": 0.2669,
+    "pending_max": 0
+  },
+  {
+    "mesh_target_px": 4,
+    "window_frames": 200,
+    "terrain_drawn": 358.0,
+    "terrain_resident": 534.0,
+    "terrain_pending": 0.0,
+    "terrain_submitted_triangles": 764352.0,
+    "terrain_evictions": 0.0,
+    "gpu_surface_bodies_ms": 0.9456640000000001,
+    "gpu_ms": 4.061968,
+    "cpu_prepare_ms": 0.25845,
+    "pending_max": 0
+  }
+]

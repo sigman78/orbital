@@ -32,6 +32,68 @@ void test_noise() {
     assert(u >= 0 && u < 1 && uniform(state) != u && mix64(1) != mix64(2));
 }
 
+// A continuous bump field must not jump when its lattice search window moves.
+void test_detail_continuity() {
+    double worst = 0;
+    for (unsigned seed : {1007u, 1008u, 2024u}) {
+        const MinorPlanetTerrain terrain(seed);
+        for (unsigned axis = 0; axis < 3; ++axis)
+            for (int plane = -100; plane <= 100; plane += 8)
+                for (unsigned k = 0; k < 32; ++k) {
+                    const double phi = (k + .31) * 2 * pi<double> / 32;
+                    const auto direction = [&](double epsilon) {
+                        const double x = (plane + epsilon) / MinorPlanetTerrain::detail_frequency;
+                        const double r = std::sqrt(1 - x * x);
+                        const Vec3d d{x, r * std::cos(phi), r * std::sin(phi)};
+                        return axis == 0 ? d : axis == 1 ? Vec3d{d.z, d.x, d.y} : Vec3d{d.y, d.z, d.x};
+                    };
+                    const double jump = std::abs(double(terrain.detail(direction(1e-7), 1e6, 1)) -
+                                                 terrain.detail(direction(-1e-7), 1e6, 1));
+                    worst = std::max(worst, jump);
+                }
+    }
+    std::printf("detail: maximum lattice-boundary step %.12g radii\n", worst);
+    assert(worst < 1e-8);
+
+    // Isolate one crater's outer support: both its height and derivative taper out.
+    MinorPlanetTerrain terrain(1007);
+    MinorPlanetTerrain::DetailRegion region;
+    region.weights[0] = 1;
+    region.craters[0].push_back({{0, 0, 1}, .4, .1});
+    const auto at = [&](double x) {
+        const double chord = x * .4 / MinorPlanetTerrain::detail_frequency;
+        const double angle = 2 * std::asin(chord / 2);
+        return terrain.detail({std::sin(angle), 0, std::cos(angle)}, region, 1);
+    };
+    assert(at(MinorPlanetTerrain::detail_reach + 1e-4) == 0);
+    assert(std::abs(at(MinorPlanetTerrain::detail_reach - 1e-3)) < 1e-10);
+    assert(terrain.detail({0, 0, 1}, 1e6, 0) == 0);
+}
+
+// The accelerated tile path must retain all contributions, including derivative borders.
+void test_detail_regions() {
+    for (unsigned seed : {1007u, 1008u, 2024u}) {
+        const MinorPlanetTerrain terrain(seed);
+        for (unsigned face = 0; face < 6; ++face)
+            for (unsigned level : {3u, 5u, 7u, 9u, 11u}) {
+                const unsigned cells = 1u << level;
+                const PatchKey key{std::uint8_t(face), std::uint8_t(level), std::uint16_t(face & 1 ? 0 : cells / 2),
+                                   std::uint16_t(cells / 2)};
+                const auto bounds = patch_bounds(key);
+                const double nyquist = .5 * (tile_colour_side - 1) / bounds.angular_size;
+                const auto region = terrain.detail_region(
+                    bounds.centre, bounds.angular_radius + 2 * bounds.angular_size / (tile_colour_side - 1), nyquist);
+                const double step = 2.0 / cells;
+                for (int y : {-1, 0, 16, 32, 64, 65})
+                    for (int x : {-1, 0, 16, 32, 64, 65}) {
+                        const auto d = cube_direction(face, -1 + (key.x + double(x) / 64) * step,
+                                                      -1 + (key.y + double(y) / 64) * step);
+                        assert(terrain.detail(d, region, 1) == terrain.detail(d, nyquist, 1));
+                    }
+            }
+    }
+}
+
 // The terrain is deterministic, within its stated range, and continuous: neighbouring
 // directions differ by little.
 void test_terrain() {
@@ -571,6 +633,8 @@ int main(int argc, char** argv) {
         }
     test_patch_neighbours();
     test_noise();
+    test_detail_continuity();
+    test_detail_regions();
     test_terrain();
     test_regional_albedo();
     test_bake();

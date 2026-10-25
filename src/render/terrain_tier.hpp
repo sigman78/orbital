@@ -1,4 +1,5 @@
 #pragma once
+#include "render/terrain_health.hpp"
 #include "scene/geometry.hpp"
 #include "scene/terrain_patch.hpp"
 
@@ -26,6 +27,8 @@ struct TierView {
     float height_pixels = 0, tan_y = 0;
     float activate_pixels = TerrainTier_activate_default; // the switch from the sphere levels
     float lod_bias = 0;                                   // every level's range times 2^bias
+    // Nominal projected grid interval, in actual pixels; 0 retains error-only selection.
+    float mesh_pixels = 0;
 };
 
 // Distance-based quadtree selection with parent fallback and a generation-checked tile cache.
@@ -160,6 +163,7 @@ public:
         unsigned balanced = 0;
     };
     const Pressure& pressure() const { return pressure_; }
+    const TerrainHealth& health() const { return health_; }
 
     explicit TerrainTier(unsigned cache_capacity = slot_count) : capacity_(std::max(1u, cache_capacity)) {}
     void update(const TierView& view, unsigned frame, unsigned budget = generate_per_frame);
@@ -219,6 +223,7 @@ private:
     struct Slot {
         PatchKey key;
         unsigned used = 0;
+        unsigned guard_frame = 0;    // speculative neighbour; visible requests may evict it
         unsigned fade_update = 0;    // first display of this assignment; visibility never restarts the fade
         unsigned assigned_frame = 0; // when the generation went out; `used` tracks visits instead
         // Distinguishes repeated assignments of the same key and slot, including detail changes.
@@ -229,6 +234,7 @@ private:
     struct Request {
         PatchKey key;
         float pixels;
+        bool prefetch = false;
     };
     struct Visibility {
         bool visible = false;
@@ -252,11 +258,13 @@ private:
     void visit(std::uint32_t index, const TierView& view, const Visibility& seen);
     void stitch(const TierView& view);
     void cull_draw_quadrants();
+    void monitor_coverage(std::span<const Draw> before_balance);
     void collapse(Node& node);
     std::uint32_t allocate_children(const Node& node);
     unsigned slot_of(PatchKey key) const; // no_slot when not in the cache
     void touch(PatchKey key);
-    void request(PatchKey key, float pixels);
+    void request(PatchKey key, float pixels, bool prefetch = false);
+    void prefetch_neighbours();
     void choose_generation(unsigned budget);
 
     std::vector<Node> nodes_;
@@ -265,6 +273,7 @@ private:
     std::vector<unsigned> free_slots_;
     std::unordered_map<std::uint32_t, unsigned> slots_by_key_;
     std::vector<Draw> draws_;
+    std::vector<Draw> previous_draws_;
     std::vector<Request> requests_;
     std::vector<Generation> generate_;
     float range_[std::size(level_error) + 1] = {};
@@ -280,6 +289,7 @@ private:
     std::uint32_t stamp_ = 0;   // the last generation stamp issued, never reused
     std::uint64_t eviction_total_ = 0, warm_eviction_total_ = 0;
     Pressure pressure_;
+    TerrainHealth health_;
     bool active_ = false, wanted_ = false;
 };
 

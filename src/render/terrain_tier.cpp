@@ -329,8 +329,24 @@ void TerrainTier::touch(PatchKey key) {
         slots_[slot].used = frame_;
 }
 
-void TerrainTier::request(PatchKey key, float pixels) {
-    requests_.push_back({key, pixels});
+void TerrainTier::request(PatchKey key, float pixels, bool prefetch) {
+    requests_.push_back({key, pixels, prefetch});
+}
+
+void TerrainTier::prefetch_neighbours() {
+    // Keep a one-patch guard around the selected cover. Streaming uses this halo;
+    // rendering still uses the actual frustum. Ancestors are needed for traversal
+    // and material blending, even when the neighbouring leaf is already cached.
+    for (const Draw& draw : draws_)
+        for (unsigned side = 0; side < 4; ++side)
+            for (PatchKey key = patch_neighbour(draw.key, side).key;; key = key.parent()) {
+                if (slot_of(key) == no_slot)
+                    request(key, 0, true);
+                else
+                    slots_[slot_of(key)].guard_frame = frame_;
+                if (!key.level)
+                    break;
+            }
 }
 
 // Discover requested tiles independently of local resident fallback. Missing tiles never change
@@ -443,10 +459,13 @@ void TerrainTier::stitch(const TierView& view) {
                     const unsigned other = covering(patch_neighbour(draw.key.child(q), side).key);
                     if (other == draws_.size() || draw.key.level <= draws_[other].key.level + 1)
                         continue;
-                    PatchKey parent = draw.key.parent();
-                    while (parent.level > draws_[other].key.level + 1)
-                        parent = parent.parent();
-                    coarsen.push_back(parent);
+                    // Only replace the offending quadrant of the required parent.
+                    // Replacing its whole subtree lets a newly visible coarse neighbour
+                    // erase unrelated, already resident detail several levels away.
+                    PatchKey region = draw.key.child(q);
+                    while (region.level > draws_[other].key.level + 2)
+                        region = region.parent();
+                    coarsen.push_back(region);
                 }
             }
         if (coarsen.empty())
@@ -455,23 +474,21 @@ void TerrainTier::stitch(const TierView& view) {
             return a.level != b.level ? a.level < b.level : a.packed() < b.packed();
         });
         std::vector<PatchKey> replaced;
-        for (PatchKey key : coarsen) {
-            if (std::any_of(replaced.begin(), replaced.end(), [&](PatchKey parent) { return contains(parent, key); }))
+        for (PatchKey region : coarsen) {
+            if (std::any_of(replaced.begin(), replaced.end(),
+                            [&](PatchKey parent) { return contains(parent, region); }))
                 continue;
-            replaced.push_back(key);
-            unsigned quadrants = 0;
-            std::erase_if(draws_, [&](const Draw& draw) {
-                if (!contains(key, draw.key))
-                    return false;
-                if (key == draw.key) {
-                    quadrants |= draw.quadrants;
-                } else {
-                    const unsigned shift = draw.key.level - key.level - 1;
-                    const unsigned q = ((draw.key.x >> shift) & 1) | (((draw.key.y >> shift) & 1) << 1);
-                    quadrants |= 1u << q;
-                }
-                return true;
-            });
+            replaced.push_back(region);
+            const PatchKey key = region.parent();
+            const unsigned quadrant = (region.x & 1u) | ((region.y & 1u) << 1);
+            std::erase_if(draws_, [&](const Draw& draw) { return contains(region, draw.key); });
+            const auto existing = std::find_if(draws_.begin(), draws_.end(),
+                                               [&](const Draw& draw) { return draw.key == key; });
+            if (existing != draws_.end()) {
+                existing->quadrants |= 1u << quadrant;
+                pressure_.balanced++;
+                continue;
+            }
             const Node* node = find(key);
             const unsigned slot = resident_slot(key);
             ORBITAL_ASSERT(node && slot != no_slot);
@@ -479,7 +496,7 @@ void TerrainTier::stitch(const TierView& view) {
             draws_.push_back(
                 {.key = key,
                  .slot = slot,
-                 .quadrants = quadrants,
+                 .quadrants = 1u << quadrant,
                  .near_distance = float(nearest_distance(view.camera_local, node->bounds, reach_of(key))),
                  .far_distance = float(farthest_distance(view.camera_local, node->bounds, height_range(key)))});
             pressure_.balanced++;
@@ -531,6 +548,59 @@ void TerrainTier::cull_draw_quadrants() {
     });
 }
 
+void TerrainTier::monitor_coverage(std::span<const Draw> before_balance) {
+    using Cover = std::unordered_map<std::uint32_t, unsigned>;
+    const auto coverage = [](std::span<const Draw> draws) {
+        Cover cover;
+        for (const Draw& draw : draws)
+            for (unsigned q = 0; q < 4; ++q)
+                if (draw.quadrants & (1u << q))
+                    cover.emplace(draw.key.child(q).packed(), draw.key.level);
+        return cover;
+    };
+    const Cover final = coverage(draws_);
+    Cover selected; // only needed on frames with an actual multi-level rollback
+    bool selected_ready = false;
+    const auto covering = [](const Cover& cover, PatchKey key) {
+        for (; key.level; key = key.parent())
+            if (const auto it = cover.find(key.packed()); it != cover.end())
+                return it->second;
+        return patch_level_max + 1;
+    };
+    for (const Draw& old : previous_draws_)
+        for (unsigned q = 0; q < 4; ++q) {
+            if (!(old.quadrants & (1u << q)))
+                continue;
+            const PatchKey cell = old.key.child(q);
+            const unsigned level = covering(final, cell);
+            if (level + 1 >= old.key.level)
+                continue; // refinement, culled/absent, or ordinary one-level transition
+            const unsigned drop = old.key.level - level;
+            health_.rollback_quadrants++;
+            health_.rollback_levels = std::max(health_.rollback_levels, drop);
+            if (!selected_ready) {
+                selected = coverage(before_balance);
+                selected_ready = true;
+            }
+            const bool selection = covering(selected, cell) + 1 < old.key.level;
+            health_.selection_rollbacks += selection;
+            health_.balance_rollbacks += !selection;
+            health_.missing_previous += resident_slot(old.key) == no_slot;
+            health_.last_key = cell.packed();
+            health_.last_from = old.key.level;
+            health_.last_to = level;
+        }
+    if (health_.rollback_quadrants) {
+        health_.rollback_events++;
+        health_.last_frame = frame_;
+        health_.last_quadrants = health_.rollback_quadrants;
+        health_.last_levels = health_.rollback_levels;
+        health_.last_selection = health_.selection_rollbacks;
+        health_.last_balance = health_.balance_rollbacks;
+        health_.last_missing = health_.missing_previous;
+    }
+}
+
 // Serve coarse/large patches first; LRU eviction protects pending and currently used slots.
 void TerrainTier::choose_generation(unsigned budget) {
     const unsigned cap = std::min(budget, generate_per_frame);
@@ -543,6 +613,7 @@ void TerrainTier::choose_generation(unsigned budget) {
         Slot& slot = slots_[sweep_cursor_];
         sweep_cursor_ = (sweep_cursor_ + 1) % capacity_;
         if (!slot.resident && slot.stamp && slot.assigned_frame + pending_timeout < frame_) {
+            health_.timeouts++;
             slots_by_key_.erase(slot.key.packed());
             free_slots_.push_back(unsigned(&slot - slots_.data()));
             slot = {};
@@ -551,12 +622,14 @@ void TerrainTier::choose_generation(unsigned budget) {
     std::sort(requests_.begin(), requests_.end(), [](const Request& a, const Request& b) {
         if (a.key.level != b.key.level)
             return a.key.level < b.key.level;
+        if (a.prefetch != b.prefetch)
+            return !a.prefetch; // at equal level, visible coverage wins over guard tiles
         if (a.pixels != b.pixels)
             return a.pixels > b.pixels;
         return a.key.packed() < b.key.packed();
     });
     std::unordered_set<std::uint32_t> seen;
-    bool slots_unavailable = false;
+    bool slots_unavailable[2] = {}; // visible demand may reclaim guards; prefetch cannot
     for (const Request& r : requests_) {
         if (!seen.insert(r.key.packed()).second)
             continue;
@@ -567,7 +640,7 @@ void TerrainTier::choose_generation(unsigned budget) {
             pressure_.generation_budget_limited++;
             continue;
         }
-        if (slots_unavailable) {
+        if (slots_unavailable[r.prefetch ? 1 : 0]) {
             pressure_.slots_blocked++;
             continue;
         }
@@ -577,14 +650,23 @@ void TerrainTier::choose_generation(unsigned budget) {
             free_slots_.pop_back();
         } else {
             unsigned oldest = frame_;
-            for (unsigned i = 0; i < capacity_; i++)
-                if (slots_[i].resident && slots_[i].used < oldest) {
-                    oldest = slots_[i].used;
-                    slot = i;
+            // Evict cold history first. A guard is optional: visible demand may
+            // take its slot, but another speculative request must not churn it.
+            for (unsigned pass = 0; pass < (r.prefetch ? 1u : 2u) && slot == no_slot; ++pass) {
+                for (unsigned i = 0; i < capacity_; i++) {
+                    if (!pass && slots_[i].guard_frame == frame_)
+                        continue;
+                    if (slots_[i].resident && slots_[i].used < oldest) {
+                        oldest = slots_[i].used;
+                        slot = i;
+                    }
                 }
+            }
             if (slot == no_slot) {
                 pressure_.slots_blocked++; // every usable slot is pending or touched this frame
-                slots_unavailable = true;
+                slots_unavailable[r.prefetch ? 1 : 0] = true;
+                if (!r.prefetch)
+                    slots_unavailable[1] = true;
                 continue;
             }
             pressure_.evictions++;
@@ -601,6 +683,8 @@ void TerrainTier::choose_generation(unsigned budget) {
 }
 
 void TerrainTier::invalidate() {
+    health_.clear_frame();
+    health_.invalidations++;
     ensure_roots();
     for (Node& node : nodes_)
         node.measured = false;
@@ -611,12 +695,15 @@ void TerrainTier::invalidate() {
     for (unsigned slot = capacity_; slot-- > 0;)
         free_slots_.push_back(slot);
     draws_.clear();
+    previous_draws_.clear();
     generate_.clear();
     active_ = false;
 }
 
 void TerrainTier::disable() {
+    health_.clear_frame();
     draws_.clear();
+    previous_draws_.clear();
     generate_.clear();
     for (unsigned face = 0; face < std::min<std::size_t>(6, nodes_.size()); face++)
         collapse(nodes_[face]);
@@ -628,14 +715,17 @@ void TerrainTier::release(unsigned slot, PatchKey key, std::uint32_t stamp) {
     if (slot >= slots_.size() || slots_[slot].stamp != stamp || slots_[slot].key != key || slots_[slot].resident)
         return;
     slots_by_key_.erase(key.packed());
+    health_.releases++;
     slots_[slot] = {};
     free_slots_.push_back(slot);
 }
 
 bool TerrainTier::mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights) {
     // Stamps start at one, so a slot cleared by invalidate() matches nothing in flight.
-    if (slot >= slots_.size() || slots_[slot].stamp != stamp || slots_[slot].key != key)
+    if (slot >= slots_.size() || slots_[slot].stamp != stamp || slots_[slot].key != key) {
+        health_.stale_completions++;
         return false; // recycled, or regenerated at another detail, since the request went out
+    }
     slots_[slot].resident = true;
     slots_[slot].heights = heights;
     if (const Node* node = find(key)) {
@@ -649,7 +739,9 @@ bool TerrainTier::mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp
 void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) {
     frame_ = frame;
     update_++;
+    previous_draws_.swap(draws_);
     draws_.clear();
+    health_.clear_frame();
     requests_.clear();
     generate_.clear();
     pressure_ = {};
@@ -670,9 +762,18 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     const float bias = std::exp2(view.lod_bias);
     // A child replaces its parent when the parent's projected error reaches the budget.
     // range[L] is both L's handover/morph end and (L-1)'s split distance.
-    for (unsigned level = 0; level < std::size(range_); level++)
-        range_[level] = (level ? level_error[level - 1] : 2 * level_error[0]) * view.height_pixels /
-                        (view.tan_y * error_pixels) * bias;
+    for (unsigned level = 0; level < std::size(range_); level++) {
+        const float error_range = (level ? level_error[level - 1] : 2 * level_error[0]) * view.height_pixels /
+                                  (view.tan_y * error_pixels);
+        // A nominal root-face width of two radii, divided into 32 grid intervals.
+        // Use the parent's interval at the child handover, just like the error budget.
+        // This is a density target, not a bound on displaced or diagonal edges.
+        const float interval = std::ldexp(2.f / (tile_side - 1), 1 - int(level));
+        const float spacing_range = view.mesh_pixels > 0
+                                        ? interval * view.height_pixels / (2 * view.tan_y * view.mesh_pixels)
+                                        : 0;
+        range_[level] = std::max(error_range, spacing_range) * bias;
+    }
     ensure_roots();
     // Carry the frustum into the body's frame and into radii, once: the axes are orthonormal,
     // so a plane normal transposes by three dots and a patch test becomes one more.
@@ -715,8 +816,12 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
         for (unsigned face = 0; face < 6; face++)
             visit(face, view, roots[face]);
     if (active_) {
+        cull_draw_quadrants();
+        const std::vector<Draw> before_balance = draws_;
+        prefetch_neighbours();
         stitch(view);
         cull_draw_quadrants();
+        monitor_coverage(before_balance);
     }
     choose_generation(budget);
     cache_snapshot();

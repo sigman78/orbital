@@ -28,6 +28,7 @@ constexpr std::size_t bookmark_count = 10;
 struct Camera {
     Vec3d position{0.0, 0.8, 4.8};
     double vertical_fov = pi<double> / 3; // 60 degrees
+    bool terrain_noclip = false;          // inspection: bypass the minor planet's camera clearance
 
     Camera();
     constexpr CameraMode mode() const { return mode_; }

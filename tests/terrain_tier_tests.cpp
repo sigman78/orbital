@@ -335,6 +335,31 @@ void test_morph_bands() {
     assert(worst > 1.1);
 }
 
+void test_mesh_spacing_bands() {
+    for (float target : {4.f, 8.f, 16.f}) {
+        TierView view = view_at(20, 2.5 / 15);
+        view.mesh_pixels = target;
+        TerrainTier tier;
+        tier.update(view, 1);
+        for (unsigned level = 0; level <= patch_level_max; ++level) {
+            const double projection = view.height_pixels / (2 * double(view.tan_y));
+            const double split = tier.range(level + 1);
+            const double interval = std::ldexp(2. / (tile_side - 1), -int(level));
+            assert(interval * projection / split <= target * 1.00001);
+            assert(TerrainTier::level_error[level] * projection / split <= TerrainTier::error_pixels * .50001);
+            assert(tier.morph_start(level) > split);
+            assert(tier.morph_start(level) < tier.range(level));
+        }
+        const float old_range = tier.range(6);
+        view.height_pixels *= 2;
+        tier.update(view, 2);
+        assert(std::abs(tier.range(6) / old_range - 2) < 1e-5);
+        view.lod_bias = 1;
+        tier.update(view, 3);
+        assert(std::abs(tier.range(6) / old_range - 4) < 1e-5);
+    }
+}
+
 void test_morph_continuity() {
     constexpr double radius = 2.5 / 15;
     const MinorPlanetTerrain terrain(1007);
@@ -345,7 +370,8 @@ void test_morph_continuity() {
     for (const Vec3d& spot : spots)
         for (double altitude : {.03, .08, .2, .5}) {
             TerrainTier tier;
-            const TierView view = view_over(spot, altitude, radius);
+            TierView view = view_over(spot, altitude, radius);
+            view.mesh_pixels = 8;
             for (unsigned frame = 1; frame <= 96; frame++) {
                 tier.update(view, frame, TerrainTier::slot_count);
                 for (const auto& g : tier.generate())
@@ -432,7 +458,9 @@ void test_motion_stability() {
     }
     std::printf("terrain tier: small-step flight, worst draw replacement %.1f%%, %u waiting frames, peak %u patches\n",
                 100 * worst_loss, waiting, peak);
-    assert(waiting > 0 && worst_loss < .2);
+    // The neighbour guard may eliminate all waits on this slow path.
+    assert(worst_loss < .2);
+    assert(tier.health().rollback_events == 0);
 }
 
 // Looking away must not replay arrival morphs on already settled, cached geometry.
@@ -1476,6 +1504,7 @@ int main(int argc, char** argv) {
     test_height_range_lifetime();
     test_resident_terrain_morph();
     test_morph_bands();
+    test_mesh_spacing_bands();
     test_morph_continuity();
     test_cache_stats_accounting();
     test_cull_waste();

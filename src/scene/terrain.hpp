@@ -1,6 +1,7 @@
 #pragma once
 #include "core/math.hpp"
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -36,6 +37,17 @@ public:
     static constexpr float detail_density = .55f; // the share of cells carrying one
     static constexpr float detail_slope = .15f;   // rms tangent the full stack adds at strength 1
     float detail(Vec3d direction, double nyquist, float strength) const;
+    struct DetailCrater {
+        Vec3d centre;
+        double radius = 0, depth = 0; // lattice-cell units
+    };
+    struct DetailRegion {
+        std::array<std::vector<DetailCrater>, detail_octaves> craters;
+        std::array<double, detail_octaves> weights{};
+    };
+    // Complete projected crater support for a spherical cap, prepared once per tile.
+    DetailRegion detail_region(Vec3d centre, double angular_radius, double nyquist) const;
+    float detail(Vec3d direction, const DetailRegion& region, float strength) const;
 
     // Height above the reference sphere, radii, within [height_min, height_max].
     float height(Vec3d direction) const { return height(direction, craters_); }

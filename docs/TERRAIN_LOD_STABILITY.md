@@ -1,5 +1,184 @@
 # Terrain LOD stability under cache pressure
 
+## Low-flight rollback reproduction and prevention, 2026-10-25
+
+The new eight-pixel spacing policy exposed a **balancing cascade**, independently
+of eviction. This matches the reported sudden broad detail drop followed by recovery;
+it is a deterministic reproduction of that failure class, not a recording of the
+user's exact flight. The user runs default settings at fullscreen 2K.
+
+### What fails
+
+There are three different sets: requested detail, tiles resident in memory, and
+the final crack-compatible draw selection. A tile can stay resident while being
+replaced by an ancestor in the draw list. Existing cache occupancy readings could
+not distinguish that from a flush.
+
+```mermaid
+flowchart LR
+    A[New terrain enters view] --> B[Neighbour's fine tile not ready]
+    B --> C[Neighbour uses coarse ancestor]
+    C --> D[Balance adjacent levels]
+    D --> E[Old code replaces whole parent subtree]
+    E --> F[Resident fine terrain suddenly draws coarse]
+    F --> G[Uploads arrive and fine selection returns]
+```
+
+At frame 521 of the old-path replay, 802 previously drawn quadrants fell by up to
+four levels. Only 380 tiles were resident, 32 pending, with **zero evictions**,
+zero blocked slots, zero blocked tree splits, and none of the replaced tiles
+missing from residency. Every detected multi-level rollback in that replay
+originated in balancing after selection. Thus neither increasing cache capacity
+nor animating eviction addresses this particular trigger.
+
+The old balancer replaced an entire parent subtree to satisfy one offending edge.
+That enlarged the coarse region, exposed more mismatches, and propagated the loss.
+The replacement was immediate. Uploads and normal arrival morphs account for staged
+recovery; there is no multi-frame eviction animation. An assignment's arrival fade
+also does not restart just because it was temporarily undrawn.
+
+Streaming and draw topology must agree about readiness, but they are not identical.
+The [original CDLOD implementation](https://raw.githubusercontent.com/fstrugar/CDLOD/master/source/StreamingCDLOD/CDLODQuadTree.cpp)
+separates selection ranges and streaming inclusion and explicitly checks morph-range
+coverage. Our observed cascade is in this repository's additional resident-neighbour
+balancer, not a demonstrated defect in upstream CDLOD.
+
+### Implemented response
+
+- Balance only the offending **parent quadrant**, preserving unrelated descendant
+  coverage. Existing 2:1 edge constraints and material-parent dependencies remain.
+- Cull actual draw quadrants before balancing as well as afterward, so wholly
+  rejected geometry does not impose unnecessary adjacency constraints.
+- Request a one-patch neighbour guard, including the ancestor chain needed for
+  traversal and material blending. These are streaming tiles, not additional draws.
+- Prioritize coarse dependencies before fine work; at an equal level visible demand
+  precedes guard requests. Putting every guard request behind all visible requests
+  failed: constant fine demand starved the guard until it was too late.
+- Guard residency is optional. Evict cold history first; visible demand can reclaim
+  a guard. Speculative requests cannot evict another current guard or current draw
+  dependencies. Separate allocation-failure caches preserve that distinction.
+
+Capacities, eight admissions/update, 32 staging rings, generation stamps, and morph
+ranges are unchanged. No global quality multiplier or cache enlargement is used.
+The guard costs additional generation and residency. It is not a universal guarantee
+when speed exceeds streaming throughput or the necessary cover exceeds capacity.
+
+### Controlled measurements
+
+Seed 1007, 2560x1440 projection, 60° FOV, radial altitude .08, default bias zero and
+spacing eight. Hold 500 frames, rotate the stand point .0012 radians/update for
+1100 frames, then hold 500. The look direction is tangent minus 0.1 times radial.
+Uploads arrive after 24–28 updates, out of order, with a strict 32-job ring and
+real generated height bounds. The old binary uses the selector immediately before
+these changes with the same new rollback detector. Timings are not compared.
+
+| Slots | Before / after rollback frames | Worst prior quadrants before / after | Evictions before / after |
+| ---: | ---: | ---: | ---: |
+| 2048 | 28 / **0** | 802 / **0** | 0 / 29 |
+| 512 | 28 / **0** | 802 / **0** | 1347 / 1568 |
+| 256 | 26 / 25 | 556 / 546 | 1292 / 1393 |
+
+The 256-slot case is deliberately overloaded and **not fixed**: severe drops still
+reach four levels in the revised path. Warm evictions remain high (1334); the guard
+cannot create space for required detail. All six traces end with zero pending jobs.
+No multi-level event in these traces required the previously drawn tile itself to
+be absent. Eviction can still indirectly remove newly needed neighbours; absence
+of the old tile is only one attribution signal, not proof that cache pressure is
+irrelevant. [Summary and CSV paths](data/terrain-cruise-summary-2026-10-25.json).
+
+A slower .00012-radian/update path at altitude .035 did not reproduce the failure,
+even at 1024 slots with 795 evictions. Merely observing evictions was insufficient.
+Quadrant-local balancing alone cut the fast case's worst event from 802 to 207
+quadrants but left 29 rollback frames. Guard tiles with visible-first priority still
+left 24 frames. Coarse dependency priority was needed to remove events in the tested
+2048/512-slot paths.
+
+### Warnings and meaning
+
+The Terrain panel now retains the last multi-level rollback after it recovers,
+including its frame, largest level drop, affected prior quadrants and attribution.
+The tooltip shows lifetime event-frame count and an example packed cell/from/to.
+A console warning and named `terrain_*` benchmark columns record the same event.
+A separate persistent cache history records invalidations, pending timeouts, explicit
+job releases and stale completion rejection. These counters survive disable/reset.
+
+The detector compares previous drawn quadrants with the current covering ancestors.
+A drop of two or more levels is recorded; culled regions, refinements and ordinary
+one-level changes do not trigger it. It checks selection before balancing and the
+final draw list afterward. The counts are **overlapping quadrant observations, not
+screen pixels** or an occlusion test; large camera/quality changes can legitimately
+trigger them. A regression explicitly changes quality and checks selection attribution,
+zero missing previous tiles, persistence after recovery and cleared per-frame counts
+on disable. Deliberate detail-setting changes can legitimately increment reset and
+stale-upload counts. Stale completions are rejected before GPU writes.
+
+For investigation, record `--benchmark captures/flight.csv` while flying. Correlate
+rollback columns with eviction, free slots, blocked admissions, pending age and
+`terrain_balanced`. Blocked-admission totals include optional guard requests; they
+are not alone evidence of visible degradation. Zero rollbacks does not rule out one-level popping, morph/shading
+changes, or defects outside this detector. The warning is a retained diagnostic,
+not an assertion that the scene is currently degraded.
+
+### Validation and reproduction
+
+```text
+terrain_cache_tests --cruise 2048 24 0 .0012 .08
+terrain_cache_tests --cruise 512 24 0 .0012 .08
+terrain_cache_tests --cruise 256 24 0 .0012 .08
+orbital --headless --terrain-cruise --time 0 --tier-activate 100
+  --frames 2100 --width 2560 --height 1440 --taa 1
+  --benchmark captures/terrain-cruise-gpu.csv
+```
+
+CPU arguments are capacity, base upload delay in frames, bias, radians/update and
+radial altitude. `--terrain-cruise` is an opt-in renderer camera fixture with the
+same hold/cruise/hold schedule; it overrides navigation for the run and preserves
+normal temporal history. Runtime worker completion is asynchronous, unlike the
+CPU replay's fixed delays. The desktop constrained the GPU run to 2560x1421.
+On the GTX 1080 Ti it completed 2100 frames, filled all 2048 slots, performed 1850
+evictions, recorded **zero rollback events, invalidations, timeouts, releases or
+stale uploads**, and had zero pending jobs throughout the final 200 frames.
+[GPU report](data/terrain-cruise-gpu-2026-10-25.json). Concurrent CPU verification
+means these runs are correctness checks, not clean performance comparisons.
+
+A further 900-frame TAA/wireframe cruise completed with the local Vulkan core and
+synchronization validation layer enabled and no reported validation findings.
+
+All 18 MSVC and 17 GCC tests passed. The regular cache regression now includes
+512-slot moving flight and asserts zero rollback frames, actual evictions, settled
+completion and cache ownership. Existing seam/morph checks and the separate
+ray-truth sweep pass with zero uncovered probes. The warning was inspected at
+1280x900 and 960x720 after an intentional quality reduction; temporary UI capture
+and forced-quality hooks were removed. This verifies warning layout and attribution,
+not an independently reproduced GPU failure in the user's original flight.
+
+### How to prevent the remaining overload class
+
+The invariant to aim for is: *optional streaming work must not force an already
+valid visible cover to regress*. The present guard is a bounded mitigation, not
+that complete invariant. Further work, in order:
+
+1. Maintain an admitted cover separately from desired refinement, with explicit
+   neighbour/ancestor readiness and capacity reservation. Admit a refinement only
+   when its complete local dependency set fits; preserve prior valid cover while
+   preparing its replacement. A finite cache still needs a controlled overload policy.
+2. Extend the guard using measured velocity and generation/upload latency, bounded
+   by available capacity. Reserve throughput for readiness dependencies before fine
+   detail; avoid blindly raising prefetch distance or globally scaling LOD each frame.
+3. For strict continuity across previously unseen terrain under sustained overload,
+   decouple draw-grid level from material/height residency. Sample a resident ancestor
+   into a finer temporary grid, with compatible borders, then transition when the tile
+   arrives. This requires shader UV transforms, height/material fallback rules and seam
+   validation; drawing unmatched fine edges or merely removing balancing is unsafe.
+4. Tune glancing-view density independently after stability is established. The nominal
+   spacing metric still selects detail by nearest cell distance, not visible projected
+   area; grazing triangles and anisotropic texel footprints remain inefficient. Measure
+   visible contribution and retain silhouette-error limits before relaxing far detail.
+
+The horizon-density policy is deliberately unchanged by this fix. Reducing it could
+mask the reproduction without resolving the streaming/topology coupling.
+
+
 ## Glancing-view draw coverage, 2026-10-25
 
 The remaining report concerned distant pieces in the patch map or after freezing

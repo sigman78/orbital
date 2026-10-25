@@ -136,7 +136,10 @@ void Camera::rebuild_basis() {
 }
 
 void Camera::collision_clamp(std::span<const BodyState> bodies) {
-    for (const auto& body : bodies) {
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        if (terrain_noclip && i == bookmark_body(9))
+            continue;
+        const auto& body = bodies[i];
         const Vec3d delta = position - body.position;
         const double distance = length(delta), minimum = std::max(0.0, body.radius * settings::collision_margin);
         if (minimum > 0.0 && distance < minimum) {
@@ -196,7 +199,8 @@ void Camera::step_tour(double time, std::span<const BodyState> bodies) {
 }
 
 void Camera::step_orbit(double dt, double speed, const Input& input, const BodyState& body) {
-    const double minimum_zoom = body.radius * settings::collision_margin;
+    const double minimum_zoom =
+        body.radius * (terrain_noclip && orbit_target_ == bookmark_body(9) ? .001 : settings::collision_margin);
     orbit_zoom_ = std::max(minimum_zoom, orbit_zoom_ - input.move_forward * speed * dt);
     orbit_yaw_ += input.mouse_dx * settings::mouse_sensitivity / zoom_;
     orbit_pitch_ = settings::orbit::pitch.clamp(orbit_pitch_ - input.mouse_dy * settings::mouse_sensitivity / zoom_);

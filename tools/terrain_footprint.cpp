@@ -112,7 +112,7 @@ Vec3d surface_point(const MinorPlanetTerrain& terrain, unsigned face, double s, 
 }
 
 struct Samples {
-    std::vector<double> mesh_edge;
+    std::vector<double> mesh_edge, triangle_area, triangle_longest;
     std::vector<double> material_major, material_minor, anisotropy;
     std::size_t considered = 0, rejected = 0;
     std::size_t patch_draws = 0, drawn_quadrants = 0, triangles = 0;
@@ -143,19 +143,30 @@ void sample_draws(const CameraSetup& camera, const TerrainTier& tier, const Mino
                     samples.considered++;
                     const double s = -1 + (double(draw.key.x) + double(x) * mesh_step) * cell_size;
                     const double t = -1 + (double(draw.key.y) + double(y) * mesh_step) * cell_size;
-                    Projection centre, mx, my, cu, cv;
+                    Projection centre, mx, my, mxy, cu, cv;
                     const Vec3d p = surface_point(terrain, draw.key.face, s, t);
                     const Vec3d px = surface_point(terrain, draw.key.face, s + cell_size * mesh_step, t);
                     const Vec3d py = surface_point(terrain, draw.key.face, s, t + cell_size * mesh_step);
+                    const Vec3d pxy = surface_point(terrain, draw.key.face, s + cell_size * mesh_step,
+                                                    t + cell_size * mesh_step);
                     const Vec3d pu = surface_point(terrain, draw.key.face, s + cell_size * material_step, t);
                     const Vec3d pv = surface_point(terrain, draw.key.face, s, t + cell_size * material_step);
                     if (!project(camera, p, centre) || !project(camera, px, mx) || !project(camera, py, my) ||
-                        !project(camera, pu, cu) || !project(camera, pv, cv)) {
+                        !project(camera, pxy, mxy) || !project(camera, pu, cu) || !project(camera, pv, cv)) {
                         samples.rejected++;
                         continue;
                     }
                     samples.mesh_edge.push_back(std::hypot(mx.x - centre.x, mx.y - centre.y));
                     samples.mesh_edge.push_back(std::hypot(my.x - centre.x, my.y - centre.y));
+                    const double ex = mx.x - centre.x, ey = mx.y - centre.y;
+                    const double fx = my.x - centre.x, fy = my.y - centre.y;
+                    const double dx = mxy.x - centre.x, dy = mxy.y - centre.y;
+                    samples.triangle_area.push_back(.5 * std::abs(ex * dy - ey * dx));
+                    samples.triangle_area.push_back(.5 * std::abs(dx * fy - dy * fx));
+                    samples.triangle_longest.push_back(
+                        std::max({std::hypot(ex, ey), std::hypot(dx, dy), std::hypot(dx - ex, dy - ey)}));
+                    samples.triangle_longest.push_back(
+                        std::max({std::hypot(fx, fy), std::hypot(dx, dy), std::hypot(dx - fx, dy - fy)}));
 
                     // Singular values of the screen-pixel Jacobian per colour/slope texel.
                     const double ux = cu.x - centre.x, uy = cu.y - centre.y;
@@ -180,25 +191,30 @@ double percentile(std::vector<double> values, double q) {
     return values[i];
 }
 
-bool emit_row(const CameraSetup& base, float bias, const MinorPlanetTerrain& terrain) {
+bool emit_row(const CameraSetup& base, float bias, float mesh_pixels, const MinorPlanetTerrain& terrain) {
     CameraSetup camera = base;
     camera.tier.lod_bias = bias;
-    TerrainTier tier;
+    camera.tier.mesh_pixels = mesh_pixels;
+    TerrainTier tier(2048);
     if (!converge_tier(tier, camera.tier, terrain)) {
-        std::fprintf(stderr, "terrain_footprint: tier did not converge for %s bias %.0f\n", camera.name, bias);
+        std::fprintf(stderr, "terrain_footprint: tier did not converge for %s bias %.0f mesh %.0f\n", camera.name, bias,
+                     mesh_pixels);
         return false;
     }
     Samples samples;
     sample_draws(camera, tier, terrain, samples);
-    std::printf("%s,%.0f,%zu,%zu,%zu,%u,%zu,%zu,%zu,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n",
-                camera.name, double(bias), samples.considered, samples.rejected, samples.patch_draws, samples.deepest,
-                samples.drawn_quadrants, samples.triangles, samples.mesh_edge.size(),
-                percentile(samples.mesh_edge, .50), percentile(samples.mesh_edge, .90),
+    std::printf("%s,%.0f,%.0f,%zu,%zu,%zu,%u,%zu,%zu,%zu,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,",
+                camera.name, double(bias), double(mesh_pixels), samples.considered, samples.rejected,
+                samples.patch_draws, samples.deepest, samples.drawn_quadrants, samples.triangles,
+                samples.mesh_edge.size(), percentile(samples.mesh_edge, .50), percentile(samples.mesh_edge, .90),
                 percentile(samples.mesh_edge, .95), percentile(samples.material_major, .50),
                 percentile(samples.material_major, .90), percentile(samples.material_major, .95),
                 percentile(samples.material_minor, .50), percentile(samples.material_minor, .90),
                 percentile(samples.material_minor, .95), percentile(samples.anisotropy, .50),
                 percentile(samples.anisotropy, .90), percentile(samples.anisotropy, .95));
+    std::printf("%.4f,%.4f,%.4f,%u\n", percentile(samples.triangle_longest, .50),
+                percentile(samples.triangle_longest, .95), percentile(samples.triangle_area, .50),
+                tier.cache_stats(20000).resident);
     return true;
 }
 
@@ -214,14 +230,20 @@ int main() {
               "seed 1007.");
     std::puts("# Mesh: 33x33 vertices, 32x32 quads, 2304 triangles including skirts per full patch.");
     std::puts("# Material values are projected pixels per albedo/slope texel (shared 65x65 layout at ratio 2).");
-    std::puts("camera,lod_bias,sample_sites,rejected_sites,draw_patches,deepest_level,drawn_quadrants,submitted_"
+    std::puts("camera,lod_bias,mesh_target_px,sample_sites,rejected_sites,draw_patches,deepest_level,drawn_quadrants,"
+              "submitted_"
               "triangles,mesh_edge_samples,mesh_edge_px_p50,mesh_edge_px_p90,mesh_edge_px_p95,material_major_px_p50,"
               "material_major_px_p90,material_major_px_p95,material_minor_px_p50,material_minor_px_p90,material_minor_"
-              "px_p95,anisotropy_p50,anisotropy_p90,anisotropy_p95");
+              "px_p95,anisotropy_p50,anisotropy_p90,anisotropy_p95,triangle_longest_px_p50,triangle_longest_px_p95,"
+              "triangle_area_px2_p50,resident_tiles");
     const CameraSetup nadir = camera_setup("nadir", 0);
     const CameraSetup glancing = camera_setup("glancing18deg", 18 * pi<double> / 180);
     for (const CameraSetup& camera : {nadir, glancing})
         for (const float bias : {0.f, 1.f, 2.f})
-            if (!emit_row(camera, bias, terrain))
+            if (!emit_row(camera, bias, 0, terrain))
+                return 1;
+    for (const CameraSetup& camera : {nadir, glancing})
+        for (const float mesh_pixels : {16.f, 8.f, 4.f})
+            if (!emit_row(camera, 0, mesh_pixels, terrain))
                 return 1;
 }

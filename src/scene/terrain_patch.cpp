@@ -240,12 +240,16 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
     const MinorPlanetTerrain::Region region = terrain.region(bounds.centre,
                                                              bounds.angular_radius + 2 * bounds.angular_size / quads);
     const double nyquist = .5 * quads / bounds.angular_size;
+    const MinorPlanetTerrain::DetailRegion detail_region =
+        detail > 0
+            ? terrain.detail_region(bounds.centre, bounds.angular_radius + 2 * bounds.angular_size / quads, nyquist)
+            : MinorPlanetTerrain::DetailRegion{};
     std::vector<float> h(bordered * bordered);
     const auto at = [&](int x, int y) -> float& { return h[(y + 1) * bordered + (x + 1)]; };
     for (int y = -1; y <= int(tile_colour_side); y++)
         for (int x = -1; x <= int(tile_colour_side); x++) {
             const Vec3d d = direction(x, y);
-            at(x, y) = terrain.height(d, region) + terrain.detail(d, nyquist, detail);
+            at(x, y) = terrain.height(d, region) + terrain.detail(d, detail_region, detail);
         }
     for (int y = 0; y < int(tile_colour_side); y++)
         for (int x = 0; x < int(tile_colour_side); x++) {

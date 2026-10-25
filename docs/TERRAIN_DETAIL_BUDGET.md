@@ -1,5 +1,160 @@
 # Minor planet detail budget
 
+The [bump continuity investigation](TERRAIN_BUMP_CONTINUITY.md) fixes diagonal
+micro-crater cuts without changing texture sizes or mesh spacing.
+
+The subsequent [low-flight stability investigation](TERRAIN_LOD_STABILITY.md)
+adds a streaming neighbour guard and quadrant-local balancing. The spacing study
+below predates that change; its allocation figures still apply, but residency and
+transient selection counts can differ.
+
+## Implemented screen-spacing policy — 2026-10-25
+
+This section supersedes the earlier recommendation to leave selection defaults unchanged.
+The mesh remains 32x32 intervals, height 33x33, bump 65x65 and albedo 65x65:
+**1:2:2 linear sampling density**. Ratios count intervals, not sample dimensions
+(64/32 = 2, not 65/33). No new detail layers are introduced.
+
+The renderer now defaults to `--terrain-mesh-pixels 8`. Use 16 for economy, 4 for
+high density, and 0 to reproduce the former displacement-error-only selection.
+These are nominal grid-spacing targets at the split threshold, not promised
+triangle lengths everywhere. Leave `--lod-bias 0` for these comparisons: positive
+bias refines both constraints and can greatly exceed the intended workload.
+
+### Metric and selection
+
+The old five-pixel budget bounds *estimated geometric displacement error*, not
+edge length. Keep it to protect silhouette and relief. For level L, let
+`f = height / (2*tan(fov_y/2))`, `s[L] = (2/32)*2^-L` radii and `P` be the
+requested spacing. The child split range is now
+`max(level_error[L]*f/5, s[L]*f/P) * 2^lod_bias`.
+When P is zero the spacing term is disabled. These same ranges drive morphing,
+retention and selection; no second incompatible refinement test is introduced.
+CPU callers retain a zero default for existing error-only experiments; the
+application explicitly supplies its default of eight.
+
+The two-radii face width is a nominal density calibration, not an exact warped
+sphere edge bound. Selection uses nearest cell distance, whereas projection uses
+view depth. Warp, slopes, diagonals, morphing, grazing incidence, discrete LOD,
+missing resident tiles, maximum level and cache/tree ceilings all affect actual
+pixel sizes. Refinement often halves the spacing below its threshold. The target
+is an upper preference, not a minimum: geometric error can demand smaller triangles.
+
+For an approximately square projected grid with interval p, a triangle covers
+p²/2 square pixels and its diagonal is sqrt(2)*p. Thus “8 px triangles” must
+specify length versus area. At p=4/8/16, ideal full-screen 1920x1080 coverage takes
+259,200 / 64,800 / 16,200 surface triangles, respectively. Those are area estimates,
+not draw budgets: skirts, conservative culling, grazing foreshortening and
+occluded triangles add work. The footprint tool now reports actual projected
+triangle longest edges and areas from both triangles of sampled quads.
+
+### Measurements and recommendation
+
+Fresh deterministic footprint sweep, seed 1007, 900px high, 60° vertical FOV,
+radial camera 1.08, renderer-equivalent 2048-slot cache, bias zero:
+
+| View | Target | Grid edge p50 | Triangle longest p50 / p95 | Material major p50 | Submitted triangles | Resident tiles |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Nadir | Legacy | 9.12 | 11.34 / 21.57 | 4.78 | 41,472 | 52 |
+| Nadir | 16 | 7.90 | 10.78 / 12.30 | 4.58 | 69,120 | 75 |
+| Nadir | **8** | **3.99** | **5.42 / 6.25** | **2.31** | **227,520** | **186** |
+| Nadir | 4 | 2.01 | 2.72 / 3.16 | 1.16 | 829,440 | 564 |
+| Glancing | Legacy | 6.73 | 9.88 / 17.85 | 4.45 | 73,152 | 71 |
+| Glancing | 16 | 6.13 | 8.78 / 15.03 | 3.94 | 92,736 | 87 |
+| Glancing | **8** | **3.36** | **4.88 / 8.11** | **2.18** | **285,696** | **218** |
+| Glancing | 4 | 1.74 | 2.53 / 4.21 | 1.13 | 1,010,880 | 680 |
+
+Lengths are pixels; material major is pixels/texel. At target 8 the median
+triangle areas are 8.19 and 2.37 square pixels. These are unweighted lattice
+samples, not visible-pixel percentages. Positions use procedural heights rather
+than exact quantized/morphed vertices, and no local ray occlusion is tested.
+[Full CSV](data/terrain-spacing-2026-10-25.csv) includes rejection counts,
+minor-axis footprints, anisotropy and legacy bias sweeps.
+
+**Recommend 8 for the requested 4–8 px triangle scale, 16 for economy.** The 4
+setting is an optional supersampling budget; these views do not justify it as
+the default. At target 8, bump and albedo samples span about two pixels along
+the major axis. This is a useful compromise for broad procedural color and
+relief lighting, but not one-pixel material detail. Two samples per interval do
+not mean two independently resolved features: Nyquist requires at least two
+samples per cycle, and central-difference bump derivation and bilinear filtering
+attenuate detail further. Perception depends on contrast, lighting, motion and
+feature frequency, not density alone.
+
+The generator already evaluates a bordered 67x67 relief field for central-difference
+slopes, with a tile-scale Nyquist input to procedural micro-relief. Albedo uses
+height and slope tint as well as regional crater data; it is not purely a smooth
+macro map. Keep its current 2x density instead of reducing it to 1x. Height stays
+matched to mesh vertices. Larger height maps alone cannot add geometry.
+
+| Height / bump / albedo samples | Linear ratios | 2048-slot allocation |
+| --- | --- | ---: |
+| **33 / 65 / 65 (implemented)** | **1:2:2** | **70.27 MiB** |
+| 33 / 65 / 129 (possible future albedo experiment) | 1:2:4 | 167.27 MiB |
+| 33 / 129 / 129 | 1:4:4 | 264.27 MiB |
+
+The latter two are calculations, not implemented presets. Increasing albedo to
+4x costs another 97 MiB before mips and does not sharpen bump lighting. It is
+not supported as a default by the present generator's color content. For future
+high-contrast color assets, 4x albedo would put a 4px interval at roughly one
+pixel/texel. Shared albedo/slope generation currently also makes independent
+channel resolution a structural change, not a safe constant adjustment.
+
+At target 8 the glancing view still has p90 anisotropy of 24:1. Current explicit
+mip-zero sampling cannot resolve that by adding texels. Border-correct mipmaps,
+anisotropic sampling and slope-variance handling are separate future filtering
+work. No temporal-quality or universally optimal ratio claim follows from these
+static measurements. The distinction between geometry density and finer normal
+sampling is consistent with [NVIDIA's geometry clipmap implementation](https://developer.nvidia.com/gpugems/gpugems2/part-i-geometric-complexity/chapter-2-terrain-rendering-using-gpu-based-geometry).
+
+### Render checks and reproduction
+
+GTX 1080 Ti, bookmark 9, time 0, 1280x900, TAA off, 1200 frames; final 200-frame
+windows all have zero pending tiles and zero evictions:
+
+| Target | Drawn patches | Resident tiles | Submitted triangles | Body pass median ms |
+| --- | ---: | ---: | ---: | ---: |
+| 0 | 36 | 81 | 64,512 | 0.360 |
+| 16 | 36 | 81 | 64,512 | 0.361 |
+| 8 | 104 | 183 | 214,272 | 0.488 |
+| 4 | 358 | 534 | 764,352 | 0.946 |
+
+[Recorded windows](data/terrain-spacing-render-2026-10-25.json). These single-run
+GPU timings are observations, not statistically isolated speed comparisons;
+some runs overlapped CPU build/benchmark work. This camera differs from the
+footprint sweep. Captures at 0 and 8 show visibly finer relief shading at 8;
+that change includes finer material sampling, not solely better geometry.
+
+The allocation stays 70.27 MiB; finer selection increases resident use and generation
+work, not array size. The new default costs 3.32x the triangles and 2.26x the
+resident tiles of legacy at this bookmark. Target 4 adds 3.57x triangles over 8.
+Keep the fixed 2048 slots and bounded admission; budget pressure can prevent a
+requested spacing from being achieved.
+
+Build opt-in targets `terrain_footprint` and `terrain_budget`. Run the former
+without arguments; run `terrain_budget 1007 1000` for CPU generation timing.
+[Fresh generator report](data/terrain-generation-spacing-2026-10-25.csv) records
+unchanged tile sizes/checksums and excludes renderer/upload scheduling. The isolated
+GCC run measured 1.30–1.35 ms per height tile and 14.23–19.62 ms per material pair
+across levels 3/5/7/9/11. Material generation remains the dominant streaming cost;
+refinement increases the number of these jobs rather than making each job cheaper.
+
+```text
+orbital --headless --bookmark 9 --time 0 --tier-activate 100
+  --terrain-mesh-pixels 8 --lod-bias 0 --taa 0 --frames 1200
+  --width 1280 --height 900 --benchmark captures/terrain-spacing-8.csv
+  --capture captures/terrain-spacing-8.png
+```
+
+The Release renderer builds and all 18 MSVC tests pass. Regression coverage
+checks both constraints, morph-band ordering, resolution scaling, bias scaling,
+CLI validation and actual boundary continuity under the new default spacing.
+All 17 GCC tests passed, followed by passing reruns of the two amended suites.
+A 300-frame pan with TAA and wireframe enabled completed; this is an integration
+smoke check, not a temporal image-quality measurement.
+
+## Earlier assessment
+
 Assessment on 2026-10-25, after selection/cache fix `9a026b4`. Target: crisp close
 flight with lower generation and GPU cost. Measurements use an i7-9700K and GTX
 1080 Ti. This is a measured starting point, not a universal optimal ratio.

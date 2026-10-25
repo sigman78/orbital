@@ -129,6 +129,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         // Totals survive disable/invalidate and remain useful after the current-frame counters clear.
         ts.eviction_total = p.eviction_total;
         ts.warm_eviction_total = p.warm_eviction_total;
+        ts.health = terrain_tier.health();
         patch_views.clear();
         stats.patch_map = {};
         return;
@@ -171,7 +172,8 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                   .height_pixels = float(extent.height),
                   .tan_y = tan_y,
                   .activate_pixels = input.terrain.activate_pixels,
-                  .lod_bias = input.terrain.lod_bias};
+                  .lod_bias = input.terrain.lod_bias,
+                  .mesh_pixels = input.terrain.mesh_pixels};
     unsigned free_rings = 0;
     for (unsigned i = 0; i < tile_ring_count; i++)
         free_rings += ring_available(i);
@@ -249,6 +251,12 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     ts.flat_far = p.flat_far;
     ts.graded = p.graded;
     ts.balanced = p.balanced;
+    ts.health = terrain_tier.health();
+    if (ts.health.rollback_quadrants)
+        log::warn("Terrain rollback: frame {}, {} quadrants, up to {} levels; selection {}, balance {}, "
+                  "previous tiles missing {}, evictions {}, free slots {}",
+                  frame_index, ts.health.rollback_quadrants, ts.health.rollback_levels, ts.health.selection_rollbacks,
+                  ts.health.balance_rollbacks, ts.health.missing_previous, p.evictions, p.cache_free);
     if (tile_pool) {
         const float height_range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
         for (const TerrainTier::Generation& generation : terrain_tier.generate()) {

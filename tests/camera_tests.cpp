@@ -85,5 +85,29 @@ int main() {
     for (int i = 0; i < 50; i++)
         scope.step(.01, 0, released, bodies);
     assert(scope.zoom() == 1.0 && scope.vertical_fov == base_fov);
+    // Close inspection bypasses only the minor planet, in free flight and orbit.
+    const auto minor = Camera::bookmark_body(9);
+    std::vector<BodyState> inspection_bodies(minor + 1);
+    inspection_bodies[minor].radius = 1;
+    inspection_bodies[0].radius = 1;
+    inspection_bodies[0].position = {100, 0, 0};
+    Camera inspection;
+    inspection.terrain_noclip = true;
+    inspection.position = {0, 0, .99};
+    inspection.step(.01, 0, {}, inspection_bodies);
+    assert(near(length(inspection.position), .99));
+    inspection.terrain_noclip = false;
+    inspection.step(.01, 0, {}, inspection_bodies);
+    assert(near(length(inspection.position), 1.08));
+    inspection.terrain_noclip = true;
+    inspection.position = {100, 0, .5};
+    inspection.step(.01, 0, {}, inspection_bodies);
+    assert(near(length(inspection.position - inspection_bodies[0].position), 1.08));
+    inspection.set_orbit_target(minor, .99);
+    inspection.step(.01, 0, {}, inspection_bodies);
+    assert(near(length(inspection.position), .99));
+    inspection.terrain_noclip = false;
+    inspection.step(.01, 0, {}, inspection_bodies);
+    assert(near(length(inspection.position), 1.08));
     return 0;
 }

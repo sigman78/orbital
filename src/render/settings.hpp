@@ -154,6 +154,8 @@ struct TerrainSettings {
     float activate_pixels = 1200;
     // Multiply all LOD ranges by 2^bias; positive selects finer detail.
     float lod_bias = 0;
+    // Nominal grid interval in screen pixels: 4 high, 8 balanced, 16 economy, 0 error-only.
+    float mesh_pixels = 8;
     // Slope detail strength; 0 disables it. Changes regenerate all tiles.
     float detail = 1;
 };
