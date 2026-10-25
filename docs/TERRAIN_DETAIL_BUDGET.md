@@ -35,7 +35,8 @@ not every frame once resident.
 Fixed bookmark 9, time 0, 1280x900, TAA off, 1200 frames per run. Each final
 200-frame window had zero pending tiles. The approximate geometric error targets
 below follow the existing calibrated distance ranges; they are not certified
-per-pixel bounds.
+per-pixel bounds. This capture table predates the subsequent glancing-view quadrant
+cull documented in [TERRAIN_LOD_STABILITY.md](TERRAIN_LOD_STABILITY.md).
 
 | LOD bias | Approximate error target | Drawn patches | Resident tiles | Required surface + skirt triangles |
 | --- | ---: | ---: | ---: | ---: |
@@ -137,6 +138,10 @@ parent-transition validation before claiming temporal crispness.
 
 ## Reproducing measurements
 
+The follow-up `terrain_footprint` target measures projected sample spacing rather
+than CPU time. Run it without arguments. Its CSV includes sample counts, rejection
+counts and percentile distributions. See the screen-space assessment below.
+
 Build the opt-in `terrain_budget` target and run `terrain_budget 1007 1000` for CPU
 generation measurements, separate height/material timings and output checksums.
 It does not include worker scheduling, upload or rendering. The final argument is
@@ -155,3 +160,76 @@ image pixels. `terrain_submitted_triangles` counts the selected terrain geometry
 once per view, not multiplied by scene/shadow/motion passes. `terrain_covered_quadrants`
 records the selected area at each patch's resolution. GPU timings fluctuate; a lower
 triangle count alone does not prove lower frame time.
+
+## Screen-space relationship: follow-up measurements
+
+There is no universal best texel-to-triangle ratio. The budgets have distinct jobs:
+
+| Channel | Select detail from | What more resolution cannot repair |
+| --- | --- | --- |
+| Mesh | Projected displacement/curvature error, especially silhouette and occlusion | Missing high-frequency shading detail |
+| Height samples | Vertices and morph samples actually consumed by the mesh | Silhouette detail without corresponding geometry |
+| Albedo | Projected footprint and color variation | Shape or geometric occlusion |
+| Bump/slope | Projected footprint and variation of the lighting normal | Silhouette or true displacement |
+
+For perspective scale `f = screen_height / (2*tan(vertical_fov/2))`, a small
+view-transverse geometric error `e` at view depth `z` projects to roughly `f*e/z`
+pixels. This is the relevant geometry budget, not triangle edge length alone:
+a long triangle on flat ground can be accurate while a shorter one on a crater
+rim can miss an important silhouette. Height quantization is already much finer
+than the present geometry target: the 0.1-radius R16 range has steps of about
+1.53e-6 radii, or about 0.015 pixels per step at depth 0.08, 900px and 60 degrees.
+Increasing height precision or height texture size is not the first intervention
+for that camera.
+
+`terrain_footprint` projects finite differences in the material lattice and reports
+the singular values of that two-dimensional mapping: the long and short axes of
+a texel's projected footprint, in pixels per texel. A long axis above one means
+magnification along that direction; a short axis below one means minification
+along the other. Both can happen simultaneously at glancing incidence.
+
+At radius 1.08, 60-degree FOV and 900px height, seed 1007:
+
+| View / bias | Median mesh edge (px) | Median material long axis (px/texel) | Median short axis | 90th-percentile anisotropy |
+| --- | ---: | ---: | ---: | ---: |
+| Nadir / 0 | 9.12 | 4.78 | 3.79 | 1.37 |
+| Nadir / +1 | 7.85 | 4.56 | 3.55 | 1.43 |
+| Nadir / +2 | 3.92 | 2.28 | 1.77 | 1.43 |
+| Glancing / 0 | 6.73 | 4.45 | 0.93 | 28.18 |
+| Glancing / +1 | 4.05 | 2.64 | 0.57 | 27.08 |
+| Glancing / +2 | 2.32 | 1.50 | 0.27 | 28.36 |
+
+These are unweighted samples from selected quadrants, not visible-pixel percentages.
+They use direct procedural heights rather than the exact morphed/quantized mesh,
+reject samples outside the frustum, and do not ray-test local occlusion. The glancing
+camera stands 18 degrees around the body from its target; this is not an 18-degree
+surface incidence angle. The camera differs from bookmark 9, so its counts should
+not be compared directly with the earlier capture table. Full distributions are in
+[the footprint CSV](data/terrain-footprint-2026-10-25.csv).
+
+The current 2:1 ratio thus still magnifies material samples over several pixels.
+That indicates potential shading-detail limitations, not a measured image error:
+smooth albedo can remain accurate at that spacing. At glancing angles, higher
+resolution alone cannot fix the simultaneous minification across the compressed
+axis; mip/anisotropic filtering must accompany material refinement.
+
+The concrete next experiment should separate the material channels and selection:
+
+1. Retain the calibrated mesh and height grid. Measure displacement error before
+   changing its density; do not force subpixel triangles just to sharpen bumps.
+2. Test 33x33 albedo with 65x65 slopes against the existing 65/65 pair. This would
+   reduce tile-array allocation from 70.27 to 45.77 MiB at 2048 slots, providing a
+   budget for finer slopes where needed. This is **not yet quality-validated**:
+   albedo currently includes a slope-dependent tint, so it is not purely low-frequency.
+3. Select finer slope/material tiles independently from mesh LOD, using the projected
+   footprint, residency cost and generation budget. A long-axis target around 1–2
+   pixels/texel is a useful starting experiment for crisp normals, not a proven
+   universal threshold. Prioritize by visible contribution rather than refine every
+   channel and every patch globally.
+4. Add border-correct material mips and anisotropic sampling, and test motion with
+   TAA on and off. Normal filtering should preserve unresolved variation through
+   roughness where appropriate; a static sharp screenshot alone cannot establish
+   temporal fidelity.
+
+No resolution or quality defaults were changed on the strength of this approximate
+footprint report. It supplies the measurements needed to test those choices separately.

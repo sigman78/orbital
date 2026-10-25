@@ -80,6 +80,11 @@ add_executable(terrain_budget EXCLUDE_FROM_ALL tools/terrain_budget.cpp)
 target_link_libraries(terrain_budget PRIVATE orbital_scene)
 target_compile_options(terrain_budget PRIVATE ${ORBITAL_WARNINGS})
 
+# Opt-in CPU projection study for terrain mesh and material texel footprints.
+add_executable(terrain_footprint EXCLUDE_FROM_ALL tools/terrain_footprint.cpp)
+target_link_libraries(terrain_footprint PRIVATE orbital_render_cpu orbital_scene)
+target_compile_options(terrain_footprint PRIVATE ${ORBITAL_WARNINGS})
+
 if(BUILD_TESTING)
   if(NOT MINGW) # NoGraphicsAPI headers explicitly exclude MinGW.
     add_executable(gpu_scopes_tests tests/gpu_scopes_tests.cpp)
