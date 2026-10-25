@@ -82,6 +82,10 @@ std::uint32_t TerrainTier::allocate_children(const Node& parent) {
     for (unsigned i = 0; i < 4; i++) {
         const PatchKey child = key.child(i);
         nodes_[first + i] = {.key = child, .bounds = patch_bounds(child)};
+        if (const unsigned slot = resident_slot(child); slot != no_slot) {
+            nodes_[first + i].heights = slots_[slot].heights;
+            nodes_[first + i].measured = true;
+        }
     }
     return first;
 }
@@ -102,12 +106,22 @@ unsigned TerrainTier::slot_of(PatchKey key) const {
 
 double TerrainTier::nearest_distance(Vec3d camera_local, const PatchBounds& bounds, Range<float> heights) {
     const double len = length(camera_local);
+    const double inner = 1 + double(heights.min);
+    const double outer = 1 + double(heights.max);
     if (len < 1e-9)
-        return 0;
-    const double theta = std::acos(std::clamp(dot(camera_local, bounds.centre) / len, -1.0, 1.0));
-    const double t = std::max(0.0, theta - bounds.angular_radius);
-    const double r = std::clamp(len * std::cos(t), 1 + double(heights.min), 1 + double(heights.max));
-    return std::sqrt(std::max(0.0, len * len + r * r - 2 * len * r * std::cos(t)));
+        return inner;
+
+    // The closest point has the direction in this cell with the greatest dot against the
+    // camera, and a radius clamped to the height interval. Unlike angular_radius, the exact
+    // cell support follows the four spherical edges instead of filling the whole cap.
+    const Vec3d direction = camera_local * (1 / len);
+    const double cosine = std::clamp(patch_direction_support(bounds, direction), -1.0, 1.0);
+
+    const double r = std::clamp(len * cosine, inner, outer);
+    // This form avoids subtracting nearly equal squared lengths when the camera is close to
+    // the surface: |C-r*n|² = (|C|-r)² + 2|C|r(1-dot(Chat,n)).
+    const double lateral_squared = std::max(0.0, 2 * len * r * (1 - cosine));
+    return std::hypot(len - r, std::sqrt(lateral_squared));
 }
 
 // Interpolate the distance ranges in log space to estimate the desired level.
@@ -145,18 +159,21 @@ Range<float> TerrainTier::height_range(PatchKey key) const {
     return slot != no_slot ? slots_[slot].heights : full_height_range;
 }
 
-// A node's height reach: its own tile's range and margin, or the nearest resident ancestor's.
-// An ancestor's margin covers its whole subtree, so the inherited bound stays sound, and it is
-// far tighter than the global shell -- whose 1.05 top stands several degrees of arc further
-// over the horizon than the 1.01 a loaded neighbour has. A root is resident while the tier is
-// active, so the walk ends in a measured range; in practice it is a lookup or two, since a
-// node is only reached through a parent that has a tile.
+// A node's measured range and margin, or the nearest measured ancestor's. Evicting a GPU
+// tile must not widen this reach: that would make previously rejected cells request their
+// tiles again, tighten their bounds on arrival, and repeat indefinitely under cache pressure.
+// Live tree nodes retain that knowledge within node_budget; reusing a node or invalidating
+// terrain clears it. The ancestor's margin covers its whole subtree.
 Range<float> TerrainTier::reach_of(PatchKey key) const {
     for (;; key = key.parent()) {
         const unsigned slot = resident_slot(key);
-        if (slot == no_slot && key.level)
+        const Node* node = slot == no_slot ? find(key) : nullptr;
+        const bool measured = node && node->measured;
+        if (slot == no_slot && !measured && key.level)
             continue;
-        const Range<float> heights = slot != no_slot ? slots_[slot].heights : full_height_range;
+        const Range<float> heights = slot != no_slot ? slots_[slot].heights
+                                     : measured      ? node->heights
+                                                     : full_height_range;
         const float margin = relief_margin(key.level);
         return {heights.min - margin, heights.max + margin};
     }
@@ -190,7 +207,7 @@ void TerrainTier::explain(PatchKey key, const TierView& view, std::vector<Step>&
         step.slot = resident_slot(step.key);
         step.reach = reach_of(step.key);
         for (PatchKey a = step.key;; a = a.parent())
-            if (resident_slot(a) != no_slot || !a.level) {
+            if (const Node* node = find(a); resident_slot(a) != no_slot || (node && node->measured) || !a.level) {
                 step.reach_level = a.level;
                 break;
             }
@@ -563,6 +580,8 @@ void TerrainTier::choose_generation(unsigned budget) {
 
 void TerrainTier::invalidate() {
     ensure_roots();
+    for (Node& node : nodes_)
+        node.measured = false;
     for (Slot& slot : slots_)
         slot = {};
     slots_by_key_.clear();
@@ -597,6 +616,11 @@ bool TerrainTier::mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp
         return false; // recycled, or regenerated at another detail, since the request went out
     slots_[slot].resident = true;
     slots_[slot].heights = heights;
+    if (const Node* node = find(key)) {
+        Node& measured = nodes_[std::size_t(node - nodes_.data())];
+        measured.heights = heights;
+        measured.measured = true;
+    }
     return true;
 }
 

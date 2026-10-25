@@ -1,5 +1,40 @@
 # Terrain LOD stability under cache pressure
 
+## Fix, 2026-10-25
+
+Two remaining mechanisms were isolated in the close grazing selection path:
+
+- `nearest_distance` used the circular cap around a cube cell. Directions outside the
+  actual cell could still lie inside that cap, reporting zero distance when the camera
+  was within the height interval. Selection now minimizes distance over the actual
+  spherical cell and its radial interval, using a numerically stable distance formula.
+- Evicting a tile also forgot its measured height range. A cell rejected using its own
+  tight range could become eligible again using an ancestor's broader range, regenerate,
+  tighten, and be evicted again. Live quadtree nodes now retain measured ranges independently
+  of GPU residency. Node reuse and explicit terrain invalidation clear this knowledge;
+  generation stamps prevent stale uploads from restoring invalid bounds. This metadata
+  remains bounded by the existing node budget and does not enlarge the GPU cache.
+
+The new `terrain_cache` CPU regression uses seed 1007, altitude 0.035 radii, a grazing
+camera, bias +3 and delayed uploads. With the distance fix alone, 1024 slots produced
+2,900 repeated generations in 900 stationary frames. Retaining bounds reduced that to
+zero, with 1,038 unique requests and 14 evictions. At 2048 slots there were also zero
+repeats. Both capacities had zero generation and coverage changes in their final 120
+frames, and settled again after a 90-frame look-away and return. The regression also
+checks invalidation and stale completion handling. Cell-distance tests cover all six
+faces, edges, corners, opposite directions and near-surface numerical precision.
+
+These reproduce and fix a selection/cache feedback loop, not every possible visible
+LOD transition. The existing horizon test remains heuristic; exact pixel behavior for
+the user's original camera path has not been established. The user subsequently confirmed
+that the result looks better.
+
+Validation: all 18 MSVC Release CTest cases and all 17 GCC CPU cases passed. The separate
+`terrain_tier_tests --truth` run found zero uncovered visible probes, including lowland
+and summit views. The Release renderer and shaders rebuilt successfully; a 300-frame
+headless bookmark-9 run at 1280x900, activation 100 and bias +3 completed. This smoke run
+checks integration, not convergence or a visual match to the original camera path.
+
 2026-09-19. Follow-up to the CDLOD continuity fixes on
 `fix/terrain-cdlod-continuity`, through commit `1db6502`.
 

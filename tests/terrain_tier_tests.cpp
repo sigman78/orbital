@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -1294,6 +1295,61 @@ void test_cache_stats_accounting() {
     assert(tier.resident_slot({0, 0, 0, 0}) == TerrainTier::no_slot);
 }
 
+// Nearest distance must follow the spherical cell, including its edges and corners, rather
+// than treating the whole angular cap as terrain. Compare it with a dense cell lattice across
+// faces, levels and camera directions, and cover numerically sensitive radial cases directly.
+void test_nearest_cell_distance() {
+    const Range<float> heights{-.02f, .03f};
+    const double inner = 1 + double(heights.min), outer = 1 + double(heights.max);
+    constexpr unsigned divisions = 64;
+    for (unsigned face = 0; face < 6; face++)
+        for (unsigned level : {2u, 4u, 7u}) {
+            const unsigned cells = 1u << level;
+            const unsigned cx = cells / 2 - 1, cy = cells / 2 - 1;
+            const PatchKey key{std::uint8_t(face), std::uint8_t(level), std::uint16_t(cx), std::uint16_t(cy)};
+            const PatchBounds bounds = patch_bounds(key);
+            const double size = 2.0 / cells;
+            const double s0 = -1 + cx * size, t0 = -1 + cy * size;
+            const double sm = s0 + size / 2, tm = t0 + size / 2;
+            const Vec3d directions[] = {
+                cube_direction(face, sm, tm),                                         // in the cell
+                cube_direction(face, s0 + size + .05 * size, tm),                     // just beyond an edge
+                cube_direction(face, s0 + size + .05 * size, t0 + size + .05 * size), // beyond a corner
+                bounds.centre * -1                                                    // opposite side
+            };
+            for (Vec3d direction : directions) {
+                const Vec3d camera = normalized(direction) * 1.2;
+                const double nearest = TerrainTier::nearest_distance(camera, bounds, heights);
+                double sampled = std::numeric_limits<double>::infinity();
+                for (unsigned y = 0; y <= divisions; y++)
+                    for (unsigned x = 0; x <= divisions; x++) {
+                        const Vec3d d = cube_direction(face, s0 + size * x / divisions, t0 + size * y / divisions);
+                        const double r = std::clamp(dot(camera, d), inner, outer);
+                        sampled = std::min(sampled, length(camera - d * r));
+                    }
+                assert(nearest <= sampled + 1e-12);
+                assert(sampled - nearest < .01);
+            }
+
+            // Exact direction support scales for non-unit normals, including negative support.
+            const double opposite_support = patch_direction_support(bounds, bounds.centre * -1);
+            assert(opposite_support < 0);
+            assert(std::abs(patch_direction_support(bounds, bounds.centre * -3) - 3 * opposite_support) < 1e-12);
+
+            // The cap contains some directions outside the cell. Being inside that cap must
+            // not incorrectly report zero distance to a camera lying on the height shell.
+            const Vec3d cap_only = cube_direction(face, s0 + size * 1.01, tm);
+            assert(std::acos(std::clamp(dot(cap_only, bounds.centre), -1.0, 1.0)) < bounds.angular_radius);
+            assert(TerrainTier::nearest_distance(cap_only * 1.01, bounds, heights) > 0);
+
+            // A camera just above the outer shell over an interior cell direction is separated
+            // from the surface by only this tiny radial delta.
+            constexpr double altitude = 1e-6;
+            const double near = TerrainTier::nearest_distance(directions[0] * (outer + altitude), bounds, heights);
+            assert(std::abs(near - altitude) < 1e-9);
+        }
+}
+
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     for (int i = 1; i < argc; i++)
@@ -1310,6 +1366,7 @@ int main(int argc, char** argv) {
             return 0;
         }
     test_motion_stability();
+    test_nearest_cell_distance();
     test_cached_reentry();
     test_invalidate_before_update();
     test_morph_streaming();

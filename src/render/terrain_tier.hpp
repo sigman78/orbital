@@ -182,8 +182,8 @@ public:
     void release(unsigned slot, PatchKey key, std::uint32_t stamp);
     // Only resident tiles supply a tighter range. Unknown tiles retain the full shell.
     Range<float> height_range(PatchKey key) const;
-    // The interval culling and distances use: height_range padded by relief_margin, inherited
-    // from the nearest resident ancestor while a node has no tile of its own.
+    // The interval culling and distances use: measured heights padded by relief_margin,
+    // retained in live nodes after eviction, or inherited from the nearest measured ancestor.
     Range<float> reach_of(PatchKey key) const;
     float range(unsigned level) const { return level < std::size(range_) ? range_[level] : 0; }
     float morph_start(unsigned level) const {
@@ -195,7 +195,7 @@ public:
     unsigned resident_slot(PatchKey key) const; // the tile's slot, no_slot when absent or pending
     unsigned pending() const;                   // slots handed out whose tile has not arrived
     unsigned pending_age() const;               // frames the oldest of those has waited, 0 when there are none
-    // Cap distance over the supplied height interval, excluding skirts as in the shader.
+    // Nearest distance to the spherical cell over the supplied height interval, excluding skirts.
     static double nearest_distance(Vec3d camera_local, const PatchBounds& bounds,
                                    Range<float> heights = full_height_range);
     static double farthest_distance(Vec3d camera_local, const PatchBounds& bounds,
@@ -211,6 +211,10 @@ private:
         PatchKey key;
         PatchBounds bounds;
         std::uint32_t children = 0; // index of the first of four, 0 none (the roots are never children)
+        // Bounds are knowledge about the terrain, not ownership of a GPU tile. Retain them
+        // after eviction so a rejected tile does not become eligible just by losing its slot.
+        Range<float> heights = full_height_range;
+        bool measured = false;
     };
     struct Slot {
         PatchKey key;

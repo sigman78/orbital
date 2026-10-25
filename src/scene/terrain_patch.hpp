@@ -81,6 +81,9 @@ struct PatchBounds {
 };
 PatchBounds patch_bounds(PatchKey key);
 
+// Largest dot(normal, direction) over the unit spherical cell; normal need not be unit length.
+double patch_direction_support(const PatchBounds& bounds, Vec3d normal);
+
 // Largest dot(normal, point) over the patch's shell: every direction of its cell at every
 // radius of the interval, the skirt drop included. A patch lies entirely outside a plane when
 // its support falls below the plane's own offset, which is the whole plane test.

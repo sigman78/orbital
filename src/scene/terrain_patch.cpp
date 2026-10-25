@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace space {
 
@@ -119,15 +120,13 @@ PatchBounds patch_bounds(PatchKey key) {
     return bounds;
 }
 
-double patch_cell_support(const PatchBounds& bounds, Vec3d normal, Range<float> heights) {
-    const double top = 1 + double(heights.max);
-    const double bottom = 1 + double(heights.min) - patch_skirt_drop;
+double patch_direction_support(const PatchBounds& bounds, Vec3d normal) {
     bool inside = true;
     for (unsigned i = 0; i < 4; i++)
         inside = inside && dot(normal, bounds.edges[i]) >= 0;
-    double reach = -1;
+    double reach = -std::numeric_limits<double>::infinity();
     if (inside) {
-        reach = 1; // the normal's own direction is in the cell, and nothing beats it
+        reach = length(normal); // the normal's own direction is in the cell
     } else {
         for (const Vec3d& corner : bounds.corners)
             reach = std::max(reach, dot(normal, corner));
@@ -146,6 +145,13 @@ double patch_cell_support(const PatchBounds& bounds, Vec3d normal, Range<float> 
                 reach = std::max(reach, len); // dot(normal, candidate) is the projection's length
         }
     }
+    return reach;
+}
+
+double patch_cell_support(const PatchBounds& bounds, Vec3d normal, Range<float> heights) {
+    const double top = 1 + double(heights.max);
+    const double bottom = 1 + double(heights.min) - patch_skirt_drop;
+    const double reach = patch_direction_support(bounds, normal);
     return reach >= 0 ? top * reach : bottom * reach;
 }
 
