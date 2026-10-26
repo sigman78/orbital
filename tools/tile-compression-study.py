@@ -1,4 +1,7 @@
-"""Lossless compression of the baked tiles' planes: raw vs predicted, zlib as the stand-in for zstd."""
+"""Lossless compression of a baked store's planes, raw against predicted (docs/TILE_COMPRESSION.md).
+
+Usage: python -I tools/tile-compression-study.py [level] [store directory], from the repo root.
+zlib stands in for zstd unless the zstandard module is installed; needs numpy."""
 import struct, zlib, sys
 import numpy as np
 try:
@@ -7,7 +10,7 @@ try:
 except ImportError:
     def comp(b): return len(zlib.compress(b, 9)), 'zlib9'
 
-store = r'D:\non-esp\space-demo\assets\planets\minor-planet'
+store = sys.argv[2] if len(sys.argv) > 2 else 'assets/planets/minor-planet'
 SIDE, CSIDE = 33, 65
 H_BYTES = SIDE * SIDE * 2
 A_OFF, S_OFF = 2180, 19080
