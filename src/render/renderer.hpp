@@ -86,6 +86,7 @@ struct FrameStats {
         unsigned nodes = 0; // quadtree nodes alive
         unsigned workers = 0;
         float generate_ms = 0; // the last finished tile's time on its worker
+        float prepare_ms = 0;  // selection, dispatch and records on the main thread
         // Clod::Pressure counters.
         unsigned node_budget = 0, splits_blocked = 0;
         unsigned requested = 0, served = 0;

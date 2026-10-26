@@ -348,9 +348,12 @@ not accurate large shapes, and shader detail costs no tiles, no slots and no CPU
 - Constants duplicated between C++ and the shaders: the Everitt constant, the face tables, `tile_side`.
 - `draw_body` leaves `ORBITAL_ROOT_PATCHES` and `root.patches` on the caller's `Root`; harmless only
   because the minor planet is drawn last.
-- Acceptance never read off the panel: main-thread time in `prepare_terrain_tier` under 0.5 ms with 32
-  jobs in flight (the original target was one draw call; active quadrants now use two per pass). Selection walks a larger tree for a deeper cap, so
-  this is the number to watch: measured in isolation it roughly doubled at bias 2.
+- Acceptance missed: main-thread time in `prepare_terrain_tier` under 0.5 ms with 32 jobs in flight
+  (the original target was one draw call; active quadrants now use two per pass). First read
+  2026-10-25 through the new `cpu_terrain_prepare_ms` benchmark column and the panel's Queue row:
+  0.95 ms median converged at bookmark 9, 1600x900, 0.26 ms while tiles are still loading. Selection
+  walks a larger tree for a deeper cap, so this is the number to watch: measured in isolation it
+  roughly doubled at bias 2.
 
 ## Later, out of scope
 

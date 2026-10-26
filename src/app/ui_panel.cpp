@@ -413,9 +413,9 @@ void terrain_cache(const render::FrameStats::Terrain& terrain) {
             terrain.generation_budget_limited ? "capped" : "");
         row("Queue", std::format("{}/{}/{}", terrain.queued, terrain.rings_free, terrain.rings),
             std::format("Worker jobs / free upload rings / total rings.\n"
-                        "{} workers; last generated tile {:.1f} ms.\n"
+                        "{} workers; last generated tile {:.1f} ms; main thread {:.2f} ms.\n"
                         "Oldest pending tile: {} frames. Slow flags a wait over 60 frames.",
-                        terrain.workers, terrain.generate_ms, terrain.pending_age),
+                        terrain.workers, terrain.generate_ms, terrain.prepare_ms, terrain.pending_age),
             terrain.pending_age > 60 ? "slow" : "", terrain.pending_age > 60);
         row("Evict", std::format("{}/{}/{}", terrain.evictions, terrain.evicted_recent, terrain.eviction_total),
             std::format("Evictions / warm evictions this frame / lifetime evictions.\n"

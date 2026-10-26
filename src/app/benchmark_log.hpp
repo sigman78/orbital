@@ -28,7 +28,7 @@ public:
             log::error("cannot write benchmark {}", path.string());
             return;
         }
-        buffer_ = "frame,frame_ms,cpu_submit_and_wait_ms,cpu_prepare_ms";
+        buffer_ = "frame,frame_ms,cpu_submit_and_wait_ms,cpu_prepare_ms,cpu_terrain_prepare_ms";
         for (const auto& pass : render::gpu_pass_info)
             std::format_to(std::back_inserter(buffer_), ",{}", pass.column);
         for (const auto& column : terrain_columns)
@@ -45,7 +45,8 @@ public:
     void record(float frame_ms, const render::FrameStats& frame) {
         if (!file_)
             return;
-        std::format_to(std::back_inserter(buffer_), "{},{},{},{}", rows_++, frame_ms, frame.draw_ms, frame.prepare_ms);
+        std::format_to(std::back_inserter(buffer_), "{},{},{},{},{}", rows_++, frame_ms, frame.draw_ms,
+                       frame.prepare_ms, frame.terrain.prepare_ms);
         for (const float ms : frame.gpu.ms)
             std::format_to(std::back_inserter(buffer_), ",{}", ms);
         for (const auto& column : terrain_columns)

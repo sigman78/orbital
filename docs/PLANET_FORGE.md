@@ -1,7 +1,7 @@
 # Planet Forge: splitting the minor-planet terrain into libraries
 
-Status: proposal for discussion, 2026-10-25. Nothing here is built. The branch for the work is
-`evo/planet-forge`.
+Status: proposal for discussion, 2026-10-25; phases 0 to 2 are built on `evo/planet-forge`, see
+"Phases" and the debt sections at the end.
 
 ## What exists and where it sits
 
@@ -127,10 +127,11 @@ it.
   pressure and health structs.
 - New: `TileStreamer`. Owns the worker pool, calls the provider on workers, owns completion with
   stamp checks, and hands finished tiles to a sink. The renderer stops knowing the generator. The
-  sink is the one GPU-facing seam, shaped like Kiln's adapter: `acquire_staging(user, layout) ->
-  bytes or none`, `submit(user, slot, stamp, heights)`, with the renderer's staging rings behind it.
-  Today's budget rule (generate only as many tiles as there are free rings) becomes the sink saying
-  no.
+  sink is the one GPU-facing seam, shaped like Kiln's adapter: `acquire(bytes, staging)` hands out
+  four-byte aligned bytes and a token, `complete(request, staging, heights, ms)` returns a produced
+  tile for upload, `abandon(staging)` returns the bytes of a failed one; the renderer's staging rings
+  sit behind it. Today's budget rule (generate only as many tiles as there are free rings) is the
+  sink saying no, which releases the slot.
 - Instance-based from the start: one `Clod` per body. The showcase hard-wires one minor planet
   through `Frame`, `resource_slots.h` and `Showcase::resolve` (PLANS-2026-09-15 thread D); the
   library must not inherit that.
@@ -139,8 +140,8 @@ it.
 
 - `TileProvider`: the pluggable source. Shape is the first decision below (virtual interface or
   Kiln-style function table). Contract: `levels()` and `layout(level)` are constant; `produce(request,
-  output)` runs on a worker, is reentrant, writes every plane of the layout and returns the measured
-  height range, or reports failure so the slot is released.
+  output)` runs on a worker, is reentrant, writes every plane of the layout and the measured height
+  range into the output, and returns false on failure so the slot is released.
 - `ProceduralProvider`: today's `MinorPlanetTerrain` plus `generate_height_tile` and
   `generate_colour_tiles`. First implementation, and the regression anchor.
 - `BakedProvider`: reads a tile store (below). I/O on the worker, no decode when planes are stored in
@@ -328,10 +329,12 @@ commit.
    `terrain` and tile sampling to `planet/gen`. Cut the four couplings: `BodyShape`, `LevelTable`,
    own planes, generator out of the renderer. Every library object takes its `Allocator*`. Tests
    move with their code and are split as listed.
-2. **Provider and streamer.** `TileProvider`, `TileStreamer`, the sink; `ProceduralProvider` is the
-   only implementation; `renderer_terrain.cpp` shrinks to arrays, rings, records and draws. List and
-   remove the remaining per-frame allocations. Measure `prepare_terrain_tier` main-thread time,
-   which DYNAMIC_TERRAIN says was never read off the panel.
+2. **Provider and streamer.** Done. `TileProvider`, `TileStreamer`, the sink; `ProceduralProvider` is
+   the only implementation; `renderer_terrain.cpp` shrinks to arrays, rings, records and draws. The
+   per-frame allocations left are listed under debt. `prepare_terrain_tier` main-thread time is now
+   a stat (panel Queue row, benchmark column `cpu_terrain_prepare_ms`): 0.95 ms median converged at
+   bookmark 9, 1600x900 (134 draws, 337 resident), 0.26 ms while loading. DYNAMIC_TERRAIN's 0.5 ms
+   target is missed before any of this split; where the time goes is a profiling item.
 3. **Store, forge, baked and mixed providers.** Tile store format, `planet-forge` baking levels 0..N
    of the seed-1007 body on the LAN machine, `BakedProvider`, `MixedProvider`. A baked tile must
    equal the procedural one bit for bit before compression, which is the test.
@@ -343,7 +346,7 @@ commit.
 
 ## Debt after phase 1 (the mechanical move)
 
-Recorded by the step's audit, to be closed in phases 1b and 2:
+Recorded by the step's audit:
 
 - Public headers still carry standard containers: `PatchGrid` (two vectors), `MinorPlanetTerrain`
   (`Region`, `DetailRegion`, `TerrainMaps` vectors and arrays), `TerrainTier` (private vectors and an
@@ -357,6 +360,23 @@ Recorded by the step's audit, to be closed in phases 1b and 2:
 - `Clod` takes `BodyShape`, `LevelTable` and an `Allocator*` through `ClodConfig` (the second
   step), but its containers do not use the allocator yet, and `shell_height_min/max` remain as
   the default `BodyShape` and the bake's alpha range.
+
+## Debt after phase 2 (provider and streamer)
+
+- `TileStreamer` runs on the host's `WorkerPool`: `submit` wraps each job in a `std::function`
+  (the closure is at the small-buffer limit, so it may allocate per tile) and `poll` hands back a
+  fresh vector each frame, both through global new. A fixed job ring in `planet/clod` on the
+  `Allocator` replaces it. The renderer's `tile_uploads` and `patch_copies` grow to a high-water
+  mark and then stop allocating.
+- The sink lives in the renderer as `Renderer::Impl::TileRings` over the 32 staging rings; by
+  design, but it is the only place that knows ring reuse must wait two frames after a copy.
+- The renderer sizes its arrays and staging from `ProceduralProvider::tile_layout` at compile time
+  and asserts the 35,980-byte total. A provider whose layout differs per level (decision 5) needs the
+  arrays built from `provider.layout(level)` at `create_terrain_tier`.
+- `streamer_tests` links only the planet libraries; the two CLOD suites still borrow `view_frustum`.
+- The public headers still carry the phase 1 containers; `tile.hpp` and `streamer.hpp` add only
+  `<cstddef>`, `<cstdint>` and `<span>`, but `streamer.hpp` includes `clod.hpp` with its
+  `unordered_map` and vectors.
 
 ## Open questions carried over, unchanged by the split
 

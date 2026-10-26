@@ -6,11 +6,12 @@
 #include "assets/image.hpp"
 #include "assets/texture.hpp"
 #include "belt/beltblur_shared.h"
-#include "core/parallel.hpp"
 #include "core/types.hpp"
 #include "planet/clod.hpp"
 #include "planet/crater_terrain.hpp"
 #include "planet/patch.hpp"
+#include "planet/procedural_provider.hpp"
+#include "planet/streamer.hpp"
 #include "post/bloom_shared.h"
 #include "render/gpu_commands.hpp"
 #include "render/gpu_image.hpp"
@@ -41,7 +42,6 @@ using planet::ClodConfig;
 using planet::ClodView;
 using planet::cube_coordinates;
 using planet::CubeCoord;
-using planet::height_tile_range;
 using planet::MinorPlanetTerrain;
 using planet::patch_quadrant_skirt_grid;
 using planet::patch_quadrant_surface_grid;
@@ -49,11 +49,16 @@ using planet::patch_skirt_drop;
 using planet::PatchGrid;
 using planet::PatchKey;
 using planet::PatchVertex;
+using planet::ProceduralProvider;
 using planet::TerrainMaps;
 using planet::tile_colour_ratio;
 using planet::tile_colour_side;
 using planet::tile_side;
 using planet::tile_slope_scale;
+using planet::TileRequest;
+using planet::TileSink;
+using planet::TileStaging;
+using planet::TileStreamer;
 
 // --- Fixed layout shared with the shaders -------------------------------------
 
@@ -418,14 +423,6 @@ struct Renderer::Impl {
     };
     std::vector<PatchCopy> patch_copies;
     std::uint64_t patch_records_bytes = 0;
-    struct TileResult {
-        PatchKey key;
-        unsigned slot;
-        unsigned ring;
-        std::uint32_t stamp; // the tier's name for this generation of this slot
-        Range<float> heights;
-        float ms; // the generation's time on its worker
-    };
     // Retain completed tiles until upload recording, including across aborted frames.
     struct TileUpload {
         PatchKey key;
@@ -434,7 +431,6 @@ struct Renderer::Impl {
         Range<float> heights;
     };
     static constexpr unsigned tile_ring_count = 32;
-    std::unique_ptr<WorkerPool<TileResult>> tile_pool;
     std::vector<TileUpload> tile_uploads;
     // Keep worker/upload ownership explicit; frame numbers only guard GPU reuse.
     enum class RingState : std::uint8_t { free, worker, upload };
@@ -443,8 +439,19 @@ struct Renderer::Impl {
     bool ring_available(unsigned i) const {
         return ring_state[i] == RingState::free && (!ring_used_frame[i] || frame_index >= ring_used_frame[i] + 2);
     }
-    unsigned tile_workers = 0;
-    unsigned ring_head = 0;
+    // Hands the streamer staging rings and takes its finished tiles back; host thread only.
+    struct TileRings final : TileSink {
+        Impl& owner;
+        unsigned head = 0; // where the ring search resumes
+        explicit TileRings(Impl& owner) : owner(owner) {}
+        bool acquire(unsigned bytes, TileStaging& staging) override;
+        void complete(const TileRequest& request, const TileStaging& staging, Range<float> heights,
+                      float milliseconds) override;
+        void abandon(const TileStaging& staging) override;
+    };
+    TileRings tile_sink{*this};
+    std::optional<ProceduralProvider> tile_provider;
+    std::optional<TileStreamer> tile_streamer;
     // The staging heap has two slots, written by frame parity before the wait for the
     // previous frame, which may still be copying the other; the version each holds
     // says whether a standing state must be written again into a stale slot.
