@@ -1,4 +1,5 @@
 #pragma once
+#include "planet/body.hpp"
 #include "planet/types.hpp"
 
 #include <array>
@@ -21,6 +22,19 @@ public:
     };
     static constexpr float height_min = shell_height_min,
                            height_max = shell_height_max; // the range a bake's alpha spans, radii
+    // What this terrain hands the quadtree: its shell, and the seed-1007 calibration against 3D
+    // triangles, 32 quads, Everitt warp (`planet_gen_tests --calibrate`: uniform samples followed
+    // by a hill climb). Estimates, not certified bounds on every patch or intermediate morph.
+    // The relief is the running sum, from each level down, of the measured parent-to-child steps
+    // at twice for headroom: one step is not enough (at level 6 it is 0.000057 against a
+    // subtree's 0.000128), and the gap culls patches whose children stand higher than they do.
+    static constexpr BodyShape shape{{height_min, height_max}};
+    static constexpr LevelTable levels{
+        .error = {.0304741f, .0192836f, .00591285f, .00245085f, .00100089f, .000457055f, .000173189f, 8.54412e-5f,
+                  4.493e-5f, 2.27982e-5f, 1.25439e-5f, 4.57292e-6f, 3.38214e-6f},
+        .relief = {.0286f, .0136f, .0061f, .0036f, .0014f, .00056f, .00026f, .00015f, .000055f, .000016f, .000004f,
+                   2e-6f, 2e-6f},
+    };
 
     // Craters intersecting a spherical cap, to accelerate patch sampling.
     struct Region {

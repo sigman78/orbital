@@ -3,7 +3,7 @@
 namespace planet {
 
 // Coverage observations, not pixel visibility or proof of a cache flush. Counters survive resets.
-struct TerrainHealth {
+struct ClodHealth {
     unsigned rollback_quadrants = 0, rollback_levels = 0;
     unsigned selection_rollbacks = 0, balance_rollbacks = 0, missing_previous = 0;
     unsigned rollback_events = 0, last_frame = 0, last_quadrants = 0, last_levels = 0;

@@ -357,7 +357,7 @@ void test_patch_error() {
     std::printf("tiles: patch error at level 3: %g radii\n", double(error));
 }
 
-// Minutes of work, and only needed when level_error is re-derived: --calibrate runs it.
+// Minutes of work, and only needed when MinorPlanetTerrain::levels is re-derived: --calibrate runs it.
 void calibrate_level_errors() {
     const MinorPlanetTerrain terrain(1007);
     std::uint64_t rng = 42;

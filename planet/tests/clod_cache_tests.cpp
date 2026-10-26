@@ -17,15 +17,27 @@
 using namespace space;
 using namespace planet;
 
+namespace {
+
+// The CPU regression baseline, independent of the renderer's arrays.
+constexpr unsigned baseline_slots = 1024;
+
+Clod make_clod(unsigned capacity = baseline_slots) {
+    return Clod{ClodConfig{
+        .shape = MinorPlanetTerrain::shape, .levels = MinorPlanetTerrain::levels, .cache_capacity = capacity}};
+}
+
+} // namespace
+
 // The tier takes the four side planes and the near plane, in the frustum's order.
-void set_planes(TierView& view, const geometry::Frustum& frustum) {
+void set_planes(ClodView& view, const geometry::Frustum& frustum) {
     for (unsigned i = 0; i < 5; i++)
         view.planes[i] = ViewPlane{.normal = frustum.planes[i].normal, .distance = frustum.planes[i].distance};
 }
 
 namespace {
 
-TierView grazing_view(double altitude, double radius, bool away = false) {
+ClodView grazing_view(double altitude, double radius, bool away = false) {
     const Vec3d radial = normalized(Vec3d{.6, .3, 1});
     const Vec3d local = radial * (1 + altitude);
     const float tan_y = float(std::tan(render::CameraView{}.vertical_fov / 2));
@@ -33,7 +45,7 @@ TierView grazing_view(double altitude, double radius, bool away = false) {
     camera.forward = away ? radial : normalized(normalized(cross(Vec3d{0, 1, 0}, radial)) - radial * .1);
     camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
     camera.up = cross(camera.right, camera.forward);
-    TierView view{.body_centre = local * -radius,
+    ClodView view{.body_centre = local * -radius,
                   .radius = radius,
                   .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
                   .camera_local = local,
@@ -48,7 +60,7 @@ void stationary_constrained_cache(unsigned capacity) {
     constexpr unsigned frames = 900;
     constexpr double radius = 2.5 / 15;
     const MinorPlanetTerrain terrain(1007);
-    TerrainTier tier(capacity);
+    Clod tier = make_clod(capacity);
     struct Pending {
         unsigned slot;
         PatchKey key;
@@ -72,7 +84,7 @@ void stationary_constrained_cache(unsigned capacity) {
                 ++it;
             }
         }
-        TierView view = grazing_view(.035, radius);
+        ClodView view = grazing_view(.035, radius);
         tier.update(view, frame, 6);
         for (const auto& g : tier.generate()) {
             if (const auto old = generated.find(g.key.packed()); old != generated.end()) {
@@ -85,7 +97,7 @@ void stationary_constrained_cache(unsigned capacity) {
         if (frame > frames - 120)
             tail_generated += unsigned(tier.generate().size());
         std::vector<std::uint64_t> coverage;
-        for (const TerrainTier::Draw& draw : tier.draws())
+        for (const Clod::Draw& draw : tier.draws())
             coverage.push_back((std::uint64_t(draw.key.packed()) << 4) | draw.quadrants);
         std::sort(coverage.begin(), coverage.end());
         if (frame > frames - 120 && !previous_coverage.empty() && coverage != previous_coverage)
@@ -127,7 +139,7 @@ void stationary_constrained_cache(unsigned capacity) {
         for (const auto& g : tier.generate())
             pending.push_back({g.slot, g.key, g.stamp, frame + 2});
         std::vector<std::uint64_t> coverage;
-        for (const TerrainTier::Draw& draw : tier.draws())
+        for (const Clod::Draw& draw : tier.draws())
             coverage.push_back((std::uint64_t(draw.key.packed()) << 4) | draw.quadrants);
         std::sort(coverage.begin(), coverage.end());
         return std::pair{generated_now, coverage};
@@ -153,15 +165,15 @@ void stationary_constrained_cache(unsigned capacity) {
 void cruise(unsigned capacity, unsigned delay, float bias, double speed, double altitude, bool report = true,
             bool verify = false) {
     const MinorPlanetTerrain terrain(1007);
-    TerrainTier tier(capacity);
+    Clod tier = make_clod(capacity);
     struct Pending {
-        TerrainTier::Generation g;
+        Clod::Generation g;
         unsigned due;
     };
     std::vector<Pending> pending;
     std::unordered_map<std::uint32_t, Range<float>> heights;
     unsigned rollbacks = 0, evictions = 0, tail_generation = 0;
-    TierView last_view;
+    ClodView last_view;
     if (report)
         std::puts("frame,drawn,resident,pending,evictions,warm,balanced,rollback_quadrants,rollback_levels,selection,"
                   "balance,missing_previous,slots_blocked,nodes,splits_blocked,timeouts");
@@ -188,7 +200,7 @@ void cruise(unsigned capacity, unsigned delay, float bias, double speed, double 
         camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
         camera.up = cross(camera.right, camera.forward);
         const float tan_y = float(std::tan(camera.vertical_fov / 2));
-        TierView view{.body_centre = local * -1.0,
+        ClodView view{.body_centre = local * -1.0,
                       .radius = 1,
                       .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
                       .camera_local = local,
@@ -246,28 +258,28 @@ void invalidation_rejects_late_bounds() {
     render::CameraView camera;
     camera.forward = {0, 0, -1};
     const float tan_y = float(std::tan(camera.vertical_fov / 2));
-    TierView view{.body_centre = {0, 0, -.2},
+    ClodView view{.body_centre = {0, 0, -.2},
                   .radius = radius,
                   .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
                   .camera_local = {0, 0, .2 / radius},
                   .height_pixels = 900,
                   .tan_y = tan_y};
     set_planes(view, render::view_frustum(camera, tan_y * 16 / 9, tan_y));
-    TerrainTier tier;
+    Clod tier = make_clod();
     tier.update(view, 1);
     assert(!tier.generate().empty());
-    const TerrainTier::Generation old = tier.generate().front();
+    const Clod::Generation old = tier.generate().front();
     assert(old.key.level == 0);
     constexpr Range<float> measured{-0.001f, 0.001f};
     assert(tier.mark_resident(old.slot, old.key, old.stamp, measured));
     const Range<float> before = tier.reach_of(old.key);
-    assert(before.min > TerrainTier::full_height_range.min);
-    assert(before.max < TerrainTier::full_height_range.max);
+    assert(before.min > MinorPlanetTerrain::shape.heights.min);
+    assert(before.max < MinorPlanetTerrain::shape.heights.max);
 
     tier.invalidate();
     const Range<float> reset = tier.reach_of(old.key);
-    assert(reset.min == TerrainTier::full_height_range.min - TerrainTier::relief_margin(0));
-    assert(reset.max == TerrainTier::full_height_range.max + TerrainTier::relief_margin(0));
+    assert(reset.min == MinorPlanetTerrain::shape.heights.min - MinorPlanetTerrain::levels.relief_at(0));
+    assert(reset.max == MinorPlanetTerrain::shape.heights.max + MinorPlanetTerrain::levels.relief_at(0));
     // A completion racing with invalidation must not restore stale measurements.
     assert(!tier.mark_resident(old.slot, old.key, old.stamp, measured));
     assert(tier.health().invalidations == 1 && tier.health().stale_completions == 1);
@@ -285,7 +297,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     invalidation_rejects_late_bounds();
-    stationary_constrained_cache(TerrainTier::slot_count);
-    stationary_constrained_cache(TerrainTier::slot_count * 2);
+    stationary_constrained_cache(baseline_slots);
+    stationary_constrained_cache(baseline_slots * 2);
     cruise(512, 24, 0, .0012, .08, false, true);
 }

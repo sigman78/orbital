@@ -36,6 +36,9 @@
 namespace space::render {
 
 using planet::bake_terrain_maps;
+using planet::Clod;
+using planet::ClodConfig;
+using planet::ClodView;
 using planet::cube_coordinates;
 using planet::CubeCoord;
 using planet::height_tile_range;
@@ -47,8 +50,6 @@ using planet::PatchGrid;
 using planet::PatchKey;
 using planet::PatchVertex;
 using planet::TerrainMaps;
-using planet::TerrainTier;
-using planet::TierView;
 using planet::tile_colour_ratio;
 using planet::tile_colour_side;
 using planet::tile_side;
@@ -402,7 +403,9 @@ struct Renderer::Impl {
     BeltMotion belt_motion;     // the rocks' seeds and states, stepped on the CPU
     // Near-terrain selection, tile arrays, and upload staging (renderer_terrain.cpp).
     std::optional<MinorPlanetTerrain> minor_planet_terrain;
-    TerrainTier terrain_tier{terrain_cache_slots};
+    Clod terrain_tier{ClodConfig{.shape = MinorPlanetTerrain::shape,
+                                 .levels = MinorPlanetTerrain::levels,
+                                 .cache_capacity = terrain_cache_slots}};
     GpuImage tile_height, tile_albedo, tile_slope; // the three tile arrays, terrain_cache_slots layers each
     float tile_detail = 1;                         // TerrainSettings::detail the resident tiles were built with
     std::vector<PatchView> patch_views;            // the draw list as the panel's patch map wants it

@@ -100,21 +100,21 @@ private:
     };
     struct HealthColumn {
         const char* name;
-        unsigned planet::TerrainHealth::* value;
+        unsigned planet::ClodHealth::* value;
     };
     static constexpr HealthColumn health_columns[] = {
-        {"terrain_rollback_quadrants", &planet::TerrainHealth::rollback_quadrants},
-        {"terrain_rollback_levels", &planet::TerrainHealth::rollback_levels},
-        {"terrain_selection_rollbacks", &planet::TerrainHealth::selection_rollbacks},
-        {"terrain_balance_rollbacks", &planet::TerrainHealth::balance_rollbacks},
-        {"terrain_missing_previous", &planet::TerrainHealth::missing_previous},
-        {"terrain_rollback_events", &planet::TerrainHealth::rollback_events},
-        {"terrain_last_rollback_frame", &planet::TerrainHealth::last_frame},
-        {"terrain_last_rollback_key", &planet::TerrainHealth::last_key},
-        {"terrain_invalidations", &planet::TerrainHealth::invalidations},
-        {"terrain_timeouts", &planet::TerrainHealth::timeouts},
-        {"terrain_releases", &planet::TerrainHealth::releases},
-        {"terrain_stale_completions", &planet::TerrainHealth::stale_completions},
+        {"terrain_rollback_quadrants", &planet::ClodHealth::rollback_quadrants},
+        {"terrain_rollback_levels", &planet::ClodHealth::rollback_levels},
+        {"terrain_selection_rollbacks", &planet::ClodHealth::selection_rollbacks},
+        {"terrain_balance_rollbacks", &planet::ClodHealth::balance_rollbacks},
+        {"terrain_missing_previous", &planet::ClodHealth::missing_previous},
+        {"terrain_rollback_events", &planet::ClodHealth::rollback_events},
+        {"terrain_last_rollback_frame", &planet::ClodHealth::last_frame},
+        {"terrain_last_rollback_key", &planet::ClodHealth::last_key},
+        {"terrain_invalidations", &planet::ClodHealth::invalidations},
+        {"terrain_timeouts", &planet::ClodHealth::timeouts},
+        {"terrain_releases", &planet::ClodHealth::releases},
+        {"terrain_stale_completions", &planet::ClodHealth::stale_completions},
     };
     void flush() {
         if (file_ && !buffer_.empty()) {

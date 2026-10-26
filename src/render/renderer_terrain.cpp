@@ -29,8 +29,8 @@ constexpr std::uint64_t tile_total_bytes = align4(slope_offset + colour_tile_byt
 constexpr unsigned patch_tile_flag_bits = 10;
 static_assert(patch_tile_flag_bits <= 12, "tile[3] is unpacked from a 12-bit field");
 static_assert(terrain_cache_slots <= 0xfff, "tile[2] carries the parent slot in a 12-bit field");
-static_assert(FrameStats::Terrain::cache_age_buckets == TerrainTier::cache_age_buckets &&
-              FrameStats::Terrain::cache_age_bucket_frames == TerrainTier::cache_age_bucket_frames);
+static_assert(FrameStats::Terrain::cache_age_buckets == Clod::cache_age_buckets &&
+              FrameStats::Terrain::cache_age_bucket_frames == Clod::cache_age_bucket_frames);
 } // namespace
 
 void Renderer::Impl::create_terrain_tier() {
@@ -99,9 +99,9 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         terrain_tier.disable();
         // Disabling only stops selection; it deliberately keeps the cache warm. Preserve a
         // truthful pressure strip instead of showing an empty cache while its tiles remain.
-        const TerrainTier::CacheStats cache = terrain_tier.cache_stats(frame_index);
+        const Clod::CacheStats cache = terrain_tier.cache_stats(frame_index);
         auto& ts = stats.frame.terrain;
-        const TerrainTier::Pressure& p = terrain_tier.pressure();
+        const Clod::Pressure& p = terrain_tier.pressure();
         unsigned rings_free = 0;
         for (unsigned i = 0; i < tile_ring_count; i++)
             rings_free += ring_available(i);
@@ -119,7 +119,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         ts.oldest_age = cache.oldest_age;
         ts.cache_age = cache.age;
         ts.nodes = terrain_tier.nodes();
-        ts.node_budget = TerrainTier::node_budget;
+        ts.node_budget = Clod::node_budget;
         ts.workers = tile_workers;
         ts.splits_blocked = ts.requested = ts.served = ts.evictions = ts.evicted_recent = 0;
         ts.generation_budget = ts.generation_budget_limited = ts.slots_blocked = 0;
@@ -164,7 +164,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     }
     const float tan_y = frozen_cull ? frozen_cull->tan_y : float(std::tan(camera.vertical_fov * .5));
     const float tan_x = tan_y * float(extent.width) / float(std::max(extent.height, 1u));
-    TierView view{.body_centre = state.position - camera.position,
+    ClodView view{.body_centre = state.position - camera.position,
                   .radius = state.radius,
                   .axes = {axes[0], axes[1], axes[2]},
                   .camera_local = into_body(camera.position - state.position) * (1 / state.radius),
@@ -194,7 +194,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     // The draw list for the panel's patch map, kept until the next frame replaces it.
     patch_views.clear();
     patch_views.reserve(terrain_tier.draws().size());
-    for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
+    for (const Clod::Draw& draw : terrain_tier.draws()) {
         const float end = terrain_tier.range(draw.key.level), start = terrain_tier.morph_start(draw.key.level);
         const float morph = draw.key.level && end > start
                                 ? std::clamp((draw.near_distance - start) / (end - start), 0.f, 1.f)
@@ -213,11 +213,11 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                        .camera_s = float(under.s),
                        .camera_t = float(under.t)};
     auto& ts = stats.frame.terrain;
-    const TerrainTier::Pressure& p = terrain_tier.pressure();
+    const Clod::Pressure& p = terrain_tier.pressure();
     ts.active = terrain_tier.active();
     ts.drawn = unsigned(terrain_tier.draws().size());
     ts.submitted_triangles = ts.covered_quadrants = 0;
-    for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
+    for (const Clod::Draw& draw : terrain_tier.draws()) {
         ts.covered_quadrants += std::popcount(unsigned(draw.quadrants));
     }
     ts.submitted_triangles = ts.covered_quadrants * ((grid_index_count + skirt_index_count) / 3);
@@ -261,7 +261,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                   ts.health.balance_rollbacks, ts.health.missing_previous, p.evictions, p.cache_free);
     if (tile_pool) {
         const float height_range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
-        for (const TerrainTier::Generation& generation : terrain_tier.generate()) {
+        for (const Clod::Generation& generation : terrain_tier.generate()) {
             unsigned ring = tile_ring_count;
             for (unsigned i = 0; i < tile_ring_count; i++) {
                 const unsigned idx = (ring_head + i) % tile_ring_count;
@@ -315,11 +315,11 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                                        sizeof(PatchInstance);
     auto* records = reinterpret_cast<PatchInstance*>(buffers.patch_records_staging.range().cpu + records_slot);
     std::size_t expected_records = 0;
-    for (const TerrainTier::Draw& draw : terrain_tier.draws())
+    for (const Clod::Draw& draw : terrain_tier.draws())
         expected_records += std::popcount(unsigned(draw.quadrants));
     ORBITAL_ASSERT(expected_records <= terrain_patch_record_capacity);
     std::size_t record_index = 0;
-    for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
+    for (const Clod::Draw& draw : terrain_tier.draws()) {
         const auto cell = [&] {
             const double size = 2.0 / double(1u << draw.key.level);
             return ShaderFloat4{float(-1 + draw.key.x * size), float(-1 + draw.key.y * size), float(size),
@@ -330,10 +330,10 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         const PatchKey parent{draw.key.face, std::uint8_t(draw.key.level ? draw.key.level - 1 : 0),
                               std::uint16_t(draw.key.x / 2), std::uint16_t(draw.key.y / 2)};
         // The parent tile supplies material at the coarse end of the distance band.
-        const unsigned resident_parent = draw.key.level ? terrain_tier.resident_slot(parent) : TerrainTier::no_slot;
+        const unsigned resident_parent = draw.key.level ? terrain_tier.resident_slot(parent) : Clod::no_slot;
         // The shader's parent-layer absence marker is the fixed GPU array size, while the CPU
         // cache uses no_slot so deterministic tests can safely exceed that array's capacity.
-        const unsigned parent_slot = resident_parent == TerrainTier::no_slot ? terrain_cache_slots : resident_parent;
+        const unsigned parent_slot = resident_parent == Clod::no_slot ? terrain_cache_slots : resident_parent;
         const unsigned edge_flags = (draw.key.x & 1u) | (draw.key.y & 1u) << 1 | (draw.key.x == 0) << 2 |
                                     (unsigned(draw.key.x) + 1 == 1u << draw.key.level) << 3 | (draw.key.y == 0) << 4 |
                                     (unsigned(draw.key.y) + 1 == 1u << draw.key.level) << 5;

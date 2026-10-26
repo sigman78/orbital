@@ -81,12 +81,12 @@ struct FrameStats {
         unsigned rings_free = 0, rings = 0; // upload ring entries free, and the ring's size
         unsigned slots = 0;                 // the cache's capacity
         unsigned slots_free = 0, oldest_age = 0;
-        // Resident cache-age bars, recent to cold. See TerrainTier::cache_age_bucket_frames.
+        // Resident cache-age bars, recent to cold. See Clod::cache_age_bucket_frames.
         std::array<unsigned, cache_age_buckets> cache_age{};
         unsigned nodes = 0; // quadtree nodes alive
         unsigned workers = 0;
         float generate_ms = 0; // the last finished tile's time on its worker
-        // TerrainTier::Pressure counters.
+        // Clod::Pressure counters.
         unsigned node_budget = 0, splits_blocked = 0;
         unsigned requested = 0, served = 0;
         unsigned evictions = 0, evicted_recent = 0;
@@ -96,7 +96,7 @@ struct FrameStats {
         unsigned flat_near = 0, flat_far = 0, graded = 0; // patches the morph grades against ones it switches
         float behind_mean = 0;
         unsigned balanced = 0;
-        planet::TerrainHealth health;
+        planet::ClodHealth health;
     } terrain;
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
     float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc

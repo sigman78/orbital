@@ -354,8 +354,9 @@ Recorded by the step's audit, to be closed in phases 1b and 2:
   `planet/clod` or the tests removes the renderer from the library tests.
 - `clod_tests` converges the close view three times through `converge_close`, and its 58-draw
   bound is the demo's workload rather than an input.
-- `TerrainTier` keeps its name, its seed-1007 `level_error` table and the shared shell constants
-  until `BodyShape` and `LevelTable` land.
+- `Clod` takes `BodyShape`, `LevelTable` and an `Allocator*` through `ClodConfig` (the second
+  step), but its containers do not use the allocator yet, and `shell_height_min/max` remain as
+  the default `BodyShape` and the bake's alpha range.
 
 ## Open questions carried over, unchanged by the split
 
