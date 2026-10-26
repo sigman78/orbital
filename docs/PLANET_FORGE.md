@@ -213,6 +213,14 @@ the precision risk: BC5's 8-bit endpoints bring a crater-rim block back near the
 error (0.18 degrees rms). Measure with the existing tile-normal comparison before committing;
 the fallback is BC5 for coarse levels and raw rg16 for the last two.
 
+Portability (raised 2026-10-26): a store of BC7 and BC5 blocks is a desktop-Vulkan artefact. If baked
+tiles are ever shipped rather than regenerated, either the blocks ship with supercompression (Zstd per
+shard, as Kiln's KTX2 does) and a second store per GPU family, or the tiles are stored once in a
+transcodable form: Basis Universal UASTC (near-lossless, transcodes to BC7, ASTC or ETC2 at load) or
+ETC1S (smaller, visibly lossy). Phase 4 should pick between "BCn + Zstd, desktop only" and "UASTC
+in the store, transcoded on the worker" before the first encoder is vendored; the heights stay R16
+raw either way.
+
 Procedural tiles generated at runtime stay raw at first (CPU encoding at 14 to 20 ms per material
 pair already dominates generation). Compressing them on a compute pass is the listed "Later" item
 and is unchanged by this split.
