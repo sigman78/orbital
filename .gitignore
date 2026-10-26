@@ -33,6 +33,9 @@ compile_commands.json
 *.lib
 __pycache__/
 
+# Baked planet tile stores (tools/planet-forge); the generator is authoritative.
+/assets/planets/
+
 # On-demand material caches; source PNGs remain authoritative.
 /assets/materials/*.otex
 /assets/materials/*.otex.*.tmp

@@ -417,7 +417,21 @@ int run(const Options& options) {
         log::info("Display: HDR on, {:.0f} to {:.0f} nits, SDR white {:.0f} nits", display.min_nits, display.max_nits,
                   display.sdr_white_nits);
     auto hud = make_hud();
-    render::Renderer renderer(window->native_handle(), system, directory, hud.view(), {.belt_count = options.rocks});
+    // Stores are too large to mirror beside the executable like the materials, so a relative path
+    // is looked for from the executable's directory up to the source tree.
+    const std::filesystem::path planet_store = [&] {
+        if (options.planet_store.empty() || options.planet_store.is_absolute())
+            return options.planet_store;
+        std::filesystem::path base = directory;
+        for (unsigned up = 0; up < 4; up++, base = base.parent_path()) {
+            std::error_code error;
+            if (std::filesystem::exists(base / options.planet_store, error))
+                return base / options.planet_store;
+        }
+        return directory / options.planet_store;
+    }();
+    render::Renderer renderer(window->native_handle(), system, directory, hud.view(),
+                              {.belt_count = options.rocks, .planet_store = planet_store});
     hud = {}; // The renderer has copied/uploaded the pixels.
     Ui ui(*window);
     const auto atlas = ui.font_atlas();

@@ -85,8 +85,9 @@ struct FrameStats {
         std::array<unsigned, cache_age_buckets> cache_age{};
         unsigned nodes = 0; // quadtree nodes alive
         unsigned workers = 0;
-        float generate_ms = 0; // the last finished tile's time on its worker
-        float prepare_ms = 0;  // selection, dispatch and records on the main thread
+        float generate_ms = 0;     // the last finished tile's time on its worker
+        unsigned baked_levels = 0; // levels the store serves, from the roots; 0 when every tile is procedural
+        float prepare_ms = 0;      // selection, dispatch and records on the main thread
         // Clod::Pressure counters.
         unsigned node_budget = 0, splits_blocked = 0;
         unsigned requested = 0, served = 0;
@@ -161,7 +162,8 @@ struct FrameInput {
 
 // Startup choices that are not part of the scene description.
 struct RendererConfig {
-    unsigned belt_count = 0; // rocks generated and drawn regardless of quality tier; 0 keeps the tiers
+    unsigned belt_count = 0;            // rocks generated and drawn regardless of quality tier; 0 keeps the tiers
+    std::filesystem::path planet_store; // the minor planet's cooked tiles; empty keeps every tile procedural
 };
 
 class Renderer {

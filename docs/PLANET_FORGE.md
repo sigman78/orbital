@@ -1,6 +1,6 @@
 # Planet Forge: splitting the minor-planet terrain into libraries
 
-Status: proposal for discussion, 2026-10-25; phases 0 to 2 are built on `evo/planet-forge`, see
+Status: proposal for discussion, 2026-10-25; phases 0 to 3 are built on `evo/planet-forge`, see
 "Phases" and the debt sections at the end.
 
 ## What exists and where it sits
@@ -93,7 +93,7 @@ planet/common    vocabulary shared by generator, runtime and renderer     depend
 planet/clod      CDLOD selection, tile cache, streamer, diagnostics       common
 planet/gen       procedural model, tile sampling, baked and mixed providers, tile store reader   common
 planet/cook      tile store writer, block encoders, cook keys, CLI main   gen, third_party encoders
-tools/planet-forge.cpp   the CLI: a few lines calling planet::cook::main
+tools/planet-forge.cpp   the CLI: a few lines calling planet::cook_main
 src/render/planet_*.cpp  the Vulkan binding: arrays, rings, records, draws   clod, NoGraphicsAPI
 shaders/planet/          patch.slang, the surface material functions
 ```
@@ -144,39 +144,51 @@ it.
   range into the output, and returns false on failure so the slot is released.
 - `ProceduralProvider`: today's `MinorPlanetTerrain` plus `generate_height_tile` and
   `generate_colour_tiles`. First implementation, and the regression anchor.
-- `BakedProvider`: reads a tile store (below). I/O on the worker, no decode when planes are stored in
-  GPU block formats.
-- `MixedProvider`: baked for levels 0..B, procedural below B, with the procedural fine levels seeded
-  from the baked parent. For that `produce` receives the parent tile when the streamer has it
-  resident. The CLOD's parent-fallback rule nearly guarantees this; the gap (a child requested
-  before its parent arrived) is a design item, likely "request the parent first", which also
+- `BakedProvider`: reads a tile store (below). I/O on the worker under a per-shard lock, no decode
+  when planes are stored in GPU block formats. A level the store lacks fails `produce`.
+- `MixedProvider`: one source for levels 0..B, another beyond; built as the plain level split,
+  shape and level table taken from the fine source. The renderer uses it as baked up to the store's
+  last level, procedural beyond. Seeding the procedural fine levels from the baked parent is not
+  built: with the generator as the only baked source the parent carries nothing the function does
+  not already know, so it waits for a source that differs (edited heights, phase 5 materials). When
+  it comes, `produce` receives the parent tile and the CLOD requests parents first, which also
   serves IDEAS.md's "height first" entry.
 - The equirect far-tier bake moves here too; a far tier later becomes levels 0..2 of the same cube
   sphere (DYNAMIC_TERRAIN "Later").
 
 ### Tile store (planet/gen reads, planet/cook writes)
 
-Own format, not KTX2 per tile and not one file per tile. Per body directory:
+Own format, not KTX2 per tile and not one file per tile (built in phase 3; the structs are
+`planet/common/include/planet/store_format.hpp`, little-endian, every byte written). Per body
+directory:
 
-- `body.json` or a fixed header: body parameters hash, cooker version, level range, per-level
-  `TileLayout`, per-level measured error table, shell range.
-- One shard file per face and level (`f3_l07.tiles`): header, index sorted by packed key (`u32 key,
-  u64 offset, u32 size`), then payload. Planes stored exactly as the GPU reads them (R16, BC5, BC7
-  blocks). Zstd per tile is an option to measure later, as Kiln only keeps it when it saves enough.
-- Deterministic bytes, per-tile cook key (cooker version, params hash, key) so re-cooks skip
-  unchanged tiles, as Kiln's manifest does.
+- `store.planet`: a fixed 616-byte header: format version, cooker version, the terrain's seed, the
+  level range and face mask present, `BodyShape`, `LevelTable` and a `TileLayout` per level.
+- One shard file per face and level (`f3_l07.tiles`): a 56-byte header, the tiles' bytes back to
+  back in ascending packed-key order, then the index of 24-byte entries (key, bytes, offset, the
+  tile's height range for the CLOD's bounds). Planes stored exactly as the GPU reads them; raw
+  today, BC5 and BC7 blocks in phase 4. Zstd per tile is an option to measure later, as Kiln only
+  keeps it when it saves enough.
+- Deterministic bytes independent of the thread count. Re-cooks skip at shard granularity: a shard
+  whose header already matches (version, cooker, seed, face, level, tile count and bytes) is left
+  alone unless forced, since every tile of a shard shares the same inputs. `cook_version` is
+  bumped by hand when the same seed starts producing different bytes.
 
 Kiln's KTX2 writer stays the reference for the material library textures (the splat detail sets),
 which are ordinary 2D assets and could even be cooked by Kiln itself.
 
 ### planet/cook and the planet-forge CLI
 
-Structured as Kiln's: all logic in the library, the executable calls `planet::cook::main(argc,
-argv)`. Table-driven options, `--threads`, `--levels a..b`, `--faces`, `--check`, `--explain key`,
-progress by level, deterministic output, exit codes. Encoders vendored from the bcn-spike winners:
-`rgbcx` for BC4/BC5 (not yet in `third_party/`; `bc7enc_rdo` ships it next to the `bc7enc` we have),
-`bc7enc` High for albedo, `bc7f` later if cook time matters. Compiled with contraction off so a
-bake is reproducible across the LAN machine and this one.
+Structured as Kiln's: all logic in the library, the executable calls `planet::cook_main(argc,
+argv, host)` (`tools/planet-forge.cpp`, which links `orbital_scene` only to map a showcase seed to
+the minor planet's terrain seed through `CookHost`). `cook()` itself is generic over a
+`TileProvider`. Options: `--out`, `--seed` or `--terrain-seed`, `--levels a..b`, `--faces`,
+`--threads`, `--force`, `--check` (every tile read back and compared with the provider),
+`--explain f,l,x,y`, `--quiet`; progress by level; exit codes 0 ok, 1 usage, 2 I/O or options the
+library rejects, 3 mismatch or conflict. Encoders come in phase 4, vendored from the bcn-spike winners: `rgbcx` for BC4/BC5
+(not yet in `third_party/`; `bc7enc_rdo` ships it next to the `bc7enc` we have), `bc7enc` High for
+albedo, `bc7f` later if cook time matters. Contraction off is still to do, so a bake is
+reproducible across the LAN machine and this one.
 
 Built behind `ORBITAL_BUILD_PLANET_TOOLS` (default ON; it is CPU only and belongs in CI), unlike
 today's `EXCLUDE_FROM_ALL` tools.
@@ -335,9 +347,14 @@ commit.
    a stat (panel Queue row, benchmark column `cpu_terrain_prepare_ms`): 0.95 ms median converged at
    bookmark 9, 1600x900 (134 draws, 337 resident), 0.26 ms while loading. DYNAMIC_TERRAIN's 0.5 ms
    target is missed before any of this split; where the time goes is a profiling item.
-3. **Store, forge, baked and mixed providers.** Tile store format, `planet-forge` baking levels 0..N
-   of the seed-1007 body on the LAN machine, `BakedProvider`, `MixedProvider`. A baked tile must
-   equal the procedural one bit for bit before compression, which is the test.
+3. **Store, forge, baked and mixed providers.** Done. Tile store format, `planet-forge`,
+   `BakedProvider`, `MixedProvider`, `planet_store_tests` (cook, read back, equality with the
+   procedural tiles, skip, conflict, corrupt and incomplete stores). The demo stays procedural;
+   `--planet-store dir` opts a run into a store when its seed, shell, level table and layouts are the
+   terrain's and it holds every face from level 0. The LAN machine was unreachable, so the showcase body
+   was baked here (8 cores): levels 0..5, 8,190 tiles, 281 MiB in 42 s plus 45 s for `--check`,
+   0 mismatched; level 5 alone is 6,144 tiles in 33 s, about 43 ms of CPU per tile. With the store the
+   close view (bookmark 9, 1600x900) has no pending tile after 46 frames instead of 250.
 4. **Block compression.** 4-aligned colour tiles, BC5 slopes, BC7 albedo in the store and arrays,
    normal-error measurement against IDEAS.md's table, memory and generation numbers in
    TERRAIN_DETAIL_BUDGET.md.
@@ -377,6 +394,25 @@ Recorded by the step's audit:
 - The public headers still carry the phase 1 containers; `tile.hpp` and `streamer.hpp` add only
   `<cstddef>`, `<cstdint>` and `<span>`, but `streamer.hpp` includes `clod.hpp` with its
   `unordered_map` and vectors.
+
+## Debt after phase 3 (store and forge)
+
+- Parent seeding and "request the parent first" are not built (see planet/gen above).
+- The store reads with C stdio on narrow paths (ASCII asset names) under a per-shard mutex; a
+  positional-read backend like Kiln's `IoBackend` would drop the lock, and Unicode paths need the
+  platform layer.
+- The cook parallelizes with the host's `parallel_for`, capped at 16 workers; its scratch goes
+  through the `Allocator` but the pool does not.
+- The renderer accepts a store only when every level's layout equals the procedural one and the
+  range starts at 0; arrays built from `provider.layout(level)` lift both.
+- Contraction is not pinned, so a bake from another compiler may differ from this machine's;
+  `--check` is the test when the LAN machine bakes.
+- The reader seeks with `std::fseek`, a `long`: shards past 2 GiB (level 8 raw is 1.6 GiB per face)
+  fail on Windows, and the cook refuses to write them; a 64-bit positional read goes with the
+  backend above.
+- Baked tiles carry micro-relief at detail 1; the panel's detail setting only reaches generated
+  levels while a store is in use.
+- The skip rule trusts a shard's header and size, not its bytes; `--check` is what proves them.
 
 ## Open questions carried over, unchanged by the split
 

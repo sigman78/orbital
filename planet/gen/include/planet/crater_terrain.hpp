@@ -76,6 +76,7 @@ public:
         return albedo(direction, height, slope, region.craters);
     }
     std::span<const Crater> craters() const { return craters_; }
+    std::uint64_t seed() const { return seed_; }
 
 private:
     float height(Vec3d direction, std::span<const Crater> craters) const;

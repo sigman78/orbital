@@ -76,7 +76,53 @@ void Renderer::Impl::create_terrain_tier() {
                  !buffers.tile_staging.range().cpu,
              "terrain tier allocation failed");
     tile_provider.emplace(*minor_planet_terrain);
-    tile_streamer.emplace(TileStreamer::Config{.provider = &*tile_provider, .sink = &tile_sink});
+    TileProvider* provider = &*tile_provider;
+    if (!planet_store.empty()) {
+        const planet::StoreStatus status = tile_store.open(planet_store.string().c_str());
+        if (status == planet::StoreStatus::missing) {
+            log::info("Near tier: no tile store at {}, tiles generated", planet_store.string());
+        } else if (status != planet::StoreStatus::ok) {
+            log::warn("Near tier: tile store {} not used: {}", planet_store.string(), store_status_name(status));
+        } else {
+            const planet::store::StoreHeader& header = tile_store.header();
+            // The arrays are sized by the procedural layout, so the store must share it level by level.
+            const auto same_layout = [&](const planet::TileLayout& stored) {
+                bool same = stored.plane_count == tile_layout.plane_count;
+                for (unsigned p = 0; same && p < tile_layout.plane_count; p++)
+                    same = stored.planes[p].id == tile_layout.planes[p].id &&
+                           stored.planes[p].format == tile_layout.planes[p].format &&
+                           stored.planes[p].side == tile_layout.planes[p].side;
+                return same;
+            };
+            // What MixedProvider would assert: the baked body's shell and level table are the terrain's.
+            const auto same_body = [&] {
+                bool same = header.shape.heights == MinorPlanetTerrain::shape.heights;
+                for (unsigned i = 0; same && i < planet::LevelTable::count; i++)
+                    same = header.levels.error[i] == MinorPlanetTerrain::levels.error[i] &&
+                           header.levels.relief[i] == MinorPlanetTerrain::levels.relief[i];
+                return same;
+            };
+            bool fits = true;
+            for (unsigned level = header.level_min; level <= header.level_max; level++)
+                fits &= same_layout(header.layouts[level]);
+            const char* reject = header.seed != minor_planet_terrain->seed()         ? "another body's seed"
+                                 : header.face_mask != 0x3f || header.level_min != 0 ? "faces or roots missing"
+                                 : !same_body()                                      ? "shell or level table differs"
+                                 : !fits                                             ? "tile layout differs"
+                                                                                     : nullptr;
+            if (reject) {
+                log::warn("Near tier: tile store {} not used: {}", planet_store.string(), reject);
+                tile_store.close();
+            } else {
+                baked_provider.emplace(tile_store);
+                mixed_provider.emplace(*baked_provider, *tile_provider, header.level_max);
+                provider = &*mixed_provider;
+                baked_levels = header.level_max + 1;
+                log::info("Near tier: levels 0..{} from the tile store {}", header.level_max, planet_store.string());
+            }
+        }
+    }
+    tile_streamer.emplace(TileStreamer::Config{.provider = provider, .sink = &tile_sink});
     log::info("Near tier: {} tile slots, {} workers, {} KiB height + {} KiB albedo + {} KiB slope arrays",
               terrain_cache_slots, tile_streamer->workers(), terrain_cache_slots * height_tile_bytes >> 10,
               terrain_cache_slots * colour_tile_bytes >> 10, terrain_cache_slots * colour_tile_bytes >> 10);
@@ -116,6 +162,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         ts.nodes = terrain_tier.nodes();
         ts.node_budget = Clod::node_budget;
         ts.workers = tile_streamer ? tile_streamer->workers() : 0;
+        ts.baked_levels = baked_levels;
         ts.splits_blocked = ts.requested = ts.served = ts.evictions = ts.evicted_recent = 0;
         ts.generation_budget = ts.generation_budget_limited = ts.slots_blocked = 0;
         ts.starved = ts.out_of_range = ts.deepest = ts.behind_one = 0;
@@ -225,6 +272,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     ts.slots = terrain_tier.capacity();
     ts.nodes = terrain_tier.nodes();
     ts.workers = tile_streamer ? tile_streamer->workers() : 0;
+    ts.baked_levels = baked_levels;
     ts.node_budget = p.node_budget;
     ts.splits_blocked = p.splits_blocked;
     ts.requested = p.requested;

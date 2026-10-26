@@ -43,7 +43,7 @@ clang-tidy -p build/release src/scene/system.cpp
 ctest --preset release
 ```
 
-All CTest suites, including the planet library suites (`planet_patch`, `planet_gen`, `planet_clod`, `planet_clod_cache`), are CPU-only and run in CI with
+All CTest suites, including the planet library suites (`planet_patch`, `planet_gen`, `planet_streamer`, `planet_store`, `planet_clod`, `planet_clod_cache`), are CPU-only and run in CI with
 `ORBITAL_BUILD_DEMO=OFF`. The window smoke test (`tools/smoke-window.ps1`) needs a GPU and runs locally.
 `tools/check-stability.ps1` compares two fixed-time captures pixel by pixel; it needs a GPU as well.
 

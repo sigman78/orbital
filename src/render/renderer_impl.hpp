@@ -7,11 +7,14 @@
 #include "assets/texture.hpp"
 #include "belt/beltblur_shared.h"
 #include "core/types.hpp"
+#include "planet/baked_provider.hpp"
 #include "planet/clod.hpp"
 #include "planet/crater_terrain.hpp"
+#include "planet/mixed_provider.hpp"
 #include "planet/patch.hpp"
 #include "planet/procedural_provider.hpp"
 #include "planet/streamer.hpp"
+#include "planet/tile_store.hpp"
 #include "post/bloom_shared.h"
 #include "render/gpu_commands.hpp"
 #include "render/gpu_image.hpp"
@@ -37,12 +40,14 @@
 namespace space::render {
 
 using planet::bake_terrain_maps;
+using planet::BakedProvider;
 using planet::Clod;
 using planet::ClodConfig;
 using planet::ClodView;
 using planet::cube_coordinates;
 using planet::CubeCoord;
 using planet::MinorPlanetTerrain;
+using planet::MixedProvider;
 using planet::patch_quadrant_skirt_grid;
 using planet::patch_quadrant_surface_grid;
 using planet::patch_skirt_drop;
@@ -55,9 +60,11 @@ using planet::tile_colour_ratio;
 using planet::tile_colour_side;
 using planet::tile_side;
 using planet::tile_slope_scale;
+using planet::TileProvider;
 using planet::TileRequest;
 using planet::TileSink;
 using planet::TileStaging;
+using planet::TileStore;
 using planet::TileStreamer;
 
 // --- Fixed layout shared with the shaders -------------------------------------
@@ -451,6 +458,12 @@ struct Renderer::Impl {
     };
     TileRings tile_sink{*this};
     std::optional<ProceduralProvider> tile_provider;
+    // A cooked store serves the coarse levels when its body and layout match (create_terrain_tier).
+    std::filesystem::path planet_store;
+    TileStore tile_store;
+    std::optional<BakedProvider> baked_provider;
+    std::optional<MixedProvider> mixed_provider;
+    unsigned baked_levels = 0;
     std::optional<TileStreamer> tile_streamer;
     // The staging heap has two slots, written by frame parity before the wait for the
     // previous frame, which may still be copying the other; the version each holds

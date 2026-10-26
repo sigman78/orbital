@@ -30,21 +30,37 @@ target_compile_options(orbital_scene PRIVATE ${ORBITAL_WARNINGS})
 #   planet_common  patch keys, cube sphere, tile vocabulary, allocator
 #   planet_gen     the procedural crater terrain and its tile sampling
 #   planet_clod    quadtree selection and the tile cache
+#   planet_cook    writes tile stores; planet-forge is its command line
 add_library(planet_common STATIC planet/common/src/patch.cpp planet/common/src/allocator.cpp)
 target_include_directories(planet_common PUBLIC planet/common/include)
 target_link_libraries(planet_common PUBLIC orbital_core)
 target_compile_options(planet_common PRIVATE ${ORBITAL_WARNINGS})
 
 add_library(planet_gen STATIC planet/gen/src/crater_terrain.cpp planet/gen/src/tile_sampling.cpp
-                              planet/gen/src/procedural_provider.cpp)
+                              planet/gen/src/procedural_provider.cpp planet/gen/src/tile_store.cpp
+                              planet/gen/src/baked_provider.cpp planet/gen/src/mixed_provider.cpp)
 target_include_directories(planet_gen PUBLIC planet/gen/include)
 target_link_libraries(planet_gen PUBLIC planet_common)
 target_compile_options(planet_gen PRIVATE ${ORBITAL_WARNINGS})
+target_compile_definitions(planet_gen PRIVATE _CRT_SECURE_NO_WARNINGS) # std::fopen on MSVC
 
 add_library(planet_clod STATIC planet/clod/src/clod.cpp planet/clod/src/streamer.cpp)
 target_include_directories(planet_clod PUBLIC planet/clod/include)
 target_link_libraries(planet_clod PUBLIC planet_common)
 target_compile_options(planet_clod PRIVATE ${ORBITAL_WARNINGS})
+
+add_library(planet_cook STATIC planet/cook/src/cook.cpp planet/cook/src/cli.cpp)
+target_include_directories(planet_cook PUBLIC planet/cook/include)
+target_link_libraries(planet_cook PUBLIC planet_gen)
+target_compile_options(planet_cook PRIVATE ${ORBITAL_WARNINGS})
+target_compile_definitions(planet_cook PRIVATE _CRT_SECURE_NO_WARNINGS)
+
+option(ORBITAL_BUILD_PLANET_TOOLS "Build the planet-forge tile baker" ON)
+if(ORBITAL_BUILD_PLANET_TOOLS)
+  add_executable(planet-forge tools/planet-forge.cpp)
+  target_link_libraries(planet-forge PRIVATE planet_cook orbital_scene)
+  target_compile_options(planet-forge PRIVATE ${ORBITAL_WARNINGS})
+endif()
 
 add_library(orbital_render_cpu STATIC src/render/showcase.cpp src/render/frame_calculations.cpp)
 target_include_directories(orbital_render_cpu PUBLIC shaders) # the shared GPU ABI headers
@@ -123,7 +139,7 @@ if(BUILD_TESTING)
     add_test(NAME gpu_scopes COMMAND gpu_scopes_tests)
   endif()
   # Planet library tests (planet/tests): CPU only, assertions kept in Release like the rest.
-  foreach(test IN ITEMS patch gen streamer clod clod_cache)
+  foreach(test IN ITEMS patch gen streamer store clod clod_cache)
     add_executable(planet_${test}_tests planet/tests/${test}_tests.cpp)
     if(test STREQUAL "patch")
       target_link_libraries(planet_${test}_tests PRIVATE planet_common)
@@ -131,6 +147,9 @@ if(BUILD_TESTING)
       target_link_libraries(planet_${test}_tests PRIVATE planet_gen)
     elseif(test STREQUAL "streamer")
       target_link_libraries(planet_${test}_tests PRIVATE planet_clod planet_gen)
+    elseif(test STREQUAL "store")
+      target_link_libraries(planet_${test}_tests PRIVATE planet_cook)
+      target_compile_definitions(planet_${test}_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
     else()
       # The CLOD suites still borrow view_frustum from the renderer's CPU library (phase 2 debt).
       target_link_libraries(planet_${test}_tests PRIVATE planet_clod planet_gen orbital_render_cpu)
@@ -224,8 +243,8 @@ if(ORBITAL_BUILD_DEMO)
   add_dependencies(orbital orbital_shaders)
   add_custom_command(TARGET orbital POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/shaders" "$<TARGET_FILE_DIR:orbital>/shaders")
   add_custom_target(orbital_sync_assets
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets" "${CMAKE_BINARY_DIR}/assets"
-    COMMENT "Synchronizing material assets")
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets/materials" "${CMAKE_BINARY_DIR}/assets/materials"
+    COMMENT "Synchronizing material assets") # baked planet stores stay in the source tree (main.cpp finds them)
   add_dependencies(orbital orbital_sync_assets)
 
   if(BUILD_TESTING AND ORBITAL_RENDER_TESTS)
