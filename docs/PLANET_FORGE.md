@@ -341,6 +341,22 @@ commit.
 5. **Splat surface.** Material library arrays, weights plane, the per-level material function in the
    shaders, forge-side classification. Reviewed at the glancing, limb and night-side views.
 
+## Debt after phase 1 (the mechanical move)
+
+Recorded by the step's audit, to be closed in phases 1b and 2:
+
+- Public headers still carry standard containers: `PatchGrid` (two vectors), `MinorPlanetTerrain`
+  (`Region`, `DetailRegion`, `TerrainMaps` vectors and arrays), `TerrainTier` (private vectors and an
+  `unordered_map`, `std::vector<Step>&` in `explain`, `std::array` in the stats structs) and
+  `types.hpp` pulls in all of `core/math.hpp`. The provider and sink redesign in phase 2 is where
+  these turn into views over allocator-owned storage.
+- The CLOD test suites borrow `view_frustum` from `orbital_render_cpu`; a plane builder in
+  `planet/clod` or the tests removes the renderer from the library tests.
+- `clod_tests` converges the close view three times through `converge_close`, and its 58-draw
+  bound is the demo's workload rather than an input.
+- `TerrainTier` keeps its name, its seed-1007 `level_error` table and the shared shell constants
+  until `BodyShape` and `LevelTable` land.
+
 ## Open questions carried over, unchanged by the split
 
 The 256-slot overload, the heuristic plane horizon test, independent material refinement, per-tile

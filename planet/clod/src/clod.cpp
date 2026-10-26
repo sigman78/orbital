@@ -1,4 +1,4 @@
-#include "render/terrain_tier.hpp"
+#include "planet/clod.hpp"
 #include "core/panic.hpp"
 
 #include <algorithm>
@@ -6,7 +6,9 @@
 #include <limits>
 #include <unordered_set>
 
-namespace space::render {
+namespace planet {
+
+using namespace space; // the host's math and noise vocabulary
 
 namespace {
 
@@ -44,7 +46,7 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
     // and the plane always cuts inside it. What keeps this sound is slack of the other kind --
     // the occluder is the shell's floor, 0.95, while ground near a limb stands near 1.0 -- and
     // today that outweighs the error for the relief this body has. It is an accident of the
-    // constants, not a guarantee: `terrain_tier_tests --truth` is what checks it, and taller
+    // constants, not a guarantee: `planet_clod_tests --truth` is what checks it, and taller
     // relief, a higher floor or a smaller descendant_relief would each have to be put through
     // it. Do not raise the occluder while the plane formula stands. The known fallback is the
     // cone test over the lowest ground within acos(R / d), at 10 to 40 percent more patches.
@@ -778,7 +780,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     // Carry the frustum into the body's frame and into radii, once: the axes are orthonormal,
     // so a plane normal transposes by three dots and a patch test becomes one more.
     for (std::size_t i = 0; i < std::size(planes_); i++) {
-        const geometry::Plane& plane = view.frustum.planes[i];
+        const ViewPlane& plane = view.planes[i];
         const Vec3d n{double(plane.normal.x), double(plane.normal.y), double(plane.normal.z)};
         planes_[i] = {.normal = {dot(n, view.axes[0]), dot(n, view.axes[1]), dot(n, view.axes[2])},
                       .offset = (dot(n, view.body_centre) + double(plane.distance)) / std::max(view.radius, 1e-12)};
@@ -850,4 +852,4 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     pressure_.behind_mean = draws_.empty() ? 0 : float(behind / double(draws_.size()));
 }
 
-} // namespace space::render
+} // namespace planet

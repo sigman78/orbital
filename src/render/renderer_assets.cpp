@@ -9,7 +9,7 @@
 #include "core/log.hpp"
 #include "core/parallel.hpp"
 #include "core/small_vec.hpp"
-#include "scene/terrain.hpp"
+#include "planet/crater_terrain.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>

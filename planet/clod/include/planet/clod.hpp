@@ -1,7 +1,7 @@
 #pragma once
-#include "render/terrain_health.hpp"
-#include "scene/geometry.hpp"
-#include "scene/terrain_patch.hpp"
+#include "planet/clod_health.hpp"
+#include "planet/patch.hpp"
+#include "planet/types.hpp"
 
 #include <algorithm>
 #include <array>
@@ -11,19 +11,25 @@
 #include <unordered_map>
 #include <vector>
 
-namespace space::render {
+namespace planet {
 
 // Default near-tier activation threshold in cull_bodies' units; overridable per frame.
 inline constexpr float TerrainTier_activate_default = 1200;
 
+// A world-space clipping plane: dot(normal, p) + distance >= 0 is inside.
+struct ViewPlane {
+    Vec3f normal;
+    float distance = 0;
+};
+
 // The tier's view of one frame: the body relative to the camera, its spin, and
 // the projection, in the units cull_bodies uses.
 struct TierView {
-    Vec3d body_centre;  // camera-relative, units
-    double radius = 0;  // the body's, units
-    Vec3d axes[3];      // the body's local x, y and z in world
-    Vec3d camera_local; // the camera in the body's local frame, radii
-    geometry::Frustum frustum;
+    Vec3d body_centre;   // camera-relative, units
+    double radius = 0;   // the body's, units
+    Vec3d axes[3];       // the body's local x, y and z in world
+    Vec3d camera_local;  // the camera in the body's local frame, radii
+    ViewPlane planes[5]; // near and the four sides; the far plane is never tested
     float height_pixels = 0, tan_y = 0;
     float activate_pixels = TerrainTier_activate_default; // the switch from the sphere levels
     float lod_bias = 0;                                   // every level's range times 2^bias
@@ -51,7 +57,7 @@ public:
     static constexpr unsigned pending_timeout = 240;
     static constexpr unsigned sweep_window = 64;
     // Culling a patch against its own tile would drop relief only its descendants reveal, so
-    // the interval is padded by how far they reach outside it. `terrain_tests --calibrate`
+    // the interval is padded by how far they reach outside it. `planet_gen_tests --calibrate`
     // measures one step, parent to child; the pad must cover the **whole subtree**, so these
     // are the running sums of those steps from each level down, at twice for headroom. One
     // step is not enough: at level 6 it is 0.000057 against a subtree's 0.000128, and the gap
@@ -69,7 +75,7 @@ public:
     // Local arrival transition; it never changes another patch's distance ranges.
     static constexpr unsigned recovery_frames = 15;
     // Seed-1007 calibration against 3D triangles, 32 quads, Everitt warp
-    // (`terrain_tests --calibrate`): uniform samples followed by a hill climb.
+    // (`planet_gen_tests --calibrate`): uniform samples followed by a hill climb.
     // These are estimates, not certified bounds on every patch or intermediate morph.
     static constexpr float level_error[] = {
         .0304741f,   .0192836f, .00591285f,  .00245085f,  .00100089f,  .000457055f, .000173189f,
@@ -174,11 +180,11 @@ public:
     bool active() const { return active_; }
     std::span<const Draw> draws() const { return draws_; } // this frame's patches
     std::span<const Generation> generate() const { return generate_; }
-    static constexpr Range<float> full_height_range{MinorPlanetTerrain::height_min, MinorPlanetTerrain::height_max};
+    static constexpr Range<float> full_height_range{shell_height_min, shell_height_max};
     // The sphere the horizon test hides patches behind: the shell's floor, never the reference
     // surface, since ground below that surface sets the horizon further out. visibility() has
     // what rests on the choice; the truth test reads it to place its cameras.
-    static constexpr double horizon_occluder = 1 + double(MinorPlanetTerrain::height_min);
+    static constexpr double horizon_occluder = 1 + double(shell_height_min);
     // Accept uploaded contents and height bounds only for the current slot assignment.
     bool mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights = full_height_range);
     // Hand back a slot from generate() the caller could not serve, so the patch is asked for
@@ -293,4 +299,4 @@ private:
     bool active_ = false, wanted_ = false;
 };
 
-} // namespace space::render
+} // namespace planet

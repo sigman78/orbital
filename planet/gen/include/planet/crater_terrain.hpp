@@ -1,12 +1,12 @@
 #pragma once
-#include "core/math.hpp"
+#include "planet/types.hpp"
 
 #include <array>
 #include <cstdint>
 #include <span>
 #include <vector>
 
-namespace space {
+namespace planet {
 
 // Shared map/tile terrain: body-local directions, heights in reference radii.
 class MinorPlanetTerrain {
@@ -19,7 +19,8 @@ public:
         float facula = 0;    // a bright deposit at the floor's centre, 0 for most
         float cos_reach = 1; // cosine of the angle past which the crater no longer contributes
     };
-    static constexpr float height_min = -.05f, height_max = .05f; // the range a bake's alpha spans, radii
+    static constexpr float height_min = shell_height_min,
+                           height_max = shell_height_max; // the range a bake's alpha spans, radii
 
     // Craters intersecting a spherical cap, to accelerate patch sampling.
     struct Region {
@@ -79,4 +80,4 @@ struct TerrainMaps {
 };
 TerrainMaps bake_terrain_maps(const MinorPlanetTerrain& terrain, unsigned width, unsigned height);
 
-} // namespace space
+} // namespace planet

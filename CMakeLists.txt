@@ -22,17 +22,36 @@ target_include_directories(orbital_core PUBLIC src)
 target_compile_features(orbital_core PUBLIC cxx_std_20)
 target_compile_options(orbital_core PRIVATE ${ORBITAL_WARNINGS})
 
-add_library(orbital_scene STATIC src/scene/system.cpp src/scene/geometry.cpp src/scene/belt_motion.cpp src/scene/terrain.cpp src/scene/terrain_patch.cpp)
+add_library(orbital_scene STATIC src/scene/system.cpp src/scene/geometry.cpp src/scene/belt_motion.cpp)
 target_link_libraries(orbital_scene PUBLIC orbital_core)
 target_compile_options(orbital_scene PRIVATE ${ORBITAL_WARNINGS})
 
-add_library(orbital_render_cpu STATIC src/render/showcase.cpp src/render/frame_calculations.cpp src/render/terrain_tier.cpp)
+# Planet libraries (docs/PLANET_FORGE.md): graphics-API-free, depend on orbital_core only.
+#   planet_common  patch keys, cube sphere, tile vocabulary, allocator
+#   planet_gen     the procedural crater terrain and its tile sampling
+#   planet_clod    quadtree selection and the tile cache
+add_library(planet_common STATIC planet/common/src/patch.cpp planet/common/src/allocator.cpp)
+target_include_directories(planet_common PUBLIC planet/common/include)
+target_link_libraries(planet_common PUBLIC orbital_core)
+target_compile_options(planet_common PRIVATE ${ORBITAL_WARNINGS})
+
+add_library(planet_gen STATIC planet/gen/src/crater_terrain.cpp planet/gen/src/tile_sampling.cpp)
+target_include_directories(planet_gen PUBLIC planet/gen/include)
+target_link_libraries(planet_gen PUBLIC planet_common)
+target_compile_options(planet_gen PRIVATE ${ORBITAL_WARNINGS})
+
+add_library(planet_clod STATIC planet/clod/src/clod.cpp)
+target_include_directories(planet_clod PUBLIC planet/clod/include)
+target_link_libraries(planet_clod PUBLIC planet_common)
+target_compile_options(planet_clod PRIVATE ${ORBITAL_WARNINGS})
+
+add_library(orbital_render_cpu STATIC src/render/showcase.cpp src/render/frame_calculations.cpp)
 target_include_directories(orbital_render_cpu PUBLIC shaders) # the shared GPU ABI headers
-target_link_libraries(orbital_render_cpu PUBLIC orbital_scene)
+target_link_libraries(orbital_render_cpu PUBLIC orbital_scene planet_clod planet_gen) # renderer.hpp carries planet types
 target_compile_options(orbital_render_cpu PRIVATE ${ORBITAL_WARNINGS})
 
 add_library(orbital_app_cpu STATIC src/app/camera.cpp src/app/options.cpp)
-target_link_libraries(orbital_app_cpu PUBLIC orbital_scene)
+target_link_libraries(orbital_app_cpu PUBLIC orbital_scene orbital_render_cpu) # app headers include render/renderer.hpp
 target_compile_options(orbital_app_cpu PRIVATE ${ORBITAL_WARNINGS})
 
 add_library(orbital_assets STATIC src/assets/image.cpp src/assets/kernels.cpp src/assets/materials.cpp src/assets/texture.cpp)
@@ -77,17 +96,17 @@ target_compile_options(storage_profile PRIVATE ${ORBITAL_WARNINGS})
 
 # Opt-in CPU-only terrain generation benchmark; excluded from ordinary builds.
 add_executable(terrain_budget EXCLUDE_FROM_ALL tools/terrain_budget.cpp)
-target_link_libraries(terrain_budget PRIVATE orbital_scene)
+target_link_libraries(terrain_budget PRIVATE planet_gen)
 target_compile_options(terrain_budget PRIVATE ${ORBITAL_WARNINGS})
 
 # Opt-in CPU projection study for terrain mesh and material texel footprints.
 add_executable(terrain_footprint EXCLUDE_FROM_ALL tools/terrain_footprint.cpp)
-target_link_libraries(terrain_footprint PRIVATE orbital_render_cpu orbital_scene)
+target_link_libraries(terrain_footprint PRIVATE orbital_render_cpu planet_clod planet_gen)
 target_compile_options(terrain_footprint PRIVATE ${ORBITAL_WARNINGS})
 
 # Opt-in bump continuity probe and deterministic slope-shading image.
 add_executable(terrain_detail EXCLUDE_FROM_ALL tools/terrain_detail.cpp)
-target_link_libraries(terrain_detail PRIVATE orbital_scene)
+target_link_libraries(terrain_detail PRIVATE planet_gen)
 target_compile_options(terrain_detail PRIVATE ${ORBITAL_WARNINGS})
 
 if(BUILD_TESTING)
@@ -102,10 +121,28 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME gpu_scopes COMMAND gpu_scopes_tests)
   endif()
-  foreach(test IN ITEMS core belt_motion terrain terrain_tier terrain_cache system geometry camera image kernels materials smaa texture app showcase frame_calculations options)
+  # Planet library tests (planet/tests): CPU only, assertions kept in Release like the rest.
+  foreach(test IN ITEMS patch gen clod clod_cache)
+    add_executable(planet_${test}_tests planet/tests/${test}_tests.cpp)
+    if(test STREQUAL "patch")
+      target_link_libraries(planet_${test}_tests PRIVATE planet_common)
+    elseif(test STREQUAL "gen")
+      target_link_libraries(planet_${test}_tests PRIVATE planet_gen)
+    else()
+      # The CLOD suites still borrow view_frustum from the renderer's CPU library (phase 2 debt).
+      target_link_libraries(planet_${test}_tests PRIVATE planet_clod planet_gen orbital_render_cpu)
+    endif()
+    if(MSVC)
+      target_compile_options(planet_${test}_tests PRIVATE ${ORBITAL_WARNINGS} /UNDEBUG)
+    else()
+      target_compile_options(planet_${test}_tests PRIVATE ${ORBITAL_WARNINGS} -UNDEBUG)
+    endif()
+    add_test(NAME planet_${test} COMMAND planet_${test}_tests)
+  endforeach()
+  foreach(test IN ITEMS core belt_motion system geometry camera image kernels materials smaa texture app showcase frame_calculations options)
     add_executable(${test}_tests tests/${test}_tests.cpp)
     target_link_libraries(${test}_tests PRIVATE orbital_scene orbital_assets)
-    if(test STREQUAL "showcase" OR test STREQUAL "frame_calculations" OR test STREQUAL "terrain_tier" OR test STREQUAL "terrain_cache")
+    if(test STREQUAL "showcase" OR test STREQUAL "frame_calculations")
       target_link_libraries(${test}_tests PRIVATE orbital_render_cpu)
     endif()
     if(test STREQUAL "camera" OR test STREQUAL "app" OR test STREQUAL "options")
@@ -177,7 +214,7 @@ if(ORBITAL_BUILD_DEMO)
   add_executable(orbital src/app/main.cpp src/app/hud.cpp src/app/ui.cpp src/app/ui_panel.cpp src/render/renderer_resources.cpp src/render/gpu_image.cpp src/render/renderer_frame.cpp
     src/render/renderer_frame_data.cpp src/render/renderer_pipelines.cpp src/render/renderer_assets.cpp
     src/render/renderer_belt.cpp src/render/renderer_scene.cpp src/render/renderer_terrain.cpp src/render/renderer_post.cpp src/render/renderer_overlay.cpp)
-  target_link_libraries(orbital PRIVATE orbital_scene orbital_app_cpu orbital_render_cpu orbital_assets orbital_platform NoGraphicsAPI)
+  target_link_libraries(orbital PRIVATE orbital_scene orbital_app_cpu orbital_render_cpu orbital_assets orbital_platform planet_clod planet_gen NoGraphicsAPI)
   target_include_directories(orbital PRIVATE shaders) # scene_shared.h, the C++/shader layout
   target_compile_definitions(orbital PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
   target_compile_options(orbital PRIVATE ${ORBITAL_WARNINGS})

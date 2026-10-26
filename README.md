@@ -61,11 +61,12 @@ For very close glancing views, enable **Terrain > Surface inspection (noclip)**.
 | `src/core` | Logging, panic, file I/O and vector/matrix math shared by everything else |
 | `src/platform` | OS-neutral window, input, process, text-overlay and ImGui-overlay interfaces; `win32/` and `linux/` implement them |
 | `src/app` | Options, camera, HUD, control panel and the frame loop; no OS calls |
-| `src/scene` | Deterministic system generation, rock population, mesh geometry and the minor planet's terrain and patch quadtree |
+| `src/scene` | Deterministic system generation, rock population and mesh geometry |
 | `src/assets` | PNG image I/O (Wuffs decode, stb write), SIMD pixel kernels and material mip-chain generation |
-| `src/render` | The renderer on NoGraphicsAPI: resources and materials, per-frame passes, the terrain tier's selection and streaming, GPU-side types |
+| `src/render` | The renderer on NoGraphicsAPI: resources and materials, per-frame passes, the terrain tier's GPU side (tile arrays, staging rings, patch draws), GPU-side types |
+| `planet/` | The planet libraries (docs/PLANET_FORGE.md): `common` (patch keys, cube sphere, allocator), `gen` (procedural crater terrain, tile sampling), `clod` (quadtree selection and tile cache); graphics-API-free, depend on `src/core` only |
 | `shaders/` | Slang shaders; `scene_shared.h` is the shared C++/shader layout |
-| `tests/` | Executable-assertion tests run through CTest |
+| `tests/` | Executable-assertion tests run through CTest; `planet/tests` holds the planet libraries' suites |
 | `tools/` | PowerShell scripts (bootstrap, asset import, build, format, GCC check, smoke and stability checks) and Python tools (render and shader checks, benchmark suite, asset bakes, texture compression) |
 | `cmake/` | Slang shader compilation helper |
 | `docs/` | Architecture, decisions, foundation, assets, terrain and code style ([index](docs/README.md)) |

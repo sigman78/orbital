@@ -10,10 +10,10 @@
 #include "assets/image.hpp"
 #include "core/log.hpp"
 #include "core/math.hpp"
+#include "planet/crater_terrain.hpp"
 #include "platform/process.hpp"
 #include "platform/window.hpp"
 #include "render/renderer.hpp"
-#include "scene/terrain.hpp"
 
 #include <algorithm>
 #include <array>
@@ -161,7 +161,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     if (const auto body = Camera::bookmark_body(options.bookmark >= 0 ? std::size_t(options.bookmark) : 0);
         options.back != 0 && body < app.bodies.size()) {
         const Vec3d centre = app.bodies[body].position, away = normalized(app.camera.position - centre);
-        const double floor = app.bodies[body].radius * (1 + double(MinorPlanetTerrain::height_max) + .002);
+        const double floor = app.bodies[body].radius * (1 + double(planet::MinorPlanetTerrain::height_max) + .002);
         const double distance = std::max(length(app.camera.position - centre) + options.back, floor);
         app.camera.look_at(centre + away * distance, centre);
         free_camera(app);

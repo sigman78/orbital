@@ -51,7 +51,7 @@ only delays a request to the next frame.
    their material ancestors need slots, so the two have no reason to share a number. They did once, and
    capping the tree at `slot_count - 64` starved splits long before memory justified it.
 9. `patch_level_max` is 11: cells of 90 degrees over 2048, quads of 24 urad, about 10 m on this body.
-   Every field carrying a cell index is guarded by a `static_assert` in `terrain_patch.hpp`, because
+   Every field carrying a cell index is guarded by a `static_assert` in `planet/patch.hpp`, because
    overflowing one truncates silently. 12 is the ceiling `PatchKey::packed`'s 12-bit x and y allow.
 
 ## Design
@@ -124,7 +124,7 @@ carry false motion vectors into TAA.
 ### Selection
 
 `level_error[level]` estimates error in radii against the actual 3D triangles. `patch_error` samples
-the diagonal midpoint and both triangle centroids, including curvature. `terrain_tests --calibrate`
+the diagonal midpoint and both triangle centroids, including curvature. `planet_gen_tests --calibrate`
 samples 64 patches per level (1024 at levels 9–12), then hill-climbs around the worst patch. This is
 not a certified bound over all terrain, seeds or intermediate morphs.
 

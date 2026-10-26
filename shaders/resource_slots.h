@@ -57,7 +57,7 @@
 #define TEX_FLARE 51
 #define TEX_LENS_DIRT 52
 #define TEX_MOTION 53
-#define TEX_MINOR_PLANET_ALBEDO 54 // baked at start-up from scene/terrain.hpp, linear light
+#define TEX_MINOR_PLANET_ALBEDO 54 // baked at start-up from planet/crater_terrain.hpp, linear light
 #define TEX_MINOR_PLANET_NORMAL 55 // tangent normal and height, the airless shader's layout
 #define ORBITAL_TEXTURE_ARRAY_COUNT 8
 #define TEX_ARRAY_TERRAIN_HEIGHT 0

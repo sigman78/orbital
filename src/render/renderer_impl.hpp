@@ -8,6 +8,9 @@
 #include "belt/beltblur_shared.h"
 #include "core/parallel.hpp"
 #include "core/types.hpp"
+#include "planet/clod.hpp"
+#include "planet/crater_terrain.hpp"
+#include "planet/patch.hpp"
 #include "post/bloom_shared.h"
 #include "render/gpu_commands.hpp"
 #include "render/gpu_image.hpp"
@@ -16,12 +19,9 @@
 #include "render/gpu_timing.hpp"
 #include "render/gpu_types.hpp"
 #include "render/showcase.hpp"
-#include "render/terrain_tier.hpp"
 #include "scene/belt_motion.hpp"
 #include "scene/geometry.hpp"
 #include "scene/system.hpp"
-#include "scene/terrain.hpp"
-#include "scene/terrain_patch.hpp"
 
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
 #include <array>
@@ -34,6 +34,25 @@
 #include <vector>
 
 namespace space::render {
+
+using planet::bake_terrain_maps;
+using planet::cube_coordinates;
+using planet::CubeCoord;
+using planet::height_tile_range;
+using planet::MinorPlanetTerrain;
+using planet::patch_quadrant_skirt_grid;
+using planet::patch_quadrant_surface_grid;
+using planet::patch_skirt_drop;
+using planet::PatchGrid;
+using planet::PatchKey;
+using planet::PatchVertex;
+using planet::TerrainMaps;
+using planet::TerrainTier;
+using planet::TierView;
+using planet::tile_colour_ratio;
+using planet::tile_colour_side;
+using planet::tile_side;
+using planet::tile_slope_scale;
 
 // --- Fixed layout shared with the shaders -------------------------------------
 

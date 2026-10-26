@@ -100,21 +100,21 @@ private:
     };
     struct HealthColumn {
         const char* name;
-        unsigned render::TerrainHealth::* value;
+        unsigned planet::TerrainHealth::* value;
     };
     static constexpr HealthColumn health_columns[] = {
-        {"terrain_rollback_quadrants", &render::TerrainHealth::rollback_quadrants},
-        {"terrain_rollback_levels", &render::TerrainHealth::rollback_levels},
-        {"terrain_selection_rollbacks", &render::TerrainHealth::selection_rollbacks},
-        {"terrain_balance_rollbacks", &render::TerrainHealth::balance_rollbacks},
-        {"terrain_missing_previous", &render::TerrainHealth::missing_previous},
-        {"terrain_rollback_events", &render::TerrainHealth::rollback_events},
-        {"terrain_last_rollback_frame", &render::TerrainHealth::last_frame},
-        {"terrain_last_rollback_key", &render::TerrainHealth::last_key},
-        {"terrain_invalidations", &render::TerrainHealth::invalidations},
-        {"terrain_timeouts", &render::TerrainHealth::timeouts},
-        {"terrain_releases", &render::TerrainHealth::releases},
-        {"terrain_stale_completions", &render::TerrainHealth::stale_completions},
+        {"terrain_rollback_quadrants", &planet::TerrainHealth::rollback_quadrants},
+        {"terrain_rollback_levels", &planet::TerrainHealth::rollback_levels},
+        {"terrain_selection_rollbacks", &planet::TerrainHealth::selection_rollbacks},
+        {"terrain_balance_rollbacks", &planet::TerrainHealth::balance_rollbacks},
+        {"terrain_missing_previous", &planet::TerrainHealth::missing_previous},
+        {"terrain_rollback_events", &planet::TerrainHealth::rollback_events},
+        {"terrain_last_rollback_frame", &planet::TerrainHealth::last_frame},
+        {"terrain_last_rollback_key", &planet::TerrainHealth::last_key},
+        {"terrain_invalidations", &planet::TerrainHealth::invalidations},
+        {"terrain_timeouts", &planet::TerrainHealth::timeouts},
+        {"terrain_releases", &planet::TerrainHealth::releases},
+        {"terrain_stale_completions", &planet::TerrainHealth::stale_completions},
     };
     void flush() {
         if (file_ && !buffer_.empty()) {

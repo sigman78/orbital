@@ -1,6 +1,7 @@
 #include "render/frame_calculations.hpp"
-#include "render/terrain_tier.hpp"
-#include "scene/terrain_patch.hpp"
+#include "planet/clod.hpp"
+#include "planet/patch.hpp"
+#include "planet/tile_sampling.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,7 +14,7 @@
 namespace {
 
 using namespace space;
-using namespace space::render;
+using namespace planet;
 
 constexpr unsigned screen_height = 900;
 constexpr double body_radius = 1.0;    // distances below are expressed in body radii
@@ -29,7 +30,7 @@ struct CameraSetup {
     const char* name;
     Vec3d target;
     Vec3d camera_local;
-    CameraView camera;
+    render::CameraView camera;
     TierView tier;
     double tan_y = 0;
 };
@@ -45,16 +46,18 @@ CameraSetup camera_setup(const char* name, double azimuth_radians) {
     const Vec3d up_reference = std::abs(forward.y) < .95 ? Vec3d{0, 1, 0} : Vec3d{1, 0, 0};
     const Vec3d right = normalized(cross(forward, up_reference));
     const Vec3d up = normalized(cross(right, forward));
-    CameraView camera{.position = camera_local, .forward = forward, .right = right, .up = up};
+    render::CameraView camera{.position = camera_local, .forward = forward, .right = right, .up = up};
     const double tan_y = std::tan(camera.vertical_fov * .5);
     constexpr double aspect = 16.0 / 9.0;
     TierView view{.body_centre = camera_local * -body_radius,
                   .radius = body_radius,
                   .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
                   .camera_local = camera_local,
-                  .frustum = view_frustum(camera, float(tan_y * aspect), float(tan_y)),
                   .height_pixels = float(screen_height),
                   .tan_y = float(tan_y)};
+    const geometry::Frustum frustum = render::view_frustum(camera, float(tan_y * aspect), float(tan_y));
+    for (unsigned i = 0; i < 5; i++)
+        view.planes[i] = {.normal = frustum.planes[i].normal, .distance = frustum.planes[i].distance};
     return {name, target, camera_local, camera, view, tan_y};
 }
 

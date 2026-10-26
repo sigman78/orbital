@@ -1,6 +1,7 @@
+#include "planet/clod.hpp"
+#include "planet/crater_terrain.hpp"
+#include "planet/tile_sampling.hpp"
 #include "render/frame_calculations.hpp"
-#include "render/terrain_tier.hpp"
-#include "scene/terrain.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -14,26 +15,33 @@
 #include <vector>
 
 using namespace space;
-using namespace space::render;
+using namespace planet;
+
+// The tier takes the four side planes and the near plane, in the frustum's order.
+void set_planes(TierView& view, const geometry::Frustum& frustum) {
+    for (unsigned i = 0; i < 5; i++)
+        view.planes[i] = ViewPlane{.normal = frustum.planes[i].normal, .distance = frustum.planes[i].distance};
+}
 
 namespace {
 
 TierView grazing_view(double altitude, double radius, bool away = false) {
     const Vec3d radial = normalized(Vec3d{.6, .3, 1});
     const Vec3d local = radial * (1 + altitude);
-    const float tan_y = float(std::tan(CameraView{}.vertical_fov / 2));
-    CameraView camera;
+    const float tan_y = float(std::tan(render::CameraView{}.vertical_fov / 2));
+    render::CameraView camera;
     camera.forward = away ? radial : normalized(normalized(cross(Vec3d{0, 1, 0}, radial)) - radial * .1);
     camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
     camera.up = cross(camera.right, camera.forward);
-    return {.body_centre = local * -radius,
-            .radius = radius,
-            .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
-            .camera_local = local,
-            .frustum = view_frustum(camera, tan_y * 16 / 9, tan_y),
-            .height_pixels = 900,
-            .tan_y = tan_y,
-            .lod_bias = 3};
+    TierView view{.body_centre = local * -radius,
+                  .radius = radius,
+                  .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
+                  .camera_local = local,
+                  .height_pixels = 900,
+                  .tan_y = tan_y,
+                  .lod_bias = 3};
+    set_planes(view, render::view_frustum(camera, tan_y * 16 / 9, tan_y));
+    return view;
 }
 
 void stationary_constrained_cache(unsigned capacity) {
@@ -175,7 +183,7 @@ void cruise(unsigned capacity, unsigned delay, float bias, double speed, double 
         const double angle = speed * std::clamp(int(frame) - 500, 0, 1100);
         const Vec3d radial = rotate_about(normalized(Vec3d{.6, .3, 1}), Vec3d{0, 1, 0}, angle);
         const Vec3d local = radial * (1 + altitude);
-        CameraView camera;
+        render::CameraView camera;
         camera.forward = normalized(normalized(cross(Vec3d{0, 1, 0}, radial)) - radial * .1);
         camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
         camera.up = cross(camera.right, camera.forward);
@@ -184,11 +192,11 @@ void cruise(unsigned capacity, unsigned delay, float bias, double speed, double 
                       .radius = 1,
                       .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
                       .camera_local = local,
-                      .frustum = view_frustum(camera, tan_y * 16 / 9, tan_y),
                       .height_pixels = 1440,
                       .tan_y = tan_y,
                       .lod_bias = bias,
                       .mesh_pixels = 8};
+        set_planes(view, render::view_frustum(camera, tan_y * 16 / 9, tan_y));
         last_view = view;
         tier.update(view, frame, 32 - unsigned(pending.size()));
         for (const auto& g : tier.generate())
@@ -235,16 +243,16 @@ void cruise(unsigned capacity, unsigned delay, float bias, double speed, double 
 
 void invalidation_rejects_late_bounds() {
     constexpr double radius = 2.5 / 15;
-    CameraView camera;
+    render::CameraView camera;
     camera.forward = {0, 0, -1};
     const float tan_y = float(std::tan(camera.vertical_fov / 2));
     TierView view{.body_centre = {0, 0, -.2},
                   .radius = radius,
                   .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
                   .camera_local = {0, 0, .2 / radius},
-                  .frustum = view_frustum(camera, tan_y * 16 / 9, tan_y),
                   .height_pixels = 900,
                   .tan_y = tan_y};
+    set_planes(view, render::view_frustum(camera, tan_y * 16 / 9, tan_y));
     TerrainTier tier;
     tier.update(view, 1);
     assert(!tier.generate().empty());

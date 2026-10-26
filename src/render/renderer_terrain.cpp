@@ -2,8 +2,8 @@
 
 #include "core/log.hpp"
 #include "core/panic_if.hpp"
+#include "planet/tile_sampling.hpp"
 #include "render/frame_calculations.hpp"
-#include "scene/terrain_patch.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -168,12 +168,14 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                   .radius = state.radius,
                   .axes = {axes[0], axes[1], axes[2]},
                   .camera_local = into_body(camera.position - state.position) * (1 / state.radius),
-                  .frustum = view_frustum(camera, tan_x, tan_y),
                   .height_pixels = float(extent.height),
                   .tan_y = tan_y,
                   .activate_pixels = input.terrain.activate_pixels,
                   .lod_bias = input.terrain.lod_bias,
                   .mesh_pixels = input.terrain.mesh_pixels};
+    const geometry::Frustum view_planes = view_frustum(camera, tan_x, tan_y);
+    for (unsigned i = 0; i < 5; i++)
+        view.planes[i] = {.normal = view_planes.planes[i].normal, .distance = view_planes.planes[i].distance};
     unsigned free_rings = 0;
     for (unsigned i = 0; i < tile_ring_count; i++)
         free_rings += ring_available(i);
@@ -290,8 +292,8 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                 std::vector<float> heights(tile_side * tile_side);
                 std::vector<std::uint8_t> albedo(tile_colour_side * tile_colour_side * 4);
                 std::vector<std::uint16_t> slope(tile_colour_side * tile_colour_side * 2);
-                generate_height_tile(*terrain, key, heights);
-                generate_colour_tiles(*terrain, key, albedo, slope, detail);
+                planet::generate_height_tile(*terrain, key, heights);
+                planet::generate_colour_tiles(*terrain, key, albedo, slope, detail);
                 auto* h16 = reinterpret_cast<std::uint16_t*>(dst);
                 for (unsigned i = 0; i < tile_side * tile_side; i++)
                     h16[i] = std::uint16_t(

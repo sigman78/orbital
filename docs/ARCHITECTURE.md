@@ -77,7 +77,7 @@ Between the rocks a half-resolution march through the same density field scatter
 ## Minor planet
 
 The minor planet is a fifteenth of the Earth's radius, on its own orbit, and the one body whose surface is
-made rather than mapped. `scene/terrain.hpp` is the single source of it: `MinorPlanetTerrain(seed)` gives a
+made rather than mapped. `planet/crater_terrain.hpp` is the single source of it: `MinorPlanetTerrain(seed)` gives a
 height above the reference sphere and a linear-light albedo for any direction from the centre, from
 gradient-noise fBm (`core/noise.hpp`), a ridged term and a seeded crater population (a flat floor, a wall
 to a raised rim, ejecta, a central peak on the large ones; the fresh ones dark inside and bright around,
@@ -88,7 +88,7 @@ airless shader (`KIND_MINOR_PLANET`) with the same terrain shadowing and draw ti
 pass gives it a faint blue haze after Pluto's, tripled from the physical optical depth to read.
 
 Close in, the body draws as a CDLOD cube sphere with a shared 32-quad grid, sampled from height,
-albedo and slope tile arrays. `render/terrain_tier.hpp` selects patches using distance ranges derived
+albedo and slope tile arrays. `planet/clod.hpp` selects patches using distance ranges derived
 from the maximum of calibrated parent triangle error (five screen pixels) and a nominal
 eight-pixel grid interval. `--terrain-mesh-pixels` selects 4/8/16 or zero for error-only
 selection; both terms share the morph ranges. See [Detail budget](TERRAIN_DETAIL_BUDGET.md)

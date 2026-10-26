@@ -1,8 +1,8 @@
 #pragma once
+#include "planet/clod_health.hpp"
 #include "render/camera_view.hpp"
 #include "render/gpu_pass.hpp"
 #include "render/settings.hpp"
-#include "render/terrain_health.hpp"
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -96,7 +96,7 @@ struct FrameStats {
         unsigned flat_near = 0, flat_far = 0, graded = 0; // patches the morph grades against ones it switches
         float behind_mean = 0;
         unsigned balanced = 0;
-        TerrainHealth health;
+        planet::TerrainHealth health;
     } terrain;
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
     float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc

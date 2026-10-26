@@ -1,6 +1,6 @@
 #pragma once
 
-namespace space::render {
+namespace planet {
 
 // Coverage observations, not pixel visibility or proof of a cache flush. Counters survive resets.
 struct TerrainHealth {
@@ -16,4 +16,4 @@ struct TerrainHealth {
     }
 };
 
-} // namespace space::render
+} // namespace planet
