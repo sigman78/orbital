@@ -1,6 +1,7 @@
 #include "render/frame_calculations.hpp"
-#include "render/terrain_tier.hpp"
-#include "scene/terrain_patch.hpp"
+#include "planet/clod.hpp"
+#include "planet/patch.hpp"
+#include "planet/tile_sampling.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,7 +14,7 @@
 namespace {
 
 using namespace space;
-using namespace space::render;
+using namespace planet;
 
 constexpr unsigned screen_height = 900;
 constexpr double body_radius = 1.0;    // distances below are expressed in body radii
@@ -29,8 +30,8 @@ struct CameraSetup {
     const char* name;
     Vec3d target;
     Vec3d camera_local;
-    CameraView camera;
-    TierView tier;
+    render::CameraView camera;
+    ClodView tier;
     double tan_y = 0;
 };
 
@@ -45,22 +46,24 @@ CameraSetup camera_setup(const char* name, double azimuth_radians) {
     const Vec3d up_reference = std::abs(forward.y) < .95 ? Vec3d{0, 1, 0} : Vec3d{1, 0, 0};
     const Vec3d right = normalized(cross(forward, up_reference));
     const Vec3d up = normalized(cross(right, forward));
-    CameraView camera{.position = camera_local, .forward = forward, .right = right, .up = up};
+    render::CameraView camera{.position = camera_local, .forward = forward, .right = right, .up = up};
     const double tan_y = std::tan(camera.vertical_fov * .5);
     constexpr double aspect = 16.0 / 9.0;
-    TierView view{.body_centre = camera_local * -body_radius,
+    ClodView view{.body_centre = camera_local * -body_radius,
                   .radius = body_radius,
                   .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
                   .camera_local = camera_local,
-                  .frustum = view_frustum(camera, float(tan_y * aspect), float(tan_y)),
                   .height_pixels = float(screen_height),
                   .tan_y = float(tan_y)};
+    const geometry::Frustum frustum = render::view_frustum(camera, float(tan_y * aspect), float(tan_y));
+    for (unsigned i = 0; i < 5; i++)
+        view.planes[i] = {.normal = frustum.planes[i].normal, .distance = frustum.planes[i].distance};
     return {name, target, camera_local, camera, view, tan_y};
 }
 
-std::uint64_t draw_signature(const TerrainTier& tier) {
+std::uint64_t draw_signature(const Clod& tier) {
     std::uint64_t hash = 14695981039346656037ull;
-    for (const TerrainTier::Draw& draw : tier.draws()) {
+    for (const Clod::Draw& draw : tier.draws()) {
         const std::uint32_t words[] = {draw.key.packed(), draw.quadrants};
         for (std::uint32_t word : words)
             for (unsigned byte = 0; byte < 4; ++byte)
@@ -69,12 +72,12 @@ std::uint64_t draw_signature(const TerrainTier& tier) {
     return hash;
 }
 
-bool converge_tier(TerrainTier& tier, const TierView& view, const MinorPlanetTerrain& terrain) {
+bool converge_tier(Clod& tier, const ClodView& view, const MinorPlanetTerrain& terrain) {
     unsigned unchanged = 0;
     std::uint64_t previous = 0;
     for (unsigned frame = 1; frame <= 20000; ++frame) {
         tier.update(view, frame);
-        for (const TerrainTier::Generation& generation : tier.generate()) {
+        for (const Clod::Generation& generation : tier.generate()) {
             std::vector<float> heights(tile_side * tile_side);
             generate_height_tile(terrain, generation.key, heights);
             if (!tier.mark_resident(generation.slot, generation.key, generation.stamp, height_tile_range(heights)))
@@ -119,7 +122,7 @@ struct Samples {
     unsigned deepest = 0;
 };
 
-void sample_draws(const CameraSetup& camera, const TerrainTier& tier, const MinorPlanetTerrain& terrain,
+void sample_draws(const CameraSetup& camera, const Clod& tier, const MinorPlanetTerrain& terrain,
                   Samples& samples) {
     constexpr unsigned mesh_quads = tile_side - 1;
     constexpr unsigned quadrant_quads = mesh_quads / 2;
@@ -127,7 +130,7 @@ void sample_draws(const CameraSetup& camera, const TerrainTier& tier, const Mino
     constexpr double material_step = 1.0 / (tile_colour_side - 1);
     constexpr unsigned triangles_per_quadrant = (quadrant_quads * quadrant_quads + 2 * quadrant_quads) * 2;
 
-    for (const TerrainTier::Draw& draw : tier.draws()) {
+    for (const Clod::Draw& draw : tier.draws()) {
         samples.patch_draws++;
         samples.deepest = std::max(samples.deepest, unsigned(draw.key.level));
         const double cell_size = 2.0 / double(1u << draw.key.level);
@@ -195,7 +198,7 @@ bool emit_row(const CameraSetup& base, float bias, float mesh_pixels, const Mino
     CameraSetup camera = base;
     camera.tier.lod_bias = bias;
     camera.tier.mesh_pixels = mesh_pixels;
-    TerrainTier tier(2048);
+    Clod tier(ClodConfig{.shape = MinorPlanetTerrain::shape, .levels = MinorPlanetTerrain::levels, .cache_capacity = 2048});
     if (!converge_tier(tier, camera.tier, terrain)) {
         std::fprintf(stderr, "terrain_footprint: tier did not converge for %s bias %.0f mesh %.0f\n", camera.name, bias,
                      mesh_pixels);

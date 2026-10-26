@@ -1,4 +1,4 @@
-#include "scene/terrain.hpp"
+#include "planet/crater_terrain.hpp"
 
 #include "core/noise.hpp"
 #include "core/parallel.hpp"
@@ -8,7 +8,9 @@
 #include <optional>
 #include <span>
 
-namespace space {
+namespace planet {
+
+using namespace space; // the host's math and noise vocabulary
 
 namespace {
 
@@ -292,4 +294,4 @@ TerrainMaps bake_terrain_maps(const MinorPlanetTerrain& terrain, unsigned width,
     return maps;
 }
 
-} // namespace space
+} // namespace planet

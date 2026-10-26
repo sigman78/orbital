@@ -28,7 +28,7 @@ public:
             log::error("cannot write benchmark {}", path.string());
             return;
         }
-        buffer_ = "frame,frame_ms,cpu_submit_and_wait_ms,cpu_prepare_ms";
+        buffer_ = "frame,frame_ms,cpu_submit_and_wait_ms,cpu_prepare_ms,cpu_terrain_prepare_ms";
         for (const auto& pass : render::gpu_pass_info)
             std::format_to(std::back_inserter(buffer_), ",{}", pass.column);
         for (const auto& column : terrain_columns)
@@ -45,7 +45,8 @@ public:
     void record(float frame_ms, const render::FrameStats& frame) {
         if (!file_)
             return;
-        std::format_to(std::back_inserter(buffer_), "{},{},{},{}", rows_++, frame_ms, frame.draw_ms, frame.prepare_ms);
+        std::format_to(std::back_inserter(buffer_), "{},{},{},{},{}", rows_++, frame_ms, frame.draw_ms,
+                       frame.prepare_ms, frame.terrain.prepare_ms);
         for (const float ms : frame.gpu.ms)
             std::format_to(std::back_inserter(buffer_), ",{}", ms);
         for (const auto& column : terrain_columns)
@@ -100,21 +101,21 @@ private:
     };
     struct HealthColumn {
         const char* name;
-        unsigned render::TerrainHealth::* value;
+        unsigned planet::ClodHealth::* value;
     };
     static constexpr HealthColumn health_columns[] = {
-        {"terrain_rollback_quadrants", &render::TerrainHealth::rollback_quadrants},
-        {"terrain_rollback_levels", &render::TerrainHealth::rollback_levels},
-        {"terrain_selection_rollbacks", &render::TerrainHealth::selection_rollbacks},
-        {"terrain_balance_rollbacks", &render::TerrainHealth::balance_rollbacks},
-        {"terrain_missing_previous", &render::TerrainHealth::missing_previous},
-        {"terrain_rollback_events", &render::TerrainHealth::rollback_events},
-        {"terrain_last_rollback_frame", &render::TerrainHealth::last_frame},
-        {"terrain_last_rollback_key", &render::TerrainHealth::last_key},
-        {"terrain_invalidations", &render::TerrainHealth::invalidations},
-        {"terrain_timeouts", &render::TerrainHealth::timeouts},
-        {"terrain_releases", &render::TerrainHealth::releases},
-        {"terrain_stale_completions", &render::TerrainHealth::stale_completions},
+        {"terrain_rollback_quadrants", &planet::ClodHealth::rollback_quadrants},
+        {"terrain_rollback_levels", &planet::ClodHealth::rollback_levels},
+        {"terrain_selection_rollbacks", &planet::ClodHealth::selection_rollbacks},
+        {"terrain_balance_rollbacks", &planet::ClodHealth::balance_rollbacks},
+        {"terrain_missing_previous", &planet::ClodHealth::missing_previous},
+        {"terrain_rollback_events", &planet::ClodHealth::rollback_events},
+        {"terrain_last_rollback_frame", &planet::ClodHealth::last_frame},
+        {"terrain_last_rollback_key", &planet::ClodHealth::last_key},
+        {"terrain_invalidations", &planet::ClodHealth::invalidations},
+        {"terrain_timeouts", &planet::ClodHealth::timeouts},
+        {"terrain_releases", &planet::ClodHealth::releases},
+        {"terrain_stale_completions", &planet::ClodHealth::stale_completions},
     };
     void flush() {
         if (file_ && !buffer_.empty()) {

@@ -51,7 +51,7 @@ only delays a request to the next frame.
    their material ancestors need slots, so the two have no reason to share a number. They did once, and
    capping the tree at `slot_count - 64` starved splits long before memory justified it.
 9. `patch_level_max` is 11: cells of 90 degrees over 2048, quads of 24 urad, about 10 m on this body.
-   Every field carrying a cell index is guarded by a `static_assert` in `terrain_patch.hpp`, because
+   Every field carrying a cell index is guarded by a `static_assert` in `planet/patch.hpp`, because
    overflowing one truncates silently. 12 is the ceiling `PatchKey::packed`'s 12-bit x and y allow.
 
 ## Design
@@ -124,7 +124,7 @@ carry false motion vectors into TAA.
 ### Selection
 
 `level_error[level]` estimates error in radii against the actual 3D triangles. `patch_error` samples
-the diagonal midpoint and both triangle centroids, including curvature. `terrain_tests --calibrate`
+the diagonal midpoint and both triangle centroids, including curvature. `planet_gen_tests --calibrate`
 samples 64 patches per level (1024 at levels 9–12), then hill-climbs around the worst patch. This is
 not a certified bound over all terrain, seeds or intermediate morphs.
 
@@ -348,9 +348,12 @@ not accurate large shapes, and shader detail costs no tiles, no slots and no CPU
 - Constants duplicated between C++ and the shaders: the Everitt constant, the face tables, `tile_side`.
 - `draw_body` leaves `ORBITAL_ROOT_PATCHES` and `root.patches` on the caller's `Root`; harmless only
   because the minor planet is drawn last.
-- Acceptance never read off the panel: main-thread time in `prepare_terrain_tier` under 0.5 ms with 32
-  jobs in flight (the original target was one draw call; active quadrants now use two per pass). Selection walks a larger tree for a deeper cap, so
-  this is the number to watch: measured in isolation it roughly doubled at bias 2.
+- Acceptance missed: main-thread time in `prepare_terrain_tier` under 0.5 ms with 32 jobs in flight
+  (the original target was one draw call; active quadrants now use two per pass). First read
+  2026-10-25 through the new `cpu_terrain_prepare_ms` benchmark column and the panel's Queue row:
+  0.95 ms median converged at bookmark 9, 1600x900, 0.26 ms while tiles are still loading. Selection
+  walks a larger tree for a deeper cap, so this is the number to watch: measured in isolation it
+  roughly doubled at bias 2.
 
 ## Later, out of scope
 

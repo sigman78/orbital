@@ -10,10 +10,10 @@
 #include "assets/image.hpp"
 #include "core/log.hpp"
 #include "core/math.hpp"
+#include "planet/crater_terrain.hpp"
 #include "platform/process.hpp"
 #include "platform/window.hpp"
 #include "render/renderer.hpp"
-#include "scene/terrain.hpp"
 
 #include <algorithm>
 #include <array>
@@ -161,7 +161,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     if (const auto body = Camera::bookmark_body(options.bookmark >= 0 ? std::size_t(options.bookmark) : 0);
         options.back != 0 && body < app.bodies.size()) {
         const Vec3d centre = app.bodies[body].position, away = normalized(app.camera.position - centre);
-        const double floor = app.bodies[body].radius * (1 + double(MinorPlanetTerrain::height_max) + .002);
+        const double floor = app.bodies[body].radius * (1 + double(planet::MinorPlanetTerrain::height_max) + .002);
         const double distance = std::max(length(app.camera.position - centre) + options.back, floor);
         app.camera.look_at(centre + away * distance, centre);
         free_camera(app);
@@ -417,7 +417,21 @@ int run(const Options& options) {
         log::info("Display: HDR on, {:.0f} to {:.0f} nits, SDR white {:.0f} nits", display.min_nits, display.max_nits,
                   display.sdr_white_nits);
     auto hud = make_hud();
-    render::Renderer renderer(window->native_handle(), system, directory, hud.view(), {.belt_count = options.rocks});
+    // Stores are too large to mirror beside the executable like the materials, so a relative path
+    // is looked for from the executable's directory up to the source tree.
+    const std::filesystem::path planet_store = [&] {
+        if (options.planet_store.empty() || options.planet_store.is_absolute())
+            return options.planet_store;
+        std::filesystem::path base = directory;
+        for (unsigned up = 0; up < 4; up++, base = base.parent_path()) {
+            std::error_code error;
+            if (std::filesystem::exists(base / options.planet_store, error))
+                return base / options.planet_store;
+        }
+        return directory / options.planet_store;
+    }();
+    render::Renderer renderer(window->native_handle(), system, directory, hud.view(),
+                              {.belt_count = options.rocks, .planet_store = planet_store});
     hud = {}; // The renderer has copied/uploaded the pixels.
     Ui ui(*window);
     const auto atlas = ui.font_atlas();

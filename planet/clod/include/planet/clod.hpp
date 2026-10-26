@@ -1,7 +1,9 @@
 #pragma once
-#include "render/terrain_health.hpp"
-#include "scene/geometry.hpp"
-#include "scene/terrain_patch.hpp"
+#include "planet/allocator.hpp"
+#include "planet/body.hpp"
+#include "planet/clod_health.hpp"
+#include "planet/patch.hpp"
+#include "planet/types.hpp"
 
 #include <algorithm>
 #include <array>
@@ -11,32 +13,45 @@
 #include <unordered_map>
 #include <vector>
 
-namespace space::render {
+namespace planet {
 
 // Default near-tier activation threshold in cull_bodies' units; overridable per frame.
-inline constexpr float TerrainTier_activate_default = 1200;
+inline constexpr float clod_activate_default = 1200;
+
+// A world-space clipping plane: dot(normal, p) + distance >= 0 is inside.
+struct ViewPlane {
+    Vec3f normal;
+    float distance = 0;
+};
 
 // The tier's view of one frame: the body relative to the camera, its spin, and
 // the projection, in the units cull_bodies uses.
-struct TierView {
-    Vec3d body_centre;  // camera-relative, units
-    double radius = 0;  // the body's, units
-    Vec3d axes[3];      // the body's local x, y and z in world
-    Vec3d camera_local; // the camera in the body's local frame, radii
-    geometry::Frustum frustum;
+struct ClodView {
+    Vec3d body_centre;   // camera-relative, units
+    double radius = 0;   // the body's, units
+    Vec3d axes[3];       // the body's local x, y and z in world
+    Vec3d camera_local;  // the camera in the body's local frame, radii
+    ViewPlane planes[5]; // near and the four sides; the far plane is never tested
     float height_pixels = 0, tan_y = 0;
-    float activate_pixels = TerrainTier_activate_default; // the switch from the sphere levels
-    float lod_bias = 0;                                   // every level's range times 2^bias
+    float activate_pixels = clod_activate_default; // the switch from the sphere levels
+    float lod_bias = 0;                            // every level's range times 2^bias
     // Nominal projected grid interval, in actual pixels; 0 retains error-only selection.
     float mesh_pixels = 0;
 };
 
+// What a Clod is built from: the body's shell and level tables come from whatever supplies
+// its tiles, the cache capacity from the arrays the host allocated for them.
+struct ClodConfig {
+    BodyShape shape;
+    LevelTable levels;
+    unsigned cache_capacity = 1024;
+    const Allocator* allocator = nullptr; // null: default_allocator()
+};
+
 // Distance-based quadtree selection with parent fallback and a generation-checked tile cache.
-class TerrainTier {
+class Clod {
 public:
-    static constexpr unsigned slot_count = 1024; // CPU regression baseline; renderer passes its own capacity
-    // CPU regressions vary capacity independently of the renderer's GPU arrays.
-    // Keep absence independent of either capacity so callers cannot mistake a valid extra slot
+    // Keep absence independent of the capacity so callers cannot mistake a valid extra slot
     // for no tile. The renderer converts absence to its shader's parent-layer sentinel.
     static constexpr unsigned no_slot = std::numeric_limits<unsigned>::max();
     static constexpr unsigned cache_age_buckets = 8;
@@ -50,31 +65,12 @@ public:
     // so the whole cache is covered every capacity / sweep_window frames.
     static constexpr unsigned pending_timeout = 240;
     static constexpr unsigned sweep_window = 64;
-    // Culling a patch against its own tile would drop relief only its descendants reveal, so
-    // the interval is padded by how far they reach outside it. `terrain_tests --calibrate`
-    // measures one step, parent to child; the pad must cover the **whole subtree**, so these
-    // are the running sums of those steps from each level down, at twice for headroom. One
-    // step is not enough: at level 6 it is 0.000057 against a subtree's 0.000128, and the gap
-    // culls patches whose children stand higher than they do.
-    static constexpr float descendant_relief[] = {
-        .0286f, .0136f, .0061f, .0036f, .0014f, .00056f, .00026f, .00015f, .000055f, .000016f, .000004f, 2e-6f, 2e-6f,
-    };
-    static constexpr float relief_margin(unsigned level) {
-        return level < std::size(descendant_relief) ? descendant_relief[level] : 0.f;
-    }
     static constexpr unsigned generate_per_frame = 8;
     // Sizes are in cull_bodies' units: a projected radius over the half height, twice the pixels.
     static constexpr float error_pixels = 10; // 5 screen pixels: preserves the former default workload
     static constexpr float hysteresis = .8f;  // the fraction of either the way back
     // Local arrival transition; it never changes another patch's distance ranges.
     static constexpr unsigned recovery_frames = 15;
-    // Seed-1007 calibration against 3D triangles, 32 quads, Everitt warp
-    // (`terrain_tests --calibrate`): uniform samples followed by a hill climb.
-    // These are estimates, not certified bounds on every patch or intermediate morph.
-    static constexpr float level_error[] = {
-        .0304741f,   .0192836f, .00591285f,  .00245085f,  .00100089f,  .000457055f, .000173189f,
-        8.54412e-5f, 4.493e-5f, 2.27982e-5f, 1.25439e-5f, 4.57292e-6f, 3.38214e-6f,
-    };
 
     struct Generation {
         PatchKey key;
@@ -114,7 +110,7 @@ public:
     // The chain of decisions that put a patch in the draw list, root first. Off the hot path: it
     // recomputes what visibility() weighed for a key already chosen, so call it after update()
     // and within the frame whose planes are loaded.
-    void explain(PatchKey key, const TierView& view, std::vector<Step>& steps) const;
+    void explain(PatchKey key, const ClodView& view, std::vector<Step>& steps) const;
 
     // Tree and cache health for the same debugging. `reachable` walks from the six roots, so a
     // gap against `allocated` is a subtree no visit can reach again; `resident_undrawn` is tiles
@@ -163,10 +159,10 @@ public:
         unsigned balanced = 0;
     };
     const Pressure& pressure() const { return pressure_; }
-    const TerrainHealth& health() const { return health_; }
+    const ClodHealth& health() const { return health_; }
 
-    explicit TerrainTier(unsigned cache_capacity = slot_count) : capacity_(std::max(1u, cache_capacity)) {}
-    void update(const TierView& view, unsigned frame, unsigned budget = generate_per_frame);
+    explicit Clod(const ClodConfig& config);
+    void update(const ClodView& view, unsigned frame, unsigned budget = generate_per_frame);
     void disable(); // the switch off: the tree collapses, the cache stays
     // Discard cached tiles; generation stamps reject results still in flight.
     void invalidate();
@@ -174,13 +170,16 @@ public:
     bool active() const { return active_; }
     std::span<const Draw> draws() const { return draws_; } // this frame's patches
     std::span<const Generation> generate() const { return generate_; }
-    static constexpr Range<float> full_height_range{MinorPlanetTerrain::height_min, MinorPlanetTerrain::height_max};
-    // The sphere the horizon test hides patches behind: the shell's floor, never the reference
-    // surface, since ground below that surface sets the horizon further out. visibility() has
-    // what rests on the choice; the truth test reads it to place its cameras.
-    static constexpr double horizon_occluder = 1 + double(MinorPlanetTerrain::height_min);
-    // Accept uploaded contents and height bounds only for the current slot assignment.
-    bool mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights = full_height_range);
+    const BodyShape& shape() const { return shape_; }
+    const LevelTable& levels() const { return levels_; }
+    // The sphere the horizon test hides patches behind; visibility() has what rests on the
+    // choice, and the truth test reads it to place its cameras.
+    double occluder() const { return shape_.occluder(); }
+    // The pad culling a patch against its own tile needs for the relief its descendants reveal.
+    float relief_margin(unsigned level) const { return levels_.relief_at(level); }
+    // Accept uploaded contents and height bounds only for the current slot assignment; pass the
+    // shell when the tile's own range is unknown.
+    bool mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights);
     // Hand back a slot from generate() the caller could not serve, so the patch is asked for
     // again. The stamp rejects a slot already reassigned, as mark_resident does.
     void release(unsigned slot, PatchKey key, std::uint32_t stamp);
@@ -200,10 +199,8 @@ public:
     unsigned pending() const;                   // slots handed out whose tile has not arrived
     unsigned pending_age() const;               // frames the oldest of those has waited, 0 when there are none
     // Nearest distance to the spherical cell over the supplied height interval, excluding skirts.
-    static double nearest_distance(Vec3d camera_local, const PatchBounds& bounds,
-                                   Range<float> heights = full_height_range);
-    static double farthest_distance(Vec3d camera_local, const PatchBounds& bounds,
-                                    Range<float> heights = full_height_range);
+    static double nearest_distance(Vec3d camera_local, const PatchBounds& bounds, Range<float> heights);
+    static double farthest_distance(Vec3d camera_local, const PatchBounds& bounds, Range<float> heights);
     // The fractional level the screen error asks for at a distance.
     double level_at(double distance) const;
     unsigned resident() const;
@@ -217,7 +214,7 @@ private:
         std::uint32_t children = 0; // index of the first of four, 0 none (the roots are never children)
         // Bounds are knowledge about the terrain, not ownership of a GPU tile. Retain them
         // after eviction so a rejected tile does not become eligible just by losing its slot.
-        Range<float> heights = full_height_range;
+        Range<float> heights; // the shell until measured
         bool measured = false;
     };
     struct Slot {
@@ -228,7 +225,7 @@ private:
         unsigned assigned_frame = 0; // when the generation went out; `used` tracks visits instead
         // Distinguishes repeated assignments of the same key and slot, including detail changes.
         std::uint32_t stamp = 0;
-        Range<float> heights = full_height_range;
+        Range<float> heights; // the shell until the tile's own range arrives
         bool resident = false;
     };
     struct Request {
@@ -253,10 +250,10 @@ private:
     // Visibility of geometry actually submitted: one tile's own heights, without padding
     // for descendants that will not be drawn in its place.
     bool drawn_visible(const PatchBounds& bounds, Range<float> heights) const;
-    Visibility visibility(const Node& node, const TierView& view) const;
-    void prepare(std::uint32_t index, const TierView& view, const Visibility& seen);
-    void visit(std::uint32_t index, const TierView& view, const Visibility& seen);
-    void stitch(const TierView& view);
+    Visibility visibility(const Node& node, const ClodView& view) const;
+    void prepare(std::uint32_t index, const ClodView& view, const Visibility& seen);
+    void visit(std::uint32_t index, const ClodView& view, const Visibility& seen);
+    void stitch(const ClodView& view);
     void cull_draw_quadrants();
     void monitor_coverage(std::span<const Draw> before_balance);
     void collapse(Node& node);
@@ -276,21 +273,24 @@ private:
     std::vector<Draw> previous_draws_;
     std::vector<Request> requests_;
     std::vector<Generation> generate_;
-    float range_[std::size(level_error) + 1] = {};
+    float range_[LevelTable::count + 1] = {};
     LocalPlane planes_[5] = {}; // near and the four sides; the frustum's sixth is the far plane, not tested
     // The camera in the body's frame, resolved once an update: every node tested the horizon
     // against it, and every one of them was taking the same square root to do so.
     Vec3d eye_{0, 0, 1};
     double camera_distance_ = 0;
+    BodyShape shape_;
+    LevelTable levels_;
+    const Allocator* allocator_; // owns nothing yet: the containers above move onto it in phase 2
     unsigned frame_ = 0;
     unsigned update_ = 0;
-    unsigned capacity_ = slot_count;
+    unsigned capacity_;
     unsigned sweep_cursor_ = 0; // where the pending-slot reclaim sweep resumes
     std::uint32_t stamp_ = 0;   // the last generation stamp issued, never reused
     std::uint64_t eviction_total_ = 0, warm_eviction_total_ = 0;
     Pressure pressure_;
-    TerrainHealth health_;
+    ClodHealth health_;
     bool active_ = false, wanted_ = false;
 };
 
-} // namespace space::render
+} // namespace planet

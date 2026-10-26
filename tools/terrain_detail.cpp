@@ -1,12 +1,14 @@
 #include "core/file.hpp"
-#include "scene/terrain.hpp"
-#include "scene/terrain_patch.hpp"
+#include "planet/crater_terrain.hpp"
+#include "planet/patch.hpp"
+#include "planet/tile_sampling.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
 #include <string_view>
 #include <vector>
+using namespace planet;
 using namespace space;
 bool image(const char* path) {
     constexpr unsigned side = 512, border = side + 2;

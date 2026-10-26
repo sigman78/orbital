@@ -6,8 +6,15 @@
 #include "assets/image.hpp"
 #include "assets/texture.hpp"
 #include "belt/beltblur_shared.h"
-#include "core/parallel.hpp"
 #include "core/types.hpp"
+#include "planet/baked_provider.hpp"
+#include "planet/clod.hpp"
+#include "planet/crater_terrain.hpp"
+#include "planet/mixed_provider.hpp"
+#include "planet/patch.hpp"
+#include "planet/procedural_provider.hpp"
+#include "planet/streamer.hpp"
+#include "planet/tile_store.hpp"
 #include "post/bloom_shared.h"
 #include "render/gpu_commands.hpp"
 #include "render/gpu_image.hpp"
@@ -16,12 +23,9 @@
 #include "render/gpu_timing.hpp"
 #include "render/gpu_types.hpp"
 #include "render/showcase.hpp"
-#include "render/terrain_tier.hpp"
 #include "scene/belt_motion.hpp"
 #include "scene/geometry.hpp"
 #include "scene/system.hpp"
-#include "scene/terrain.hpp"
-#include "scene/terrain_patch.hpp"
 
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
 #include <array>
@@ -34,6 +38,34 @@
 #include <vector>
 
 namespace space::render {
+
+using planet::bake_terrain_maps;
+using planet::BakedProvider;
+using planet::Clod;
+using planet::ClodConfig;
+using planet::ClodView;
+using planet::cube_coordinates;
+using planet::CubeCoord;
+using planet::MinorPlanetTerrain;
+using planet::MixedProvider;
+using planet::patch_quadrant_skirt_grid;
+using planet::patch_quadrant_surface_grid;
+using planet::patch_skirt_drop;
+using planet::PatchGrid;
+using planet::PatchKey;
+using planet::PatchVertex;
+using planet::ProceduralProvider;
+using planet::TerrainMaps;
+using planet::tile_colour_ratio;
+using planet::tile_colour_side;
+using planet::tile_side;
+using planet::tile_slope_scale;
+using planet::TileProvider;
+using planet::TileRequest;
+using planet::TileSink;
+using planet::TileStaging;
+using planet::TileStore;
+using planet::TileStreamer;
 
 // --- Fixed layout shared with the shaders -------------------------------------
 
@@ -383,7 +415,9 @@ struct Renderer::Impl {
     BeltMotion belt_motion;     // the rocks' seeds and states, stepped on the CPU
     // Near-terrain selection, tile arrays, and upload staging (renderer_terrain.cpp).
     std::optional<MinorPlanetTerrain> minor_planet_terrain;
-    TerrainTier terrain_tier{terrain_cache_slots};
+    Clod terrain_tier{ClodConfig{.shape = MinorPlanetTerrain::shape,
+                                 .levels = MinorPlanetTerrain::levels,
+                                 .cache_capacity = terrain_cache_slots}};
     GpuImage tile_height, tile_albedo, tile_slope; // the three tile arrays, terrain_cache_slots layers each
     float tile_detail = 1;                         // TerrainSettings::detail the resident tiles were built with
     std::vector<PatchView> patch_views;            // the draw list as the panel's patch map wants it
@@ -396,14 +430,6 @@ struct Renderer::Impl {
     };
     std::vector<PatchCopy> patch_copies;
     std::uint64_t patch_records_bytes = 0;
-    struct TileResult {
-        PatchKey key;
-        unsigned slot;
-        unsigned ring;
-        std::uint32_t stamp; // the tier's name for this generation of this slot
-        Range<float> heights;
-        float ms; // the generation's time on its worker
-    };
     // Retain completed tiles until upload recording, including across aborted frames.
     struct TileUpload {
         PatchKey key;
@@ -412,7 +438,6 @@ struct Renderer::Impl {
         Range<float> heights;
     };
     static constexpr unsigned tile_ring_count = 32;
-    std::unique_ptr<WorkerPool<TileResult>> tile_pool;
     std::vector<TileUpload> tile_uploads;
     // Keep worker/upload ownership explicit; frame numbers only guard GPU reuse.
     enum class RingState : std::uint8_t { free, worker, upload };
@@ -421,8 +446,25 @@ struct Renderer::Impl {
     bool ring_available(unsigned i) const {
         return ring_state[i] == RingState::free && (!ring_used_frame[i] || frame_index >= ring_used_frame[i] + 2);
     }
-    unsigned tile_workers = 0;
-    unsigned ring_head = 0;
+    // Hands the streamer staging rings and takes its finished tiles back; host thread only.
+    struct TileRings final : TileSink {
+        Impl& owner;
+        unsigned head = 0; // where the ring search resumes
+        explicit TileRings(Impl& owner) : owner(owner) {}
+        bool acquire(unsigned bytes, TileStaging& staging) override;
+        void complete(const TileRequest& request, const TileStaging& staging, Range<float> heights,
+                      float milliseconds) override;
+        void abandon(const TileStaging& staging) override;
+    };
+    TileRings tile_sink{*this};
+    std::optional<ProceduralProvider> tile_provider;
+    // A cooked store serves the coarse levels when its body and layout match (create_terrain_tier).
+    std::filesystem::path planet_store;
+    TileStore tile_store;
+    std::optional<BakedProvider> baked_provider;
+    std::optional<MixedProvider> mixed_provider;
+    unsigned baked_levels = 0;
+    std::optional<TileStreamer> tile_streamer;
     // The staging heap has two slots, written by frame parity before the wait for the
     // previous frame, which may still be copying the other; the version each holds
     // says whether a standing state must be written again into a stale slot.

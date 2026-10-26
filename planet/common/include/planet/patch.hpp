@@ -1,12 +1,11 @@
 #pragma once
-#include "core/math.hpp"
-#include "scene/terrain.hpp"
+#include "planet/types.hpp"
 
 #include <cstdint>
 #include <span>
 #include <vector>
 
-namespace space {
+namespace planet {
 
 // Cube-sphere quadtree patches in body-local radii, with skirts for seam fallback.
 
@@ -54,8 +53,17 @@ constexpr float tile_slope_scale = 3.f;
 // Radial skirt drop, also included in culling bounds.
 constexpr float patch_skirt_drop = .002f;
 
+// The cell's span of the face square.
+struct PatchCell {
+    double s0, t0, size;
+};
+PatchCell patch_cell(PatchKey key);
+
 // Everitt cube mapping: s/t in [-1,1], warp tan(0.8687*s)/tan(0.8687).
 Vec3d cube_direction(unsigned face, double s, double t);
+// The same mapping continued past a face's edge onto the neighbouring face, so stencils that
+// straddle a cube edge sample both faces on one grid.
+Vec3d cube_ring_direction(unsigned face, double s, double t);
 
 struct CubeCoord {
     unsigned face;
@@ -97,15 +105,8 @@ double patch_direction_support(const PatchBounds& bounds, Vec3d normal);
 // ahead of it only rejected what it rejects too, and cost more than it saved.
 double patch_cell_support(const PatchBounds& bounds, Vec3d normal, Range<float> heights);
 
-// Sampled 3D error against the grid's two triangles per quad, in radii (not a proven bound).
-float patch_error(const MinorPlanetTerrain& terrain, PatchKey key);
-
-// Outputs: tile_side squared heights; colour-side RGBA8 albedo and RG16_UNORM tangent slopes.
-void generate_height_tile(const MinorPlanetTerrain& terrain, PatchKey key, std::span<float> out);
 // Bounds bilinear tile heights including quantization, but not unsampled descendants.
 Range<float> height_tile_range(std::span<const float> heights);
-void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std::span<std::uint8_t> albedo,
-                           std::span<std::uint16_t> slope, float detail = 1);
 
 // One vertex of the shared patch grid. It is not a mesh vertex: it carries no position of its
 // own, only where it sits on the tile's lattice and which quadrant owns it, and the shaders
@@ -130,4 +131,4 @@ PatchGrid patch_grid();
 PatchGrid patch_quadrant_surface_grid();
 PatchGrid patch_quadrant_skirt_grid();
 
-} // namespace space
+} // namespace planet

@@ -146,6 +146,8 @@ bool apply_arguments(Options& options, std::span<const std::string_view> args) {
             ok = parse_path(value(), options.capture);
         else if (arg == "--benchmark")
             ok = parse_path(value(), options.benchmark);
+        else if (arg == "--planet-store")
+            ok = parse_path(value(), options.planet_store);
         else if (arg == "--shots")
             ok = parse_path(value(), options.shots);
         else if (arg == "--report")

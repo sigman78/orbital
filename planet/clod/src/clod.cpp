@@ -1,4 +1,4 @@
-#include "render/terrain_tier.hpp"
+#include "planet/clod.hpp"
 #include "core/panic.hpp"
 
 #include <algorithm>
@@ -6,32 +6,41 @@
 #include <limits>
 #include <unordered_set>
 
-namespace space::render {
+namespace planet {
+
+using namespace space; // the host's math and noise vocabulary
 
 namespace {
 
-constexpr unsigned no_slot = TerrainTier::no_slot;
+constexpr unsigned no_slot = Clod::no_slot;
 
-Vec3d to_world(const TierView& view, Vec3d local) {
+Vec3d to_world(const ClodView& view, Vec3d local) {
     return view.axes[0] * local.x + view.axes[1] * local.y + view.axes[2] * local.z;
 }
 
 } // namespace
 
-void TerrainTier::ensure_roots() {
+Clod::Clod(const ClodConfig& config)
+    : shape_(config.shape), levels_(config.levels), allocator_(allocator_or_default(config.allocator)),
+      capacity_(std::max(1u, config.cache_capacity)) {
+    // A zero table would collapse every split range; a source must have measured its levels.
+    ORBITAL_ASSERT(levels_.error[0] > 0 && shape_.heights.max > shape_.heights.min);
+}
+
+void Clod::ensure_roots() {
     if (!nodes_.empty())
         return;
     nodes_.reserve(4096);
     for (unsigned face = 0; face < 6; face++) {
         const PatchKey key{std::uint8_t(face), 0, 0, 0};
-        nodes_.push_back({.key = key, .bounds = patch_bounds(key)});
+        nodes_.push_back({.key = key, .bounds = patch_bounds(key), .heights = shape_.heights});
     }
-    slots_.resize(capacity_);
+    slots_.resize(capacity_, Slot{.heights = shape_.heights});
     for (unsigned slot = capacity_; slot-- > 0;)
         free_slots_.push_back(slot);
 }
 
-TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView& view) const {
+Clod::Visibility Clod::visibility(const Node& node, const ClodView& view) const {
     const PatchBounds& b = node.bounds;
     const Range<float> reach = reach_of(node.key);
     // Past the horizon, by the same support: a point p at radius r is on the near side of an
@@ -44,15 +53,15 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
     // and the plane always cuts inside it. What keeps this sound is slack of the other kind --
     // the occluder is the shell's floor, 0.95, while ground near a limb stands near 1.0 -- and
     // today that outweighs the error for the relief this body has. It is an accident of the
-    // constants, not a guarantee: `terrain_tier_tests --truth` is what checks it, and taller
-    // relief, a higher floor or a smaller descendant_relief would each have to be put through
+    // constants, not a guarantee: `planet_clod_tests --truth` is what checks it, and taller
+    // relief, a higher floor or a smaller level relief would each have to be put through
     // it. Do not raise the occluder while the plane formula stands. The known fallback is the
     // cone test over the lowest ground within acos(R / d), at 10 to 40 percent more patches.
     const double d = camera_distance_; // both taken once a frame: every node would redo the root
     // The test is valid from anywhere outside the occluder, which is anywhere above ground.
     // Comparing with the reference surface instead switched the horizon off over every lowland,
     // half the body, and left the frustum alone to keep whatever it crossed on the far side.
-    constexpr double occluder = horizon_occluder;
+    const double occluder = this->occluder();
     if (d > occluder && patch_cell_support(b, eye_, reach) * d < occluder * occluder)
         return {};
     // The patch is a cell, not a ball and not the cap around it. A cap pre-test stood here to
@@ -69,7 +78,7 @@ TerrainTier::Visibility TerrainTier::visibility(const Node& node, const TierView
     return {.visible = true, .pixels = float(b.angular_size) * scale, .distance = near};
 }
 
-std::uint32_t TerrainTier::allocate_children(const Node& parent) {
+std::uint32_t Clod::allocate_children(const Node& parent) {
     const PatchKey key = parent.key; // the vector may grow below
     std::uint32_t first;
     if (!free_blocks_.empty()) {
@@ -81,7 +90,7 @@ std::uint32_t TerrainTier::allocate_children(const Node& parent) {
     }
     for (unsigned i = 0; i < 4; i++) {
         const PatchKey child = key.child(i);
-        nodes_[first + i] = {.key = child, .bounds = patch_bounds(child)};
+        nodes_[first + i] = {.key = child, .bounds = patch_bounds(child), .heights = shape_.heights};
         if (const unsigned slot = resident_slot(child); slot != no_slot) {
             nodes_[first + i].heights = slots_[slot].heights;
             nodes_[first + i].measured = true;
@@ -90,7 +99,7 @@ std::uint32_t TerrainTier::allocate_children(const Node& parent) {
     return first;
 }
 
-void TerrainTier::collapse(Node& node) {
+void Clod::collapse(Node& node) {
     if (!node.children)
         return;
     for (unsigned i = 0; i < 4; i++)
@@ -99,12 +108,12 @@ void TerrainTier::collapse(Node& node) {
     node.children = 0;
 }
 
-unsigned TerrainTier::slot_of(PatchKey key) const {
+unsigned Clod::slot_of(PatchKey key) const {
     const auto found = slots_by_key_.find(key.packed());
     return found == slots_by_key_.end() ? no_slot : found->second;
 }
 
-double TerrainTier::nearest_distance(Vec3d camera_local, const PatchBounds& bounds, Range<float> heights) {
+double Clod::nearest_distance(Vec3d camera_local, const PatchBounds& bounds, Range<float> heights) {
     const double len = length(camera_local);
     const double inner = 1 + double(heights.min);
     const double outer = 1 + double(heights.max);
@@ -125,7 +134,7 @@ double TerrainTier::nearest_distance(Vec3d camera_local, const PatchBounds& boun
 }
 
 // Interpolate the distance ranges in log space to estimate the desired level.
-double TerrainTier::level_at(double distance) const {
+double Clod::level_at(double distance) const {
     if (distance >= double(range_[1]))
         return 0;
     for (std::size_t i = 2; i < std::size(range_); i++)
@@ -134,10 +143,10 @@ double TerrainTier::level_at(double distance) const {
                              std::log(double(range_[i]) / double(range_[i - 1]));
             return double(i - 2) + t;
         }
-    return double(std::size(level_error) - 1);
+    return double(LevelTable::count - 1);
 }
 
-double TerrainTier::farthest_distance(Vec3d camera_local, const PatchBounds& bounds, Range<float> heights) {
+double Clod::farthest_distance(Vec3d camera_local, const PatchBounds& bounds, Range<float> heights) {
     const double len = length(camera_local);
     if (len < 1e-9)
         return 1 + double(heights.max);
@@ -149,14 +158,14 @@ double TerrainTier::farthest_distance(Vec3d camera_local, const PatchBounds& bou
     return far;
 }
 
-unsigned TerrainTier::resident_slot(PatchKey key) const {
+unsigned Clod::resident_slot(PatchKey key) const {
     const unsigned slot = slot_of(key);
     return slot != no_slot && slots_[slot].resident ? slot : no_slot;
 }
 
-Range<float> TerrainTier::height_range(PatchKey key) const {
+Range<float> Clod::height_range(PatchKey key) const {
     const unsigned slot = resident_slot(key);
-    return slot != no_slot ? slots_[slot].heights : full_height_range;
+    return slot != no_slot ? slots_[slot].heights : shape_.heights;
 }
 
 // A node's measured range and margin, or the nearest measured ancestor's. Evicting a GPU
@@ -164,22 +173,20 @@ Range<float> TerrainTier::height_range(PatchKey key) const {
 // tiles again, tighten their bounds on arrival, and repeat indefinitely under cache pressure.
 // Live tree nodes retain that knowledge within node_budget; reusing a node or invalidating
 // terrain clears it. The ancestor's margin covers its whole subtree.
-Range<float> TerrainTier::reach_of(PatchKey key) const {
+Range<float> Clod::reach_of(PatchKey key) const {
     for (;; key = key.parent()) {
         const unsigned slot = resident_slot(key);
         const Node* node = slot == no_slot ? find(key) : nullptr;
         const bool measured = node && node->measured;
         if (slot == no_slot && !measured && key.level)
             continue;
-        const Range<float> heights = slot != no_slot ? slots_[slot].heights
-                                     : measured      ? node->heights
-                                                     : full_height_range;
+        const Range<float> heights = slot != no_slot ? slots_[slot].heights : measured ? node->heights : shape_.heights;
         const float margin = relief_margin(key.level);
         return {heights.min - margin, heights.max + margin};
     }
 }
 
-const TerrainTier::Node* TerrainTier::find(PatchKey key) const {
+const Clod::Node* Clod::find(PatchKey key) const {
     if (nodes_.size() < 6 || key.face >= 6)
         return nullptr;
     const Node* node = &nodes_[key.face];
@@ -192,8 +199,9 @@ const TerrainTier::Node* TerrainTier::find(PatchKey key) const {
     return node;
 }
 
-void TerrainTier::explain(PatchKey key, const TierView& view, std::vector<Step>& steps) const {
+void Clod::explain(PatchKey key, const ClodView& view, std::vector<Step>& steps) const {
     steps.clear();
+    const double occluder = this->occluder();
     for (PatchKey k = key;; k = k.parent()) {
         steps.push_back({.key = k});
         if (!k.level)
@@ -213,9 +221,8 @@ void TerrainTier::explain(PatchKey key, const TierView& view, std::vector<Step>&
             }
         // Infinity where the camera stands inside the occluder: the test does not run at all,
         // which is worth seeing, since then only the frustum holds the far side out.
-        step.horizon_margin = d > horizon_occluder
-                                  ? patch_cell_support(b, eye, step.reach) * d - horizon_occluder * horizon_occluder
-                                  : std::numeric_limits<double>::infinity();
+        step.horizon_margin = d > occluder ? patch_cell_support(b, eye, step.reach) * d - occluder * occluder
+                                           : std::numeric_limits<double>::infinity();
         step.plane_margin = std::numeric_limits<double>::infinity();
         for (unsigned i = 0; i < std::size(planes_); i++)
             if (const double margin = planes_[i].offset + patch_cell_support(b, planes_[i].normal, step.reach);
@@ -235,7 +242,7 @@ void TerrainTier::explain(PatchKey key, const TierView& view, std::vector<Step>&
     }
 }
 
-TerrainTier::Audit TerrainTier::audit() const {
+Clod::Audit Clod::audit() const {
     Audit result{.allocated = nodes()};
     const auto walk = [&](auto&& self, std::uint32_t index) -> void {
         result.reachable++;
@@ -264,7 +271,7 @@ TerrainTier::Audit TerrainTier::audit() const {
     return result;
 }
 
-TerrainTier::CacheStats TerrainTier::cache_stats(unsigned frame) const {
+Clod::CacheStats Clod::cache_stats(unsigned frame) const {
     CacheStats result{.capacity = capacity_};
     unsigned oldest = frame, assigned = frame;
     for (const Slot& slot : slots_) {
@@ -286,12 +293,12 @@ TerrainTier::CacheStats TerrainTier::cache_stats(unsigned frame) const {
     return result;
 }
 
-unsigned TerrainTier::pending() const {
+unsigned Clod::pending() const {
     return unsigned(slots_by_key_.size()) - resident();
 }
 
 // The wait of the oldest slot whose tile never came back. One pass of the map, as resident() is.
-unsigned TerrainTier::pending_age() const {
+unsigned Clod::pending_age() const {
     unsigned oldest = frame_;
     for (const auto& [_, slot] : slots_by_key_)
         if (!slots_[slot].resident)
@@ -299,7 +306,7 @@ unsigned TerrainTier::pending_age() const {
     return frame_ - oldest;
 }
 
-unsigned TerrainTier::resident() const {
+unsigned Clod::resident() const {
     unsigned count = 0;
     for (const auto& [_, slot] : slots_by_key_)
         if (slots_[slot].resident)
@@ -314,9 +321,10 @@ unsigned TerrainTier::resident() const {
 // so the top of the bound stands at 1.05 where the tile itself reaches 1.02. The draw asks the
 // narrower question over exactly the geometry it is about to put on screen, and the answer holds
 // whatever happens to the subtree: a quadrant covered by this tile shows this tile's shape.
-bool TerrainTier::drawn_visible(const PatchBounds& bounds, Range<float> heights) const {
-    if (camera_distance_ > horizon_occluder &&
-        patch_cell_support(bounds, eye_, heights) * camera_distance_ < horizon_occluder * horizon_occluder)
+bool Clod::drawn_visible(const PatchBounds& bounds, Range<float> heights) const {
+    const double occluder = this->occluder();
+    if (camera_distance_ > occluder &&
+        patch_cell_support(bounds, eye_, heights) * camera_distance_ < occluder * occluder)
         return false;
     for (const LocalPlane& plane : planes_)
         if (plane.offset + patch_cell_support(bounds, plane.normal, heights) < 0)
@@ -324,16 +332,16 @@ bool TerrainTier::drawn_visible(const PatchBounds& bounds, Range<float> heights)
     return true;
 }
 
-void TerrainTier::touch(PatchKey key) {
+void Clod::touch(PatchKey key) {
     if (const unsigned slot = slot_of(key); slot != no_slot)
         slots_[slot].used = frame_;
 }
 
-void TerrainTier::request(PatchKey key, float pixels, bool prefetch) {
+void Clod::request(PatchKey key, float pixels, bool prefetch) {
     requests_.push_back({key, pixels, prefetch});
 }
 
-void TerrainTier::prefetch_neighbours() {
+void Clod::prefetch_neighbours() {
     // Keep a one-patch guard around the selected cover. Streaming uses this halo;
     // rendering still uses the actual frustum. Ancestors are needed for traversal
     // and material blending, even when the neighbouring leaf is already cached.
@@ -351,7 +359,7 @@ void TerrainTier::prefetch_neighbours() {
 
 // Discover requested tiles independently of local resident fallback. Missing tiles never change
 // the distance ranges used by other patches.
-void TerrainTier::prepare(std::uint32_t index, const TierView& view, const Visibility& seen) {
+void Clod::prepare(std::uint32_t index, const ClodView& view, const Visibility& seen) {
     if (!seen.visible) {
         collapse(nodes_[index]);
         return;
@@ -388,7 +396,7 @@ void TerrainTier::prepare(std::uint32_t index, const TierView& view, const Visib
     }
 }
 
-void TerrainTier::visit(std::uint32_t index, const TierView& view, const Visibility& seen) {
+void Clod::visit(std::uint32_t index, const ClodView& view, const Visibility& seen) {
     if (!seen.visible)
         return;
     const PatchKey key = nodes_[index].key;
@@ -425,7 +433,7 @@ void TerrainTier::visit(std::uint32_t index, const TierView& view, const Visibil
 
 // Balance only the neighbourhood of a late tile. A fine quadrant may meet a patch at most
 // one level coarser, so collapsing its odd boundary vertices reproduces that neighbour's edge.
-void TerrainTier::stitch(const TierView& view) {
+void Clod::stitch(const ClodView& view) {
     std::unordered_map<std::uint32_t, unsigned> cover;
     const auto rebuild = [&] {
         cover.clear();
@@ -532,7 +540,7 @@ void TerrainTier::stitch(const TierView& view) {
 // A whole-cell bound can intersect a glancing frustum while some of its draw quadrants
 // are entirely outside. Use the actual tile's geometry, not padded descendant reach.
 // Do this after stitching: balancing can replace fine draws with new coarse quadrants.
-void TerrainTier::cull_draw_quadrants() {
+void Clod::cull_draw_quadrants() {
     std::erase_if(draws_, [&](Draw& draw) {
         const Node* node = find(draw.key);
         ORBITAL_ASSERT(node);
@@ -548,7 +556,7 @@ void TerrainTier::cull_draw_quadrants() {
     });
 }
 
-void TerrainTier::monitor_coverage(std::span<const Draw> before_balance) {
+void Clod::monitor_coverage(std::span<const Draw> before_balance) {
     using Cover = std::unordered_map<std::uint32_t, unsigned>;
     const auto coverage = [](std::span<const Draw> draws) {
         Cover cover;
@@ -602,7 +610,7 @@ void TerrainTier::monitor_coverage(std::span<const Draw> before_balance) {
 }
 
 // Serve coarse/large patches first; LRU eviction protects pending and currently used slots.
-void TerrainTier::choose_generation(unsigned budget) {
+void Clod::choose_generation(unsigned budget) {
     const unsigned cap = std::min(budget, generate_per_frame);
     pressure_.generation_budget = cap;
     // Reclaim slots whose generation never came back, whatever lost it. `used` cannot say:
@@ -616,7 +624,7 @@ void TerrainTier::choose_generation(unsigned budget) {
             health_.timeouts++;
             slots_by_key_.erase(slot.key.packed());
             free_slots_.push_back(unsigned(&slot - slots_.data()));
-            slot = {};
+            slot = Slot{.heights = shape_.heights};
         }
     }
     std::sort(requests_.begin(), requests_.end(), [](const Request& a, const Request& b) {
@@ -676,20 +684,25 @@ void TerrainTier::choose_generation(unsigned budget) {
             warm_eviction_total_ += warm;
             slots_by_key_.erase(slots_[slot].key.packed());
         }
-        slots_[slot] = {.key = r.key, .used = frame_, .assigned_frame = frame_, .stamp = ++stamp_, .resident = false};
+        slots_[slot] = {.key = r.key,
+                        .used = frame_,
+                        .assigned_frame = frame_,
+                        .stamp = ++stamp_,
+                        .heights = shape_.heights,
+                        .resident = false};
         slots_by_key_[r.key.packed()] = slot;
         generate_.push_back({.key = r.key, .slot = slot, .stamp = stamp_});
     }
 }
 
-void TerrainTier::invalidate() {
+void Clod::invalidate() {
     health_.clear_frame();
     health_.invalidations++;
     ensure_roots();
     for (Node& node : nodes_)
         node.measured = false;
     for (Slot& slot : slots_)
-        slot = {};
+        slot = Slot{.heights = shape_.heights};
     slots_by_key_.clear();
     free_slots_.clear();
     for (unsigned slot = capacity_; slot-- > 0;)
@@ -700,7 +713,7 @@ void TerrainTier::invalidate() {
     active_ = false;
 }
 
-void TerrainTier::disable() {
+void Clod::disable() {
     health_.clear_frame();
     draws_.clear();
     previous_draws_.clear();
@@ -710,17 +723,17 @@ void TerrainTier::disable() {
     active_ = wanted_ = false;
 }
 
-void TerrainTier::release(unsigned slot, PatchKey key, std::uint32_t stamp) {
+void Clod::release(unsigned slot, PatchKey key, std::uint32_t stamp) {
     // Stamps start at one, so a cleared slot matches nothing; a resident slot is not ours to free.
     if (slot >= slots_.size() || slots_[slot].stamp != stamp || slots_[slot].key != key || slots_[slot].resident)
         return;
     slots_by_key_.erase(key.packed());
     health_.releases++;
-    slots_[slot] = {};
+    slots_[slot] = Slot{.heights = shape_.heights};
     free_slots_.push_back(slot);
 }
 
-bool TerrainTier::mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights) {
+bool Clod::mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp, Range<float> heights) {
     // Stamps start at one, so a slot cleared by invalidate() matches nothing in flight.
     if (slot >= slots_.size() || slots_[slot].stamp != stamp || slots_[slot].key != key) {
         health_.stale_completions++;
@@ -736,7 +749,7 @@ bool TerrainTier::mark_resident(unsigned slot, PatchKey key, std::uint32_t stamp
     return true;
 }
 
-void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) {
+void Clod::update(const ClodView& view, unsigned frame, unsigned budget) {
     frame_ = frame;
     update_++;
     previous_draws_.swap(draws_);
@@ -763,7 +776,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     // A child replaces its parent when the parent's projected error reaches the budget.
     // range[L] is both L's handover/morph end and (L-1)'s split distance.
     for (unsigned level = 0; level < std::size(range_); level++) {
-        const float error_range = (level ? level_error[level - 1] : 2 * level_error[0]) * view.height_pixels /
+        const float error_range = (level ? levels_.error[level - 1] : 2 * levels_.error[0]) * view.height_pixels /
                                   (view.tan_y * error_pixels);
         // A nominal root-face width of two radii, divided into 32 grid intervals.
         // Use the parent's interval at the child handover, just like the error budget.
@@ -778,7 +791,7 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     // Carry the frustum into the body's frame and into radii, once: the axes are orthonormal,
     // so a plane normal transposes by three dots and a patch test becomes one more.
     for (std::size_t i = 0; i < std::size(planes_); i++) {
-        const geometry::Plane& plane = view.frustum.planes[i];
+        const ViewPlane& plane = view.planes[i];
         const Vec3d n{double(plane.normal.x), double(plane.normal.y), double(plane.normal.z)};
         planes_[i] = {.normal = {dot(n, view.axes[0]), dot(n, view.axes[1]), dot(n, view.axes[2])},
                       .offset = (dot(n, view.body_centre) + double(plane.distance)) / std::max(view.radius, 1e-12)};
@@ -850,4 +863,4 @@ void TerrainTier::update(const TierView& view, unsigned frame, unsigned budget) 
     pressure_.behind_mean = draws_.empty() ? 0 : float(behind / double(draws_.size()));
 }
 
-} // namespace space::render
+} // namespace planet

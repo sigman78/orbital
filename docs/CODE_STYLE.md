@@ -1,6 +1,6 @@
 # Code style and conventions
 
-This document records the decisions behind the C++ in `src/` and `tests/`, and the lessons from
+This document records the decisions behind the C++ in `src/`, `planet/` and `tests/`, and the lessons from
 applying them. Formatting is mechanical (`.clang-format`, run `tools/format.ps1`); everything below
 is about what the code does, not how it is indented.
 
@@ -298,13 +298,16 @@ was tuned rather than derived.
 - A type forward-declared at namespace scope must be defined at that same scope. Defining it inside
   an anonymous namespace silently creates a second, unrelated type; keep TU-local types in the
   anonymous namespace only when nothing outside the TU names them.
-- Project includes are rooted at `src/` (`#include "scene/system.hpp"`), never relative (`../`).
+- Project includes are rooted at `src/` (`#include "scene/system.hpp"`) or at a planet library's `include/` (`#include "planet/patch.hpp"`), never relative (`../`).
   The formatter keeps `<windows.h>` first, then other Win32 headers, then project headers, then
   third-party, then the standard library.
 
 ## Layout
 
 - `src/core`: logging, panic, files, math, byte aliases, `SmallVec`. Depends on nothing else.
+- `planet/common`, `planet/gen`, `planet/clod`: the planet libraries (docs/PLANET_FORGE.md), rooted at
+  `planet/<lib>/include`, namespace `planet`. Depend on `core` only; `render` consumes them. Their public
+  headers follow the stricter rules in that document.
 - `src/scene`: deterministic system generation and geometry. Depends on `core`.
 - `src/assets`: image I/O, pixel kernels, materials. Depends on `core`.
 - `src/platform`: OS-agnostic interfaces with one implementation directory per OS. Depends on `core`.

@@ -23,6 +23,7 @@ inline constexpr std::string_view usage =
     "for the coarse levels) --lod-bias X (patch ranges times 2^X; positive is finer) --terrain-detail X "
     "(the tiles' micro-relief, 0 off) --terrain-mesh-pixels X (4 high, 8 default, 16 economy, 0 error-only) "
     "--lod-scale X "
+    "--planet-store dir (try a planet-forge store for the minor planet's coarse tiles; off by default) "
     "--vsync 0|1 "
     "--splat 0..3 --tone "
     "0|1|2 --hdr 0|1|2 (SDR, scRGB, HDR10; needs the OS in HDR) "
@@ -87,8 +88,9 @@ struct Options {
     bool belt_sun_view = false; // repeatable view through the gas giant's belt toward the sun
     bool headless = false;      // the window is created hidden: scripted runs without a window on screen
     std::filesystem::path capture, benchmark;
-    std::filesystem::path shots;  // a shot list to run in one process, one shot per line
-    std::filesystem::path report; // JSON with each shot's readings, written when the run ends
+    std::filesystem::path planet_store; // opt in to a planet-forge store for the minor planet's coarse tiles
+    std::filesystem::path shots;        // a shot list to run in one process, one shot per line
+    std::filesystem::path report;       // JSON with each shot's readings, written when the run ends
 };
 
 // argv includes the program name. Invalid options log an option-specific error.

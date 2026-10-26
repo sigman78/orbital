@@ -43,7 +43,7 @@ Renderer::Impl::~Impl() {
     material_images.clear();
     frame_targets = {};
     fixed_targets = {};
-    tile_pool.reset();
+    tile_streamer.reset();
     tile_height.reset();
     tile_albedo.reset();
     tile_slope.reset();
@@ -265,6 +265,7 @@ void Renderer::Impl::init(void* window, const SystemDescription& description,
     system = description;
     directory = base_directory;
     belt_count_override = config.belt_count;
+    planet_store = config.planet_store;
     std::string scene_error;
     const auto resolved = Showcase::resolve(system, scene_error);
     panic_if(!resolved, "unsupported renderer scene: {}", scene_error);

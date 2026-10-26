@@ -52,6 +52,8 @@ For very close glancing views, enable **Terrain > Surface inspection (noclip)**.
 
 `--help` lists every option.
 
+The minor planet's tiles are generated at run time. `planet-forge --out assets/planets/minor-planet --levels 0..5` bakes the coarse levels into a tile store (`--check` reads every tile back against the generator; the directory is ignored by git), and `--planet-store assets/planets/minor-planet` makes a run read them, generating only the finer levels. That path is for testing the bake; the demo does not use a store unless asked.
+
 `python tools/check.py` is the quick render check: every view in one process, diffed against an accepted reference. For repeatable scene/window/fullscreen measurements and comparisons against saved milestones, use [the performance suite](docs/PERFORMANCE.md).
 
 ## Repository layout
@@ -61,12 +63,13 @@ For very close glancing views, enable **Terrain > Surface inspection (noclip)**.
 | `src/core` | Logging, panic, file I/O and vector/matrix math shared by everything else |
 | `src/platform` | OS-neutral window, input, process, text-overlay and ImGui-overlay interfaces; `win32/` and `linux/` implement them |
 | `src/app` | Options, camera, HUD, control panel and the frame loop; no OS calls |
-| `src/scene` | Deterministic system generation, rock population, mesh geometry and the minor planet's terrain and patch quadtree |
+| `src/scene` | Deterministic system generation, rock population and mesh geometry |
 | `src/assets` | PNG image I/O (Wuffs decode, stb write), SIMD pixel kernels and material mip-chain generation |
-| `src/render` | The renderer on NoGraphicsAPI: resources and materials, per-frame passes, the terrain tier's selection and streaming, GPU-side types |
+| `src/render` | The renderer on NoGraphicsAPI: resources and materials, per-frame passes, the terrain tier's GPU side (tile arrays, staging rings, patch draws), GPU-side types |
+| `planet/` | The planet libraries (docs/PLANET_FORGE.md): `common` (patch keys, cube sphere, tile vocabulary, store format, allocator), `gen` (procedural crater terrain, tile sampling, store reader and providers), `clod` (quadtree selection, tile cache, streamer), `cook` (store writer behind the `planet-forge` tool); graphics-API-free, depend on `src/core` only |
 | `shaders/` | Slang shaders; `scene_shared.h` is the shared C++/shader layout |
-| `tests/` | Executable-assertion tests run through CTest |
-| `tools/` | PowerShell scripts (bootstrap, asset import, build, format, GCC check, smoke and stability checks) and Python tools (render and shader checks, benchmark suite, asset bakes, texture compression) |
+| `tests/` | Executable-assertion tests run through CTest; `planet/tests` holds the planet libraries' suites |
+| `tools/` | PowerShell scripts (bootstrap, asset import, build, format, GCC check, smoke and stability checks), Python tools (render and shader checks, benchmark suite, asset bakes, texture compression) and `planet-forge`, the minor planet's tile baker |
 | `cmake/` | Slang shader compilation helper |
 | `docs/` | Architecture, decisions, foundation, assets, terrain and code style ([index](docs/README.md)) |
 | `third_party/` | Vendored NoGraphicsAPI fork with its patch against upstream, Dear ImGui, SMAA tables, Wuffs and stb_image_write ([details](third_party/README.md)) |

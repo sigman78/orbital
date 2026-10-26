@@ -35,7 +35,10 @@ bool Renderer::draw(const FrameInput& supplied) {
     input.bodies = states;
     // The heavy CPU write of the frame goes first, while the previous frame's GPU work is still running.
     s.write_belt_state(input);
+    const auto terrain_start = std::chrono::steady_clock::now();
     s.prepare_terrain_tier(input);
+    s.stats.frame.terrain.prepare_ms =
+        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - terrain_start).count();
     s.submissions.wait_last();
     s.read_gpu_timings();
     s.apply_metering(input.tone);

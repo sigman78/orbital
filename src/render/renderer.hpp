@@ -1,8 +1,8 @@
 #pragma once
+#include "planet/clod_health.hpp"
 #include "render/camera_view.hpp"
 #include "render/gpu_pass.hpp"
 #include "render/settings.hpp"
-#include "render/terrain_health.hpp"
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -81,12 +81,14 @@ struct FrameStats {
         unsigned rings_free = 0, rings = 0; // upload ring entries free, and the ring's size
         unsigned slots = 0;                 // the cache's capacity
         unsigned slots_free = 0, oldest_age = 0;
-        // Resident cache-age bars, recent to cold. See TerrainTier::cache_age_bucket_frames.
+        // Resident cache-age bars, recent to cold. See Clod::cache_age_bucket_frames.
         std::array<unsigned, cache_age_buckets> cache_age{};
         unsigned nodes = 0; // quadtree nodes alive
         unsigned workers = 0;
-        float generate_ms = 0; // the last finished tile's time on its worker
-        // TerrainTier::Pressure counters.
+        float generate_ms = 0;     // the last finished tile's time on its worker
+        unsigned baked_levels = 0; // levels the store serves, from the roots; 0 when every tile is procedural
+        float prepare_ms = 0;      // selection, dispatch and records on the main thread
+        // Clod::Pressure counters.
         unsigned node_budget = 0, splits_blocked = 0;
         unsigned requested = 0, served = 0;
         unsigned evictions = 0, evicted_recent = 0;
@@ -96,7 +98,7 @@ struct FrameStats {
         unsigned flat_near = 0, flat_far = 0, graded = 0; // patches the morph grades against ones it switches
         float behind_mean = 0;
         unsigned balanced = 0;
-        TerrainHealth health;
+        planet::ClodHealth health;
     } terrain;
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
     float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc
@@ -160,7 +162,8 @@ struct FrameInput {
 
 // Startup choices that are not part of the scene description.
 struct RendererConfig {
-    unsigned belt_count = 0; // rocks generated and drawn regardless of quality tier; 0 keeps the tiers
+    unsigned belt_count = 0;            // rocks generated and drawn regardless of quality tier; 0 keeps the tiers
+    std::filesystem::path planet_store; // the minor planet's cooked tiles; empty keeps every tile procedural
 };
 
 class Renderer {

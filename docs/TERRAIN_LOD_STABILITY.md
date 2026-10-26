@@ -122,9 +122,9 @@ not an assertion that the scene is currently degraded.
 ### Validation and reproduction
 
 ```text
-terrain_cache_tests --cruise 2048 24 0 .0012 .08
-terrain_cache_tests --cruise 512 24 0 .0012 .08
-terrain_cache_tests --cruise 256 24 0 .0012 .08
+planet_clod_cache_tests --cruise 2048 24 0 .0012 .08
+planet_clod_cache_tests --cruise 512 24 0 .0012 .08
+planet_clod_cache_tests --cruise 256 24 0 .0012 .08
 orbital --headless --terrain-cruise --time 0 --tier-activate 100
   --frames 2100 --width 2560 --height 1440 --taa 1
   --benchmark captures/terrain-cruise-gpu.csv
@@ -235,7 +235,7 @@ the user's original camera path has not been established. The user subsequently 
 that the result looks better.
 
 Validation: all 18 MSVC Release CTest cases and all 17 GCC CPU cases passed. The separate
-`terrain_tier_tests --truth` run found zero uncovered visible probes, including lowland
+`planet_clod_tests --truth` run found zero uncovered visible probes, including lowland
 and summit views. The Release renderer and shaders rebuilt successfully; a 300-frame
 headless bookmark-9 run at 1280x900, activation 100 and bias +3 completed. This smoke run
 checks integration, not convergence or a visual match to the original camera path.
@@ -289,7 +289,7 @@ body-wide range scaling policy, which caused widespread LOD movement.
   returning restarted the arrival morph on 56/56 unchanged cached patches. The regression now
   reports 0/56. That fix does not prevent actual eviction/reassignment or selection changes.
 
-Relevant implementation: `src/render/terrain_tier.cpp` (`prepare`, `visit`, `stitch`,
+Relevant implementation: `planet/clod/src/clod.cpp` (`prepare`, `visit`, `stitch`,
 `choose_generation`, `update`) and `src/render/renderer_terrain.cpp` (`prepare_terrain_tier`).
 
 ## Detect the cause before changing policy
@@ -347,7 +347,7 @@ regression. The earlier horizon guard and frozen-camera drift fixes are already 
 
 ### Deterministic cache sweep
 
-Run `build/release/terrain_tier_tests.exe --cache-sweep` (or the corresponding Linux executable).
+Run `build/release/planet_clod_tests.exe --cache-sweep` (or the corresponding Linux executable).
 [Recorded CSV](data/terrain-cache-sweep-2026-09-20.csv): 24 cases, 755 updates each, seed 1007,
 1024/2048/4096 slots, biases 0 through +3, nadir and grazing orientations. Each case settles for
 150 updates, repeats a small pan / 35-frame look-away / return three times, then holds the view for

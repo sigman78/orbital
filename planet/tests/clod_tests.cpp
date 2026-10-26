@@ -1,7 +1,8 @@
-#include "render/terrain_tier.hpp"
+#include "planet/clod.hpp"
 #include "core/parallel.hpp"
+#include "planet/crater_terrain.hpp"
+#include "planet/tile_sampling.hpp"
 #include "render/frame_calculations.hpp"
-#include "scene/terrain.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -15,38 +16,57 @@
 #include <vector>
 
 using namespace space;
-using namespace space::render;
+using namespace planet;
+
+namespace {
+
+// The CPU regression baseline, independent of the renderer's arrays.
+constexpr unsigned baseline_slots = 1024;
+
+Clod make_clod(unsigned capacity = baseline_slots) {
+    return Clod{ClodConfig{
+        .shape = MinorPlanetTerrain::shape, .levels = MinorPlanetTerrain::levels, .cache_capacity = capacity}};
+}
+
+} // namespace
+
+// The tier takes the four side planes and the near plane, in the frustum's order.
+void set_planes(ClodView& view, const geometry::Frustum& frustum) {
+    for (unsigned i = 0; i < 5; i++)
+        view.planes[i] = ViewPlane{.normal = frustum.planes[i].normal, .distance = frustum.planes[i].distance};
+}
 
 // A camera looking down -z at the body some distance ahead, unspun.
-TierView view_at(double distance, double radius, Vec3d forward = {0, 0, -1}) {
-    CameraView camera;
+ClodView view_at(double distance, double radius, Vec3d forward = {0, 0, -1}) {
+    render::CameraView camera;
     camera.forward = forward;
     const float tan_y = float(std::tan(camera.vertical_fov / 2));
-    TierView view{.body_centre = Vec3d{0, 0, -distance},
+    ClodView view{.body_centre = Vec3d{0, 0, -distance},
                   .radius = radius,
                   .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
                   .camera_local = Vec3d{0, 0, distance} * (1 / radius),
-                  .frustum = view_frustum(camera, tan_y * 16 / 9, tan_y),
                   .height_pixels = 900,
                   .tan_y = tan_y};
+    set_planes(view, render::view_frustum(camera, tan_y * 16 / 9, tan_y));
     return view;
 }
 
 // Camera above a chosen surface direction, looking at the body centre.
-TierView view_over(Vec3d over, double altitude, double radius) {
+ClodView view_over(Vec3d over, double altitude, double radius) {
     const Vec3d local = normalized(over) * (1 + altitude);
-    CameraView camera;
+    render::CameraView camera;
     camera.forward = local * -1;
     camera.right = normalized(cross(camera.forward, std::abs(camera.forward.y) < .9 ? Vec3d{0, 1, 0} : Vec3d{1, 0, 0}));
     camera.up = cross(camera.right, camera.forward);
     const float tan_y = float(std::tan(camera.vertical_fov / 2));
-    return {.body_centre = local * -radius,
-            .radius = radius,
-            .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
-            .camera_local = local,
-            .frustum = view_frustum(camera, tan_y * 16 / 9, tan_y),
-            .height_pixels = 900,
-            .tan_y = tan_y};
+    ClodView view{.body_centre = local * -radius,
+                  .radius = radius,
+                  .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
+                  .camera_local = local,
+                  .height_pixels = 900,
+                  .tan_y = tan_y};
+    set_planes(view, render::view_frustum(camera, tan_y * 16 / 9, tan_y));
+    return view;
 }
 
 // Complete simulated uploads two updates later, before selection as in the renderer.
@@ -65,8 +85,7 @@ struct AsyncTiles {
     // residency carries the global shell, which is cheaper and all most tests need.
     const MinorPlanetTerrain* terrain = nullptr;
 
-    void update(TerrainTier& tier, const TierView& view, unsigned frame,
-                unsigned budget = TerrainTier::generate_per_frame) {
+    void update(Clod& tier, const ClodView& view, unsigned frame, unsigned budget = Clod::generate_per_frame) {
         step++;
         for (auto it = pending.begin(); it != pending.end();) {
             if (it->due <= step) {
@@ -76,7 +95,7 @@ struct AsyncTiles {
                     generate_height_tile(*terrain, it->key, heights);
                     ok = tier.mark_resident(it->slot, it->key, it->stamp, height_tile_range(heights));
                 } else {
-                    ok = tier.mark_resident(it->slot, it->key, it->stamp);
+                    ok = tier.mark_resident(it->slot, it->key, it->stamp, MinorPlanetTerrain::shape.heights);
                 }
                 assert(ok);
                 it = pending.erase(it);
@@ -139,7 +158,7 @@ struct MorphCheck {
                         float(std::clamp((dist - s.start) / std::max(double(s.end) - s.start, 1e-6), 0.0, 1.0)));
     }
 
-    unsigned violations(const TerrainTier& tier, const TierView& view, unsigned* checked = nullptr) {
+    unsigned violations(const Clod& tier, const ClodView& view, unsigned* checked = nullptr) {
         constexpr unsigned quads = tile_side - 1;
         std::vector<Surface> surfaces;
         std::unordered_map<std::uint32_t, unsigned> cover; // a drawn quadrant's cell -> its surface
@@ -223,7 +242,7 @@ GroundExtremes ground_extremes(const MinorPlanetTerrain& terrain) {
 void test_cull_waste() {
     constexpr double radius = 2.5 / 15;
     const MinorPlanetTerrain terrain(1007);
-    const auto to_world = [](const TierView& v, Vec3d local) {
+    const auto to_world = [](const ClodView& v, Vec3d local) {
         return v.axes[0] * local.x + v.axes[1] * local.y + v.axes[2] * local.z;
     };
     // Over generic ground, and low over the deepest lowland, where the camera stands below the
@@ -243,21 +262,21 @@ void test_cull_waste() {
                           {generic * 1.15, 1.22},
                           {lowland * (1 + lowest + .005), .1}};
     for (auto [over, pitch] : cases) {
-        CameraView camera;
+        render::CameraView camera;
         const Vec3d down = normalized(over) * -1;
         const Vec3d east = normalized(cross(Vec3d{0, 1, 0}, down));
         camera.forward = normalized(down * std::cos(pitch) + east * std::sin(pitch));
         camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
         camera.up = cross(camera.right, camera.forward);
         const float tan_y = float(std::tan(camera.vertical_fov / 2));
-        const TierView view{.body_centre = over * -radius,
-                            .radius = radius,
-                            .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
-                            .camera_local = over,
-                            .frustum = view_frustum(camera, tan_y * 16 / 9, tan_y),
-                            .height_pixels = 900,
-                            .tan_y = tan_y};
-        TerrainTier tier;
+        ClodView view{.body_centre = over * -radius,
+                      .radius = radius,
+                      .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
+                      .camera_local = over,
+                      .height_pixels = 900,
+                      .tan_y = tan_y};
+        set_planes(view, render::view_frustum(camera, tan_y * 16 / 9, tan_y));
+        Clod tier = make_clod();
         AsyncTiles async;
         async.terrain = &terrain; // the tight bounds are the point of this test
         for (unsigned frame = 1; frame <= 300; frame++)
@@ -278,7 +297,7 @@ void test_cull_waste() {
                     const Vec3d d = cube_direction(draw.key.face, s0 + i * size / 4, t0 + j * size / 4);
                     // Near side of the occluding sphere: dot(point, camera) >= radius squared,
                     // the occluder being the shell's floor as the tier takes it.
-                    constexpr double occluder = TerrainTier::horizon_occluder;
+                    constexpr double occluder = MinorPlanetTerrain::shape.occluder();
                     if (dot(d * (1 + double(h.max)), view.camera_local) >= occluder * occluder)
                         any_visible_over_horizon = true;
                     // Down to the skirt ring, which is drawn and which the tier's bounds carry:
@@ -287,7 +306,7 @@ void test_cull_waste() {
                         points.push_back(to_float(view.body_centre + to_world(view, d * (1 + double(e))) * radius));
                 }
             bool outside = false;
-            for (const auto& plane : view.frustum.planes) {
+            for (const auto& plane : view.planes) {
                 bool all_out = true;
                 for (const Vec3f& p : points)
                     if (dot(plane.normal, p) + plane.distance >= 0) {
@@ -317,15 +336,15 @@ void test_cull_waste() {
 void test_morph_bands() {
     double worst = 1e9;
     for (float bias : {-1.f, 0.f, 2.f}) {
-        TierView view = view_at(20, 2.5 / 15);
+        ClodView view = view_at(20, 2.5 / 15);
         view.lod_bias = bias;
-        TerrainTier tier;
+        Clod tier = make_clod();
         tier.update(view, 1); // inactive: requested ranges, with no streaming restriction
         const double projection = view.height_pixels / (2 * double(view.tan_y));
         for (unsigned level = 0; level <= patch_level_max; level++) {
             const double split = tier.range(level + 1);
-            const double pixels = TerrainTier::level_error[level] * projection / split;
-            assert(std::abs(pixels * std::exp2(bias) - TerrainTier::error_pixels / 2) < 1e-5);
+            const double pixels = MinorPlanetTerrain::levels.error[level] * projection / split;
+            assert(std::abs(pixels * std::exp2(bias) - Clod::error_pixels / 2) < 1e-5);
             assert(tier.morph_start(level) > split);
             assert(tier.morph_start(level) < tier.range(level));
             worst = std::min(worst, tier.morph_start(level) / split);
@@ -337,16 +356,16 @@ void test_morph_bands() {
 
 void test_mesh_spacing_bands() {
     for (float target : {4.f, 8.f, 16.f}) {
-        TierView view = view_at(20, 2.5 / 15);
+        ClodView view = view_at(20, 2.5 / 15);
         view.mesh_pixels = target;
-        TerrainTier tier;
+        Clod tier = make_clod();
         tier.update(view, 1);
         for (unsigned level = 0; level <= patch_level_max; ++level) {
             const double projection = view.height_pixels / (2 * double(view.tan_y));
             const double split = tier.range(level + 1);
             const double interval = std::ldexp(2. / (tile_side - 1), -int(level));
             assert(interval * projection / split <= target * 1.00001);
-            assert(TerrainTier::level_error[level] * projection / split <= TerrainTier::error_pixels * .50001);
+            assert(MinorPlanetTerrain::levels.error[level] * projection / split <= Clod::error_pixels * .50001);
             assert(tier.morph_start(level) > split);
             assert(tier.morph_start(level) < tier.range(level));
         }
@@ -369,15 +388,15 @@ void test_morph_continuity() {
     unsigned checked = 0, bad = 0, partial = 0, drawn = 0;
     for (const Vec3d& spot : spots)
         for (double altitude : {.03, .08, .2, .5}) {
-            TerrainTier tier;
-            TierView view = view_over(spot, altitude, radius);
+            Clod tier = make_clod();
+            ClodView view = view_over(spot, altitude, radius);
             view.mesh_pixels = 8;
             for (unsigned frame = 1; frame <= 96; frame++) {
-                tier.update(view, frame, TerrainTier::slot_count);
+                tier.update(view, frame, baseline_slots);
                 for (const auto& g : tier.generate())
-                    tier.mark_resident(g.slot, g.key, g.stamp);
+                    tier.mark_resident(g.slot, g.key, g.stamp, MinorPlanetTerrain::shape.heights);
             }
-            tier.update(view, 200, TerrainTier::slot_count);
+            tier.update(view, 200, baseline_slots);
             bad += check.violations(tier, view, &checked);
             for (const auto& draw : tier.draws())
                 drawn++, partial += draw.quadrants != 0xf;
@@ -394,21 +413,21 @@ void test_morph_streaming() {
     MorphCheck check{terrain};
     unsigned checked = 0, bad = 0, waiting = 0;
     for (bool moving : {false, true}) {
-        TerrainTier tier;
+        Clod tier = make_clod();
         AsyncTiles async;
         async.terrain = &terrain;
         async.jitter = 11;
         async.hold_frames = 70;
         for (unsigned frame = 1; frame <= 200; frame++) {
             const double x = moving ? .98 + .0003 * frame : .6;
-            const TierView view = view_over({x, .3, 1}, .05, 2.5 / 15);
+            const ClodView view = view_over({x, .3, 1}, .05, 2.5 / 15);
             async.update(tier, view, frame, 4);
             if (!tier.active())
                 continue;
             waiting += tier.pressure().starved > 0;
-            const double projection = view.height_pixels / (view.tan_y * TerrainTier::error_pixels);
+            const double projection = view.height_pixels / (view.tan_y * Clod::error_pixels);
             for (unsigned level = 1; level <= patch_level_max; level++)
-                assert(std::abs(tier.range(level) - TerrainTier::level_error[level - 1] * projection) <
+                assert(std::abs(tier.range(level) - MinorPlanetTerrain::levels.error[level - 1] * projection) <
                        1e-6 * tier.range(level));
             bad += check.violations(tier, view, &checked);
             for (const auto& draw : tier.draws()) {
@@ -430,7 +449,7 @@ void test_morph_streaming() {
 // Tiny camera steps while uploads lag must not demote the established view as a whole.
 void test_motion_stability() {
     const MinorPlanetTerrain terrain(1007);
-    TerrainTier tier;
+    Clod tier = make_clod();
     AsyncTiles async;
     async.terrain = &terrain;
     for (unsigned frame = 1; frame <= 150; frame++)
@@ -465,13 +484,13 @@ void test_motion_stability() {
 
 // Looking away must not replay arrival morphs on already settled, cached geometry.
 void test_cached_reentry() {
-    TerrainTier tier;
+    Clod tier = make_clod();
     AsyncTiles async;
     const auto view = view_at(.2, 2.5 / 15);
     for (unsigned frame = 1; frame <= 150; frame++)
         async.update(tier, view, frame);
     assert(async.pending.empty() && tier.generate().empty());
-    const std::vector<TerrainTier::Draw> settled(tier.draws().begin(), tier.draws().end());
+    const std::vector<Clod::Draw> settled(tier.draws().begin(), tier.draws().end());
     assert(!settled.empty());
     for (const auto& draw : settled)
         assert(draw.fade == 0);
@@ -495,52 +514,52 @@ void test_cached_reentry() {
 // Startup --terrain-detail can invalidate before update has ever initialized the cache.
 // Cycle beyond its capacity and verify that eviction removes the old owner's lookup.
 void test_invalidate_before_update() {
-    TerrainTier tier;
+    Clod tier = make_clod();
     tier.invalidate();
     tier.invalidate();
-    PatchKey owners[TerrainTier::slot_count]{};
-    bool assigned[TerrainTier::slot_count]{};
+    PatchKey owners[baseline_slots]{};
+    bool assigned[baseline_slots]{};
     unsigned generations = 0;
     for (unsigned frame = 1; frame <= 700; frame++) {
         const double angle = frame * .035;
-        const TierView view = view_over({std::sin(angle), .3, std::cos(angle)}, .08, 2.5 / 15);
+        const ClodView view = view_over({std::sin(angle), .3, std::cos(angle)}, .08, 2.5 / 15);
         tier.update(view, frame);
         for (const auto& g : tier.generate()) {
-            assert(g.slot < TerrainTier::slot_count);
+            assert(g.slot < baseline_slots);
             if (assigned[g.slot])
-                assert(tier.resident_slot(owners[g.slot]) == TerrainTier::no_slot);
+                assert(tier.resident_slot(owners[g.slot]) == Clod::no_slot);
             owners[g.slot] = g.key;
             assigned[g.slot] = true;
-            assert(tier.mark_resident(g.slot, g.key, g.stamp));
+            assert(tier.mark_resident(g.slot, g.key, g.stamp, MinorPlanetTerrain::shape.heights));
             generations++;
         }
-        assert(tier.resident() <= TerrainTier::slot_count);
+        assert(tier.resident() <= baseline_slots);
     }
     std::printf("terrain tier: startup invalidation, %u assignments with unique live slot owners\n", generations);
-    assert(generations > 2 * TerrainTier::slot_count);
+    assert(generations > 2 * baseline_slots);
 }
 
 // Regression: loose height bounds fully collapsed adjacent finest levels, leaving a 2x border.
 void test_resident_height_selection() {
     constexpr double radius = 2.5 / 15;
     for (bool grazing : {false, true}) {
-        TierView view = view_over({.6, .3, 1}, .08, radius);
+        ClodView view = view_over({.6, .3, 1}, .08, radius);
         if (grazing) {
-            CameraView camera;
+            render::CameraView camera;
             const Vec3d radial = normalized(view.camera_local);
             camera.forward = normalized(normalized(cross(Vec3d{0, 1, 0}, radial)) - radial * .1);
             camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
             camera.up = cross(camera.right, camera.forward);
-            view.frustum = view_frustum(camera, view.tan_y * 16 / 9, view.tan_y);
+            set_planes(view, render::view_frustum(camera, view.tan_y * 16 / 9, view.tan_y));
         }
         unsigned deepest[2]{};
         for (unsigned tight = 0; tight < 2; tight++) {
-            TerrainTier tier;
+            Clod tier = make_clod();
             for (unsigned frame = 1; frame <= 120; frame++) {
                 tier.update(view, frame);
                 for (const auto& g : tier.generate())
                     assert(tier.mark_resident(g.slot, g.key, g.stamp,
-                                              tight ? Range<float>{0, 0} : TerrainTier::full_height_range));
+                                              tight ? Range<float>{0, 0} : MinorPlanetTerrain::shape.heights));
             }
             tier.update(view, 140);
             assert(tier.active() && tier.generate().empty() && tier.pending() == 0);
@@ -573,19 +592,19 @@ void test_resident_height_selection() {
 }
 
 void test_height_range_lifetime() {
-    TerrainTier tier;
-    const TierView view = view_at(.2, 2.5 / 15);
+    Clod tier = make_clod();
+    const ClodView view = view_at(.2, 2.5 / 15);
     tier.update(view, 1);
     const auto first = tier.generate()[0];
     const Range<float> heights{-.012f, .018f};
-    assert(tier.height_range(first.key) == TerrainTier::full_height_range);
+    assert(tier.height_range(first.key) == MinorPlanetTerrain::shape.heights);
     assert(tier.mark_resident(first.slot, first.key, first.stamp, heights));
     assert(tier.height_range(first.key) == heights);
     tier.invalidate();
-    assert(tier.height_range(first.key) == TerrainTier::full_height_range);
+    assert(tier.height_range(first.key) == MinorPlanetTerrain::shape.heights);
     tier.update(view, 2);
     assert(!tier.mark_resident(first.slot, first.key, first.stamp, heights));
-    assert(tier.height_range(first.key) == TerrainTier::full_height_range);
+    assert(tier.height_range(first.key) == MinorPlanetTerrain::shape.heights);
 }
 
 void test_resident_terrain_morph() {
@@ -595,16 +614,16 @@ void test_resident_terrain_morph() {
     for (Vec3d spot : {Vec3d{.6, .3, 1}, Vec3d{1, .2, 1}})
         for (double altitude : {.004, .02, .08})
             for (bool grazing : {false, true}) {
-                TerrainTier tier;
-                TierView view = view_over(spot, altitude, 2.5 / 15);
+                Clod tier = make_clod();
+                ClodView view = view_over(spot, altitude, 2.5 / 15);
                 // Grazing views expose LOD boundaries hidden by downward-facing frusta.
                 if (grazing) {
-                    CameraView camera;
+                    render::CameraView camera;
                     const Vec3d radial = normalized(view.camera_local);
                     camera.forward = normalized(normalized(cross(Vec3d{0, 1, 0}, radial)) - radial * .1);
                     camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
                     camera.up = cross(camera.right, camera.forward);
-                    view.frustum = view_frustum(camera, view.tan_y * 16 / 9, view.tan_y);
+                    set_planes(view, render::view_frustum(camera, view.tan_y * 16 / 9, view.tan_y));
                 }
                 for (unsigned frame = 1; frame <= 120; frame++) {
                     tier.update(view, frame);
@@ -633,21 +652,21 @@ void test_resident_terrain_morph() {
 void test_provenance_and_audit() {
     constexpr double radius = 2.5 / 15;
     const MinorPlanetTerrain terrain(1007);
-    TerrainTier tier;
+    Clod tier = make_clod();
     AsyncTiles async;
     async.terrain = &terrain;
-    const TierView view = view_over({.6, .3, 1}, .05, radius);
+    const ClodView view = view_over({.6, .3, 1}, .05, radius);
     for (unsigned frame = 1; frame <= 300; frame++)
         async.update(tier, view, frame);
-    const TerrainTier::Audit audit = tier.audit();
-    std::vector<TerrainTier::Step> steps;
+    const Clod::Audit audit = tier.audit();
+    std::vector<Clod::Step> steps;
     unsigned checked = 0;
     for (const auto& draw : tier.draws()) {
         tier.explain(draw.key, view, steps);
         assert(steps.size() == std::size_t(draw.key.level) + 1);
         assert(steps.front().key.level == 0 && steps.back().key == draw.key);
         assert(steps.back().drawn && steps.back().quadrants == draw.quadrants);
-        for (const TerrainTier::Step& step : steps) {
+        for (const Clod::Step& step : steps) {
             assert(step.plane_margin >= 0);   // every ancestor passed the frustum
             assert(step.horizon_margin >= 0); // and the horizon, or stood inside the occluder
             assert(step.reach_level <= step.key.level && step.reach.min < step.reach.max);
@@ -662,7 +681,7 @@ void test_provenance_and_audit() {
     assert(audit.resident >= tier.draws().size());
 }
 
-// The horizon test hides a patch behind a sphere of radius horizon_occluder, and every bit of
+// The horizon test hides a patch behind a sphere of radius BodyShape::occluder(), and every bit of
 // that rests on one premise: that no ground anywhere stands below it. If any did, a sight line
 // could graze across that basin and reach terrain this test says is hidden. The premise is
 // cheap to check and nothing was checking it -- and a sparse sample will not do, since 4000
@@ -683,20 +702,20 @@ void test_occluder_floor() {
         });
         const double floor = 1 + double(*std::min_element(low.begin(), low.end()));
         std::printf("terrain tier: seed %llu floor %.5f radii, %.5f over the occluder\n",
-                    static_cast<unsigned long long>(seed), floor, floor - TerrainTier::horizon_occluder);
+                    static_cast<unsigned long long>(seed), floor, floor - MinorPlanetTerrain::shape.occluder());
         worst = std::min(worst, floor);
     }
     // Craters stack and a deeper seed is only a reseed away, so the occluder wants real room
     // under the lowest ground, not the last decimal of it.
-    assert(worst > TerrainTier::horizon_occluder);
-    assert(worst - TerrainTier::horizon_occluder > .005);
+    assert(worst > MinorPlanetTerrain::shape.occluder());
+    assert(worst - MinorPlanetTerrain::shape.occluder() > .005);
 }
 
 // Ground truth for the cull: no terrain a viewer can actually see may be missing from the
 // drawn set. Visibility is decided by ray-marching the real surface, not by the rule the tier
 // applies, so this is the only check that can fail the horizon heuristic (terrain_tier.cpp
 // explains what rests on it). Seconds a view on the worker pool, which is too slow for every
-// ctest run and right for any change to the terrain's amplitude, height_min, descendant_relief
+// ctest run and right for any change to the terrain's amplitude, height_min, levels.relief
 // or the horizon test: `terrain_tier_tests --truth`.
 //
 // What it catches, by injection: an occluder at 1.02, above the ground the sight lines graze,
@@ -707,10 +726,10 @@ namespace truth {
 
 struct View {
     const MinorPlanetTerrain* terrain = nullptr;
-    CameraView camera;
+    render::CameraView camera;
     Vec3d camera_local; // radii
     double tan_x = 0, tan_y = 0;
-    TierView view;
+    ClodView view;
 };
 
 // A camera `altitude` radii over the ground at `over`, pitched down from the local horizontal.
@@ -728,10 +747,10 @@ View view_over_ground(const MinorPlanetTerrain& terrain, Vec3d over, double alti
               .radius = radius,
               .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
               .camera_local = v.camera_local,
-              .frustum = view_frustum(v.camera, float(v.tan_x), float(v.tan_y)),
               .height_pixels = 900,
               .tan_y = float(v.tan_y),
               .activate_pixels = 100};
+    set_planes(v.view, render::view_frustum(v.camera, float(v.tan_x), float(v.tan_y)));
     return v;
 }
 
@@ -759,12 +778,12 @@ bool unoccluded(const View& v, Vec3d p) {
 }
 
 // Run the tier to a standstill with the tile height ranges the renderer would supply.
-void converge(TerrainTier& tier, const View& v) {
+void converge(Clod& tier, const View& v) {
     unsigned quiet = 0;
     for (unsigned frame = 1; frame < 4000 && quiet < 30; frame++) {
         tier.update(v.view, frame);
         quiet = tier.generate().empty() ? quiet + 1 : 0;
-        const std::vector<TerrainTier::Generation> made(tier.generate().begin(), tier.generate().end());
+        const std::vector<Clod::Generation> made(tier.generate().begin(), tier.generate().end());
         std::vector<Range<float>> ranges(made.size());
         parallel_for(unsigned(made.size()), [&](unsigned i) {
             std::vector<float> heights(tile_side * tile_side);
@@ -780,9 +799,9 @@ void converge(TerrainTier& tier, const View& v) {
 
 // Every submitted unit is the quadrant of its draw tile, so its own tile range, padded only
 // for the skirt drop, must clear each active frustum plane and the existing horizon bound.
-unsigned check_draw_quadrant_bounds(const TerrainTier& tier, const TierView& view) {
+unsigned check_draw_quadrant_bounds(const Clod& tier, const ClodView& view) {
     unsigned submitted = 0;
-    for (const TerrainTier::Draw& draw : tier.draws())
+    for (const Clod::Draw& draw : tier.draws())
         for (unsigned q = 0; q < 4; q++) {
             if (!(draw.quadrants >> q & 1))
                 continue;
@@ -790,16 +809,16 @@ unsigned check_draw_quadrant_bounds(const TerrainTier& tier, const TierView& vie
             const PatchBounds bounds = patch_bounds(draw.key.child(q));
             const Range<float> heights = tier.height_range(draw.key);
             for (unsigned i = 0; i < 5; i++) {
-                const geometry::Plane& plane = view.frustum.planes[i];
+                const ViewPlane& plane = view.planes[i];
                 const Vec3d n{double(plane.normal.x), double(plane.normal.y), double(plane.normal.z)};
                 const double offset = (dot(n, view.body_centre) + double(plane.distance)) / view.radius;
                 const Vec3d local{dot(n, view.axes[0]), dot(n, view.axes[1]), dot(n, view.axes[2])};
                 assert(offset + patch_cell_support(bounds, local, heights) >= 0);
             }
             const double distance = length(view.camera_local);
-            if (distance > TerrainTier::horizon_occluder)
+            if (distance > MinorPlanetTerrain::shape.occluder())
                 assert(patch_cell_support(bounds, view.camera_local * (1 / distance), heights) * distance >=
-                       TerrainTier::horizon_occluder * TerrainTier::horizon_occluder);
+                       MinorPlanetTerrain::shape.occluder() * MinorPlanetTerrain::shape.occluder());
         }
     return submitted;
 }
@@ -807,22 +826,22 @@ unsigned check_draw_quadrant_bounds(const TerrainTier& tier, const TierView& vie
 void test_leaf_quadrant_outside_frustum() {
     const MinorPlanetTerrain terrain(1007);
     const truth::View v = truth::view_over_ground(terrain, {.6, .3, 1}, .08, 0.);
-    TerrainTier tier;
+    Clod tier = make_clod();
     truth::converge(tier, v);
 
     // This leaf's whole descendant reach passes visibility, but all four quadrants of its own
     // resident tile are outside the frustum. The old leaf path submitted the whole patch.
     const PatchKey key{0, 3, 0, 2};
-    assert(tier.resident_slot(key) != TerrainTier::no_slot);
-    std::vector<TerrainTier::Step> steps;
+    assert(tier.resident_slot(key) != Clod::no_slot);
+    std::vector<Clod::Step> steps;
     tier.explain(key, v.view, steps);
     assert(!steps.back().split && !steps.back().drawn);
     const PatchBounds whole = patch_bounds(key);
     const Range<float> reach = tier.reach_of(key);
     const double distance = length(v.camera_local);
     assert(patch_cell_support(whole, normalized(v.camera_local), reach) * distance >=
-           TerrainTier::horizon_occluder * TerrainTier::horizon_occluder);
-    for (const geometry::Plane& plane : v.view.frustum.planes) {
+           MinorPlanetTerrain::shape.occluder() * MinorPlanetTerrain::shape.occluder());
+    for (const ViewPlane& plane : v.view.planes) {
         const Vec3d n{double(plane.normal.x), double(plane.normal.y), double(plane.normal.z)};
         const double offset = (dot(n, v.view.body_centre) + double(plane.distance)) / v.view.radius;
         assert(offset + patch_cell_support(whole, n, reach) >= 0);
@@ -831,7 +850,7 @@ void test_leaf_quadrant_outside_frustum() {
     for (unsigned q = 0; q < 4; q++) {
         const PatchBounds quadrant = patch_bounds(key.child(q));
         bool outside = false;
-        for (const geometry::Plane& plane : v.view.frustum.planes) {
+        for (const ViewPlane& plane : v.view.planes) {
             const Vec3d n{double(plane.normal.x), double(plane.normal.y), double(plane.normal.z)};
             const double offset = (dot(n, v.view.body_centre) + double(plane.distance)) / v.view.radius;
             outside |= offset + patch_cell_support(quadrant, n, own) < 0;
@@ -854,7 +873,7 @@ void test_draw_quadrant_culling() {
     // ranges can change while the bound must hold.
     for (const Case& k : cases) {
         const truth::View v = truth::view_over_ground(terrain, k.over, k.altitude, k.pitch);
-        TerrainTier tier;
+        Clod tier = make_clod();
         truth::converge(tier, v);
         assert(check_draw_quadrant_bounds(tier, v.view) > 0);
     }
@@ -864,7 +883,7 @@ void test_draw_quadrant_culling() {
     // levels for stitch() to coarsen before the final quadrant filter runs.
     truth::View high = truth::view_over_ground(terrain, {.6, .3, 1}, .08, .1);
     high.view.lod_bias = 3;
-    TerrainTier balanced;
+    Clod balanced = make_clod();
     AsyncTiles delayed;
     delayed.terrain = high.terrain;
     delayed.jitter = 30;
@@ -897,7 +916,7 @@ void test_cull_soundness() {
     };
     for (const Case& k : cases) {
         const truth::View v = truth::view_over_ground(terrain, k.over, k.altitude, k.pitch);
-        TerrainTier tier;
+        Clod tier = make_clod();
         truth::converge(tier, v);
         // The drawn unit is a quadrant: what a patch draws is one level finer than the patch.
         std::unordered_set<std::uint32_t> units;
@@ -956,7 +975,7 @@ void test_horizon_heuristic() {
                 peak = trial;
         }
     const double summit = 1 + double(terrain.height(peak));
-    constexpr double occluder = TerrainTier::horizon_occluder;
+    constexpr double occluder = MinorPlanetTerrain::shape.occluder();
     const Vec3d east = normalized(cross(std::abs(peak.y) < .9 ? Vec3d{0, 1, 0} : Vec3d{1, 0, 0}, peak));
     const Vec3d north = cross(peak, east);
     unsigned views = 0, seen_views = 0, probes = 0, uncovered = 0;
@@ -977,11 +996,11 @@ void test_horizon_heuristic() {
                           .radius = radius,
                           .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
                           .camera_local = v.camera_local,
-                          .frustum = view_frustum(v.camera, float(v.tan_x), float(v.tan_y)),
                           .height_pixels = 900,
                           .tan_y = float(v.tan_y),
                           .activate_pixels = 100};
-                TerrainTier tier;
+                set_planes(v.view, render::view_frustum(v.camera, float(v.tan_x), float(v.tan_y)));
+                Clod tier = make_clod();
                 truth::converge(tier, v);
                 std::unordered_set<std::uint32_t> units;
                 for (const auto& draw : tier.draws())
@@ -1038,15 +1057,15 @@ void test_flight_sweep() {
     // shell's ceiling rather than a sampled one: a spiral of a few thousand directions misses
     // the extremes badly (4000 of them put this seed's floor 0.009 radii too high).
     const double top = 1 + double(MinorPlanetTerrain::height_max);
-    constexpr double occluder = TerrainTier::horizon_occluder;
+    constexpr double occluder = MinorPlanetTerrain::shape.occluder();
 
     std::unordered_map<std::uint32_t, Range<float>> tile_bounds; // kept for the whole flight
     struct Pending {
-        TerrainTier::Generation generation;
+        Clod::Generation generation;
         unsigned due;
     };
     std::vector<Pending> pending;
-    TerrainTier tier;
+    Clod tier = make_clod();
     unsigned frame = 0, steps = 0, anomalies = 0, parentless = 0;
     unsigned peak_drawn = 0, peak_nodes = 0, peak_resident = 0, worst_pending_age = 0;
     double worst_excess = 0;
@@ -1088,19 +1107,19 @@ void test_flight_sweep() {
             const double yaw = i * .05, pitch = .35 + .45 * std::sin(i * .021);
             const Vec3d east = cross(up, track);
             const Vec3d heading = track * std::cos(yaw) + east * std::sin(yaw);
-            CameraView camera;
+            render::CameraView camera;
             camera.forward = normalized(heading * std::cos(pitch) - up * std::sin(pitch));
             camera.right = normalized(cross(camera.forward, up));
             camera.up = cross(camera.right, camera.forward);
             const float tan_y = float(std::tan(camera.vertical_fov / 2));
-            const TierView view{.body_centre = local * -radius,
-                                .radius = radius,
-                                .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
-                                .camera_local = local,
-                                .frustum = view_frustum(camera, tan_y * 16 / 9, tan_y),
-                                .height_pixels = 900,
-                                .tan_y = tan_y,
-                                .activate_pixels = 100};
+            ClodView view{.body_centre = local * -radius,
+                          .radius = radius,
+                          .axes = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
+                          .camera_local = local,
+                          .height_pixels = 900,
+                          .tan_y = tan_y,
+                          .activate_pixels = 100};
+            set_planes(view, render::view_frustum(camera, tan_y * 16 / 9, tan_y));
 
             // Tiles arrive two steps after they are asked for, as they do in the renderer.
             frame++;
@@ -1114,7 +1133,7 @@ void test_flight_sweep() {
                 it = pending.erase(it);
             }
             tier.update(view, frame);
-            const std::vector<TerrainTier::Generation> made(tier.generate().begin(), tier.generate().end());
+            const std::vector<Clod::Generation> made(tier.generate().begin(), tier.generate().end());
             std::vector<Range<float>> fresh(made.size());
             parallel_for(unsigned(made.size()), [&](unsigned k) {
                 if (tile_bounds.count(made[k].key.packed()))
@@ -1137,10 +1156,10 @@ void test_flight_sweep() {
             const double reach = std::acos(std::min(1.0, occluder / d)) + std::acos(std::min(1.0, occluder / top));
             std::unordered_map<std::uint32_t, unsigned> drawn_slots;
             std::unordered_set<std::uint32_t> drawn_cells;
-            for (const TerrainTier::Draw& draw : tier.draws()) {
+            for (const Clod::Draw& draw : tier.draws()) {
                 assert(draw.quadrants && draw.quadrants <= 0xf);
                 assert(drawn_slots.emplace(draw.slot, draw.key.packed()).second); // a slot drawn twice
-                parentless += draw.key.level && tier.resident_slot(draw.key.parent()) == TerrainTier::no_slot;
+                parentless += draw.key.level && tier.resident_slot(draw.key.parent()) == Clod::no_slot;
                 for (unsigned q = 0; q < 4; q++) {
                     if (!(draw.quadrants >> q & 1))
                         continue;
@@ -1161,16 +1180,15 @@ void test_flight_sweep() {
                                     "quadrant %u stands %.1f deg past the cone horizon (%.1f deg) from %.4f radii\n",
                                     leg.name, altitude, i, cell.face, cell.level, cell.x, cell.y, q,
                                     excess * 180 / pi<double>, reach * 180 / pi<double>, d);
-                        std::vector<TerrainTier::Step> chain;
+                        std::vector<Clod::Step> chain;
                         tier.explain(draw.key, view, chain);
-                        for (const TerrainTier::Step& step : chain)
+                        for (const Clod::Step& step : chain)
                             std::printf("    level %2u (%4u,%4u) %s reach %+.4f..%+.4f from level %u, horizon margin "
                                         "%+.5f, plane %u margin %+.5f, distance %.4f vs %.4f\n",
                                         step.key.level, step.key.x, step.key.y,
-                                        step.slot != TerrainTier::no_slot ? "resident" : "no tile ",
-                                        double(step.reach.min), double(step.reach.max), step.reach_level,
-                                        step.horizon_margin, step.plane, step.plane_margin, step.distance,
-                                        step.split_range);
+                                        step.slot != Clod::no_slot ? "resident" : "no tile ", double(step.reach.min),
+                                        double(step.reach.max), step.reach_level, step.horizon_margin, step.plane,
+                                        step.plane_margin, step.distance, step.split_range);
                         std::fflush(stdout); // the assertion below aborts, and this is the diagnosis
                     }
                     worst_excess = std::max(worst_excess, excess);
@@ -1186,9 +1204,9 @@ void test_flight_sweep() {
                     assert(!drawn_cells.count(cell.packed()));
                 }
             }
-            const TerrainTier::Audit audit = tier.audit();
+            const Clod::Audit audit = tier.audit();
             assert(audit.reachable == audit.allocated); // a block no walk can reach again
-            assert(tier.nodes() <= TerrainTier::node_budget);
+            assert(tier.nodes() <= Clod::node_budget);
             leg_steps++;
             peak_drawn = std::max(peak_drawn, unsigned(tier.draws().size()));
             peak_nodes = std::max(peak_nodes, audit.allocated);
@@ -1212,7 +1230,7 @@ void test_flight_sweep() {
     // the reclaim sweep takes the slot back. That is the one part of the tier that clears over
     // many frames rather than at once, and its backstop -- pending_timeout plus a full sweep
     // cycle, about four seconds at 60 Hz -- must hold, or a patch really would look stuck.
-    assert(worst_pending_age <= TerrainTier::pending_timeout + TerrainTier::slot_count / TerrainTier::sweep_window);
+    assert(worst_pending_age <= Clod::pending_timeout + baseline_slots / Clod::sweep_window);
 }
 
 // A repeatable cache-pressure trace.  It deliberately reports the result rather than asserting
@@ -1231,29 +1249,28 @@ struct CacheSweepRow {
     unsigned seam_violations = 0, seam_vertices = 0;
 };
 
-TierView cache_sweep_look(TierView view, bool away) {
-    CameraView camera;
+ClodView cache_sweep_look(ClodView view, bool away) {
+    render::CameraView camera;
     camera.forward = normalized(view.camera_local) * (away ? 1.0 : -1.0);
     camera.right = normalized(cross(camera.forward, std::abs(camera.forward.y) < .9 ? Vec3d{0, 1, 0} : Vec3d{1, 0, 0}));
     camera.up = cross(camera.right, camera.forward);
-    view.frustum = view_frustum(camera, view.tan_y * 16 / 9, view.tan_y);
+    set_planes(view, render::view_frustum(camera, view.tan_y * 16 / 9, view.tan_y));
     return view;
 }
 
-TierView cache_sweep_grazing(TierView view) {
-    CameraView camera;
+ClodView cache_sweep_grazing(ClodView view) {
+    render::CameraView camera;
     const Vec3d radial = normalized(view.camera_local);
     camera.forward = normalized(normalized(cross(Vec3d{0, 1, 0}, radial)) - radial * .1);
     camera.right = normalized(cross(camera.forward, Vec3d{0, 1, 0}));
     camera.up = cross(camera.right, camera.forward);
-    view.frustum = view_frustum(camera, view.tan_y * 16 / 9, view.tan_y);
+    set_planes(view, render::view_frustum(camera, view.tan_y * 16 / 9, view.tan_y));
     return view;
 }
 
 void test_cache_sweep() {
     constexpr double radius = 2.5 / 15;
-    constexpr unsigned capacities[] = {TerrainTier::slot_count, TerrainTier::slot_count * 2,
-                                       TerrainTier::slot_count * 4};
+    constexpr unsigned capacities[] = {baseline_slots, baseline_slots * 2, baseline_slots * 4};
     const MinorPlanetTerrain terrain(1007);
     std::printf("scenario,cache_capacity,lod_bias,frames,generated,evictions,warm_evictions,regenerated,"
                 "regenerated_within_60_frames,peak_resident,peak_nodes,coverage_changes,edge_changes,"
@@ -1262,7 +1279,7 @@ void test_cache_sweep() {
     for (unsigned capacity : capacities)
         for (unsigned bias = 0; bias <= 3; bias++) {
             for (bool grazing : {false, true}) {
-                TerrainTier tier(capacity);
+                Clod tier = make_clod(capacity);
                 AsyncTiles async;
                 async.terrain = &terrain;
                 // Varying completion time makes later requests overtake earlier ones.  The single
@@ -1274,18 +1291,18 @@ void test_cache_sweep() {
                 std::unordered_map<std::uint32_t, unsigned> generated_at;
                 std::unordered_map<std::uint64_t, unsigned> previous;
                 MorphCheck seams{terrain};
-                auto update = [&](TierView view, bool tail = false, bool away = false) {
+                auto update = [&](ClodView view, bool tail = false, bool away = false) {
                     if (grazing && !away)
                         view = cache_sweep_grazing(view);
                     else
                         view = cache_sweep_look(view, away);
                     view.lod_bias = float(bias);
                     async.update(tier, view, ++row.frames, 6);
-                    const TerrainTier::Audit audit = tier.audit();
-                    const TerrainTier::CacheStats cache = tier.cache_stats(row.frames);
-                    const TerrainTier::Pressure& pressure = tier.pressure();
+                    const Clod::Audit audit = tier.audit();
+                    const Clod::CacheStats cache = tier.cache_stats(row.frames);
+                    const Clod::Pressure& pressure = tier.pressure();
                     assert(audit.reachable == audit.allocated);
-                    assert(tier.nodes() <= TerrainTier::node_budget);
+                    assert(tier.nodes() <= Clod::node_budget);
                     assert(tier.resident() <= tier.capacity());
                     assert(tier.pending() <= tier.capacity());
                     assert(cache.capacity == tier.capacity());
@@ -1303,7 +1320,7 @@ void test_cache_sweep() {
                     row.generated += unsigned(tier.generate().size());
                     row.evictions += pressure.evictions;
                     row.warm_evictions += pressure.evicted_recent;
-                    for (const TerrainTier::Generation& generation : tier.generate()) {
+                    for (const Clod::Generation& generation : tier.generate()) {
                         const auto previous_generation = generated_at.find(generation.key.packed());
                         if (previous_generation != generated_at.end()) {
                             row.regenerated++;
@@ -1318,7 +1335,7 @@ void test_cache_sweep() {
                         row.tail_pending = std::max(row.tail_pending, tier.pending());
                     }
                     std::unordered_map<std::uint64_t, unsigned> current;
-                    for (const TerrainTier::Draw& draw : tier.draws()) {
+                    for (const Clod::Draw& draw : tier.draws()) {
                         assert(tier.resident_slot(draw.key) == draw.slot);
                         assert(draw.slot < tier.capacity());
                         assert(current
@@ -1350,23 +1367,23 @@ void test_cache_sweep() {
                         row.seam_violations += seams.violations(tier, view, &row.seam_vertices);
                     }
                 };
-                const TierView settled = view_over({.6, .3, 1}, .035, radius);
+                const ClodView settled = view_over({.6, .3, 1}, .035, radius);
                 for (unsigned i = 0; i < 150; i++)
                     update(settled);
                 for (unsigned cycle = 0; cycle < 3; cycle++) {
                     for (unsigned i = 0; i < 70; i++)
                         update(view_over({.6 + .00055 * i, .3, 1}, .035, radius));
-                    const TierView panned = view_over({.6 + .00055 * 69, .3, 1}, .035, radius);
+                    const ClodView panned = view_over({.6 + .00055 * 69, .3, 1}, .035, radius);
                     for (unsigned i = 0; i < 35; i++)
                         update(panned, false, true);
                     for (unsigned i = 0; i < 70; i++)
                         update(panned);
                 }
-                const TierView panned = view_over({.6 + .00055 * 69, .3, 1}, .035, radius);
+                const ClodView panned = view_over({.6 + .00055 * 69, .3, 1}, .035, radius);
                 // This fixed tail makes persistent requests and selection-only churn visible.
                 for (unsigned i = 0; i < 80; i++)
                     update(panned, true);
-                TierView seam_view = panned;
+                ClodView seam_view = panned;
                 seam_view.lod_bias = float(bias);
                 if (grazing)
                     seam_view = cache_sweep_grazing(seam_view);
@@ -1386,26 +1403,27 @@ void test_cache_sweep() {
 // invalidated states without relying on the renderer's fixed 1024-layer GPU array.
 void test_cache_stats_accounting() {
     constexpr double radius = 2.5 / 15;
-    const TierView close = view_at(.2, radius);
-    TerrainTier empty(2048);
+    const ClodView close = view_at(.2, radius);
+    Clod empty = make_clod(2048);
     assert(empty.cache_stats(0).free == 2048);
-    assert(!empty.mark_resident(0, {0, 0, 0, 0}, 1));
+    assert(!empty.mark_resident(0, {0, 0, 0, 0}, 1, MinorPlanetTerrain::shape.heights));
     empty.release(0, {0, 0, 0, 0}, 1);
-    TerrainTier throughput(6);
+    Clod throughput = make_clod(6);
     throughput.update(close, 1, 0);
     assert(throughput.pressure().generation_budget_limited > 0);
     assert(throughput.pressure().slots_blocked == 0);
 
-    TerrainTier tier(6);
-    tier.update(close, 1, TerrainTier::generate_per_frame);
-    const TerrainTier::CacheStats pending = tier.cache_stats(1);
+    Clod tier = make_clod(6);
+    tier.update(close, 1, Clod::generate_per_frame);
+    const Clod::CacheStats pending = tier.cache_stats(1);
     assert(pending.capacity == 6 && pending.free == 0 && pending.resident == 0 && pending.pending == 6);
-    for (const TerrainTier::Generation& generation : tier.generate()) {
+    for (const Clod::Generation& generation : tier.generate()) {
         assert(generation.slot < tier.capacity());
-        assert(tier.mark_resident(generation.slot, generation.key, generation.stamp));
+        assert(
+            tier.mark_resident(generation.slot, generation.key, generation.stamp, MinorPlanetTerrain::shape.heights));
     }
-    tier.update(close, 2, TerrainTier::generate_per_frame);
-    const TerrainTier::CacheStats full = tier.cache_stats(2);
+    tier.update(close, 2, Clod::generate_per_frame);
+    const Clod::CacheStats full = tier.cache_stats(2);
     unsigned ages = 0;
     for (unsigned count : full.age)
         ages += count;
@@ -1414,15 +1432,15 @@ void test_cache_stats_accounting() {
     assert(tier.pressure().slots_blocked > 0);
     assert(tier.pressure().generation_budget_limited == 0);
     tier.disable();
-    const TerrainTier::CacheStats disabled = tier.cache_stats(2);
+    const Clod::CacheStats disabled = tier.cache_stats(2);
     assert(disabled.free == 0 && disabled.resident == 6 && disabled.pending == 0);
     assert(tier.cache_stats(31).age[0] == 6);
     assert(tier.cache_stats(32).age[1] == 6);
     assert(tier.cache_stats(212).age.back() == 6);
     tier.invalidate();
-    const TerrainTier::CacheStats invalidated = tier.cache_stats(3);
+    const Clod::CacheStats invalidated = tier.cache_stats(3);
     assert(invalidated.free == 6 && invalidated.resident == 0 && invalidated.pending == 0);
-    assert(tier.resident_slot({0, 0, 0, 0}) == TerrainTier::no_slot);
+    assert(tier.resident_slot({0, 0, 0, 0}) == Clod::no_slot);
 }
 
 // Nearest distance must follow the spherical cell, including its edges and corners, rather
@@ -1449,7 +1467,7 @@ void test_nearest_cell_distance() {
             };
             for (Vec3d direction : directions) {
                 const Vec3d camera = normalized(direction) * 1.2;
-                const double nearest = TerrainTier::nearest_distance(camera, bounds, heights);
+                const double nearest = Clod::nearest_distance(camera, bounds, heights);
                 double sampled = std::numeric_limits<double>::infinity();
                 for (unsigned y = 0; y <= divisions; y++)
                     for (unsigned x = 0; x <= divisions; x++) {
@@ -1470,14 +1488,203 @@ void test_nearest_cell_distance() {
             // not incorrectly report zero distance to a camera lying on the height shell.
             const Vec3d cap_only = cube_direction(face, s0 + size * 1.01, tm);
             assert(std::acos(std::clamp(dot(cap_only, bounds.centre), -1.0, 1.0)) < bounds.angular_radius);
-            assert(TerrainTier::nearest_distance(cap_only * 1.01, bounds, heights) > 0);
+            assert(Clod::nearest_distance(cap_only * 1.01, bounds, heights) > 0);
 
             // A camera just above the outer shell over an interior cell direction is separated
             // from the surface by only this tiny radial delta.
             constexpr double altitude = 1e-6;
-            const double near = TerrainTier::nearest_distance(directions[0] * (outer + altitude), bounds, heights);
+            const double near = Clod::nearest_distance(directions[0] * (outer + altitude), bounds, heights);
             assert(std::abs(near - altitude) < 1e-9);
         }
+}
+
+constexpr double near_radius = 2.5 / 15;
+
+// Far away the tier stays off and asks for nothing.
+void test_inactive_far_away() {
+    Clod tier = make_clod();
+    tier.update(view_at(20, near_radius), 1);
+    assert(!tier.active() && tier.generate().empty() && tier.draws().empty());
+}
+
+// Close in it wants the six faces first, and takes over once they are resident.
+void test_roots_first() {
+    Clod tier = make_clod();
+    AsyncTiles async;
+    const ClodView close = view_at(.2, near_radius);
+    async.update(tier, close, 2);
+    assert(!tier.active());
+    assert(tier.generate().size() > 0 && tier.generate().size() <= Clod::generate_per_frame);
+    unsigned roots = 0;
+    for (const auto& g : tier.generate())
+        roots += g.key.level == 0;
+    assert(roots == 6);
+    // Keep the sphere until all root uploads arrive.
+    async.update(tier, close, 3);
+    assert(!tier.active() && tier.draws().empty());
+}
+
+// Runs the close view until the tier is active with nothing left to generate or upload.
+unsigned converge_close(Clod& tier, AsyncTiles& async, const ClodView& close) {
+    unsigned frame = 1, converged_at = 0;
+    for (; frame < 2000; frame++) {
+        async.update(tier, close, frame);
+        assert(tier.generate().size() <= Clod::generate_per_frame);
+        if (tier.active())
+            assert(!tier.draws().empty());
+        if (tier.active() && tier.generate().empty() && async.pending.empty()) {
+            converged_at = frame;
+            break;
+        }
+    }
+    assert(converged_at && tier.active() && !tier.draws().empty());
+    std::printf("terrain tier: converged at frame %u with %zu patches drawn, %u resident, %u nodes\n", converged_at,
+                tier.draws().size(), tier.resident(), tier.nodes());
+    assert(tier.draws().size() > 6 && tier.draws().size() <= 58); // former default workload was 52
+    return frame;
+}
+
+// Every drawn slot is drawn once, and no slot is both drawn and regenerated in one frame.
+void test_drawn_slots_unique() {
+    Clod tier = make_clod();
+    AsyncTiles async;
+    converge_close(tier, async, view_at(.2, near_radius));
+    std::vector<unsigned> drawn;
+    for (const auto& draw : tier.draws())
+        drawn.push_back(draw.slot);
+    std::sort(drawn.begin(), drawn.end());
+    assert(std::adjacent_find(drawn.begin(), drawn.end()) == drawn.end());
+    for (const auto& g : tier.generate())
+        for (const auto& draw : tier.draws())
+            assert(draw.slot != g.slot);
+}
+
+// Require disjoint ancestor/descendant coverage and valid child split ranges.
+void test_coverage_disjoint() {
+    Clod tier = make_clod();
+    AsyncTiles async;
+    const ClodView close = view_at(.2, near_radius);
+    converge_close(tier, async, close);
+    unsigned parents_resident = 0, children_drawn = 0, partial = 0;
+    for (const auto& a : tier.draws()) {
+        assert(a.quadrants && a.quadrants <= 0xf);
+        partial += a.quadrants != 0xf;
+        for (const auto& b : tier.draws())
+            if (is_ancestor(a.key, b.key)) {
+                const unsigned shift = a.key.level - b.key.level - 1;
+                const unsigned quadrant = ((a.key.x >> shift) & 1) | ((a.key.y >> shift) & 1) << 1;
+                assert(!((b.quadrants >> quadrant) & 1));
+            }
+        if (a.key.level == 0)
+            continue;
+        const PatchKey parent{a.key.face, std::uint8_t(a.key.level - 1), std::uint16_t(a.key.x / 2),
+                              std::uint16_t(a.key.y / 2)};
+        const double dist = Clod::nearest_distance(close.camera_local, patch_bounds(parent),
+                                                   MinorPlanetTerrain::shape.heights);
+        parents_resident += tier.resident_slot(parent) != Clod::no_slot;
+        children_drawn++;
+        assert(dist < double(tier.range(a.key.level)) / Clod::hysteresis);
+    }
+    std::printf("terrain tier: %u of %u drawn children have a resident parent, %u partial draws\n", parents_resident,
+                children_drawn, partial);
+}
+
+// A still view stays converged; a turn away draws fewer and generates the newly seen side.
+void test_view_changes() {
+    Clod tier = make_clod();
+    AsyncTiles async;
+    const ClodView close = view_at(.2, near_radius);
+    const unsigned frame = converge_close(tier, async, close);
+    async.update(tier, close, frame + 1);
+    assert(tier.generate().empty());
+    const std::size_t facing = tier.draws().size();
+    async.update(tier, view_at(.2, near_radius, normalized(Vec3d{1, 0, -.4})), frame + 2);
+    assert(tier.draws().size() < facing);
+    for (unsigned f = frame + 3; f < frame + 60; f++) {
+        async.update(tier, view_at(.2, near_radius), f);
+        for (const auto& g : tier.generate())
+            for (const auto& draw : tier.draws())
+                assert(draw.slot != g.slot);
+    }
+    // Backing off past the threshold switches the tier off again.
+    tier.update(view_at(20, near_radius), frame + 61);
+    assert(!tier.active() && tier.draws().empty());
+}
+
+void test_generation_budget() {
+    Clod budgeted = make_clod();
+    budgeted.update(view_at(.2, near_radius), 1, 0);
+    assert(budgeted.generate().empty());
+    budgeted.update(view_at(.2, near_radius), 2, 3);
+    assert(budgeted.generate().size() <= 3);
+}
+
+// Reject stale keys without establishing residency.
+void test_stale_keys() {
+    Clod stale = make_clod();
+    stale.update(view_at(.2, near_radius), 1, 3);
+    assert(!stale.generate().empty());
+    const Clod::Generation first = stale.generate()[0];
+    const PatchKey wrong_key{std::uint8_t((first.key.face + 1) % 6), first.key.level, first.key.x, first.key.y};
+    assert(stale.resident() == 0);
+    assert(!stale.mark_resident(first.slot, wrong_key, first.stamp, MinorPlanetTerrain::shape.heights));
+    assert(stale.resident() == 0);
+    assert(stale.mark_resident(first.slot, first.key, first.stamp, MinorPlanetTerrain::shape.heights));
+    assert(stale.resident() == 1);
+}
+
+// A released slot returns to the pool and its patch is asked for again.
+void test_released_slot() {
+    Clod released = make_clod();
+    released.update(view_at(.2, near_radius), 1, 3);
+    const Clod::Generation unserved = released.generate()[0];
+    released.release(unserved.slot, unserved.key, unserved.stamp);
+    assert(released.pending() == 2); // the other two of the batch
+    released.update(view_at(.2, near_radius), 2, 3);
+    unsigned reissued_count = 0;
+    for (const auto& g : released.generate())
+        reissued_count += g.key == unserved.key;
+    assert(reissued_count == 1);
+    // Releasing twice, or against a stale stamp, must not free a slot that moved on.
+    released.release(unserved.slot, unserved.key, unserved.stamp);
+    const Clod::Generation again = released.generate()[0];
+    assert(released.mark_resident(again.slot, again.key, again.stamp, MinorPlanetTerrain::shape.heights));
+    assert(released.resident() == 1);
+}
+
+// A generation that never arrives is reclaimed, so the patch is not stuck forever.
+void test_abandoned_generation() {
+    Clod abandoned = make_clod();
+    abandoned.update(view_at(.2, near_radius), 1, 3);
+    const Clod::Generation dropped = abandoned.generate()[0];
+    assert(abandoned.pending() == 3);
+    // The sweep walks a window per frame, so a full pass takes baseline_slots / sweep_window frames.
+    constexpr unsigned sweep_cycle = baseline_slots / Clod::sweep_window;
+    for (unsigned f = 0; f <= sweep_cycle; f++)
+        abandoned.update(view_at(.2, near_radius), 2 + Clod::pending_timeout + f, 0);
+    assert(abandoned.pending() == 0);
+    assert(!abandoned.mark_resident(dropped.slot, dropped.key, dropped.stamp, MinorPlanetTerrain::shape.heights));
+    abandoned.update(view_at(.2, near_radius), 3 + Clod::pending_timeout + sweep_cycle, 3);
+    unsigned re_requested = 0;
+    for (const auto& g : abandoned.generate())
+        re_requested += g.key == dropped.key;
+    assert(re_requested == 1);
+}
+
+// After invalidation, the same key/slot must reject the previous generation stamp.
+void test_reissued_stamp() {
+    Clod reissued = make_clod();
+    reissued.update(view_at(.2, near_radius), 1, 3);
+    const Clod::Generation before = reissued.generate()[0];
+    reissued.invalidate();
+    reissued.update(view_at(.2, near_radius), 2, 3);
+    const Clod::Generation after = reissued.generate()[0];
+    assert(after.key == before.key && after.slot == before.slot);
+    assert(after.stamp != before.stamp);
+    assert(!reissued.mark_resident(before.slot, before.key, before.stamp, MinorPlanetTerrain::shape.heights));
+    assert(reissued.resident() == 0);
+    assert(reissued.mark_resident(after.slot, after.key, after.stamp, MinorPlanetTerrain::shape.heights));
+    assert(reissued.resident() == 1);
 }
 
 int main(int argc, char** argv) {
@@ -1510,150 +1717,15 @@ int main(int argc, char** argv) {
     test_cull_waste();
     test_draw_quadrant_culling();
     test_provenance_and_audit();
-    constexpr double radius = 2.5 / 15;
-    TerrainTier tier;
-    AsyncTiles async;
-    // Far away the tier stays off and asks for nothing.
-    tier.update(view_at(20, radius), 1);
-    assert(!tier.active() && tier.generate().empty() && tier.draws().empty());
-    // Close in it wants the six faces first, and takes over once they are resident.
-    const TierView close = view_at(.2, radius);
-    async.update(tier, close, 2);
-    assert(!tier.active());
-    assert(tier.generate().size() > 0 && tier.generate().size() <= TerrainTier::generate_per_frame);
-    unsigned roots = 0;
-    for (const auto& g : tier.generate())
-        roots += g.key.level == 0;
-    assert(roots == 6);
-    // Keep the sphere until all root uploads arrive.
-    async.update(tier, close, 3);
-    assert(!tier.active() && tier.draws().empty());
-    unsigned frame = 4, converged_at = 0;
-    for (; frame < 2000; frame++) {
-        async.update(tier, close, frame);
-        assert(tier.generate().size() <= TerrainTier::generate_per_frame);
-        if (tier.active())
-            assert(!tier.draws().empty());
-        if (tier.active() && tier.generate().empty() && async.pending.empty()) {
-            converged_at = frame;
-            break;
-        }
-    }
-    assert(converged_at && tier.active() && !tier.draws().empty());
-    std::printf("terrain tier: converged at frame %u with %zu patches drawn, %u resident, %u nodes\n", converged_at,
-                tier.draws().size(), tier.resident(), tier.nodes());
-    assert(tier.draws().size() > 6 && tier.draws().size() <= 58); // former default workload was 52
-    // Every drawn slot is drawn once, and no slot is both drawn and regenerated in one frame.
-    std::vector<unsigned> drawn;
-    for (const auto& draw : tier.draws())
-        drawn.push_back(draw.slot);
-    std::sort(drawn.begin(), drawn.end());
-    assert(std::adjacent_find(drawn.begin(), drawn.end()) == drawn.end());
-    for (const auto& g : tier.generate())
-        for (const auto& draw : tier.draws())
-            assert(draw.slot != g.slot);
-    // Require disjoint ancestor/descendant coverage and valid child split ranges.
-    unsigned parents_resident = 0, children_drawn = 0, partial = 0;
-    for (const auto& a : tier.draws()) {
-        assert(a.quadrants && a.quadrants <= 0xf);
-        partial += a.quadrants != 0xf;
-        for (const auto& b : tier.draws())
-            if (is_ancestor(a.key, b.key)) {
-                const unsigned shift = a.key.level - b.key.level - 1;
-                const unsigned quadrant = ((a.key.x >> shift) & 1) | ((a.key.y >> shift) & 1) << 1;
-                assert(!((b.quadrants >> quadrant) & 1));
-            }
-        if (a.key.level == 0)
-            continue;
-        const PatchKey parent{a.key.face, std::uint8_t(a.key.level - 1), std::uint16_t(a.key.x / 2),
-                              std::uint16_t(a.key.y / 2)};
-        const double dist = TerrainTier::nearest_distance(close.camera_local, patch_bounds(parent));
-        parents_resident += tier.resident_slot(parent) != TerrainTier::no_slot;
-        children_drawn++;
-        assert(dist < double(tier.range(a.key.level)) / TerrainTier::hysteresis);
-    }
-    std::printf("terrain tier: %u of %u drawn children have a resident parent, %u partial draws\n", parents_resident,
-                children_drawn, partial);
-    // A still view stays converged; a turn away draws fewer and generates the newly seen side.
-    async.update(tier, close, frame + 1);
-    assert(tier.generate().empty());
-    const std::size_t facing = tier.draws().size();
-    async.update(tier, view_at(.2, radius, normalized(Vec3d{1, 0, -.4})), frame + 2);
-    assert(tier.draws().size() < facing);
-    for (unsigned f = frame + 3; f < frame + 60; f++) {
-        async.update(tier, view_at(.2, radius), f);
-        for (const auto& g : tier.generate())
-            for (const auto& draw : tier.draws())
-                assert(draw.slot != g.slot);
-    }
-    // Backing off past the threshold switches the tier off again.
-    tier.update(view_at(20, radius), frame + 61);
-    assert(!tier.active() && tier.draws().empty());
-
-    TerrainTier budgeted;
-    budgeted.update(view_at(.2, radius), 1, 0);
-    assert(budgeted.generate().empty());
-    budgeted.update(view_at(.2, radius), 2, 3);
-    assert(budgeted.generate().size() <= 3);
-
-    // Reject stale keys without establishing residency.
-    TerrainTier stale;
-    stale.update(view_at(.2, radius), 1, 3);
-    assert(!stale.generate().empty());
-    const TerrainTier::Generation first = stale.generate()[0];
-    const PatchKey wrong_key{std::uint8_t((first.key.face + 1) % 6), first.key.level, first.key.x, first.key.y};
-    assert(stale.resident() == 0);
-    assert(!stale.mark_resident(first.slot, wrong_key, first.stamp));
-    assert(stale.resident() == 0);
-    assert(stale.mark_resident(first.slot, first.key, first.stamp));
-    assert(stale.resident() == 1);
-
-    // A released slot returns to the pool and its patch is asked for again.
-    TerrainTier released;
-    released.update(view_at(.2, radius), 1, 3);
-    const TerrainTier::Generation unserved = released.generate()[0];
-    released.release(unserved.slot, unserved.key, unserved.stamp);
-    assert(released.pending() == 2); // the other two of the batch
-    released.update(view_at(.2, radius), 2, 3);
-    unsigned reissued_count = 0;
-    for (const auto& g : released.generate())
-        reissued_count += g.key == unserved.key;
-    assert(reissued_count == 1);
-    // Releasing twice, or against a stale stamp, must not free a slot that moved on.
-    released.release(unserved.slot, unserved.key, unserved.stamp);
-    const TerrainTier::Generation again = released.generate()[0];
-    assert(released.mark_resident(again.slot, again.key, again.stamp));
-    assert(released.resident() == 1);
-
-    // A generation that never arrives is reclaimed, so the patch is not stuck forever.
-    TerrainTier abandoned;
-    abandoned.update(view_at(.2, radius), 1, 3);
-    const TerrainTier::Generation dropped = abandoned.generate()[0];
-    assert(abandoned.pending() == 3);
-    // The sweep walks a window per frame, so a full pass takes slot_count / sweep_window frames.
-    constexpr unsigned sweep_cycle = TerrainTier::slot_count / TerrainTier::sweep_window;
-    for (unsigned f = 0; f <= sweep_cycle; f++)
-        abandoned.update(view_at(.2, radius), 2 + TerrainTier::pending_timeout + f, 0);
-    assert(abandoned.pending() == 0);
-    assert(!abandoned.mark_resident(dropped.slot, dropped.key, dropped.stamp));
-    abandoned.update(view_at(.2, radius), 3 + TerrainTier::pending_timeout + sweep_cycle, 3);
-    unsigned re_requested = 0;
-    for (const auto& g : abandoned.generate())
-        re_requested += g.key == dropped.key;
-    assert(re_requested == 1);
-
-    // After invalidation, the same key/slot must reject the previous generation stamp.
-    TerrainTier reissued;
-    reissued.update(view_at(.2, radius), 1, 3);
-    const TerrainTier::Generation before = reissued.generate()[0];
-    reissued.invalidate();
-    reissued.update(view_at(.2, radius), 2, 3);
-    const TerrainTier::Generation after = reissued.generate()[0];
-    assert(after.key == before.key && after.slot == before.slot);
-    assert(after.stamp != before.stamp);
-    assert(!reissued.mark_resident(before.slot, before.key, before.stamp));
-    assert(reissued.resident() == 0);
-    assert(reissued.mark_resident(after.slot, after.key, after.stamp));
-    assert(reissued.resident() == 1);
+    test_inactive_far_away();
+    test_roots_first();
+    test_drawn_slots_unique();
+    test_coverage_disjoint();
+    test_view_changes();
+    test_generation_budget();
+    test_stale_keys();
+    test_released_slot();
+    test_abandoned_generation();
+    test_reissued_stamp();
     return 0;
 }

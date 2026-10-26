@@ -3,34 +3,34 @@
 #include "core/log.hpp"
 #include "core/panic_if.hpp"
 #include "render/frame_calculations.hpp"
-#include "scene/terrain_patch.hpp"
 
 #include <algorithm>
 #include <bit>
-#include <chrono>
 #include <cmath>
-#include <cstring>
+#include <cstddef>
 
 namespace space::render {
 
 namespace {
-constexpr std::uint64_t align4(std::uint64_t bytes) {
-    return (bytes + 3) & ~3ull;
-}
 // Copy offsets and entry strides must align to the four-byte albedo/slope texels.
-constexpr std::uint64_t height_tile_bytes = tile_side * tile_side * 2;
-constexpr std::uint64_t colour_tile_bytes = tile_colour_side * tile_colour_side * 4;
-constexpr std::uint64_t albedo_offset = align4(height_tile_bytes);
-constexpr std::uint64_t slope_offset = albedo_offset + colour_tile_bytes;
-constexpr std::uint64_t tile_total_bytes = align4(slope_offset + colour_tile_bytes);
+constexpr const planet::TileLayout& tile_layout = ProceduralProvider::tile_layout;
+constexpr std::uint64_t height_tile_bytes = tile_layout.planes[0].bytes();
+constexpr std::uint64_t colour_tile_bytes = tile_layout.planes[1].bytes();
+constexpr std::uint64_t albedo_offset = tile_layout.offset(1);
+constexpr std::uint64_t slope_offset = tile_layout.offset(2);
+constexpr std::uint64_t tile_total_bytes = tile_layout.bytes();
+static_assert(height_tile_bytes == tile_side * tile_side * 2);
+static_assert(colour_tile_bytes == tile_colour_side * tile_colour_side * 4);
+static_assert(tile_layout.planes[2].bytes() == colour_tile_bytes);
+static_assert(tile_total_bytes == 35980, "the staging heap size is unchanged");
 // The low bits of PatchInstance::tile[3] carry six edge/quadrant flags plus four quadrant bits;
 // its upper 16 bits carry the unmorphed-edge mask. Only the low flags enter debug packing, and the
 // shaders' debug packing reads tile[2] and tile[3] through 12-bit fields (see patch.slang).
 constexpr unsigned patch_tile_flag_bits = 10;
 static_assert(patch_tile_flag_bits <= 12, "tile[3] is unpacked from a 12-bit field");
 static_assert(terrain_cache_slots <= 0xfff, "tile[2] carries the parent slot in a 12-bit field");
-static_assert(FrameStats::Terrain::cache_age_buckets == TerrainTier::cache_age_buckets &&
-              FrameStats::Terrain::cache_age_bucket_frames == TerrainTier::cache_age_bucket_frames);
+static_assert(FrameStats::Terrain::cache_age_buckets == Clod::cache_age_buckets &&
+              FrameStats::Terrain::cache_age_bucket_frames == Clod::cache_age_bucket_frames);
 } // namespace
 
 void Renderer::Impl::create_terrain_tier() {
@@ -75,11 +75,56 @@ void Renderer::Impl::create_terrain_tier() {
     panic_if(!buffers.patch_records.range().gpu || !buffers.patch_records_staging.range().cpu ||
                  !buffers.tile_staging.range().cpu,
              "terrain tier allocation failed");
-    const unsigned cores = std::thread::hardware_concurrency();
-    tile_workers = std::max(1u, cores > 2 ? cores - 2 : 1u);
-    tile_pool = std::make_unique<WorkerPool<TileResult>>(tile_workers);
+    tile_provider.emplace(*minor_planet_terrain);
+    TileProvider* provider = &*tile_provider;
+    if (!planet_store.empty()) {
+        const planet::StoreStatus status = tile_store.open(planet_store.string().c_str());
+        if (status == planet::StoreStatus::missing) {
+            log::info("Near tier: no tile store at {}, tiles generated", planet_store.string());
+        } else if (status != planet::StoreStatus::ok) {
+            log::warn("Near tier: tile store {} not used: {}", planet_store.string(), store_status_name(status));
+        } else {
+            const planet::store::StoreHeader& header = tile_store.header();
+            // The arrays are sized by the procedural layout, so the store must share it level by level.
+            const auto same_layout = [&](const planet::TileLayout& stored) {
+                bool same = stored.plane_count == tile_layout.plane_count;
+                for (unsigned p = 0; same && p < tile_layout.plane_count; p++)
+                    same = stored.planes[p].id == tile_layout.planes[p].id &&
+                           stored.planes[p].format == tile_layout.planes[p].format &&
+                           stored.planes[p].side == tile_layout.planes[p].side;
+                return same;
+            };
+            // What MixedProvider would assert: the baked body's shell and level table are the terrain's.
+            const auto same_body = [&] {
+                bool same = header.shape.heights == MinorPlanetTerrain::shape.heights;
+                for (unsigned i = 0; same && i < planet::LevelTable::count; i++)
+                    same = header.levels.error[i] == MinorPlanetTerrain::levels.error[i] &&
+                           header.levels.relief[i] == MinorPlanetTerrain::levels.relief[i];
+                return same;
+            };
+            bool fits = true;
+            for (unsigned level = header.level_min; level <= header.level_max; level++)
+                fits &= same_layout(header.layouts[level]);
+            const char* reject = header.seed != minor_planet_terrain->seed()         ? "another body's seed"
+                                 : header.face_mask != 0x3f || header.level_min != 0 ? "faces or roots missing"
+                                 : !same_body()                                      ? "shell or level table differs"
+                                 : !fits                                             ? "tile layout differs"
+                                                                                     : nullptr;
+            if (reject) {
+                log::warn("Near tier: tile store {} not used: {}", planet_store.string(), reject);
+                tile_store.close();
+            } else {
+                baked_provider.emplace(tile_store);
+                mixed_provider.emplace(*baked_provider, *tile_provider, header.level_max);
+                provider = &*mixed_provider;
+                baked_levels = header.level_max + 1;
+                log::info("Near tier: levels 0..{} from the tile store {}", header.level_max, planet_store.string());
+            }
+        }
+    }
+    tile_streamer.emplace(TileStreamer::Config{.provider = provider, .sink = &tile_sink});
     log::info("Near tier: {} tile slots, {} workers, {} KiB height + {} KiB albedo + {} KiB slope arrays",
-              terrain_cache_slots, tile_workers, terrain_cache_slots * height_tile_bytes >> 10,
+              terrain_cache_slots, tile_streamer->workers(), terrain_cache_slots * height_tile_bytes >> 10,
               terrain_cache_slots * colour_tile_bytes >> 10, terrain_cache_slots * colour_tile_bytes >> 10);
 }
 
@@ -88,20 +133,16 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     stats.frame.terrain.uploaded = 0;
     if (!minor_planet_terrain)
         return;
-    // Poll even while disabled; upload recording commits residency and releases staging ownership.
-    if (tile_pool)
-        for (const TileResult& result : tile_pool->poll()) {
-            ring_state[result.ring] = RingState::upload;
-            tile_uploads.push_back({result.key, result.slot, result.ring, result.stamp, result.heights});
-            stats.frame.terrain.generate_ms = result.ms;
-        }
+    // Pump even while disabled; upload recording commits residency and releases staging ownership.
+    if (tile_streamer)
+        tile_streamer->pump(terrain_tier);
     if (!input.terrain.near_tier) {
         terrain_tier.disable();
         // Disabling only stops selection; it deliberately keeps the cache warm. Preserve a
         // truthful pressure strip instead of showing an empty cache while its tiles remain.
-        const TerrainTier::CacheStats cache = terrain_tier.cache_stats(frame_index);
+        const Clod::CacheStats cache = terrain_tier.cache_stats(frame_index);
         auto& ts = stats.frame.terrain;
-        const TerrainTier::Pressure& p = terrain_tier.pressure();
+        const Clod::Pressure& p = terrain_tier.pressure();
         unsigned rings_free = 0;
         for (unsigned i = 0; i < tile_ring_count; i++)
             rings_free += ring_available(i);
@@ -111,7 +152,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         ts.resident = cache.resident;
         ts.pending = cache.pending;
         ts.pending_age = cache.pending_age;
-        ts.queued = tile_pool ? tile_pool->in_flight() : 0;
+        ts.queued = tile_streamer ? tile_streamer->in_flight() : 0;
         ts.rings_free = rings_free;
         ts.rings = tile_ring_count;
         ts.slots = cache.capacity;
@@ -119,8 +160,9 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         ts.oldest_age = cache.oldest_age;
         ts.cache_age = cache.age;
         ts.nodes = terrain_tier.nodes();
-        ts.node_budget = TerrainTier::node_budget;
-        ts.workers = tile_workers;
+        ts.node_budget = Clod::node_budget;
+        ts.workers = tile_streamer ? tile_streamer->workers() : 0;
+        ts.baked_levels = baked_levels;
         ts.splits_blocked = ts.requested = ts.served = ts.evictions = ts.evicted_recent = 0;
         ts.generation_budget = ts.generation_budget_limited = ts.slots_blocked = 0;
         ts.starved = ts.out_of_range = ts.deepest = ts.behind_one = 0;
@@ -164,16 +206,18 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     }
     const float tan_y = frozen_cull ? frozen_cull->tan_y : float(std::tan(camera.vertical_fov * .5));
     const float tan_x = tan_y * float(extent.width) / float(std::max(extent.height, 1u));
-    TierView view{.body_centre = state.position - camera.position,
+    ClodView view{.body_centre = state.position - camera.position,
                   .radius = state.radius,
                   .axes = {axes[0], axes[1], axes[2]},
                   .camera_local = into_body(camera.position - state.position) * (1 / state.radius),
-                  .frustum = view_frustum(camera, tan_x, tan_y),
                   .height_pixels = float(extent.height),
                   .tan_y = tan_y,
                   .activate_pixels = input.terrain.activate_pixels,
                   .lod_bias = input.terrain.lod_bias,
                   .mesh_pixels = input.terrain.mesh_pixels};
+    const geometry::Frustum view_planes = view_frustum(camera, tan_x, tan_y);
+    for (unsigned i = 0; i < 5; i++)
+        view.planes[i] = {.normal = view_planes.planes[i].normal, .distance = view_planes.planes[i].distance};
     unsigned free_rings = 0;
     for (unsigned i = 0; i < tile_ring_count; i++)
         free_rings += ring_available(i);
@@ -182,7 +226,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         terrain_tier.invalidate();
     }
     const bool was_active = terrain_tier.active();
-    terrain_tier.update(view, frame_index, tile_pool ? free_rings : 0);
+    terrain_tier.update(view, frame_index, tile_streamer ? free_rings : 0);
     // The tier's generation budget is the free ring count, so every generation below finds a
     // ring. Nothing else enforces it, and a generation left unserved strands its slot.
     ORBITAL_ASSERT(terrain_tier.generate().size() <= free_rings);
@@ -192,7 +236,7 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
     // The draw list for the panel's patch map, kept until the next frame replaces it.
     patch_views.clear();
     patch_views.reserve(terrain_tier.draws().size());
-    for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
+    for (const Clod::Draw& draw : terrain_tier.draws()) {
         const float end = terrain_tier.range(draw.key.level), start = terrain_tier.morph_start(draw.key.level);
         const float morph = draw.key.level && end > start
                                 ? std::clamp((draw.near_distance - start) / (end - start), 0.f, 1.f)
@@ -211,23 +255,24 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                        .camera_s = float(under.s),
                        .camera_t = float(under.t)};
     auto& ts = stats.frame.terrain;
-    const TerrainTier::Pressure& p = terrain_tier.pressure();
+    const Clod::Pressure& p = terrain_tier.pressure();
     ts.active = terrain_tier.active();
     ts.drawn = unsigned(terrain_tier.draws().size());
     ts.submitted_triangles = ts.covered_quadrants = 0;
-    for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
+    for (const Clod::Draw& draw : terrain_tier.draws()) {
         ts.covered_quadrants += std::popcount(unsigned(draw.quadrants));
     }
     ts.submitted_triangles = ts.covered_quadrants * ((grid_index_count + skirt_index_count) / 3);
     ts.resident = p.cache_resident;
     ts.pending = p.cache_pending;
     ts.pending_age = p.cache_pending_age;
-    ts.queued = tile_pool ? tile_pool->in_flight() : 0;
+    ts.queued = tile_streamer ? tile_streamer->in_flight() : 0;
     ts.rings_free = free_rings;
     ts.rings = tile_ring_count;
     ts.slots = terrain_tier.capacity();
     ts.nodes = terrain_tier.nodes();
-    ts.workers = tile_workers;
+    ts.workers = tile_streamer ? tile_streamer->workers() : 0;
+    ts.baked_levels = baked_levels;
     ts.node_budget = p.node_budget;
     ts.splits_blocked = p.splits_blocked;
     ts.requested = p.requested;
@@ -257,67 +302,17 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
                   "previous tiles missing {}, evictions {}, free slots {}",
                   frame_index, ts.health.rollback_quadrants, ts.health.rollback_levels, ts.health.selection_rollbacks,
                   ts.health.balance_rollbacks, ts.health.missing_previous, p.evictions, p.cache_free);
-    if (tile_pool) {
-        const float height_range = MinorPlanetTerrain::height_max - MinorPlanetTerrain::height_min;
-        for (const TerrainTier::Generation& generation : terrain_tier.generate()) {
-            unsigned ring = tile_ring_count;
-            for (unsigned i = 0; i < tile_ring_count; i++) {
-                const unsigned idx = (ring_head + i) % tile_ring_count;
-                if (ring_available(idx)) {
-                    ring = idx;
-                    ring_head = (idx + 1) % tile_ring_count;
-                    break;
-                }
-            }
-            if (ring == tile_ring_count) {
-                // The assert above states the invariant; recover anyway rather than keep a slot
-                // no tile will ever fill, which would hold its key forever: visit() re-requests
-                // only keys with no slot, and eviction passes over anything not resident.
-                log::error("Near tier: no staging ring for {}, slot {} released", generation.key.packed(),
-                           generation.slot);
-                terrain_tier.release(generation.slot, generation.key, generation.stamp);
-                continue;
-            }
-            ring_state[ring] = RingState::worker; // held until its result is polled, however long that takes
-            std::uint8_t* dst = buffers.tile_staging.range().cpu + ring * tile_total_bytes;
-            const MinorPlanetTerrain* terrain = &*minor_planet_terrain;
-            const PatchKey key = generation.key;
-            const unsigned slot = generation.slot;
-            const std::uint32_t stamp = generation.stamp;
-            const float detail = tile_detail;
-            tile_pool->submit([terrain, key, slot, ring, stamp, dst, height_range, detail]() -> TileResult {
-                const auto start = std::chrono::steady_clock::now();
-                std::vector<float> heights(tile_side * tile_side);
-                std::vector<std::uint8_t> albedo(tile_colour_side * tile_colour_side * 4);
-                std::vector<std::uint16_t> slope(tile_colour_side * tile_colour_side * 2);
-                generate_height_tile(*terrain, key, heights);
-                generate_colour_tiles(*terrain, key, albedo, slope, detail);
-                auto* h16 = reinterpret_cast<std::uint16_t*>(dst);
-                for (unsigned i = 0; i < tile_side * tile_side; i++)
-                    h16[i] = std::uint16_t(
-                        std::clamp((heights[i] - MinorPlanetTerrain::height_min) / height_range, 0.0f, 1.0f) *
-                            65535.0f +
-                        .5f);
-                std::memcpy(dst + albedo_offset, albedo.data(), colour_tile_bytes);
-                std::memcpy(dst + slope_offset, slope.data(), colour_tile_bytes);
-                return {key,
-                        slot,
-                        ring,
-                        stamp,
-                        height_tile_range(heights),
-                        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count()};
-            });
-        }
-    }
+    if (tile_streamer)
+        tile_streamer->dispatch(terrain_tier, tile_detail);
     const std::uint64_t records_slot = (frame_index & 1) * std::uint64_t(terrain_patch_record_capacity) *
                                        sizeof(PatchInstance);
     auto* records = reinterpret_cast<PatchInstance*>(buffers.patch_records_staging.range().cpu + records_slot);
     std::size_t expected_records = 0;
-    for (const TerrainTier::Draw& draw : terrain_tier.draws())
+    for (const Clod::Draw& draw : terrain_tier.draws())
         expected_records += std::popcount(unsigned(draw.quadrants));
     ORBITAL_ASSERT(expected_records <= terrain_patch_record_capacity);
     std::size_t record_index = 0;
-    for (const TerrainTier::Draw& draw : terrain_tier.draws()) {
+    for (const Clod::Draw& draw : terrain_tier.draws()) {
         const auto cell = [&] {
             const double size = 2.0 / double(1u << draw.key.level);
             return ShaderFloat4{float(-1 + draw.key.x * size), float(-1 + draw.key.y * size), float(size),
@@ -328,10 +323,10 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
         const PatchKey parent{draw.key.face, std::uint8_t(draw.key.level ? draw.key.level - 1 : 0),
                               std::uint16_t(draw.key.x / 2), std::uint16_t(draw.key.y / 2)};
         // The parent tile supplies material at the coarse end of the distance band.
-        const unsigned resident_parent = draw.key.level ? terrain_tier.resident_slot(parent) : TerrainTier::no_slot;
+        const unsigned resident_parent = draw.key.level ? terrain_tier.resident_slot(parent) : Clod::no_slot;
         // The shader's parent-layer absence marker is the fixed GPU array size, while the CPU
         // cache uses no_slot so deterministic tests can safely exceed that array's capacity.
-        const unsigned parent_slot = resident_parent == TerrainTier::no_slot ? terrain_cache_slots : resident_parent;
+        const unsigned parent_slot = resident_parent == Clod::no_slot ? terrain_cache_slots : resident_parent;
         const unsigned edge_flags = (draw.key.x & 1u) | (draw.key.y & 1u) << 1 | (draw.key.x == 0) << 2 |
                                     (unsigned(draw.key.x) + 1 == 1u << draw.key.level) << 3 | (draw.key.y == 0) << 4 |
                                     (unsigned(draw.key.y) + 1 == 1u << draw.key.level) << 5;
@@ -352,6 +347,34 @@ void Renderer::Impl::prepare_terrain_tier(const FrameInput& input) {
             {.source = reinterpret_cast<std::uint64_t>(buffers.patch_records_staging.range().gpu) + records_slot,
              .destination = reinterpret_cast<std::uint64_t>(buffers.patch_records.range().gpu),
              .bytes = patch_records_bytes});
+}
+
+bool Renderer::Impl::TileRings::acquire(unsigned bytes, TileStaging& staging) {
+    ORBITAL_ASSERT(bytes <= tile_total_bytes);
+    for (unsigned i = 0; i < tile_ring_count; i++) {
+        const unsigned ring = (head + i) % tile_ring_count;
+        if (!owner.ring_available(ring))
+            continue;
+        head = (ring + 1) % tile_ring_count;
+        owner.ring_state[ring] = RingState::worker; // held until its result is pumped, however long that takes
+        auto* base = reinterpret_cast<std::byte*>(owner.buffers.tile_staging.range().cpu + ring * tile_total_bytes);
+        staging = {.bytes = {base, tile_total_bytes}, .token = ring};
+        return true;
+    }
+    // The update's budget is the free ring count, so this is a broken invariant, not load.
+    log::error("Near tier: no staging ring for a {} byte tile", bytes);
+    return false;
+}
+
+void Renderer::Impl::TileRings::complete(const TileRequest& request, const TileStaging& staging, Range<float> heights,
+                                         float milliseconds) {
+    owner.ring_state[staging.token] = RingState::upload;
+    owner.tile_uploads.push_back({request.key, request.slot, staging.token, request.stamp, heights});
+    owner.stats.frame.terrain.generate_ms = milliseconds;
+}
+
+void Renderer::Impl::TileRings::abandon(const TileStaging& staging) {
+    owner.ring_state[staging.token] = RingState::free; // never copied, so no GPU reuse to wait for
 }
 
 void Renderer::Impl::record_terrain_uploads(gpu::CommandBuffer* cmd) {

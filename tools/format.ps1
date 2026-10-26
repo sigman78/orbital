@@ -10,7 +10,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $clangFormat = Get-Command clang-format -ErrorAction SilentlyContinue
 if (-not $clangFormat) { throw 'clang-format was not found on PATH. Install LLVM 17 or newer.' }
 
-$files = Get-ChildItem -Path (Join-Path $root 'src'), (Join-Path $root 'tests') -Recurse -Include *.cpp, *.hpp, *.h |
+$files = Get-ChildItem -Path (Join-Path $root 'src'), (Join-Path $root 'planet'), (Join-Path $root 'tests') -Recurse -Include *.cpp, *.hpp, *.h |
     Select-Object -ExpandProperty FullName
 if (-not $files) { throw 'No source files found.' }
 
