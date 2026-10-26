@@ -147,6 +147,7 @@ AppState initial_state(const Options& options, const SystemDescription& system) 
     app.terrain.debug = options.terrain_debug;
     app.terrain.activate_pixels = options.tier_activate;
     app.terrain.lod_bias = options.lod_bias;
+    app.terrain.mesh_pixels = options.terrain_mesh_pixels;
     app.terrain.detail = options.terrain_detail;
     app.belt.lod_scale = options.lod_scale;
     app.vsync = options.vsync < 0 ? options.benchmark.empty() : options.vsync != 0;
@@ -275,7 +276,24 @@ ShotReadings frame_loop(const Session& session, FrameHistory& history, Benchmark
             draw_panel(app, renderer.stats(), smoother, history);
         const ImDrawData* ui_draw = ui.end_frame();
 
-        const auto frame_input = make_frame_input(app, simulation_time, ui_draw);
+        auto frame_input = make_frame_input(app, simulation_time, ui_draw);
+        if (options.terrain_cruise) {
+            const unsigned body = unsigned(Camera::bookmark_body(9));
+            const BodyState& state = app.bodies[body];
+            const double angle = .0012 * std::clamp(int(frames) - 500, 0, 1100);
+            const Vec3d radial = rotate_about(normalized(Vec3d{.6, .3, 1}), Vec3d{0, 1, 0}, angle);
+            const Vec3d forward = normalized(normalized(cross(Vec3d{0, 1, 0}, radial)) - radial * .1);
+            const auto world = [&](Vec3d v) {
+                return rotate_about(rotate_about(v, Vec3d{0, 1, 0}, state.rotation_angle), Vec3d{0, 0, 1},
+                                    session.system.bodies[body].axial_tilt);
+            };
+            const Vec3d position = state.position + world(radial * 1.08) * state.radius;
+            const Vec3d right = normalized(cross(forward, Vec3d{0, 1, 0}));
+            frame_input.camera.position = position;
+            frame_input.camera.forward = world(forward);
+            frame_input.camera.right = world(right);
+            frame_input.camera.up = world(cross(right, forward));
+        }
         renderer.set_vsync(app.vsync);
         if (frames % 60 == 0) // the window may move to another display, or the OS switch HDR
             app.display = display_settings(window.display_info());

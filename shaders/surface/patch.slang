@@ -56,30 +56,27 @@ PatchResult evaluatePatch(uint vertexIndex, uint instanceIndex, Root root)
     float radius = inst.center_radius.w;
     float3x3 rotate = rotation(inst.rotation_kind.xyz);
 
-    float2 g = grid.position.xy;
     float skirt = grid.position.z;
-    // Mask replaced quadrants. The grid gives every quadrant its own copy of the row and column
-    // it shares, so a vertex names its owner in w and goes when that quadrant does; nothing has
-    // to reason about vertices two quadrants both want. patch_grid_mesh has the why.
+    // Each record is one active quadrant, so the surface grid is shared by every quadrant.
+    // The skirt grid uses its w field to name one of the two canonical outer edges; rotate
+    // only those ribbons onto the quadrant's outer edges, preserving surface diagonals.
     uint quadrants = (patch.tile[3] >> 6) & 0xf;
-    uint quadrant = uint(grid.position.w);
-    bool dropped = ((quadrants >> quadrant) & 1) == 0;
+    uint quadrant = (quadrants & 1) != 0 ? 0 : (quadrants & 2) != 0 ? 1 : (quadrants & 4) != 0 ? 2 : 3;
+    float2 g;
+    if (grid.position.w < 0.5)
+        g = grid.position.xy + float2(quadrant & 1, quadrant >> 1) * (PATCH_QUADS * 0.5);
+    else if (quadrant == 0)
+        g = grid.position.xy;
+    else if (quadrant == 1)
+        g = float2(PATCH_QUADS - grid.position.y, grid.position.x);
+    else if (quadrant == 2)
+        g = float2(grid.position.y, PATCH_QUADS - grid.position.x);
+    else
+        g = PATCH_QUADS - grid.position.xy;
     float2 cell_origin = patch.cell.xy;
     float cell_size = patch.cell.z;
     uint face = patch.tile[0];
     uint slot = patch.tile[1];
-
-    if (dropped)
-    {
-        PatchResult dead = {};
-        dead.localPosition = float3(asfloat(0x7fc00000), 0, 0); // NaN: the triangle goes
-        dead.worldPosition = dead.localPosition;
-        dead.localNormal = float3(0, 0, 1);
-        dead.worldNormal = float3(0, 0, 1);
-        dead.slot = slot;
-        dead.face = face | uint(patch.cell.w) << 3 | patch.tile[2] << 8 | patch.tile[3] << 20;
-        return dead;
-    }
 
     float2 st = cell_origin + g / PATCH_QUADS * cell_size;
     float3 d = patchCubeDirection(face, st);

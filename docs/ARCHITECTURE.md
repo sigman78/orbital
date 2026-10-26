@@ -89,10 +89,16 @@ pass gives it a faint blue haze after Pluto's, tripled from the physical optical
 
 Close in, the body draws as a CDLOD cube sphere with a shared 32-quad grid, sampled from height,
 albedo and slope tile arrays. `render/terrain_tier.hpp` selects patches using distance ranges derived
-from calibrated parent triangle error, with a default five-screen-pixel target. The renderer gives it
+from the maximum of calibrated parent triangle error (five screen pixels) and a nominal
+eight-pixel grid interval. `--terrain-mesh-pixels` selects 4/8/16 or zero for error-only
+selection; both terms share the morph ranges. See [Detail budget](TERRAIN_DETAIL_BUDGET.md)
+for measured triangle sizes and the retained 33/65/65 height/bump/albedo layout. The renderer gives it
 2048 cache slots, independently of the 4096-node ceiling. Pending tiles, current traversal dependencies,
 and all six roots are protected from LRU eviction. Local resident ancestors cover missing refinement;
-neighbour balancing and edge morph constraints preserve 2:1 boundaries. The worker pool admits at most
+quadrant-local neighbour balancing and edge morph constraints preserve 2:1 boundaries.
+A streaming-only one-patch neighbour guard requests ancestor dependencies before fine
+work; visible demand can reclaim optional guards under pressure. The Terrain panel
+retains multi-level coverage rollback events separately from cache lifecycle counters. The worker pool admits at most
 eight tiles per frame, further capped by free entries in the 32-entry staging ring. Completed tiles are
 uploaded into array layers and shared-grid instances draw in the depth, scene and motion passes;
 the shadow map keeps the sphere. See [Dynamic terrain](DYNAMIC_TERRAIN.md) for the current contract and

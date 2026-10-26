@@ -81,6 +81,9 @@ struct PatchBounds {
 };
 PatchBounds patch_bounds(PatchKey key);
 
+// Largest dot(normal, direction) over the unit spherical cell; normal need not be unit length.
+double patch_direction_support(const PatchBounds& bounds, Vec3d normal);
+
 // Largest dot(normal, point) over the patch's shell: every direction of its cell at every
 // radius of the interval, the skirt drop included. A patch lies entirely outside a plane when
 // its support falls below the plane's own offset, which is the whole plane test.
@@ -109,7 +112,7 @@ void generate_colour_tiles(const MinorPlanetTerrain& terrain, PatchKey key, std:
 // build the rest. The owner is what lets a quadrant be masked away -- see patch_grid.
 struct PatchVertex {
     std::uint8_t x = 0, y = 0; // the lattice point, 0 .. tile_side - 1
-    std::uint8_t quadrant = 0; // whose it is; it goes when that quadrant is not drawn
+    std::uint8_t quadrant = 0; // owner on the full grid; side code on the quadrant skirt mesh
     bool skirt = false;        // on the ring that hangs below the tile's border
 };
 
@@ -121,5 +124,10 @@ struct PatchGrid {
 // The grid every patch is drawn from: one tile's worth of quads, a skirt ring around it, and
 // each quadrant holding its own copy of the row and column it shares with its neighbours.
 PatchGrid patch_grid();
+
+// One canonical quadrant surface and its two canonical outer skirts. A one-hot quadrant
+// record places these on each patch's active quadrant without duplicating the mesh.
+PatchGrid patch_quadrant_surface_grid();
+PatchGrid patch_quadrant_skirt_grid();
 
 } // namespace space

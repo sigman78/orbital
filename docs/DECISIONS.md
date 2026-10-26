@@ -313,3 +313,30 @@ demo now builds and renders on the Linux PC. Setup and repeatable commands are i
 - Follow-up validation: all 18 CTest cases passed, including renderer validation; all 33 shader helpers and 35 entry points compiled and passed SPIR-V validation. The 2798-step flight sweep had no missing-parent or cone-horizon anomalies. The 26-shot smoke run and slow-pan captures with TAA off/on produced no Vulkan validation findings; settled and moving close-ups drew 54 and 55 patches respectively.
 
 - 2026-09-19 cached terrain reentry: Arrival morphs now start only on the first display of a tile assignment. The previous visibility-based restart replayed the full fade whenever an otherwise mature cached tile missed a draw update, including frustum culling or replacement by children. A look-away/return regression reproduced 56 of 56 unchanged cached patches restarting their morph; after the fix none restart, with the same keys, slots, quadrant masks, and no generation requests. Default LOD distances and workload remain unchanged. The release build and all 18 CTest cases passed, including renderer validation; streaming and settled boundary checks still report zero violations.
+
+- 2026-10-25: Minor-planet detail budget measured after the selection/cache fix. Keep the calibrated 32-quad mesh, 33-sample heights and 65-sample material planes. Albedo now uses the same regional crater list as height generation: controlled CPU runs reduced material generation by 31-38% with identical output checksums. Active quadrants use shared surface and skirt meshes in two instanced calls per pass, preserving original triangles while avoiding submission of discarded quadrants; per-view triangle and quadrant counts join benchmark CSVs. At bookmark 9 the triangle reduction is 2.8-4.9%, with no general frame-rate claim. All 18 Release tests pass; settled captures are identical at biases 0/+1, and differ by one code value at one pixel at +2. See TERRAIN_DETAIL_BUDGET.md for measurements, memory tradeoffs and the case for future independent material refinement.
+
+- 2026-10-25 glancing-view follow-up: distinguish conservative draw coverage in the patch map/frozen cull view from actual camera-visible popping. Filter each submitted quadrant with the drawn tile's own height bounds after stitching, while preserving padded descendant bounds for refinement discovery. A new leaf and balancing regression fails on the previous implementation; all 18 Release tests pass and ray-marched visibility probes remain covered. At the close +2 bookmark, submissions fall from 599 to 545 quadrants (345024 to 313920 triangles) with pixel-identical captures. The remaining inner-sphere horizon is deliberately not claimed to be an exact terrain occlusion mask.
+
+## Terrain screen spacing — 2026-10-25
+
+Keep calibrated displacement error and add a nominal grid-spacing constraint to the
+same CLOD ranges. Default to eight pixels; expose 4/16 and legacy zero through
+`--terrain-mesh-pixels`. Measurements place median longest triangle edges at
+5.42px nadir and 4.88px glancing at eight, versus 11.34/9.88 for legacy selection.
+Retain 33 height, 65 bump and 65 albedo samples (1:2:2 intervals) and 2048 slots.
+The quality gain costs 3.32x submitted triangles at bookmark 9; do not describe
+this as a performance optimization. Independent material refinement and filtering
+remain future work. See [measurements and reproduction](TERRAIN_DETAIL_BUDGET.md).
+
+## Preserve detail across streaming boundaries — 2026-10-25
+
+A 2K low-flight replay reproduces broad four-level detail drops with zero evictions:
+whole-subtree neighbour balancing amplifies newly exposed coarse fallback. Use
+quadrant-local balancing and a streaming-only neighbour guard with coarse dependency
+priority. Do not increase the renderer cache or relax stitching. Record multi-level
+coverage rollbacks separately from residency loss, invalidation and stale completions;
+retain the last event in the Terrain UI. The replay has zero drops at 2048 and 512 slots
+after the change, but 256 slots remains an explicit overload limitation. See
+[TERRAIN_LOD_STABILITY.md](TERRAIN_LOD_STABILITY.md) for measurements and the staged
+plan toward admitted-cover continuity under sustained pressure.

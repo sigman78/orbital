@@ -14,13 +14,15 @@ namespace space::app {
 inline constexpr std::string_view usage =
     "ORBITAL - NoGraphicsAPI space demo\n"
     "--seed N --frames N --duration seconds --width W --height H --time seconds --bookmark 0..9\n"
-    "--capture file.png --benchmark file.csv --tour --high --no-hud --exposure scale --pan axis --pan-stop-frame N "
+    "--capture file.png --benchmark file.csv --tour --terrain-cruise --high --no-hud --exposure scale --pan axis "
+    "--pan-stop-frame N "
     "--rocks N --sun-at X Y (turn the camera so the sun projects there, 1 the frame edge; for lens review)\n"
     "--taa 0|1 --spatial 0|1|2 (off, FXAA, SMAA) --dust 0|1 --disc 0|1 --near-tier 0|1 --wireframe 0|1 --terrain-debug "
     "0..5 (shaded, tile coordinate, normal, elevation, crater shadow, morph and level) "
     "--tier-activate px (lower switches to the patches further out, "
     "for the coarse levels) --lod-bias X (patch ranges times 2^X; positive is finer) --terrain-detail X "
-    "(the tiles' micro-relief, 0 off) --lod-scale X "
+    "(the tiles' micro-relief, 0 off) --terrain-mesh-pixels X (4 high, 8 default, 16 economy, 0 error-only) "
+    "--lod-scale X "
     "--vsync 0|1 "
     "--splat 0..3 --tone "
     "0|1|2 --hdr 0|1|2 (SDR, scRGB, HDR10; needs the OS in HDR) "
@@ -60,8 +62,10 @@ struct Options {
     unsigned disc = render::BeltSettings{}.disc;               // far-belt disc LOD
     unsigned near_tier = render::TerrainSettings{}.near_tier;  // the minor planet's patches close in
     unsigned terrain_debug = 0;                                // the patch path's debug view (TerrainSettings::debug)
-    float tier_activate = render::TerrainSettings{}.activate_pixels;        // where the patches take the body over
-    float lod_bias = render::TerrainSettings{}.lod_bias;                    // the patch split ranges, times 2^bias
+    float tier_activate = render::TerrainSettings{}.activate_pixels; // where the patches take the body over
+    float lod_bias = render::TerrainSettings{}.lod_bias;             // the patch split ranges, times 2^bias
+    float terrain_mesh_pixels = render::TerrainSettings{}.mesh_pixels;
+    bool terrain_cruise = false; // deterministic 500-frame hold, 1100-frame low flight, then hold
     float terrain_detail = render::TerrainSettings{}.detail;                // the tiles' micro-relief, 0 off
     unsigned wireframe = render::TerrainSettings{}.wireframe;               // their quad grid drawn over the surface
     float lod_scale = render::BeltSettings{}.lod_scale;                     // far-belt fade distance scale

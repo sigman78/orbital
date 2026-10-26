@@ -75,6 +75,21 @@ add_executable(storage_profile EXCLUDE_FROM_ALL tools/storage_profile.cpp)
 target_link_libraries(storage_profile PRIVATE orbital_scene orbital_assets)
 target_compile_options(storage_profile PRIVATE ${ORBITAL_WARNINGS})
 
+# Opt-in CPU-only terrain generation benchmark; excluded from ordinary builds.
+add_executable(terrain_budget EXCLUDE_FROM_ALL tools/terrain_budget.cpp)
+target_link_libraries(terrain_budget PRIVATE orbital_scene)
+target_compile_options(terrain_budget PRIVATE ${ORBITAL_WARNINGS})
+
+# Opt-in CPU projection study for terrain mesh and material texel footprints.
+add_executable(terrain_footprint EXCLUDE_FROM_ALL tools/terrain_footprint.cpp)
+target_link_libraries(terrain_footprint PRIVATE orbital_render_cpu orbital_scene)
+target_compile_options(terrain_footprint PRIVATE ${ORBITAL_WARNINGS})
+
+# Opt-in bump continuity probe and deterministic slope-shading image.
+add_executable(terrain_detail EXCLUDE_FROM_ALL tools/terrain_detail.cpp)
+target_link_libraries(terrain_detail PRIVATE orbital_scene)
+target_compile_options(terrain_detail PRIVATE ${ORBITAL_WARNINGS})
+
 if(BUILD_TESTING)
   if(NOT MINGW) # NoGraphicsAPI headers explicitly exclude MinGW.
     add_executable(gpu_scopes_tests tests/gpu_scopes_tests.cpp)
@@ -87,10 +102,10 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME gpu_scopes COMMAND gpu_scopes_tests)
   endif()
-  foreach(test IN ITEMS core belt_motion terrain terrain_tier system geometry camera image kernels materials smaa texture app showcase frame_calculations options)
+  foreach(test IN ITEMS core belt_motion terrain terrain_tier terrain_cache system geometry camera image kernels materials smaa texture app showcase frame_calculations options)
     add_executable(${test}_tests tests/${test}_tests.cpp)
     target_link_libraries(${test}_tests PRIVATE orbital_scene orbital_assets)
-    if(test STREQUAL "showcase" OR test STREQUAL "frame_calculations" OR test STREQUAL "terrain_tier")
+    if(test STREQUAL "showcase" OR test STREQUAL "frame_calculations" OR test STREQUAL "terrain_tier" OR test STREQUAL "terrain_cache")
       target_link_libraries(${test}_tests PRIVATE orbital_render_cpu)
     endif()
     if(test STREQUAL "camera" OR test STREQUAL "app" OR test STREQUAL "options")

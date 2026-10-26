@@ -20,6 +20,44 @@ float smoothstep(float a, float b, float x) {
     return t * t * (3 - 2 * t);
 }
 
+constexpr double detail_shell = 1.4, detail_jitter = .8660254037844386;
+constexpr double detail_support = MinorPlanetTerrain::detail_radius * 1.4 * MinorPlanetTerrain::detail_reach;
+constexpr double detail_calibration = 1.85;
+
+std::optional<MinorPlanetTerrain::DetailCrater> detail_crater(Vec3d cell, double frequency, std::uint64_t seed) {
+    const Vec3d centre = cell + Vec3d{.5, .5, .5};
+    const double radius2 = dot(centre, centre);
+    if (radius2 < (frequency - detail_shell) * (frequency - detail_shell) ||
+        radius2 > (frequency + detail_shell) * (frequency + detail_shell))
+        return std::nullopt;
+    std::uint64_t state = mix64(std::uint64_t(std::int64_t(cell.x) * 73856093) ^
+                                std::uint64_t(std::int64_t(cell.y) * 19349663) ^
+                                std::uint64_t(std::int64_t(cell.z) * 83492791) ^ seed);
+    if (uniform(state) > MinorPlanetTerrain::detail_density)
+        return std::nullopt;
+    const Vec3d place = cell + Vec3d{uniform(state), uniform(state), uniform(state)};
+    const double len = length(place);
+    if (len < 1e-9)
+        return std::nullopt;
+    const double radius = MinorPlanetTerrain::detail_radius * (.6 + .8 * uniform(state));
+    const double depth = radius * MinorPlanetTerrain::detail_depth * (.5 + .5 * uniform(state));
+    return MinorPlanetTerrain::DetailCrater{place * (1 / len), radius, depth};
+}
+
+double detail_profile(const MinorPlanetTerrain::DetailCrater& crater, Vec3d d, double frequency) {
+    const Vec3d delta = crater.centre - d;
+    const double reach = crater.radius * MinorPlanetTerrain::detail_reach / frequency;
+    if (dot(delta, delta) > reach * reach)
+        return 0;
+    const double x = length(delta) * frequency / crater.radius;
+    const double rim = .25 * crater.depth;
+    const double profile = x < 1 ? -crater.depth + (crater.depth + rim) * smoothstep(crater_floor, 1, float(x))
+                                 : rim * std::exp(-(x - 1) * 4);
+    // Zero height and derivative at the support boundary, without softening the rim.
+    const double fade = 1 - smoothstep(1.5f, float(MinorPlanetTerrain::detail_reach), float(x));
+    return profile * fade;
+}
+
 // Angular distance from the crater's centre over its radius: 0 at the centre,
 // 1 at the rim; or nothing when the point is out of its reach.
 std::optional<float> crater_x(const MinorPlanetTerrain::Crater& crater, Vec3d d) {
@@ -93,7 +131,6 @@ float MinorPlanetTerrain::detail(Vec3d direction, double nyquist, float strength
         return 0;
     const Vec3d d = normalized(direction);
     // Calibrates the generated stack to detail_slope's RMS tangent at strength 1.
-    constexpr double calibration = 1.85;
     double total = 0;
     for (unsigned octave = 0; octave < detail_octaves; octave++) {
         const double frequency = double(detail_frequency) * (1u << octave);
@@ -102,42 +139,92 @@ float MinorPlanetTerrain::detail(Vec3d direction, double nyquist, float strength
             break; // and so is every octave above this one
         const Vec3d p = d * frequency;
         const Vec3d base{std::floor(p.x), std::floor(p.y), std::floor(p.z)};
+        // Jittered centres are projected onto the sphere. A contributing centre can
+        // be more than one lattice cell away in 3D even when its projected crater
+        // covers d. The old 3x3x3 search sliced craters at floor(p) boundaries.
+        constexpr double shell = detail_shell, jitter = detail_jitter;
+        constexpr double support = detail_support;
+        // |place-p|^2 <= (shell+jitter)^2 + (1+(shell+jitter)/frequency)*support^2
+        // is below 3^2 at every octave. Thus floor(place) differs by at most 3.
+        constexpr int neighbours = 3;
+        static_assert((shell + jitter) * (shell + jitter) +
+                          (1 + (shell + jitter) / detail_frequency) * support * support <
+                      neighbours * neighbours);
+        const double inner2 = (frequency - shell) * (frequency - shell);
+        const double outer2 = (frequency + shell) * (frequency + shell);
+        const double tangent_limit = (1 + (shell + jitter) / frequency) * support + jitter;
         double sum = 0;
-        for (int dz = -1; dz <= 1; dz++)
-            for (int dy = -1; dy <= 1; dy++)
-                for (int dx = -1; dx <= 1; dx++) {
+        for (int dz = -neighbours; dz <= neighbours; dz++)
+            for (int dy = -neighbours; dy <= neighbours; dy++)
+                for (int dx = -neighbours; dx <= neighbours; dx++) {
                     const Vec3d cell{base.x + dx, base.y + dy, base.z + dz};
                     const Vec3d centre = cell + Vec3d{.5, .5, .5};
-                    const double radial = length(centre) - frequency;
-                    if (std::abs(radial) > 1.4)
-                        continue; // off the shell: cheap, and most cells go here
-                    std::uint64_t state = mix64(std::uint64_t(std::int64_t(cell.x) * 73856093) ^
-                                                std::uint64_t(std::int64_t(cell.y) * 19349663) ^
-                                                std::uint64_t(std::int64_t(cell.z) * 83492791) ^
-                                                (seed_ + 0xD1 + octave));
-                    if (uniform(state) > detail_density)
-                        continue; // not every cell carries one
-                    const Vec3d place = cell + Vec3d{uniform(state), uniform(state), uniform(state)};
-                    const double len = length(place);
-                    if (len < 1e-9)
+                    const double radius2 = dot(centre, centre);
+                    if (radius2 < inner2 || radius2 > outer2)
                         continue;
-                    // Crater dimensions are in lattice cells.
-                    const double radius = detail_radius * (.6 + .8 * uniform(state));
-                    const double x = length(place * (1 / len) - d) * frequency / radius;
-                    if (x > detail_reach)
-                        continue;
-                    const double depth = radius * detail_depth * (.5 + .5 * uniform(state));
-                    const double rim = .25 * depth;
-                    sum += x < 1 ? -depth + (depth + rim) * smoothstep(crater_floor, 1, float(x))
-                                 : rim * std::exp(-(x - 1) * 4);
+                    const Vec3d transverse = centre - d * dot(centre, d);
+                    if (dot(transverse, transverse) > tangent_limit * tangent_limit)
+                        continue; // conservative support test before hashing and square roots
+                    if (const auto crater = detail_crater(cell, frequency, seed_ + 0xD1 + octave))
+                        sum += detail_profile(*crater, d, frequency);
                 }
         // Convert lattice-cell depth to radii.
         total += weight * sum / frequency;
     }
-    return float(total * double(strength) * detail_slope * calibration);
+    return float(total * double(strength) * detail_slope * detail_calibration);
 }
 
-Vec3f MinorPlanetTerrain::albedo(Vec3d direction, float height, float slope) const {
+MinorPlanetTerrain::DetailRegion MinorPlanetTerrain::detail_region(Vec3d centre, double angular_radius,
+                                                                   double nyquist) const {
+    DetailRegion result;
+    const Vec3d d = normalized(centre);
+    for (unsigned octave = 0; octave < detail_octaves; ++octave) {
+        const double frequency = double(detail_frequency) * (1u << octave);
+        const double weight = std::clamp(std::log2(nyquist / frequency), 0.0, 1.0);
+        if (weight <= 0)
+            break;
+        result.weights[octave] = weight;
+        const double angle = std::min(pi<double>, angular_radius + 2 * std::asin(detail_support / (2 * frequency)));
+        const double cosine = std::cos(angle), sine = std::sin(angle);
+        const double inner = frequency - detail_shell - detail_jitter;
+        const double outer = frequency + detail_shell + detail_jitter;
+        // Bound jittered positions whose projected direction can affect the cap.
+        // Their radial range includes the full half-diagonal of a lattice cell.
+        const auto bounds = [&](double component) {
+            const double tangent = std::sqrt(std::max(0.0, 1 - component * component));
+            const double low = -component >= cosine ? -1 : component * cosine - tangent * sine;
+            const double high = component >= cosine ? 1 : component * cosine + tangent * sine;
+            return Range<int>{int(std::floor(std::min(low * inner, low * outer))) - 1,
+                              int(std::floor(std::max(high * inner, high * outer))) + 1};
+        };
+        const auto bx = bounds(d.x), by = bounds(d.y), bz = bounds(d.z);
+        for (int z = bz.min; z <= bz.max; ++z)
+            for (int y = by.min; y <= by.max; ++y)
+                for (int x = bx.min; x <= bx.max; ++x)
+                    if (const auto crater = detail_crater({double(x), double(y), double(z)}, frequency,
+                                                          seed_ + 0xD1 + octave))
+                        if (dot(crater->centre, d) >= cosine)
+                            result.craters[octave].push_back(*crater);
+    }
+    return result;
+}
+
+float MinorPlanetTerrain::detail(Vec3d direction, const DetailRegion& region, float strength) const {
+    if (strength <= 0)
+        return 0;
+    const Vec3d d = normalized(direction);
+    double total = 0;
+    for (unsigned octave = 0; octave < detail_octaves; ++octave) {
+        const double frequency = double(detail_frequency) * (1u << octave);
+        double sum = 0;
+        for (const DetailCrater& crater : region.craters[octave])
+            sum += detail_profile(crater, d, frequency);
+        total += region.weights[octave] * sum / frequency;
+    }
+    return float(total * double(strength) * detail_slope * detail_calibration);
+}
+
+Vec3f MinorPlanetTerrain::albedo(Vec3d direction, float height, float slope, std::span<const Crater> craters) const {
     const Vec3d d = normalized(direction);
     // Dark ground, warm maculae, lowland frost, and brighter steep faces.
     const float lows = std::clamp((height - height_min) / (height_max - height_min), 0.f, 1.f);
@@ -147,7 +234,7 @@ Vec3f MinorPlanetTerrain::albedo(Vec3d direction, float height, float slope) con
     albedo = albedo * (.9f + .25f * (1 - lows) + .6f * frost) * (1 + .5f * slope);
     // Fresh craters darken floors and brighten ejecta; some carry central faculae.
     const float patchy = .4f + .6f * (1 + fbm(d * 30.0, 2, seed_ + 13));
-    for (const Crater& crater : craters_) {
+    for (const Crater& crater : craters) {
         const auto x = crater_x(crater, d);
         if (!x)
             continue;

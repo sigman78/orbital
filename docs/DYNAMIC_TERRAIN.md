@@ -1,7 +1,7 @@
 # Dynamic planet terrain: the minor planet's near tier
 
 The minor planet draws close in as a CDLOD cube sphere whose shape and colour come from per-patch
-tiles of textures rather than CPU-built vertices. One shared grid mesh draws every patch; levels meet
+tiles of textures rather than CPU-built vertices. Shared surface and skirt grids draw active quadrants; levels meet
 without cracks by vertex morphing. Tiles are generated on a CPU worker pool and appear as they are
 ready. The design is meant to scale to a whole-planet tier later, and to a compute generator that
 fills the same tile contract without a renderer change.
@@ -16,8 +16,8 @@ each and the limits on them are unrelated.
 
 | Term | What it is | How many |
 |---|---|---|
-| **Patch** | A cell of a face's quadtree, named by a `PatchKey` (face, level, x, y). The unit of drawing. | one draw instance each |
-| **Node** | The quadtree bookkeeping for a patch the selector is tracking: its key, bounds and child link. 64 bytes, CPU only. | `node_budget`, 4096 |
+| **Patch** | A cell of a face's quadtree, named by a `PatchKey` (face, level, x, y). The unit of selection. | one instance per active quadrant, in surface and skirt draws |
+| **Node** | CPU quadtree bookkeeping: key, bounds, child link and retained measured heights. | `node_budget`, 4096 |
 | **Tile** | A patch's three textures: heights, albedo, slope. What a worker generates and the GPU samples. | one per resident patch |
 | **Slot** | One layer index shared by the three texture arrays, holding one tile. The cache entry, LRU-evicted. | renderer `terrain_cache_slots`, 2048; CPU sweep baseline 1024 |
 | **Ring** | One entry of the staging ring buffer: a CPU-writable, GPU-readable scratch block sized for one tile's three planes. | `tile_ring_count`, 32 |
@@ -85,10 +85,11 @@ owns the arrays.
 
 ### The shared grid
 
-One static mesh, `patch_grid()`: four quadrant grids of 17 by 17 vertices, each owning its
-centre-cross boundary vertices, plus eight half-edge skirt strips of 17 vertices. That is 1292
-vertices and 6912 indices. Vertices carry `(x, y, skirt, quadrant)`, so removing a quadrant removes
-all its triangles. This fix is already present; the former shared-vertex mask left two triangles.
+Two static meshes: `patch_quadrant_surface_grid()` has 289 vertices and 1536 indices;
+`patch_quadrant_skirt_grid()` has 68 vertices and 192 indices. One instance per selected
+quadrant translates the surface and rotates only the skirt ribbons onto the outer edges.
+Two instanced calls per pass submit no triangles for unselected quadrants. The former full
+`patch_grid()` (1292 vertices, 6912 indices) remains a topology reference for tests.
 The uniform `(x,y)–(x+1,y+1)` diagonal preserves the child's collapse into the parent triangulation.
 
 Skirts remain an outer-edge fallback. Streaming continuity is enforced by selection and common
@@ -99,7 +100,7 @@ morph bands; skirts do not cover the internal boundaries of a partially drawn pa
 `PatchInstance` in `scene_shared.h`, 48 bytes: `cell` (s0, t0, size, level), `morph` (start and end
 distance in radii, the local interior fade and the coarse-edge mask), `tile` (face, slot, the
 parent's slot or the slot count for none, then the child's quadrant, which sides lie on a cube edge,
-which grid quadrants to draw, and a 16-bit mask of edges to keep unmorphed). One record per drawn patch, written each frame into a host-visible
+one active grid quadrant, and a 16-bit mask of edges to keep unmorphed). One record per active quadrant, written each frame into a host-visible
 slot chosen by frame parity and copied beside the tile uploads. `ORBITAL_ROOT_PATCHES` puts the vertex
 shaders on the patch path.
 
@@ -107,14 +108,15 @@ shaders on the patch path.
 
 `shaders/surface/patch.slang`, shared by `surface.slang` and `motion.slang`:
 
-1. `g = position.xy` (0..32), `skirt = position.z`.
+1. Decode the record's one-hot quadrant, translate the surface or rotate the canonical skirt
+   ribbon into its patch coordinates `g` (0..32); `skirt = position.z`.
 2. Interior `m = max(saturate((dist - morph.x) / (morph.y - morph.x)), morph.z)`; roots use zero.
    Quadrant edges ignore the arrival fade. At a 2:1 boundary the fine edge uses one and the coarse
    edge zero; same-face peers use the common distance morph, and cube-face peers pin their edge.
    The CPU supplies four side bits per quadrant for each kind of constraint.
 3. `g' = g - frac(g * 0.5) * 2 * m` — odd vertices slide to the even neighbour along each axis.
 4. Height is a bilinear read of the height array at layer `slot`, coordinates `g'`.
-5. A quadrant the record does not list is dropped.
+5. Only selected quadrants have records; no NaN-based triangle dropping is needed.
 
 The motion pass places the previous position through the same morph and skirt drop, or morphing patches
 carry false motion vectors into TAA.
@@ -272,10 +274,10 @@ path one term at a time so a seam can be attributed.
 |---|---|
 | Height array, 2048 layers of 33×33 r16 | 4.3 MiB |
 | Albedo and slope arrays, 2048 layers of 65×65 at 4 B | 33.0 MiB each |
-| Patch records, 2048 × 48 B, two staging slots plus device | 288 KiB |
+| Quadrant records, 8192 × 48 B, two staging slots plus device | 1152 KiB |
 | Staging ring, 32 tiles | 1.1 MiB host-visible |
-| Quadtree nodes, 4096 × 64 B worst case | 256 KiB |
-| Shared grid | 1292 vertices, 6912 indices, static |
+| Quadtree nodes | at most 4096 live nodes; includes cell bounds and retained heights |
+| Shared surface + skirt grids | 357 vertices, 1728 indices, plus expanded wireframe vertices |
 
 Host-visible heaps count against the BAR aperture (`tools/check-bar1.py`).
 
@@ -314,11 +316,14 @@ Normal distance/morph endpoints are not warnings. Counter lists no longer requir
 
 ### 2. What the cull still keeps, and nothing says whether it costs
 
-The five default test views currently draw 13–43 patches with none provably off screen. What is left is the tail of the same thing: a plane rejects on the
-shell's extremes, and a patch can have a corner inside the frustum while almost all of it is outside.
-Closing that wants per-quadrant culling, which is a change to what a draw is, not to the bound.
+Draw quadrants are now filtered against their own tile's height bounds after stitching,
+including frustum and the existing horizon test. The close +2 bookmark drops from 599
+to 545 submitted quadrants with an unchanged capture. Remaining bounds can still keep
+a quadrant whose corner intersects the frustum while most of it lies outside; the
+inner-sphere horizon also does not account for occlusion by terrain ridges.
 
-There is also no counter for it. `test_cull_waste` measures waste offline by re-deriving visibility
+Benchmark CSVs count submitted triangles and quadrants, but do not report exact visible
+pixel contribution. `test_cull_waste` measures waste offline by re-deriving visibility
 from each patch's samples, far too slow for a frame, and the frozen-cull view shows culled quadrants
 and kept islands alike with no number beside them. A cheap proxy on the panel would say whether the
 remaining tail is worth anything at all.
@@ -344,7 +349,7 @@ not accurate large shapes, and shader detail costs no tiles, no slots and no CPU
 - `draw_body` leaves `ORBITAL_ROOT_PATCHES` and `root.patches` on the caller's `Root`; harmless only
   because the minor planet is drawn last.
 - Acceptance never read off the panel: main-thread time in `prepare_terrain_tier` under 0.5 ms with 32
-  jobs in flight, and one draw call per pass. Selection now walks a larger tree for a deeper cap, so
+  jobs in flight (the original target was one draw call; active quadrants now use two per pass). Selection walks a larger tree for a deeper cap, so
   this is the number to watch: measured in isolation it roughly doubled at bias 2.
 
 ## Later, out of scope

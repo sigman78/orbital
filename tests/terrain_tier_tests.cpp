@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -334,6 +335,31 @@ void test_morph_bands() {
     assert(worst > 1.1);
 }
 
+void test_mesh_spacing_bands() {
+    for (float target : {4.f, 8.f, 16.f}) {
+        TierView view = view_at(20, 2.5 / 15);
+        view.mesh_pixels = target;
+        TerrainTier tier;
+        tier.update(view, 1);
+        for (unsigned level = 0; level <= patch_level_max; ++level) {
+            const double projection = view.height_pixels / (2 * double(view.tan_y));
+            const double split = tier.range(level + 1);
+            const double interval = std::ldexp(2. / (tile_side - 1), -int(level));
+            assert(interval * projection / split <= target * 1.00001);
+            assert(TerrainTier::level_error[level] * projection / split <= TerrainTier::error_pixels * .50001);
+            assert(tier.morph_start(level) > split);
+            assert(tier.morph_start(level) < tier.range(level));
+        }
+        const float old_range = tier.range(6);
+        view.height_pixels *= 2;
+        tier.update(view, 2);
+        assert(std::abs(tier.range(6) / old_range - 2) < 1e-5);
+        view.lod_bias = 1;
+        tier.update(view, 3);
+        assert(std::abs(tier.range(6) / old_range - 4) < 1e-5);
+    }
+}
+
 void test_morph_continuity() {
     constexpr double radius = 2.5 / 15;
     const MinorPlanetTerrain terrain(1007);
@@ -344,7 +370,8 @@ void test_morph_continuity() {
     for (const Vec3d& spot : spots)
         for (double altitude : {.03, .08, .2, .5}) {
             TerrainTier tier;
-            const TierView view = view_over(spot, altitude, radius);
+            TierView view = view_over(spot, altitude, radius);
+            view.mesh_pixels = 8;
             for (unsigned frame = 1; frame <= 96; frame++) {
                 tier.update(view, frame, TerrainTier::slot_count);
                 for (const auto& g : tier.generate())
@@ -431,7 +458,9 @@ void test_motion_stability() {
     }
     std::printf("terrain tier: small-step flight, worst draw replacement %.1f%%, %u waiting frames, peak %u patches\n",
                 100 * worst_loss, waiting, peak);
-    assert(waiting > 0 && worst_loss < .2);
+    // The neighbour guard may eliminate all waits on this slow path.
+    assert(worst_loss < .2);
+    assert(tier.health().rollback_events == 0);
 }
 
 // Looking away must not replay arrival morphs on already settled, cached geometry.
@@ -748,6 +777,108 @@ void converge(TerrainTier& tier, const View& v) {
 }
 
 } // namespace truth
+
+// Every submitted unit is the quadrant of its draw tile, so its own tile range, padded only
+// for the skirt drop, must clear each active frustum plane and the existing horizon bound.
+unsigned check_draw_quadrant_bounds(const TerrainTier& tier, const TierView& view) {
+    unsigned submitted = 0;
+    for (const TerrainTier::Draw& draw : tier.draws())
+        for (unsigned q = 0; q < 4; q++) {
+            if (!(draw.quadrants >> q & 1))
+                continue;
+            submitted++;
+            const PatchBounds bounds = patch_bounds(draw.key.child(q));
+            const Range<float> heights = tier.height_range(draw.key);
+            for (unsigned i = 0; i < 5; i++) {
+                const geometry::Plane& plane = view.frustum.planes[i];
+                const Vec3d n{double(plane.normal.x), double(plane.normal.y), double(plane.normal.z)};
+                const double offset = (dot(n, view.body_centre) + double(plane.distance)) / view.radius;
+                const Vec3d local{dot(n, view.axes[0]), dot(n, view.axes[1]), dot(n, view.axes[2])};
+                assert(offset + patch_cell_support(bounds, local, heights) >= 0);
+            }
+            const double distance = length(view.camera_local);
+            if (distance > TerrainTier::horizon_occluder)
+                assert(patch_cell_support(bounds, view.camera_local * (1 / distance), heights) * distance >=
+                       TerrainTier::horizon_occluder * TerrainTier::horizon_occluder);
+        }
+    return submitted;
+}
+
+void test_leaf_quadrant_outside_frustum() {
+    const MinorPlanetTerrain terrain(1007);
+    const truth::View v = truth::view_over_ground(terrain, {.6, .3, 1}, .08, 0.);
+    TerrainTier tier;
+    truth::converge(tier, v);
+
+    // This leaf's whole descendant reach passes visibility, but all four quadrants of its own
+    // resident tile are outside the frustum. The old leaf path submitted the whole patch.
+    const PatchKey key{0, 3, 0, 2};
+    assert(tier.resident_slot(key) != TerrainTier::no_slot);
+    std::vector<TerrainTier::Step> steps;
+    tier.explain(key, v.view, steps);
+    assert(!steps.back().split && !steps.back().drawn);
+    const PatchBounds whole = patch_bounds(key);
+    const Range<float> reach = tier.reach_of(key);
+    const double distance = length(v.camera_local);
+    assert(patch_cell_support(whole, normalized(v.camera_local), reach) * distance >=
+           TerrainTier::horizon_occluder * TerrainTier::horizon_occluder);
+    for (const geometry::Plane& plane : v.view.frustum.planes) {
+        const Vec3d n{double(plane.normal.x), double(plane.normal.y), double(plane.normal.z)};
+        const double offset = (dot(n, v.view.body_centre) + double(plane.distance)) / v.view.radius;
+        assert(offset + patch_cell_support(whole, n, reach) >= 0);
+    }
+    const Range<float> own = tier.height_range(key);
+    for (unsigned q = 0; q < 4; q++) {
+        const PatchBounds quadrant = patch_bounds(key.child(q));
+        bool outside = false;
+        for (const geometry::Plane& plane : v.view.frustum.planes) {
+            const Vec3d n{double(plane.normal.x), double(plane.normal.y), double(plane.normal.z)};
+            const double offset = (dot(n, v.view.body_centre) + double(plane.distance)) / v.view.radius;
+            outside |= offset + patch_cell_support(quadrant, n, own) < 0;
+        }
+        assert(outside);
+    }
+}
+
+void test_draw_quadrant_culling() {
+    const MinorPlanetTerrain terrain(1007);
+    struct Case {
+        Vec3d over;
+        double altitude, pitch;
+    };
+    const Case cases[] = {{{.6, .3, 1}, .08, 0.}, {{.6, .3, 1}, .08, .1}, {{.6, .3, 1}, .08, .2},
+                          {{.6, .3, 1}, .15, 0.}, {{.6, .3, 1}, .15, .1}, {{.6, .3, 1}, .15, .2}};
+    // A prior eight-view sweep, including pitch .05 at both altitudes, found 11–24 quadrant
+    // candidates outside a frustum plane and 5–13 below the horizon bound in the pre-filter
+    // draw list. These are observations, not count assertions: selection and measured tile
+    // ranges can change while the bound must hold.
+    for (const Case& k : cases) {
+        const truth::View v = truth::view_over_ground(terrain, k.over, k.altitude, k.pitch);
+        TerrainTier tier;
+        truth::converge(tier, v);
+        assert(check_draw_quadrant_bounds(tier, v.view) > 0);
+    }
+    test_leaf_quadrant_outside_frustum();
+
+    // Keep the balancing path exercised too: delayed, out-of-order uploads create adjacent
+    // levels for stitch() to coarsen before the final quadrant filter runs.
+    truth::View high = truth::view_over_ground(terrain, {.6, .3, 1}, .08, .1);
+    high.view.lod_bias = 3;
+    TerrainTier balanced;
+    AsyncTiles delayed;
+    delayed.terrain = high.terrain;
+    delayed.jitter = 30;
+    unsigned settled = 0, balanced_total = 0;
+    for (unsigned frame = 1; frame < 400 && settled < 30; frame++) {
+        delayed.update(balanced, high.view, frame, 2);
+        balanced_total += balanced.pressure().balanced;
+        if (balanced.pressure().balanced)
+            assert(check_draw_quadrant_bounds(balanced, high.view) > 0);
+        settled = balanced.generate().empty() && delayed.pending.empty() ? settled + 1 : 0;
+    }
+    assert(balanced_total > 0);
+    assert(check_draw_quadrant_bounds(balanced, high.view) > 0);
+}
 
 void test_cull_soundness() {
     const MinorPlanetTerrain terrain(1007);
@@ -1294,6 +1425,61 @@ void test_cache_stats_accounting() {
     assert(tier.resident_slot({0, 0, 0, 0}) == TerrainTier::no_slot);
 }
 
+// Nearest distance must follow the spherical cell, including its edges and corners, rather
+// than treating the whole angular cap as terrain. Compare it with a dense cell lattice across
+// faces, levels and camera directions, and cover numerically sensitive radial cases directly.
+void test_nearest_cell_distance() {
+    const Range<float> heights{-.02f, .03f};
+    const double inner = 1 + double(heights.min), outer = 1 + double(heights.max);
+    constexpr unsigned divisions = 64;
+    for (unsigned face = 0; face < 6; face++)
+        for (unsigned level : {2u, 4u, 7u}) {
+            const unsigned cells = 1u << level;
+            const unsigned cx = cells / 2 - 1, cy = cells / 2 - 1;
+            const PatchKey key{std::uint8_t(face), std::uint8_t(level), std::uint16_t(cx), std::uint16_t(cy)};
+            const PatchBounds bounds = patch_bounds(key);
+            const double size = 2.0 / cells;
+            const double s0 = -1 + cx * size, t0 = -1 + cy * size;
+            const double sm = s0 + size / 2, tm = t0 + size / 2;
+            const Vec3d directions[] = {
+                cube_direction(face, sm, tm),                                         // in the cell
+                cube_direction(face, s0 + size + .05 * size, tm),                     // just beyond an edge
+                cube_direction(face, s0 + size + .05 * size, t0 + size + .05 * size), // beyond a corner
+                bounds.centre * -1                                                    // opposite side
+            };
+            for (Vec3d direction : directions) {
+                const Vec3d camera = normalized(direction) * 1.2;
+                const double nearest = TerrainTier::nearest_distance(camera, bounds, heights);
+                double sampled = std::numeric_limits<double>::infinity();
+                for (unsigned y = 0; y <= divisions; y++)
+                    for (unsigned x = 0; x <= divisions; x++) {
+                        const Vec3d d = cube_direction(face, s0 + size * x / divisions, t0 + size * y / divisions);
+                        const double r = std::clamp(dot(camera, d), inner, outer);
+                        sampled = std::min(sampled, length(camera - d * r));
+                    }
+                assert(nearest <= sampled + 1e-12);
+                assert(sampled - nearest < .01);
+            }
+
+            // Exact direction support scales for non-unit normals, including negative support.
+            const double opposite_support = patch_direction_support(bounds, bounds.centre * -1);
+            assert(opposite_support < 0);
+            assert(std::abs(patch_direction_support(bounds, bounds.centre * -3) - 3 * opposite_support) < 1e-12);
+
+            // The cap contains some directions outside the cell. Being inside that cap must
+            // not incorrectly report zero distance to a camera lying on the height shell.
+            const Vec3d cap_only = cube_direction(face, s0 + size * 1.01, tm);
+            assert(std::acos(std::clamp(dot(cap_only, bounds.centre), -1.0, 1.0)) < bounds.angular_radius);
+            assert(TerrainTier::nearest_distance(cap_only * 1.01, bounds, heights) > 0);
+
+            // A camera just above the outer shell over an interior cell direction is separated
+            // from the surface by only this tiny radial delta.
+            constexpr double altitude = 1e-6;
+            const double near = TerrainTier::nearest_distance(directions[0] * (outer + altitude), bounds, heights);
+            assert(std::abs(near - altitude) < 1e-9);
+        }
+}
+
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     for (int i = 1; i < argc; i++)
@@ -1310,6 +1496,7 @@ int main(int argc, char** argv) {
             return 0;
         }
     test_motion_stability();
+    test_nearest_cell_distance();
     test_cached_reentry();
     test_invalidate_before_update();
     test_morph_streaming();
@@ -1317,9 +1504,11 @@ int main(int argc, char** argv) {
     test_height_range_lifetime();
     test_resident_terrain_morph();
     test_morph_bands();
+    test_mesh_spacing_bands();
     test_morph_continuity();
     test_cache_stats_accounting();
     test_cull_waste();
+    test_draw_quadrant_culling();
     test_provenance_and_audit();
     constexpr double radius = 2.5 / 15;
     TerrainTier tier;

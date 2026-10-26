@@ -33,6 +33,8 @@ public:
             std::format_to(std::back_inserter(buffer_), ",{}", pass.column);
         for (const auto& column : terrain_columns)
             std::format_to(std::back_inserter(buffer_), ",{}", column.name);
+        for (const auto& column : health_columns)
+            std::format_to(std::back_inserter(buffer_), ",{}", column.name);
         buffer_ += '\n';
     }
     ~BenchmarkLog() { flush(); }
@@ -48,6 +50,8 @@ public:
             std::format_to(std::back_inserter(buffer_), ",{}", ms);
         for (const auto& column : terrain_columns)
             std::format_to(std::back_inserter(buffer_), ",{}", frame.terrain.*column.value);
+        for (const auto& column : health_columns)
+            std::format_to(std::back_inserter(buffer_), ",{}", frame.terrain.health.*column.value);
         buffer_ += '\n';
         draw_ms_.push_back(frame.draw_ms);
         if (rows_ % rows_per_flush == 0)
@@ -81,6 +85,8 @@ private:
         {"terrain_pending_age", &render::FrameStats::Terrain::pending_age},
         {"terrain_oldest_age", &render::FrameStats::Terrain::oldest_age},
         {"terrain_drawn", &render::FrameStats::Terrain::drawn},
+        {"terrain_submitted_triangles", &render::FrameStats::Terrain::submitted_triangles},
+        {"terrain_covered_quadrants", &render::FrameStats::Terrain::covered_quadrants},
         {"terrain_requested", &render::FrameStats::Terrain::requested},
         {"terrain_served", &render::FrameStats::Terrain::served},
         {"terrain_evictions", &render::FrameStats::Terrain::evictions},
@@ -91,6 +97,24 @@ private:
         {"terrain_nodes", &render::FrameStats::Terrain::nodes},
         {"terrain_splits_blocked", &render::FrameStats::Terrain::splits_blocked},
         {"terrain_balanced", &render::FrameStats::Terrain::balanced},
+    };
+    struct HealthColumn {
+        const char* name;
+        unsigned render::TerrainHealth::* value;
+    };
+    static constexpr HealthColumn health_columns[] = {
+        {"terrain_rollback_quadrants", &render::TerrainHealth::rollback_quadrants},
+        {"terrain_rollback_levels", &render::TerrainHealth::rollback_levels},
+        {"terrain_selection_rollbacks", &render::TerrainHealth::selection_rollbacks},
+        {"terrain_balance_rollbacks", &render::TerrainHealth::balance_rollbacks},
+        {"terrain_missing_previous", &render::TerrainHealth::missing_previous},
+        {"terrain_rollback_events", &render::TerrainHealth::rollback_events},
+        {"terrain_last_rollback_frame", &render::TerrainHealth::last_frame},
+        {"terrain_last_rollback_key", &render::TerrainHealth::last_key},
+        {"terrain_invalidations", &render::TerrainHealth::invalidations},
+        {"terrain_timeouts", &render::TerrainHealth::timeouts},
+        {"terrain_releases", &render::TerrainHealth::releases},
+        {"terrain_stale_completions", &render::TerrainHealth::stale_completions},
     };
     void flush() {
         if (file_ && !buffer_.empty()) {

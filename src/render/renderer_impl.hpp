@@ -21,6 +21,7 @@
 #include "scene/geometry.hpp"
 #include "scene/system.hpp"
 #include "scene/terrain.hpp"
+#include "scene/terrain_patch.hpp"
 
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
 #include <array>
@@ -109,6 +110,7 @@ enum class SamplerSlot : unsigned {
 
 // 2x the CPU regression baseline: the +3 grazing sweep settles here; 4x adds no benefit.
 inline constexpr unsigned terrain_cache_slots = ORBITAL_TERRAIN_SLOTS;
+inline constexpr unsigned terrain_patch_record_capacity = terrain_cache_slots * 4;
 static_assert(float(MinorPlanetTerrain::height_min) == float(MINOR_PLANET_HEIGHT_MIN) &&
               float(MinorPlanetTerrain::height_max) == float(MINOR_PLANET_HEIGHT_MAX));
 static_assert(tile_slope_scale == float(MINOR_PLANET_SLOPE_SCALE));
@@ -386,8 +388,9 @@ struct Renderer::Impl {
     float tile_detail = 1;                         // TerrainSettings::detail the resident tiles were built with
     std::vector<PatchView> patch_views;            // the draw list as the panel's patch map wants it
     std::uint64_t grid_vertices_address = 0, grid_indices_address = 0;
-    std::uint64_t grid_wire_address = 0; // the grid unindexed, a one-hot barycentric per corner, for the wireframe
-    unsigned grid_index_count = 0;
+    std::uint64_t grid_wire_address = 0; // surface grid expanded with one-hot barycentrics
+    std::uint64_t skirt_vertices_address = 0, skirt_indices_address = 0, skirt_wire_address = 0;
+    unsigned grid_index_count = 0, skirt_index_count = 0, patch_record_count = 0;
     struct PatchCopy {
         std::uint64_t source, destination, bytes;
     };

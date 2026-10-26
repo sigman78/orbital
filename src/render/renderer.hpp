@@ -2,6 +2,7 @@
 #include "render/camera_view.hpp"
 #include "render/gpu_pass.hpp"
 #include "render/settings.hpp"
+#include "render/terrain_health.hpp"
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -65,10 +66,12 @@ struct FrameStats {
     struct Terrain {             // the minor planet's near tier
         static constexpr unsigned cache_age_buckets = 8;
         static constexpr unsigned cache_age_bucket_frames = 30;
-        bool active = false;   // the tier draws the body; its sphere levels otherwise
-        unsigned drawn = 0;    // patches drawn this frame
-        unsigned resident = 0; // tiles in the cache, arrived
-        unsigned pending = 0;  // slots handed out whose tile has not arrived (queued, generating or uploading)
+        bool active = false;              // the tier draws the body; its sphere levels otherwise
+        unsigned drawn = 0;               // patches drawn this frame
+        unsigned submitted_triangles = 0; // selected mask-specific grid triangles, counted once per view
+        unsigned covered_quadrants = 0;   // sum of owned quadrants across drawn patches
+        unsigned resident = 0;            // tiles in the cache, arrived
+        unsigned pending = 0; // slots handed out whose tile has not arrived (queued, generating or uploading)
         // Frames the oldest of those has waited. Nothing evicts a pending slot and the tree
         // re-requests only keys without one, so a tile that never comes back leaves its patch
         // drawn coarse by its parent until the reclaim sweep takes the slot; seconds, not frames.
@@ -93,6 +96,7 @@ struct FrameStats {
         unsigned flat_near = 0, flat_far = 0, graded = 0; // patches the morph grades against ones it switches
         float behind_mean = 0;
         unsigned balanced = 0;
+        TerrainHealth health;
     } terrain;
     unsigned rock_groups_drawn = 0; // non-empty rock groups inside the multi-draw, from the previous frame
     float belt_lod = 0;             // far-belt blend weight this frame: 0 full detail, 1 baked disc

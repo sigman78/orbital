@@ -321,10 +321,15 @@ void patch_map(const render::Stats::PatchMap& map) {
     ImGui::Text("%zu patches, %u quadrants, finest level %u", patches.size(), drawn_quadrants, deepest);
 }
 
-void terrain_controls(render::TerrainSettings& terrain, bool& freeze_culling) {
+void terrain_controls(render::TerrainSettings& terrain, bool& freeze_culling, bool& terrain_noclip) {
     ImGui::Checkbox("Near tier (N)", &terrain.near_tier);
     ImGui::SameLine();
     ImGui::Checkbox("Wireframe (G)", &terrain.wireframe);
+    ImGui::Checkbox("Surface inspection (noclip)", &terrain_noclip);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Bypasses the minor planet's camera clearance for close glancing views.\n"
+                          "You can pass through terrain. Other bodies keep their normal clearance.\n"
+                          "Turn off to restore clearance. Z enables slow travel.");
     const char* debug_views[] = {"Shaded",    "Tile coordinate", "Normal",
                                  "Elevation", "Crater shadow",   "Morph and level"};
     int debug = int(terrain.debug);
@@ -349,6 +354,30 @@ void terrain_cache(const render::FrameStats::Terrain& terrain) {
         return;
     }
     ImGui::Spacing();
+    const auto& health = terrain.health;
+    if (health.rollback_events) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{1.f, .7f, .35f, 1.f});
+        ImGui::TextWrapped("Detail rollback recorded: %u levels across %u prior quadrants.", health.last_levels,
+                           health.last_quadrants);
+        ImGui::PopStyleColor();
+        ImGui::TextWrapped("Last at frame %u: selection %u, balancing %u, missing tiles %u.", health.last_frame,
+                           health.last_selection, health.last_balance, health.last_missing);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(
+                "%u frames with a drop of two or more levels. This reading stays visible after recovery.\n"
+                "Counts overlapping prior quadrants, not screen pixels.\n"
+                "Balancing can coarsen resident tiles without evicting them.\n"
+                "Example cell %u: L%u to L%u. Record a benchmark to correlate with cache pressure.",
+                health.rollback_events, health.last_key, health.last_from, health.last_to);
+    }
+    if (health.invalidations || health.timeouts || health.releases || health.stale_completions) {
+        ImGui::TextWrapped("Cache history: %u resets, %u timeouts, %u releases, %u stale uploads.",
+                           health.invalidations, health.timeouts, health.releases, health.stale_completions);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(
+                "Lifetime counts, retained after recovery. Changing Surface detail deliberately resets tiles.\n"
+                "Stale uploads are rejected before GPU writes; they can follow resets or timeouts.");
+    }
     if (ImGui::BeginTable("##terrain-stats", 2, ImGuiTableFlags_SizingStretchSame)) {
         const auto row = [](const char* label, const std::string& value, const std::string& hint,
                             const char* state = "", bool warning = false) {
@@ -370,7 +399,7 @@ void terrain_cache(const render::FrameStats::Terrain& terrain) {
         };
         row("Cache", std::format("{}/{}/{}", terrain.resident, terrain.pending, terrain.slots_free),
             std::format("Resident / pending / free tiles ({} capacity).\n"
-                        "{} requests blocked: no slot can be evicted.\n"
+                        "{} requests blocked by residency protection (includes optional guard tiles).\n"
                         "Oldest last use: {} frames; oldest pending: {} frames.\n"
                         "A full cache alone is not evidence of thrashing.\n"
                         "Strip below: recent to cold, then amber pending and gray free.",
@@ -769,7 +798,7 @@ void draw_panel(AppState& app, const render::Stats& stats, const SmoothedStats& 
         ImGui::PopID();
     }
     if (section("Terrain", true)) {
-        terrain_controls(app.terrain, app.belt.freeze_culling);
+        terrain_controls(app.terrain, app.belt.freeze_culling, app.camera.terrain_noclip);
         terrain_cache(stats.frame.terrain);
         patch_map(stats.patch_map);
         ImGui::PopID();

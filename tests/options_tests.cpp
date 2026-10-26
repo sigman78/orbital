@@ -10,6 +10,13 @@ int main() {
     };
     const auto defaults = parse({"orbital"});
     assert(defaults && defaults->size.width == 1600 && defaults->bookmark == -1);
+    assert(defaults->terrain_mesh_pixels == 8);
+    assert(parse({"orbital", "--terrain-mesh-pixels", "0"})->terrain_mesh_pixels == 0);
+    assert(parse({"orbital", "--terrain-mesh-pixels", "4"})->terrain_mesh_pixels == 4);
+    assert(!parse({"orbital", "--terrain-mesh-pixels", "-1"}));
+    assert(!parse({"orbital", "--terrain-mesh-pixels", "65"}));
+    assert(!parse({"orbital", "--terrain-mesh-pixels", "nan"}));
+    assert(parse({"orbital", "--terrain-cruise"})->terrain_cruise);
     const auto sample = parse({"orbital", "--width",    "320",  "--height",       "4320",    "--taa",
                                "0",       "--spatial",  "2",    "--pan",          "-.25",    "--galaxy-view",
                                "-180",    "--bookmark", "5",    "--capture",      "a b.png", "--tour",

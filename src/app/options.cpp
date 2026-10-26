@@ -59,6 +59,8 @@ bool apply_arguments(Options& options, std::span<const std::string_view> args) {
             options.help = true;
         else if (arg == "--tour")
             options.tour = true;
+        else if (arg == "--terrain-cruise")
+            options.terrain_cruise = true;
         else if (arg == "--ui")
             options.ui = true;
         else if (arg == "--belt-sun-view")
@@ -91,6 +93,9 @@ bool apply_arguments(Options& options, std::span<const std::string_view> args) {
             ok = parse_number(value(), options.terrain_detail) && options.terrain_detail >= 0;
         else if (arg == "--lod-bias")
             ok = parse_number(value(), options.lod_bias) && options.lod_bias >= -4 && options.lod_bias <= 4;
+        else if (arg == "--terrain-mesh-pixels")
+            ok = parse_number(value(), options.terrain_mesh_pixels) && options.terrain_mesh_pixels >= 0 &&
+                 options.terrain_mesh_pixels <= 64;
         else if (arg == "--dust")
             ok = parse_choice(value(), options.dust, 2);
         else if (arg == "--vsync")

@@ -1,4 +1,5 @@
 #pragma once
+#include "render/terrain_health.hpp"
 #include "scene/geometry.hpp"
 #include "scene/terrain_patch.hpp"
 
@@ -26,6 +27,8 @@ struct TierView {
     float height_pixels = 0, tan_y = 0;
     float activate_pixels = TerrainTier_activate_default; // the switch from the sphere levels
     float lod_bias = 0;                                   // every level's range times 2^bias
+    // Nominal projected grid interval, in actual pixels; 0 retains error-only selection.
+    float mesh_pixels = 0;
 };
 
 // Distance-based quadtree selection with parent fallback and a generation-checked tile cache.
@@ -160,6 +163,7 @@ public:
         unsigned balanced = 0;
     };
     const Pressure& pressure() const { return pressure_; }
+    const TerrainHealth& health() const { return health_; }
 
     explicit TerrainTier(unsigned cache_capacity = slot_count) : capacity_(std::max(1u, cache_capacity)) {}
     void update(const TierView& view, unsigned frame, unsigned budget = generate_per_frame);
@@ -182,8 +186,8 @@ public:
     void release(unsigned slot, PatchKey key, std::uint32_t stamp);
     // Only resident tiles supply a tighter range. Unknown tiles retain the full shell.
     Range<float> height_range(PatchKey key) const;
-    // The interval culling and distances use: height_range padded by relief_margin, inherited
-    // from the nearest resident ancestor while a node has no tile of its own.
+    // The interval culling and distances use: measured heights padded by relief_margin,
+    // retained in live nodes after eviction, or inherited from the nearest measured ancestor.
     Range<float> reach_of(PatchKey key) const;
     float range(unsigned level) const { return level < std::size(range_) ? range_[level] : 0; }
     float morph_start(unsigned level) const {
@@ -195,7 +199,7 @@ public:
     unsigned resident_slot(PatchKey key) const; // the tile's slot, no_slot when absent or pending
     unsigned pending() const;                   // slots handed out whose tile has not arrived
     unsigned pending_age() const;               // frames the oldest of those has waited, 0 when there are none
-    // Cap distance over the supplied height interval, excluding skirts as in the shader.
+    // Nearest distance to the spherical cell over the supplied height interval, excluding skirts.
     static double nearest_distance(Vec3d camera_local, const PatchBounds& bounds,
                                    Range<float> heights = full_height_range);
     static double farthest_distance(Vec3d camera_local, const PatchBounds& bounds,
@@ -211,10 +215,15 @@ private:
         PatchKey key;
         PatchBounds bounds;
         std::uint32_t children = 0; // index of the first of four, 0 none (the roots are never children)
+        // Bounds are knowledge about the terrain, not ownership of a GPU tile. Retain them
+        // after eviction so a rejected tile does not become eligible just by losing its slot.
+        Range<float> heights = full_height_range;
+        bool measured = false;
     };
     struct Slot {
         PatchKey key;
         unsigned used = 0;
+        unsigned guard_frame = 0;    // speculative neighbour; visible requests may evict it
         unsigned fade_update = 0;    // first display of this assignment; visibility never restarts the fade
         unsigned assigned_frame = 0; // when the generation went out; `used` tracks visits instead
         // Distinguishes repeated assignments of the same key and slot, including detail changes.
@@ -225,6 +234,7 @@ private:
     struct Request {
         PatchKey key;
         float pixels;
+        bool prefetch = false;
     };
     struct Visibility {
         bool visible = false;
@@ -240,18 +250,21 @@ private:
 
     void ensure_roots();
     const Node* find(PatchKey key) const; // the node for a key, null where the tree stops short
-    // The horizon test over the geometry a draw actually puts on screen: one tile's own heights
-    // rather than the reach, which pads for descendants that will not be drawn in its place.
-    bool drawn_over_horizon(const PatchBounds& bounds, Range<float> heights) const;
+    // Visibility of geometry actually submitted: one tile's own heights, without padding
+    // for descendants that will not be drawn in its place.
+    bool drawn_visible(const PatchBounds& bounds, Range<float> heights) const;
     Visibility visibility(const Node& node, const TierView& view) const;
     void prepare(std::uint32_t index, const TierView& view, const Visibility& seen);
     void visit(std::uint32_t index, const TierView& view, const Visibility& seen);
     void stitch(const TierView& view);
+    void cull_draw_quadrants();
+    void monitor_coverage(std::span<const Draw> before_balance);
     void collapse(Node& node);
     std::uint32_t allocate_children(const Node& node);
     unsigned slot_of(PatchKey key) const; // no_slot when not in the cache
     void touch(PatchKey key);
-    void request(PatchKey key, float pixels);
+    void request(PatchKey key, float pixels, bool prefetch = false);
+    void prefetch_neighbours();
     void choose_generation(unsigned budget);
 
     std::vector<Node> nodes_;
@@ -260,6 +273,7 @@ private:
     std::vector<unsigned> free_slots_;
     std::unordered_map<std::uint32_t, unsigned> slots_by_key_;
     std::vector<Draw> draws_;
+    std::vector<Draw> previous_draws_;
     std::vector<Request> requests_;
     std::vector<Generation> generate_;
     float range_[std::size(level_error) + 1] = {};
@@ -275,6 +289,7 @@ private:
     std::uint32_t stamp_ = 0;   // the last generation stamp issued, never reused
     std::uint64_t eviction_total_ = 0, warm_eviction_total_ = 0;
     Pressure pressure_;
+    TerrainHealth health_;
     bool active_ = false, wanted_ = false;
 };
 

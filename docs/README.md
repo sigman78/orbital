@@ -16,6 +16,7 @@
 | [SHADER_LIBRARY_REVIEW.md](SHADER_LIBRARY_REVIEW.md) | Shader correctness, composability, contracts, and staged refactoring for procedural planetary systems |
 | [BACKEND_TEXTURE_ARRAYS.md](BACKEND_TEXTURE_ARRAYS.md) | Handoff design: texture array descriptors in the vendored GPU layer, goal, acceptance criteria, tasks |
 | [DYNAMIC_TERRAIN.md](DYNAMIC_TERRAIN.md) | The minor planet's near tier as a CDLOD cube sphere with tiles in texture arrays: design as built, and its open defects |
+| [TERRAIN_DETAIL_BUDGET.md](TERRAIN_DETAIL_BUDGET.md) | Measured mesh, height and material budgets, generation optimization and quality tradeoffs |
 
 Record design changes in DECISIONS.md with what was measured; keep ARCHITECTURE.md describing what exists,
 not what is planned.
