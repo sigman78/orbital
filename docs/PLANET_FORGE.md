@@ -213,6 +213,9 @@ the precision risk: BC5's 8-bit endpoints bring a crater-rim block back near the
 error (0.18 degrees rms). Measure with the existing tile-normal comparison before committing;
 the fallback is BC5 for coarse levels and raw rg16 for the last two.
 
+Budgets, lossless measurements on the bake and the lossy height options are worked out in
+docs/TILE_COMPRESSION.md.
+
 Portability (raised 2026-10-26): a store of BC7 and BC5 blocks is a desktop-Vulkan artefact. If baked
 tiles are ever shipped rather than regenerated, either the blocks ship with supercompression (Zstd per
 shard, as Kiln's KTX2 does) and a second store per GPU family, or the tiles are stored once in a
